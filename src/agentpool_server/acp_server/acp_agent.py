@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from acp import Agent as ACPAgent
 from acp.schema import (
@@ -181,6 +181,9 @@ class AgentPoolACPAgent(ACPAgent):
     server: ACPServer | None = field(default=None)
     """Reference to the ACPServer for pool hot-switching."""
 
+    subagent_display_mode: Literal["inline", "tool_box"] = "tool_box"
+    """Display mode for subagent outputs (inline or tool_box)."""
+
     def __post_init__(self) -> None:
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
@@ -266,6 +269,7 @@ class AgentPoolACPAgent(ACPAgent):
                 mcp_servers=params.mcp_servers,
                 client_capabilities=self.client_capabilities,
                 client_info=self.client_info,
+                subagent_display_mode=self.subagent_display_mode,
             )
             state: SessionModeState | None = None
             models: SessionModelState | None = None
@@ -330,6 +334,7 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     session_id=params.session_id,
+                    subagent_display_mode=self.subagent_display_mode,
                 )
                 session = self.session_manager.get_session(session_id)
 
@@ -428,6 +433,7 @@ class AgentPoolACPAgent(ACPAgent):
             mcp_servers=params.mcp_servers,
             client_capabilities=self.client_capabilities,
             client_info=self.client_info,
+            subagent_display_mode=self.subagent_display_mode,
         )
         return ForkSessionResponse(session_id=session_id)
 
@@ -456,6 +462,7 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     session_id=params.session_id,
+                    subagent_display_mode=self.subagent_display_mode,
                 )
                 session = self.session_manager.get_session(session_id)
 
@@ -512,6 +519,7 @@ class AgentPoolACPAgent(ACPAgent):
                     session_id=params.session_id,
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
+                    subagent_display_mode=self.subagent_display_mode,
                 )
                 if session := self.session_manager.get_session(params.session_id):
                     # Initialize session extras

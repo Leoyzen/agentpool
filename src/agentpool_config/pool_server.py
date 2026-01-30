@@ -171,6 +171,15 @@ class ACPPoolServerConfig(BasePoolServerConfig):
     )
     """Whether to raise exceptions during server start."""
 
+    subagent_display_mode: Literal["inline", "tool_box"] = Field(
+        default="tool_box",
+        title="Subagent display mode",
+    )
+    """How to display nested agent output in ACP clients:
+    - "tool_box": Displays subagent output in a tool box (current default)
+    - "inline": Displays subagent output inline with the main agent's text
+    """
+
 
 class AGUIPoolServerConfig(BasePoolServerConfig):
     """Configuration for AGUI (AG-UI) server."""

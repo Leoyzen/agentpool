@@ -24,7 +24,7 @@ from agentpool_config.converters import ConversionConfig
 from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 from agentpool_config.observability import ObservabilityConfig
 from agentpool_config.output_types import StructuredResponseConfig
-from agentpool_config.pool_server import MCPPoolServerConfig
+from agentpool_config.pool_server import ACPPoolServerConfig, MCPPoolServerConfig
 from agentpool_config.storage import StorageConfig
 from agentpool_config.system_prompts import PromptLibraryConfig
 from agentpool_config.task import Job
@@ -302,7 +302,9 @@ class AgentsManifest(Schema):
 
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/mcp_configuration/
     """
-    pool_server: MCPPoolServerConfig = Field(default_factory=MCPPoolServerConfig)
+    pool_server: MCPPoolServerConfig | ACPPoolServerConfig = Field(
+        default_factory=MCPPoolServerConfig
+    )
     """Pool server configuration.
 
     This MCP server configuration is used for the pool MCP server,

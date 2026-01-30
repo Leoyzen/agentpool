@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from acp.schema import ClientCapabilities
 from agentpool.log import get_logger
@@ -61,6 +61,7 @@ class ACPSessionManager:
         session_id: str | None = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
+        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
     ) -> str:
         """Create a new ACP session.
 
@@ -73,6 +74,7 @@ class ACPSessionManager:
             session_id: Optional specific session ID (generated if None)
             client_capabilities: Client capabilities for tool registration
             client_info: Client implementation info (name, version)
+            subagent_display_mode: Display mode for subagent outputs
 
         Returns:
             Session ID for the created session
@@ -106,6 +108,7 @@ class ACPSessionManager:
                 client_capabilities=client_capabilities or ClientCapabilities(),
                 client_info=client_info,
                 manager=self,
+                subagent_display_mode=subagent_display_mode,
             )
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()
@@ -125,6 +128,7 @@ class ACPSessionManager:
         acp_agent: AgentPoolACPAgent,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
+        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
     ) -> ACPSession | None:
         """Resume a session from storage.
 
@@ -134,6 +138,7 @@ class ACPSessionManager:
             acp_agent: ACP agent instance
             client_capabilities: Client capabilities
             client_info: Client implementation info (name, version)
+            subagent_display_mode: Display mode for subagent outputs
 
         Returns:
             Resumed ACPSession if found, None otherwise
@@ -165,6 +170,7 @@ class ACPSessionManager:
                 client_capabilities=client_capabilities or ClientCapabilities(),
                 client_info=client_info,
                 manager=self,
+                subagent_display_mode=subagent_display_mode,
             )
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()

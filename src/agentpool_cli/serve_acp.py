@@ -98,6 +98,13 @@ def acp_command(  # noqa: PLR0915
             help='MCP servers configuration as JSON (format: {"mcpServers": {...}})',
         ),
     ] = None,
+    subagent_display_mode: Annotated[
+        Literal["inline", "tool_box"] | None,
+        t.Option(
+            "--subagent-display-mode",
+            help="Display subagent: 'inline' or 'tool_box'",
+        ),
+    ] = None,
 ) -> None:
     r"""Run agents as an ACP (Agent Client Protocol) server.
 
@@ -173,6 +180,7 @@ def acp_command(  # noqa: PLR0915
         agent=agent,
         load_skills=load_skills,
         transport=transport_config,
+        subagent_display_mode=subagent_display_mode,
     )
 
     # Inject MCP servers from --mcp-config if provided
