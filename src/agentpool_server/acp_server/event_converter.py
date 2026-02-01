@@ -11,6 +11,7 @@ This separation enables easy testing without mocks.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 import uuid
 
@@ -31,10 +32,7 @@ from pydantic_ai import (
     ToolCallPartDelta,
     ToolReturnPart,
 )
-from pydantic_ai.messages import (
-    BuiltinToolCallEvent,  # ty: ignore[deprecated]
-    BuiltinToolResultEvent,  # ty: ignore[deprecated]
-)
+from pydantic_ai.messages import BuiltinToolCallEvent, BuiltinToolResultEvent
 
 from acp.schema import (
     AgentMessageChunk,
@@ -47,6 +45,14 @@ from acp.schema import (
     ToolCallStart,
     Usage,
     UsageUpdate,
+)
+    AgentMessageChunk,
+    AgentPlanUpdate,
+    AgentThoughtChunk,
+    ContentToolCallContent,
+    ToolCallLocation,
+    ToolCallProgress,
+    ToolCallStart,
 )
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
@@ -65,6 +71,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    ToolResultMetadataEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -75,7 +82,7 @@ if TYPE_CHECKING:
 
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool.agents.events.events import SubAgentType
+    from agentpool.tools.base import ToolKind
 
 logger = get_logger(__name__)
 
@@ -89,6 +96,34 @@ ACPSessionUpdate = (
     | AgentPlanUpdate
     | UsageUpdate
 )
+ACPSessionUpdate = (
+    AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
+)
+
+
+# ============================================================================
+# Helper functions
+# ============================================================================
+
+
+def _get_display_mode() -> Literal["legacy", "inline", "tool_box"]:
+    """Get the subagent display mode from environment variable.
+
+    Reads from ACP_SUBAGENT_DISPLAY_MODE env var, defaults to "legacy".
+
+    Returns:
+        Display mode value: "legacy", "inline", or "tool_box"
+    """
+    mode = os.getenv("ACP_SUBAGENT_DISPLAY_MODE", "legacy")
+    if mode not in ("legacy", "inline", "tool_box"):
+        return "legacy"
+    return mode  # type: ignore[return-value]
+
+
+def get_compaction_text(trigger: str) -> str:
+    if trigger == "auto":
+        return "\n\n---\n\n📦 **Context compaction** triggered. Summarizing...\n\n---\n\n"
+    return "\n\n---\n\n📦 **Manual compaction** requested. Summarizing...\n\n---\n\n"
 
 
 @dataclass
@@ -102,6 +137,38 @@ class _ToolState:
     raw_input: dict[str, Any]
     started: bool = False
     has_content: bool = False
+
+
+@dataclass
+class _SubagentInlineState:
+    """State for inline subagent display mode.
+
+    Tracks active tool call IDs and accumulated content for text output and thinking.
+    """
+
+    source_name: str
+    depth: int
+    text_output_call_id: str | None = None
+    thinking_call_id: str | None = None
+    text_content: list[str] = field(default_factory=list)
+    thinking_content: list[str] = field(default_factory=list)
+    created_at: float = field(default_factory=lambda: __import__("time").time())
+
+
+@dataclass
+class _SubagentToolBoxState:
+    """State for tool_box subagent display mode.
+
+    Tracks header status and content accumulation for subagent display.
+    """
+
+    source_name: str
+    depth: int
+    invocation_id: str
+    header_sent: bool = False
+    content: list[str] = field(default_factory=list)
+    title: str | None = None
+    created_at: float = field(default_factory=lambda: __import__("time").time())
 
 
 # ============================================================================
@@ -125,8 +192,15 @@ class ACPEventConverter:
         ```
     """
 
-    subagent_display_mode: Literal["inline", "tool_box"] = "tool_box"
-    """How to display subagent output."""
+    # Feature flag for subagent display mode
+    # Reads from ACP_SUBAGENT_DISPLAY_MODE env var, defaults to "legacy" for backward compatibility
+    _display_mode: Literal["legacy", "inline", "tool_box"] = field(
+        default_factory=_get_display_mode,
+    )
+
+    # Legacy mode fields (deprecated)
+    subagent_display_mode: Literal["legacy", "inline", "tool_box"] = "legacy"
+    """How to display subagent output. Deprecated: Use ACP_SUBAGENT_DISPLAY_MODE env var instead."""
 
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
@@ -146,6 +220,33 @@ class ACPEventConverter:
 
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
+    """Accumulated content per subagent (for tool_box mode)."""
+
+    _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    """Message ID for the current agent response."""
+    """Accumulated content per subagent (for tool_box mode)."""
+
+    # New state management
+    _subagent_inline_states: dict[str, _SubagentInlineState] = field(default_factory=dict)
+    """Inline subagent states keyed by composite key."""
+
+    _subagent_toolbox_states: dict[str, _SubagentToolBoxState] = field(default_factory=dict)
+    """Tool_box subagent states keyed by composite key."""
+
+    MAX_STATES: int = 100
+    """Maximum number of subagent states to prevent DoS attacks."""
+
+    STATE_TTL: float = 3600.0
+    """Time-to-live for subagent states in seconds (1 hour)."""
+
+    def __post_init__(self) -> None:
+        """Reconcile _display_mode with subagent_display_mode if env var not set.
+
+        The ACP_SUBAGENT_DISPLAY_MODE environment variable takes precedence.
+        If not set, use the deprecated subagent_display_mode parameter.
+        """
+        if "ACP_SUBAGENT_DISPLAY_MODE" not in os.environ:
+            self._display_mode = self.subagent_display_mode
 
     def reset(self) -> None:
         """Reset converter state for a new run."""
@@ -153,8 +254,17 @@ class ACPEventConverter:
         self._current_tool_inputs.clear()
         self._subagent_headers.clear()
         self._subagent_content.clear()
+        self._subagent_inline_states.clear()
+        self._subagent_toolbox_states.clear()
         self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
+        """Reset converter state for a new run."""
+        self._tool_states.clear()
+        self._current_tool_inputs.clear()
+        self._subagent_headers.clear()
+        self._subagent_content.clear()
+        self._subagent_inline_states.clear()
+        self._subagent_toolbox_states.clear()
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
         """Cancel all pending tool calls.
@@ -197,6 +307,117 @@ class ACPEventConverter:
         """Remove tool state after completion."""
         self._tool_states.pop(tool_call_id, None)
         self._current_tool_inputs.pop(tool_call_id, None)
+
+    def _generate_composite_key(self, source_name: str, depth: int) -> str:
+        """Generate composite key for subagent state.
+
+        Args:
+            source_name: Name of the subagent source
+            depth: Nesting depth of the subagent call
+
+        Returns:
+            Composite key string in format "source_name:depth"
+        """
+        return f"{source_name}:{depth}"
+
+    def _cleanup_expired_states(self) -> None:
+        """Clean up expired states based on TTL to prevent memory leaks."""
+        import time
+
+        current_time = time.time()
+        cutoff_time = current_time - self.STATE_TTL
+
+        # Clean inline states
+        self._subagent_inline_states = {
+            key: state
+            for key, state in self._subagent_inline_states.items()
+            if state.created_at > cutoff_time
+        }
+
+        # Clean tool_box states
+        self._subagent_toolbox_states = {
+            key: state
+            for key, state in self._subagent_toolbox_states.items()
+            if state.created_at > cutoff_time
+        }
+
+    def _get_or_create_inline_state(self, source_name: str, depth: int) -> _SubagentInlineState:
+        """Get existing inline state or create a new one.
+
+        Args:
+            source_name: Name of the subagent source
+            depth: Nesting depth of the subagent call
+
+        Returns:
+            _SubagentInlineState instance
+
+        Raises:
+            RuntimeError: If maximum number of states exceeded (DoS protection)
+        """
+        # Clean up expired states first
+        self._cleanup_expired_states()
+
+        # Create composite key (using only source_name and depth)
+        key = self._generate_composite_key(source_name, depth)
+
+        # Return existing state if found (preserves invocation_id)
+        if key in self._subagent_inline_states:
+            return self._subagent_inline_states[key]
+
+        # Enforce MAX_STATES limit
+        if len(self._subagent_inline_states) >= self.MAX_STATES:
+            raise RuntimeError(
+                f"Maximum subagent states ({self.MAX_STATES}) exceeded. "
+                "This may indicate a DoS attack or memory leak."
+            )
+
+        # Create new state
+        new_state = _SubagentInlineState(
+            source_name=source_name,
+            depth=depth,
+        )
+        self._subagent_inline_states[key] = new_state
+        return new_state
+
+    def _get_or_create_toolbox_state(self, source_name: str, depth: int) -> _SubagentToolBoxState:
+        """Get existing toolbox state or create a new one.
+
+        Args:
+            source_name: Name of the subagent source
+            depth: Nesting depth of the subagent call
+
+        Returns:
+            _SubagentToolBoxState instance
+
+        Raises:
+            RuntimeError: If maximum number of states exceeded (DoS protection)
+        """
+        # Clean up expired states first
+        self._cleanup_expired_states()
+
+        # Create composite key (using only source_name and depth)
+        key = self._generate_composite_key(source_name, depth)
+
+        # Return existing state if found (preserves invocation_id)
+        if key in self._subagent_toolbox_states:
+            return self._subagent_toolbox_states[key]
+
+        # Enforce MAX_STATES limit
+        if len(self._subagent_toolbox_states) >= self.MAX_STATES:
+            raise RuntimeError(
+                f"Maximum subagent states ({self.MAX_STATES}) exceeded. "
+                "This may indicate a DoS attack or memory leak."
+            )
+
+        # Create new state with fresh invocation_id
+        invocation_id = str(uuid.uuid4())
+        new_state = _SubagentToolBoxState(
+            source_name=source_name,
+            depth=depth,
+            invocation_id=invocation_id,
+        )
+        self._subagent_toolbox_states[key] = new_state
+        return new_state
 
     async def convert(  # noqa: PLR0915
         self, event: RichAgentStreamEvent[Any]
@@ -453,6 +674,10 @@ class ACPEventConverter:
                         size=request_usage.total_tokens,  # best approximation
                         cost=cost_obj,
                     )
+                self.reset()
+                # Clean up all subagent states when stream completes
+                # Prevents memory leaks by removing accumulated state
+                self.reset()
 
             case PlanUpdateEvent(entries=entries):
                 acp_entries = [
@@ -461,8 +686,8 @@ class ACPEventConverter:
                 ]
                 yield AgentPlanUpdate(entries=acp_entries)
 
-            case CompactionEvent(phase="starting"):
-                text = event.format()
+            case CompactionEvent(trigger=trigger, phase=phase) if phase == "starting":
+                text = get_compaction_text(trigger)
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case SubAgentEvent(
@@ -471,16 +696,22 @@ class ACPEventConverter:
                 event=inner_event,
                 depth=depth,
             ):
-                if self.subagent_display_mode == "tool_box":
-                    async for update in self._convert_subagent_tool_box(
-                        source_name, source_type, inner_event, depth
-                    ):
-                        yield update
-                else:
-                    async for update in self._convert_subagent_inline(
-                        source_name, source_type, inner_event, depth
-                    ):
-                        yield update
+                match self._display_mode:
+                    case "inline":
+                        async for update in self._convert_subagent_inline(
+                            source_name, source_type, inner_event, depth
+                        ):
+                            yield update
+                    case "tool_box":
+                        async for update in self._convert_subagent_tool_box(
+                            source_name, source_type, inner_event, depth
+                        ):
+                            yield update
+                    case _:
+                        async for update in self._convert_subagent_legacy(
+                            source_name, source_type, inner_event, depth
+                        ):
+                            yield update
 
             case RunErrorEvent(message=message, agent_name=agent_name):
                 # Display error as agent text with formatting
@@ -489,16 +720,180 @@ class ACPEventConverter:
                 yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
 
             case _:
+                # Graceful fallback for unknown event types
+                # Handles future events like ToolRequiresAuthEvent without crashing
                 logger.debug("Unhandled event", event_type=type(event).__name__)
 
-    async def _convert_subagent_inline(
+    async def _convert_subagent_inline(  # noqa: PLR0915
         self,
         source_name: str,
-        source_type: SubAgentType,
+        _source_type: Literal["agent", "team_parallel", "team_sequential"],
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> AsyncIterator[ACPSessionUpdate]:
-        """Convert subagent event to inline text notifications."""
+        """Convert subagent event to inline tool notifications (New Mode).
+
+        Each distinct event type (text, thinking, tool calls) becomes an independent
+        tool call with the subagent name prefixed to the tool name.
+
+        PartStartEvent creates a new tool call, PartDeltaEvent accumulates content.
+        Multi-turn patterns (think→output→tool_call→think) create independent tool calls.
+        """
+        state = self._get_or_create_inline_state(source_name, depth)
+
+        match inner_event:
+            case PartStartEvent(part=TextPart(content=delta)):
+                # New text part = new tool call
+                state.text_output_call_id = f"{source_name}:output:{uuid.uuid4()}"
+                if delta:
+                    state.text_content = [delta] if delta else []
+                    full_content = "".join(state.text_content)
+                else:
+                    full_content = None
+                yield ToolCallStart(
+                    tool_call_id=state.text_output_call_id,
+                    title=f"[`{source_name}`] Output",
+                    kind="other",
+                    status="pending",
+                    content=[ContentToolCallContent.text(text=full_content)]
+                    if full_content
+                    else None,
+                )
+
+            case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+                # Accumulate text content and send update
+                if state.text_output_call_id and delta:
+                    text_chunk: str = delta
+                    state.text_content.append(text_chunk)
+                    full_text = "".join(state.text_content)
+                    yield ToolCallProgress(
+                        tool_call_id=state.text_output_call_id,
+                        status="in_progress",
+                        content=[ContentToolCallContent.text(text=full_text)],
+                    )
+
+            case PartStartEvent(part=ThinkingPart(content=delta)):
+                # New thinking part = new tool call
+                state.thinking_call_id = f"{source_name}:think:{uuid.uuid4()}"
+                state.thinking_content = [delta] if delta else []
+                yield ToolCallStart(
+                    tool_call_id=state.thinking_call_id,
+                    title=f"[`{source_name}`] Thinking",
+                    kind="think",
+                    status="pending",
+                )
+                # Send initial progress with accumulated content
+                full_text = "".join(state.thinking_content)
+                yield ToolCallProgress(
+                    tool_call_id=state.thinking_call_id,
+                    status="in_progress",
+                    content=[ContentToolCallContent.text(text=full_text)],
+                )
+
+            case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)):
+                # Accumulate thinking content and send update
+                if state.thinking_call_id and delta:
+                    thinking_chunk: str = delta
+                    state.thinking_content.append(thinking_chunk)
+                    full_text = "".join(state.thinking_content)
+                    yield ToolCallProgress(
+                        tool_call_id=state.thinking_call_id,
+                        status="in_progress",
+                        content=[ContentToolCallContent.text(text=full_text)],
+                    )
+
+            case FunctionToolCallEvent(part=part):
+                # Each tool call is independent with prefixed name
+                prefixed_tool_name = f"{source_name}:{part.tool_name}"
+                tool_call_id = f"{prefixed_tool_name}:{part.tool_call_id}"
+                tool_input = safe_args_as_dict(part, default={})
+                title = generate_tool_title(prefixed_tool_name, tool_input)
+                kind = infer_tool_kind(prefixed_tool_name)
+
+                yield ToolCallStart(
+                    tool_call_id=tool_call_id,
+                    title=f"[`{source_name}`]: {title}",
+                    kind=kind,
+                    raw_input=tool_input,
+                    status="pending",
+                )
+
+            case FunctionToolResultEvent(
+                result=ToolReturnPart() as result,
+                tool_call_id=original_id,
+            ):
+                # Complete tool call with prefixed name
+                prefixed_tool_name = f"{source_name}:{result.tool_name}"
+                tool_call_id = f"{prefixed_tool_name}:{original_id}"
+
+                # Handle async generator content (same as main converter)
+                if isinstance(result.content, AsyncGenerator):
+                    full_content = ""
+                    async for chunk in result.content:
+                        full_content += str(chunk)
+                        yield ToolCallProgress(
+                            tool_call_id=tool_call_id,
+                            status="in_progress",
+                            raw_output=chunk,
+                        )
+                    result.content = full_content
+                    final_output = full_content
+                else:
+                    final_output = str(result.content)
+
+                # Convert to content blocks and send completion
+                converted = to_acp_content_blocks(final_output)
+                content_items = [ContentToolCallContent(content=block) for block in converted]
+                yield ToolCallProgress(
+                    tool_call_id=tool_call_id,
+                    status="completed",
+                    raw_output=final_output,
+                    content=content_items,
+                )
+
+            case FunctionToolResultEvent(
+                result=RetryPromptPart(tool_name=tool_name) as result,
+                tool_call_id=original_id,
+            ):
+                # Mark tool call as failed with prefixed name
+                prefixed_tool_name = f"{source_name}:{tool_name}"
+                tool_call_id = f"{prefixed_tool_name}:{original_id}"
+
+                error_msg = result.model_response()
+                yield ToolCallProgress(
+                    tool_call_id=tool_call_id,
+                    status="failed",
+                    raw_output=error_msg,
+                    content=[ContentToolCallContent.text(text=f"Error: {error_msg}")],
+                )
+
+            case StreamCompleteEvent():
+                # Complete any pending text or thinking tool calls
+                if state.text_output_call_id:
+                    yield ToolCallProgress(
+                        tool_call_id=state.text_output_call_id,
+                        status="completed",
+                    )
+                if state.thinking_call_id:
+                    yield ToolCallProgress(
+                        tool_call_id=state.thinking_call_id,
+                        status="completed",
+                    )
+                # Clean up any state that was created
+                key = self._generate_composite_key(source_name, depth)
+                self._subagent_inline_states.pop(key, None)
+
+            case _:
+                pass
+
+    async def _convert_subagent_legacy(
+        self,
+        source_name: str,
+        source_type: Literal["agent", "team_parallel", "team_sequential"],
+        inner_event: RichAgentStreamEvent[Any],
+        depth: int,
+    ) -> AsyncIterator[ACPSessionUpdate]:
+        """Convert subagent event to legacy inline text notifications."""
         indent = "  " * depth
         icon = "🤖" if source_type == "agent" else "👥"
 
@@ -507,7 +902,7 @@ class ACPEventConverter:
                 PartStartEvent(part=TextPart(content=delta))
                 | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
             ):
-                header_key = f"{source_name}:{depth}"
+                header_key = f"`{source_name}`:{depth}"
                 if header_key not in self._subagent_headers:
                     self._subagent_headers.add(header_key)
                     yield AgentMessageChunk.text(
@@ -519,13 +914,11 @@ class ACPEventConverter:
                 PartStartEvent(part=ThinkingPart(content=delta))
                 | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
             ):
-                yield AgentThoughtChunk.text(
-                    f"{indent}[{source_name}] {delta or ''}", message_id=self._current_message_id
-                )
+                yield AgentThoughtChunk.text(delta or "", message_id=self._current_message_id)
 
             case FunctionToolCallEvent(part=part):
-                text = f"\n{indent}🔧 [{source_name}] Using tool: {part.tool_name}\n"
-                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
+                text = f"\n{indent}- 🔧 [`{source_name}`] Using tool: ``{part.tool_name}``\n"
+                yield AgentMessageChunk.text(text=text, message_id=self._current_message_id)
 
             case FunctionToolResultEvent(
                 result=ToolReturnPart(content=content, tool_name=tool_name),
@@ -533,24 +926,22 @@ class ACPEventConverter:
                 result_str = str(content)
                 if len(result_str) > 200:  # noqa: PLR2004
                     result_str = result_str[:200] + "..."
-                text = f"{indent}✅ [{source_name}] {tool_name}: {result_str}\n"
-                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
+                text = f"{indent}- ✅ [`{source_name}`] `{tool_name}`\n"
+                yield AgentMessageChunk.text(text=text, message_id=self._current_message_id)
 
             case FunctionToolResultEvent(result=RetryPromptPart(tool_name=tool_name) as result):
                 error_msg = result.model_response()
-                text = f"{indent}❌ [{source_name}] {tool_name}: {error_msg}\n"
-                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
+                text = f"{indent}- ❌ [`{source_name}`] `{tool_name}`: `{error_msg}`\n"
+                yield AgentMessageChunk.text(text=text, message_id=self._current_message_id)
 
             case StreamCompleteEvent():
-                header_key = f"{source_name}:{depth}"
+                header_key = f"`{source_name}`:{depth}"
                 self._subagent_headers.discard(header_key)
-                yield AgentMessageChunk.text(
-                    f"\n{indent}---\n", message_id=self._current_message_id
-                )
+                yield AgentMessageChunk.text(f"\n{indent}---\n", message_id=self._current_message_id)
 
             case (
-                BuiltinToolCallEvent()  # ty: ignore[deprecated]
-                | BuiltinToolResultEvent()  # ty: ignore[deprecated]
+                BuiltinToolCallEvent()  # depracated
+                | BuiltinToolResultEvent()  # depracated
                 | CompactionEvent()
                 | FinalResultEvent()
                 | FunctionToolResultEvent()
@@ -564,6 +955,7 @@ class ACPEventConverter:
                 | ToolCallCompleteEvent()
                 | ToolCallProgressEvent()
                 | ToolCallStartEvent()
+                | ToolResultMetadataEvent()
                 | CustomEvent()
             ):
                 pass  # TODO
@@ -571,120 +963,103 @@ class ACPEventConverter:
             case _ as unreachable:
                 assert_never(unreachable)
 
-    async def _convert_subagent_tool_box(
+    async def _convert_subagent_tool_box(  # noqa: PLR0915
         self,
         source_name: str,
-        source_type: SubAgentType,
+        source_type: Literal["agent", "team_parallel", "team_sequential"],
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> AsyncIterator[ACPSessionUpdate]:
-        """Convert subagent event to tool box notifications."""
-        state_key = f"subagent:{source_name}:{depth}"
+        """Convert subagent event to tool box notifications.
+
+        Uses _SubagentToolBoxState to track header status and accumulates content
+        for full transcript in the content field.
+        """
+        state = self._get_or_create_toolbox_state(source_name, depth)
+        tool_call_id = state.invocation_id
         icon = "🤖" if source_type == "agent" else "👥"
 
-        if state_key not in self._subagent_content:
-            self._subagent_content[state_key] = []
-
-        accumulated = self._subagent_content[state_key]
-
-        match inner_event:
-            case (
-                PartStartEvent(part=TextPart(content=delta))
-                | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
-            ):
-                accumulated.append(delta)
-                async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
-                    yield n
-
-            case (
-                PartStartEvent(part=ThinkingPart(content=delta))
-                | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
-            ):
-                if delta:
-                    accumulated.append(f"💭 {delta}")
-                    async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
-                        yield n
-
-            case FunctionToolCallEvent(part=part):
-                accumulated.append(f"\n🔧 Using tool: {part.tool_name}\n")
-                async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
-                    yield n
-
-            case FunctionToolResultEvent(
-                result=ToolReturnPart(content=content, tool_name=tool_name),
-            ):
-                result_str = str(content)
-                if len(result_str) > 200:  # noqa: PLR2004
-                    result_str = result_str[:200] + "..."
-                accumulated.append(f"✅ {tool_name}: {result_str}\n")
-                async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
-                    yield n
-
-            case FunctionToolResultEvent(result=RetryPromptPart(tool_name=tool_name) as result):
-                error_msg = result.model_response()
-                accumulated.append(f"❌ {tool_name}: {error_msg}\n")
-                async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
-                    yield n
-
-            case StreamCompleteEvent():
-                # Complete the tool call
-                if state_key in self._tool_states:
-                    yield ToolCallProgress(tool_call_id=state_key, status="completed")
-                    self._cleanup_tool_state(state_key)
-                self._subagent_content.pop(state_key, None)
-
-            case (
-                BuiltinToolCallEvent()  # ty: ignore[deprecated]
-                | BuiltinToolResultEvent()  # ty: ignore[deprecated]
-                | CompactionEvent()
-                | FinalResultEvent()
-                | FunctionToolResultEvent()
-                | PartDeltaEvent()
-                | PartEndEvent()
-                | PartStartEvent()
-                | PlanUpdateEvent()
-                | RunErrorEvent()
-                | RunStartedEvent()
-                | SubAgentEvent()
-                | ToolCallCompleteEvent()
-                | ToolCallProgressEvent()
-                | ToolCallStartEvent()
-                | CustomEvent()
-            ):
-                pass  # TODO
-
-            case _ as unreachable:
-                assert_never(unreachable)
-
-    async def _emit_subagent_progress(
-        self, state_key: str, title: str
-    ) -> AsyncIterator[ACPSessionUpdate]:
-        """Emit tool call notifications for subagent content."""
-        accumulated = self._subagent_content.get(state_key, [])
-        content_text = "".join(accumulated)
-
-        if state_key not in self._tool_states:
-            # Create state and emit start
-            self._tool_states[state_key] = _ToolState(
-                tool_call_id=state_key,
-                tool_name="delegate",
-                title=title,
-                kind="other",
-                raw_input={},
-                started=True,
-            )
+        if not state.header_sent:
+            state.header_sent = True
+            initial_title = f"{icon} [`{source_name}`]: {source_type} start"
+            state.title = initial_title
             yield ToolCallStart(
-                tool_call_id=state_key,
-                title=title,
+                tool_call_id=tool_call_id,
+                title=initial_title,
                 kind="other",
                 raw_input={},
                 status="pending",
             )
 
-        # Emit progress update
-        yield ToolCallProgress(
-            tool_call_id=state_key,
-            title=title,
-            status="in_progress",
-            content=[ContentToolCallContent.text(content_text)],
-        )
+        new_title: str | None = None
+        kind: ToolKind = "other"
+        current_status: Literal["in_progress", "completed"] = "in_progress"
+
+        match inner_event:
+            case PartStartEvent(part=TextPart(content=delta)):
+                tool_text = "\n" + delta
+                state.content.append(tool_text)
+                new_title = f"{icon} [`{source_name}`]: Output..."
+                kind = "other"
+
+            case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+                if delta:
+                    state.content.append(delta)
+                    new_title = f"{icon} [`{source_name}`]: Output..."
+                    kind = "other"
+
+            case PartStartEvent(part=ThinkingPart(content=delta)):
+                tool_text = "\n> **Thinking** :"
+                if delta:
+                    tool_text += delta.replace("\n", "\n> ")
+                state.content.append(tool_text)
+                new_title = f"💭 [`{source_name}`]: thinking..."
+                kind = "think"
+
+            case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)):
+                if delta:
+                    state.content.append(delta.replace("\n", "\n> "))
+                    new_title = f"💭 [`{source_name}`]: thinking..."
+                    kind = "think"
+
+            case FunctionToolCallEvent(part=part):
+                tool_text = f"\n- calling `{part.tool_name}`"
+                state.content.append(tool_text)
+                new_title = f"🔧 [`{source_name}`]: calling `{part.tool_name}`..."
+                kind = "other"
+
+            case FunctionToolResultEvent(
+                result=ToolReturnPart(tool_name=tool_name),
+            ):
+                tool_text = f"\n- `{tool_name}` completed"
+                state.content.append(tool_text)
+                new_title = f"✅ [`{source_name}`]: `{tool_name}` completed"
+                kind = "other"
+
+            case FunctionToolResultEvent(result=RetryPromptPart(tool_name=tool_name) as result):
+                error_msg = result.model_response()
+                error_text = f"\n- `{tool_name}` failed: `{error_msg}`"
+                state.content.append(error_text)
+                new_title = f"❌ [`{source_name}`]: `{tool_name}` failed"
+                kind = "other"
+
+            case StreamCompleteEvent():
+                # Complete the tool call
+                if tool_call_id in self._tool_states:
+                    yield ToolCallProgress(tool_call_id=tool_call_id, status="completed")
+                    self._cleanup_tool_state(tool_call_id)
+                self._subagent_content.pop(tool_call_id, None)
+
+            case _:
+                pass
+
+        if new_title and (new_title != state.title or kind == "think"):
+            state.title = new_title
+            full_text = "".join(state.content)
+            yield ToolCallProgress(
+                tool_call_id=tool_call_id,
+                title=new_title,
+                kind=kind,
+                status=current_status,
+                content=[ContentToolCallContent.text(text=full_text)],
+            )
