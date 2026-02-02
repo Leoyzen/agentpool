@@ -209,8 +209,13 @@ async def test_compatibility_no_processors(mock_model):
         assert result.data == "Response"
 
 
-async def test_history_processor_with_existing_history(mock_model):
-    """Test that history processors receive all messages including existing history."""
+async def test_compaction_and_processors_interaction(mock_model):
+    """Test interaction between CompactionPipeline and history processors.
+
+    Order should be:
+    1. CompactionPipeline (filters/truncates)
+    2. History Processors (receives already compacted messages)
+    """
     from pydantic_ai import ModelResponse, TextPart
 
     from agentpool.messaging import ChatMessage
