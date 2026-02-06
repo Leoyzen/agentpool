@@ -663,6 +663,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     ) -> PydanticAgent[AgentContext[TDeps], AgentOutputType]:
         """Create pydantic-ai agent from current state."""
         from agentpool.agents.native_agent.tool_wrapping import wrap_tool
+        from agentpool.utils.context_wrapping import wrap_instruction
 
         tools = await self.tools.get_tools(state="enabled")
         final_type = to_type(output_type) if output_type not in [None, str] else self._output_type
@@ -685,6 +686,39 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pydantic_ai_tool = tool.to_pydantic_ai(function_override=wrapped)
             pydantic_ai_tools.append(pydantic_ai_tool)
 
+        # Collect and wrap instructions from all resource providers
+        all_instructions: list[Any] = []
+
+        # Start with formatted system prompt as a static instruction
+        if self._formatted_system_prompt:
+            all_instructions.append(self._formatted_system_prompt)
+
+        # Collect instructions from all providers
+        for provider in self.tools.providers:
+            try:
+                provider_instructions = await provider.get_instructions()
+                # Wrap each instruction for pydantic-ai compatibility
+                for instruction_fn in provider_instructions:
+                    try:
+                        wrapped_instruction = wrap_instruction(instruction_fn, fallback="")
+                        all_instructions.append(wrapped_instruction)
+                    except Exception:
+                        # Wrap failure - log and skip this instruction
+                        logger.exception(
+                            "Failed to wrap instruction, skipping",
+                            provider=provider.name,
+                            instruction=instruction_fn,
+                        )
+                        continue
+            except Exception as e:
+                # Provider failure - log and continue
+                logger.exception(
+                    "Failed to get instructions from provider",
+                    provider=provider.name,
+                    error=str(e),
+                )
+                continue
+
         # Resolve history processors with caching
         history_processors = self._resolve_history_processors()
 
@@ -692,7 +726,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             name=self.name,
             model=model_,
             model_settings=self.model_settings,
-            instructions=self._formatted_system_prompt,
+            instructions=all_instructions,
             retries=self._retries,
             end_strategy=self._end_strategy,
             output_retries=self._output_retries,
