@@ -8,11 +8,12 @@ from upathtools import to_upath
 
 from agentpool.log import get_logger
 from agentpool.skills.registry import SkillsRegistry
+from agentpool_config.skills import SkillsConfig  # noqa: TC001
 
 
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
-    from upathtools import JoinablePathLike
+    from upathtools import JoinablePathLike, UPath
 
     from agentpool.skills.skill import Skill
 
@@ -33,6 +34,8 @@ class SkillsManager:
         name: str = "skills",
         owner: str | None = None,
         skills_dirs: list[JoinablePathLike] | None = None,
+        config: SkillsConfig | None = None,
+        config_file_path: UPath | None = None,
     ) -> None:
         """Initialize the skills manager.
 
@@ -40,20 +43,24 @@ class SkillsManager:
             name: Name for this manager
             owner: Owner of this manager
             skills_dirs: Directories to search for skills
+            config: Optional skills configuration from manifest
+            config_file_path: Optional path to configuration file for resolving relative paths
         """
         self.name = name
         self.owner = owner
         self.registry = SkillsRegistry(skills_dirs)
         self._initialized = False
+        self._config = config
+        self._config_file_path = config_file_path
 
     def __repr__(self) -> str:
         skill_count = len(self.registry.list_items()) if self._initialized else "?"
         return f"SkillsManager(name={self.name!r}, skills={skill_count})"
 
     async def __aenter__(self) -> Self:
-        """Initialize the skills manager and discover skills."""
+        """Initialize to skills manager and discover skills."""
         try:
-            await self.registry.discover_skills()
+            await self.discover_skills(self._config, self._config_file_path)
             self._initialized = True
             count = len(self.registry.list_items())
             logger.info("Skills manager initialized", name=self.name, skill_count=count)
@@ -101,9 +108,39 @@ class SkillsManager:
                 await self.registry.register_skills_from_path(upath)
                 logger.info("Added skills directory", path=str(path))
 
+    async def discover_skills(
+        self,
+        config: SkillsConfig | None = None,
+        config_file_path: UPath | None = None,
+    ) -> None:
+        """Discover skills from configured paths.
+
+        Args:
+            config: Optional skills configuration.
+            config_file_path: Optional path to the configuration file for resolving relative paths.
+        """
+        from agentpool_config.skills import DEFAULT_SKILLS_PATHS
+
+        if config:
+            paths = config.get_effective_paths(config_file_path)
+            default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
+        else:
+            paths = self.registry.skills_dirs
+            default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
+
+        for path in reversed(paths):
+            upath = to_upath(path).expanduser()
+            if not upath.exists():
+                if any(upath == dp for dp in default_paths):
+                    logger.debug("Default skills directory not found", path=upath)
+                else:
+                    logger.warning("Custom skills directory not found", path=upath)
+                continue
+            await self.registry.register_skills_from_path(upath, replace=True)
+
     async def refresh(self) -> None:
         """Force rediscovery of all skills."""
-        await self.registry.discover_skills()
+        await self.discover_skills()
         skill_count = len(self.registry.list_items())
         logger.info("Skills refreshed", name=self.name, skill_count=skill_count)
 
