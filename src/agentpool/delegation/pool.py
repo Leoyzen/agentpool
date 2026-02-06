@@ -6,11 +6,11 @@ import asyncio
 from asyncio import Lock
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import os
-from typing import TYPE_CHECKING, Any, Self, assert_never, overload
+from typing import TYPE_CHECKING, Any, Self, overload
 
 from anyenv import ProcessManager
 import anyio
-from upathtools import UPath
+from upathtools import UPath, to_upath
 
 from agentpool.common_types import NodeName, SupportsStructuredOutput
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from upathtools import JoinablePathLike
 
+    from agentpool.agents import Agent
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import AgentName, AnyEventHandlerType
     from agentpool.delegation.base_team import BaseTeam
@@ -100,10 +101,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         match manifest:
             case None:
                 self.manifest = AgentsManifest()
+                self._config_file_path: UPath | None = None
+            case str() | os.PathLike() | UPath():
+                self._config_file_path = to_upath(manifest)
+                self.manifest = AgentsManifest.from_file(manifest)
             case AgentsManifest():
                 self.manifest = manifest
-            case str() | os.PathLike() | UPath():
-                self.manifest = AgentsManifest.from_file(manifest)
+                self._config_file_path = None
             case _:
                 raise ValueError(f"Invalid config type: {type(manifest)}")
         registry.configure_observability(self.manifest.observability)
@@ -121,7 +125,12 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         self.connection_registry = ConnectionRegistry()
         servers = self.manifest.get_mcp_servers()
         self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool")
-        self.skills = SkillsManager(name="pool_skills", owner="pool")
+        self.skills = SkillsManager(
+            name="pool_skills",
+            owner="pool",
+            config=self.manifest.skills,
+            config_file_path=self._config_file_path,
+        )
         self._tasks = TaskRegistry()
         self.prompt_manager = PromptManager(self.manifest.prompts)
         # Main agent name: explicit param > manifest.default_agent > None (will use first)
@@ -354,7 +363,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.agents.base_agent import BaseAgent
 
         filter_type = agent_type or BaseAgent
-        return {i.name: i for i in self._items.values() if isinstance(i, filter_type)}  # ty: ignore[invalid-return-type]
+        return {i.name: i for i in self._items.values() if isinstance(i, filter_type)}
 
     @property
     def all_agents(self) -> dict[str, BaseAgent[Any, Any]]:
@@ -446,7 +455,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     @overload
     def get_agent[TResult = str](
         self,
-        agent: AgentName | BaseAgent[Any, Any],
+        agent: AgentName | Agent[Any, str],
         *,
         output_type: type[TResult] = str,  # type: ignore[assignment]
     ) -> BaseAgent[TPoolDeps, TResult]: ...
@@ -454,7 +463,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     @overload
     def get_agent[TCustomDeps, TResult = str](
         self,
-        agent: AgentName | BaseAgent[Any, Any],
+        agent: AgentName | Agent[Any, str],
         *,
         deps_type: type[TCustomDeps],
         output_type: type[TResult] = str,  # type: ignore[assignment]
@@ -462,7 +471,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
 
     def get_agent(
         self,
-        agent: AgentName | BaseAgent[Any, Any],
+        agent: AgentName | Agent[Any, str],
         *,
         deps_type: Any | None = None,
         output_type: Any = str,
@@ -489,13 +498,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         from agentpool.agents.base_agent import BaseAgent
 
-        match agent:
-            case BaseAgent():
-                base = agent
-            case str():
-                base = self.get_agents()[agent]
-            case _ as unreachable:
-                assert_never(unreachable)  # ty: ignore[type-assertion-failure]
+        base = agent if isinstance(agent, BaseAgent) else self.get_agents()[agent]
         # Use custom deps if provided, otherwise use shared deps
         # base.context.data = deps if deps is not None else self.shared_deps
         base.deps_type = deps_type

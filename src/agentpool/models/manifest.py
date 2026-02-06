@@ -25,6 +25,7 @@ from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 from agentpool_config.observability import ObservabilityConfig
 from agentpool_config.output_types import StructuredResponseConfig
 from agentpool_config.pool_server import ACPPoolServerConfig, MCPPoolServerConfig
+from agentpool_config.skills import SkillsConfig
 from agentpool_config.storage import StorageConfig
 from agentpool_config.system_prompts import PromptLibraryConfig
 from agentpool_config.task import Job
@@ -321,6 +322,22 @@ class AgentsManifest(Schema):
     This configuration defines the prompt library, which is used to provide prompts to the nodes.
 
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/prompt_configuration/
+    """
+
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    """Custom skill discovery paths configuration.
+
+    Defines where to search for custom skills. Skills are discovered from
+    configured directories following "first path wins" semantics.
+
+    Example:
+        ```yaml
+        skills:
+          paths:
+            - ./my-skills
+            - s3://bucket/skills
+          include_default: true
+        ```
     """
 
     commands: dict[str, CommandConfig | str] = Field(
