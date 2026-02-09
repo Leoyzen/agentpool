@@ -121,12 +121,11 @@ class SkillsManager:
         """
         from agentpool_config.skills import DEFAULT_SKILLS_PATHS
 
+        default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
         if config:
             paths = config.get_effective_paths(config_file_path)
-            default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
         else:
             paths = self.registry.skills_dirs
-            default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
 
         for path in reversed(paths):
             upath = to_upath(path).expanduser()
