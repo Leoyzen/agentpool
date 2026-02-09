@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Self, overload
 
 from anyenv import ProcessManager
 import anyio
-from upathtools import UPath
+from upathtools import UPath, to_upath
 
 from agentpool.common_types import NodeName, SupportsStructuredOutput
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
@@ -101,10 +101,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         match manifest:
             case None:
                 self.manifest = AgentsManifest()
+                self._config_file_path: UPath | None = None
             case str() | os.PathLike() | UPath():
+                self._config_file_path = to_upath(manifest)
                 self.manifest = AgentsManifest.from_file(manifest)
             case AgentsManifest():
                 self.manifest = manifest
+                self._config_file_path = None
             case _:
                 raise ValueError(f"Invalid config type: {type(manifest)}")
         registry.configure_observability(self.manifest.observability)
@@ -124,7 +127,12 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         self.connection_registry = ConnectionRegistry()
         servers = self.manifest.get_mcp_servers()
         self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool")
-        self.skills = SkillsManager(name="pool_skills", owner="pool")
+        self.skills = SkillsManager(
+            name="pool_skills",
+            owner="pool",
+            config=self.manifest.skills,
+            config_file_path=self._config_file_path,
+        )
         self._tasks = TaskRegistry()
         self.prompt_manager = PromptManager(self.manifest.prompts)
         # Main agent name: explicit param > manifest.default_agent > None (will use first)

@@ -55,6 +55,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
         self,
         skills_dir: JoinablePathLike | AbstractFileSystem,
         base_path: str | None = None,
+        replace: bool = True,
         **storage_options: Any,
     ) -> None:
         """Register skills from a given path.
@@ -63,6 +64,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             skills_dir: Path to the directory containing skills, or filesystem instance.
             base_path: When skills_dir is a filesystem, the path within that filesystem
                       to look for skills. Defaults to root_marker if not specified.
+            replace: Whether to replace existing skills with same name.
             storage_options: Additional options to pass to the filesystem.
         """
         if isinstance(skills_dir, AbstractFileSystem):
@@ -80,7 +82,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             # List entries in skills directory
             entries = await fs._ls(search_path, detail=True)
         except FileNotFoundError:
-            logger.warning("Skills directory not found", path=search_path)
+            logger.debug("Skills directory not found", path=search_path)
             return
         # Filter for directories that might contain skills
         skill_dirs = [
@@ -111,7 +113,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
 
             try:
                 skill = self._parse_skill(skill_dir_path)
-                self.register(skill.name, skill, replace=True)
+                self.register(skill.name, skill, replace=replace)
             except Exception as e:  # noqa: BLE001
                 # Log but don't fail discovery for one bad skill
                 print(f"Warning: Failed to parse skill at {skill_dir_path}: {e}")
