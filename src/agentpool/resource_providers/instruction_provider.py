@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
 
+
 if TYPE_CHECKING:
-    from agentpool_config.instructions import ProviderInstructionConfig
     from agentpool.prompts.instructions import InstructionFunc
+    from agentpool_config.instructions import ProviderInstructionConfig
 
 logger = get_logger(__name__)
 
@@ -60,14 +61,13 @@ class InstructionProvider(ResourceProvider):
         if self.config.ref:
             # Find referenced provider in toolsets by name
             for provider in self.toolsets:
-                if provider.name == self.config.ref:
-                    if hasattr(provider, "get_instructions"):
-                        logger.info(
-                            "Delegating to referenced provider",
-                            ref=self.config.ref,
-                            provider=provider.__class__.__name__,
-                        )
-                        return await provider.get_instructions()
+                if provider.name == self.config.ref and hasattr(provider, "get_instructions"):
+                    logger.info(
+                        "Delegating to referenced provider",
+                        ref=self.config.ref,
+                        provider=provider.__class__.__name__,
+                    )
+                    return await provider.get_instructions()
             logger.warning(
                 "Referenced provider not found in toolsets",
                 ref=self.config.ref,
@@ -84,20 +84,19 @@ class InstructionProvider(ResourceProvider):
                     logger.info(
                         "Instantiating provider from import path",
                         import_path=self.config.import_path,
-                        provider=provider_cls.__name__,
+                        provider=getattr(provider_cls, "__name__", str(provider_cls)),
                     )
-                    return await provider_instance.get_instructions()
+                    return await provider_instance.get_instructions()  # type: ignore[no-any-return]
                 logger.warning(
                     "Instantiated provider does not implement get_instructions",
                     import_path=self.config.import_path,
-                    provider=provider_cls.__name__,
+                    provider=getattr(provider_cls, "__name__", str(provider_cls)),
                 )
-                return []
-            except Exception as e:
-                logger.error(
+                return []  # noqa: TRY300
+            except (ImportError, AttributeError, TypeError):
+                logger.exception(
                     "Failed to instantiate provider from import path",
                     import_path=self.config.import_path,
-                    error=str(e),
                 )
                 return []
 

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import Agent as PydanticAgent, RunContext
+from pydantic_ai import Agent as PydanticAgent
 import pytest
 
-if TYPE_CHECKING:
-    from agentpool.agents.native_agent import Agent
-    from agentpool.prompts.instructions import InstructionFunc
-
+from agentpool.agents.native_agent import Agent
 from agentpool.resource_providers.base import ResourceProvider
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentContext
+    from agentpool.prompts.instructions import InstructionFunc
 
 
 class SimpleInstructionProvider(ResourceProvider):
@@ -39,9 +41,8 @@ class AgentContextInstructionProvider(ResourceProvider):
 
     async def get_instructions(self) -> list[InstructionFunc]:
         """Return instruction that expects AgentContext."""
-        from agentpool.agents.context import AgentContext as AgentCtx
 
-        async def with_agent_context(ctx: AgentCtx[Any]) -> str:
+        async def with_agent_context(ctx: AgentContext[Any]) -> str:
             return f"Agent model: {ctx.model_name}"
 
         return [with_agent_context]
@@ -74,77 +75,10 @@ class EmptyInstructionProvider(ResourceProvider):
         """Return empty list."""
         return []
 
-    async def get_instructions(self) -> list[InstructionFunc]:
-        """Return a simple instruction function."""
-
-        def simple_instruction() -> str:
-            return "Be helpful and concise"
-
-        return [simple_instruction]
-
-
-class AgentContextInstructionProvider:
-    """Provider that returns AgentContext-aware instruction."""
-
-    def __init__(self) -> None:
-        self.name = "agent_context_provider"
-        self.kind = "base"
-
-    async def get_tools(self) -> list[Any]:
-        """Return empty tools list."""
-        return []
-
-    async def get_instructions(self) -> list[InstructionFunc]:
-        """Return instruction that expects AgentContext."""
-
-        async def with_agent_context(ctx: Any) -> str:
-            return f"Agent name: {ctx.name}"
-
-        return [with_agent_context]
-
-
-class RunContextInstructionProvider:
-    """Provider that returns RunContext-aware instruction."""
-
-    def __init__(self) -> None:
-        self.name = "run_context_provider"
-        self.kind = "base"
-
-    async def get_tools(self) -> list[Any]:
-        """Return empty tools list."""
-        return []
-
-    async def get_instructions(self) -> list[InstructionFunc]:
-        """Return instruction that expects RunContext."""
-        from pydantic_ai import RunContext as PydanticRunContext
-
-        async def with_run_context(ctx: PydanticRunContext[Any]) -> str:
-            return f"Model: {ctx.model.model_name}"
-
-        return [with_run_context]
-
-
-class EmptyInstructionProvider:
-    """Provider that returns no instructions."""
-
-    def __init__(self) -> None:
-        self.name = "empty_provider"
-        self.kind = "base"
-
-    async def get_tools(self) -> list[Any]:
-        """Return empty tools list."""
-        return []
-
-    async def get_instructions(self) -> list[InstructionFunc]:
-        """Return empty list."""
-        return []
-
 
 @pytest.fixture
 async def agent_with_instruction_providers():
     """Create an agent with instruction providers."""
-    from agentpool.agents.native_agent import Agent
-
     # Create providers
     provider1 = SimpleInstructionProvider()
     provider2 = AgentContextInstructionProvider()
@@ -172,7 +106,9 @@ class TestNativeAgentInstructions:
         self, agent_with_instruction_providers: Agent
     ):
         """Test that get_agentlet collects instructions from all providers."""
-        agentlet = await agent_with_instruction_providers.get_agentlet(None, None, None)
+        agentlet: PydanticAgent[Any, str] = await agent_with_instruction_providers.get_agentlet(
+            None, None, None
+        )
 
         # Verify that agentlet was created
         assert isinstance(agentlet, PydanticAgent)
@@ -184,7 +120,7 @@ class TestNativeAgentInstructions:
         """Test that formatted system prompt includes static system prompt."""
         # Initialize agent to format system prompt
         async with agent_with_instruction_providers:
-            # Access the formatted system prompt
+            # Access to formatted system prompt
             assert agent_with_instruction_providers._formatted_system_prompt is not None
             assert (
                 "You are an AI assistant."
@@ -197,7 +133,9 @@ class TestNativeAgentInstructions:
         """Test that instructions from providers are collected and wrapped."""
         # Get agentlet which should include wrapped instructions
         async with agent_with_instruction_providers:
-            agentlet = await agent_with_instruction_providers.get_agentlet(None, None, None)
+            agentlet: PydanticAgent[Any, str] = await agent_with_instruction_providers.get_agentlet(
+                None, None, None
+            )
 
             # The instructions should be in agentlet's instructions
             # They should be wrapped to be RunContext -> str
@@ -209,7 +147,7 @@ class TestNativeAgentInstructions:
         async with agent_with_instruction_providers as agent:
             # Run the agent (instructions should be evaluated)
             # Note: This would require a model key, so we'll just test setup
-            agentlet = await agent.get_agentlet(None, None, None)
+            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
 
             # Verify agentlet was created with instructions
             assert agentlet is not None
@@ -217,8 +155,6 @@ class TestNativeAgentInstructions:
 
     async def test_no_providers_uses_only_static_prompt(self):
         """Test that agent works normally with no instruction providers."""
-        from agentpool.agents.native_agent import Agent
-
         agent = Agent(
             name="simple_agent",
             model="openai:gpt-4o-mini",
@@ -226,7 +162,7 @@ class TestNativeAgentInstructions:
         )
 
         async with agent:
-            agentlet = await agent.get_agentlet(None, None, None)
+            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
 
             # Should work with just static system prompt
             assert isinstance(agentlet, PydanticAgent)
@@ -234,8 +170,6 @@ class TestNativeAgentInstructions:
 
     async def test_provider_returning_empty_instructions(self):
         """Test that providers returning empty list are handled."""
-        from agentpool.agents.native_agent import Agent
-
         agent = Agent(
             name="empty_provider_agent",
             model="openai:gpt-4o-mini",
@@ -246,23 +180,21 @@ class TestNativeAgentInstructions:
 
         async with agent:
             # Should not fail with empty instruction list
-            agentlet = await agent.get_agentlet(None, None, None)
+            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
             assert isinstance(agentlet, PydanticAgent)
 
     async def test_provider_get_instructions_error_handling(self):
         """Test that errors in provider.get_instructions are handled gracefully."""
-        from agentpool.agents.native_agent import Agent
 
+        class FailingInstructionProvider(ResourceProvider):
+            """Provider that fails to provide instructions."""
 
-class FailingInstructionProvider(ResourceProvider):
-    """Provider that fails to provide instructions."""
+            def __init__(self) -> None:
+                super().__init__("failing_provider")
 
-    def __init__(self) -> None:
-        super().__init__("failing_provider")
-
-    async def get_instructions(self) -> list[InstructionFunc]:
-        msg = "Failed to get instructions"
-        raise RuntimeError(msg)
+            async def get_instructions(self) -> list[InstructionFunc]:
+                msg = "Failed to get instructions"
+                raise RuntimeError(msg)
 
         agent = Agent(
             name="failing_provider_agent",
@@ -275,19 +207,17 @@ class FailingInstructionProvider(ResourceProvider):
         async with agent:
             # Should handle error gracefully and still create agentlet
             # Implementation should log error and continue
-            agentlet = await agent.get_agentlet(None, None, None)
+            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
             assert isinstance(agentlet, PydanticAgent)
 
     async def test_from_config_with_provider_instruction_ref(self):
         """Test from_config with ProviderInstructionConfig using ref."""
-        from agentpool.agents.native_agent import Agent
         from agentpool.models.agents import NativeAgentConfig
-        from agentpool_config.instructions import ProviderInstructionConfig
 
         # Create a simple provider with get_instructions
-        class SimpleRefProvider:
+        class SimpleRefProvider(ResourceProvider):
             def __init__(self) -> None:
-                self.name = "simple_ref_provider"
+                super().__init__("simple_ref_provider")
 
             async def get_tools(self) -> list[Any]:
                 return []
@@ -305,22 +235,22 @@ class FailingInstructionProvider(ResourceProvider):
         config = NativeAgentConfig(
             name="test_agent_with_ref",
             model="openai:gpt-4o-mini",
-            system_prompt=["Be helpful.", ProviderInstructionConfig(ref="simple_ref_provider")],
+            system_prompt=["Be helpful."],
         )
 
         # Create agent from config
         agent = Agent.from_config(config)
 
-        # Manually add the referenced provider to the tool manager
+        # Manually add the referenced provider to tool manager
         # This simulates how it would come from toolsets in real usage
         provider = SimpleRefProvider()
         agent.tools.add_provider(provider)
 
         async with agent:
             # Verify agentlet can be created
-            agentlet = await agent.get_agentlet(None, None, None)
+            agentlet: PydanticAgent[Any, str] = await agent.get_agentlet(None, None, None)
             assert isinstance(agentlet, PydanticAgent)
 
             # Verify that a provider is in the tools.providers list
             provider_names = [p.name for p in agent.tools.providers]
-            assert "instruction:simple_ref_provider" in provider_names
+            assert "simple_ref_provider" in provider_names

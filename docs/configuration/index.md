@@ -81,6 +81,12 @@ See [Task Configuration](./tasks.md) for job definitions.
 
 Global resource definitions for filesystems, APIs, and data sources that agents can access.
 
+### `skills`
+
+Configuration for automatic skills injection into agent system prompts.
+
+See [Skills Configuration](./skills.md) for setup and injection modes.
+
 ## Configuration Resolution
 
 AgentPool uses a layered configuration system inspired by OpenCode. Multiple config files are automatically discovered and deep-merged, allowing you to set global preferences while overriding project-specific settings.

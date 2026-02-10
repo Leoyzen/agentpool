@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import ConfigDict, Field
 from schemez import Schema
 from upathtools import UPath
@@ -11,6 +13,54 @@ DEFAULT_SKILLS_PATHS = [
     UPath("~/.claude/skills/"),
     UPath(".claude/skills/"),
 ]
+
+
+class SkillsInstructionConfig(Schema):
+    """Configuration for dynamic skills injection via ResourceProvider.
+
+    Controls how skills are dynamically injected into agent prompts as
+    instructions. This enables agents to discover and use skills without
+    explicit tool calls, making skill usage more natural and context-aware.
+
+    Modes:
+    - "off": No dynamic skill injection (default, backward compatible)
+    - "metadata": Inject only skill metadata (name, description, triggers)
+    - "full": Inject complete skill content including prompts and examples
+      for maximum capability at the cost of more tokens
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "x-icon": "octicon:mortar-board-16",
+            "x-doc-title": "Skills Instruction Configuration",
+        }
+    )
+
+    mode: Literal["off", "metadata", "full"] = Field(
+        default="off",
+        title="Injection mode",
+        examples=["off", "metadata", "full"],
+    )
+    """Dynamic skill injection mode.
+
+    - "off": No skill injection (default, backward compatible)
+    - "metadata": Inject skill names and descriptions only
+    - "full": Inject complete skill content including prompts
+    """
+
+    max_skills: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        title="Maximum skills",
+        examples=[10, 20, 50],
+    )
+    """Maximum number of skills to inject.
+
+    Limits the number of skills included in prompts to prevent
+    excessive token usage. Skills are ranked by relevance when
+    this limit is exceeded.
+    """
 
 
 class SkillsConfig(Schema):
@@ -61,6 +111,9 @@ class SkillsConfig(Schema):
 
     Set to False to disable default paths entirely.
     """
+
+    instruction: SkillsInstructionConfig = Field(default_factory=SkillsInstructionConfig)
+    """Configuration for dynamic skills injection via ResourceProvider."""
 
     def get_effective_paths(self, config_file_path: UPath | None = None) -> list[UPath]:
         """Get the effective list of paths for skill discovery.

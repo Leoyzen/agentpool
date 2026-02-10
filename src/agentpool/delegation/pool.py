@@ -90,6 +90,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.models.manifest import AgentsManifest
         from agentpool.observability import registry
         from agentpool.prompts.manager import PromptManager
+        from agentpool.resource_providers.skills_instruction import SkillsInstructionProvider
+        from agentpool.sessions import SessionManager
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
         from agentpool.utils.streams import FileOpsTracker
@@ -130,6 +132,12 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             owner="pool",
             config=self.manifest.skills,
             config_file_path=self._config_file_path,
+        )
+        self.skills_instruction_provider = SkillsInstructionProvider(
+            skills_registry=self.skills.registry,
+            injection_mode=self.manifest.skills.instruction.mode,
+            max_skills=self.manifest.skills.instruction.max_skills,
+            owner="pool",
         )
         self._tasks = TaskRegistry()
         self.prompt_manager = PromptManager(self.manifest.prompts)
@@ -173,9 +181,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 agents = list(self.all_agents.values())
                 teams = list(self.teams.values())
+                if self.skills_instruction_provider:
+                    await self.exit_stack.enter_async_context(self.skills_instruction_provider)
                 for agent in agents:
                     agent.tools.add_provider(aggregating_provider)
-                # Initialize storage
+                    if self.skills_instruction_provider:
+                        agent.tools.add_provider(self.skills_instruction_provider)
+                # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 # Initialize agents and teams (can be parallel)
                 comps: list[AbstractAsyncContextManager[Any]] = [*agents, *teams]
@@ -210,6 +222,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 for agent in self.get_agents().values():
                     agent.tools.remove_provider(aggregating_provider.name)
+                    if self.skills_instruction_provider:
+                        agent.tools.remove_provider(self.skills_instruction_provider.name)
                 await self.cleanup()
 
     @property
@@ -523,6 +537,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             agent.event_handler.add_handler(handler)
         # Add MCP aggregating provider from manager
         agent.tools.add_provider(self.mcp.get_aggregating_provider())
+        if self.skills_instruction_provider:
+            agent.tools.add_provider(self.skills_instruction_provider)
         agent = await self.exit_stack.enter_async_context(agent)
         self.register(agent.name, agent)
 
