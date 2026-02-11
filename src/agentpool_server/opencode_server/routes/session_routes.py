@@ -172,6 +172,12 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     state.input_providers[session_id] = input_provider
     # Set input provider on agent
     state.agent._input_provider = input_provider
+    # Clear agent's conversation for the new session
+    # Agent is shared across sessions, so we need to clear its conversation state
+    if hasattr(state.agent, "conversation") and state.agent.conversation:
+        state.agent.conversation.chat_messages.clear()
+    # Update agent's session_id to the new session
+    state.agent.session_id = session_id
     await state.broadcast_event(SessionCreatedEvent.create(session))
     return session
 
