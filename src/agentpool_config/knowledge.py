@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic import ConfigDict, Field
 from schemez import Schema
 
 from agentpool.prompts.prompts import PromptType
+from agentpool_config.paths import ConfigPath
+
+
+if TYPE_CHECKING:
+    from upathtools import UPath
 
 
 class Knowledge(Schema):
@@ -19,12 +26,16 @@ class Knowledge(Schema):
 
     model_config = ConfigDict(json_schema_extra={"title": "Knowledge Configuration"})
 
-    paths: list[str] = Field(
+    paths: list[ConfigPath] = Field(
         default_factory=list,
         examples=[["docs/readme.md", "https://api.example.com/docs"], ["/data/context.txt"]],
         title="Resource paths",
     )
-    """Quick access to files and URLs."""
+    """Quick access to files and URLs.
+
+    Paths are automatically resolved relative to the config file location
+    via ConfigPath validation.
+    """
 
     prompts: list[PromptType] = Field(default_factory=list, title="Dynamic prompts")
     """Prompts for dynamic content generation:
@@ -36,6 +47,6 @@ class Knowledge(Schema):
     convert_to_markdown: bool = Field(default=False, title="Convert to markdown")
     """Whether to convert content to markdown when possible."""
 
-    def get_resources(self) -> list[PromptType | str]:
+    def get_resources(self) -> list[PromptType | UPath]:
         """Get all resources."""
         return self.prompts + self.paths

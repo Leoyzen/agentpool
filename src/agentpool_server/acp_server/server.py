@@ -14,6 +14,7 @@ from acp import serve
 from agentpool import AgentPool
 from agentpool.log import get_logger
 from agentpool.models.manifest import AgentsManifest
+from agentpool_config.context import ConfigContextManager
 from agentpool_server import BaseServer
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
@@ -179,7 +180,7 @@ class ACPServer(BaseServer):
             debug_commands=self.debug_commands,
             load_skills=self.load_skills,
             server=self,
-            subagent_display_mode=self.subagent_display_mode,  # type: ignore[arg-type]
+            subagent_display_mode=self.subagent_display_mode,
         )
         debug_file = self.debug_file if self.debug_messages else None
         self.log.info("ACP server started")
@@ -222,8 +223,9 @@ class ACPServer(BaseServer):
         """
         # 1. Parse and validate new config before touching current pool
         self.log.info("Loading new pool configuration", config_path=config_path)
-        new_manifest = AgentsManifest.from_file(config_path)
-        new_pool = AgentPool(manifest=new_manifest)
+        with ConfigContextManager(config_path):
+            new_manifest = AgentsManifest.from_file(config_path)
+            new_pool = AgentPool(manifest=new_manifest)
         # 2. Validate agent exists in new pool if specified
         agent_names = list(new_pool.all_agents.keys())
         if not agent_names:

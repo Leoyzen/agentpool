@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Self, overload
 
 from anyenv import ProcessManager
 import anyio
-from upathtools import UPath, to_upath
+from upathtools import to_upath
 
 from agentpool.common_types import NodeName, SupportsStructuredOutput
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
     from types import TracebackType
 
-    from upathtools import JoinablePathLike
+    from upathtools import JoinablePathLike, UPath
 
     from agentpool.agents import Agent
     from agentpool.agents.base_agent import BaseAgent
@@ -94,79 +94,95 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.sessions import SessionManager
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
-        from agentpool.utils.streams import FileOpsTracker
-        from agentpool.utils.todos import TodoTracker
+        from agentpool.utils.streams import FileOpsTracker, TodoTracker
         from agentpool.vfs_registry import VFSRegistry
+        from agentpool_config.context import ConfigContextManager
         from agentpool_toolsets.builtin.debug import install_memory_handler
 
         super().__init__()
+
+        # Determine config path first, then load everything with context
+        config_path: UPath | None = None
+        manifest_obj: AgentsManifest | None = None
+        path_for_loading: UPath | None = None
+
         match manifest:
             case None:
-                self.manifest = AgentsManifest()
-                self._config_file_path: UPath | None = None
-            case str() | os.PathLike() | UPath():
-                self._config_file_path = to_upath(manifest)
-                self.manifest = AgentsManifest.from_file(manifest)
+                manifest_obj = AgentsManifest()
+            case str() | os.PathLike() as path:
+                config_path = to_upath(path)
+                path_for_loading = config_path
             case AgentsManifest():
-                self.manifest = manifest
-                self._config_file_path = None
+                manifest_obj = manifest
             case _:
                 raise ValueError(f"Invalid config type: {type(manifest)}")
-        registry.configure_observability(self.manifest.observability)
-        self._memory_log_handler = install_memory_handler()
-        self.shared_deps_type = shared_deps_type
-        self.connect_nodes = connect_nodes
-        self._input_provider = input_provider
-        self.exit_stack = AsyncExitStack()
-        self.parallel_load = parallel_load
-        self.storage = StorageManager(self.manifest.storage)
-        self.vfs_registry = VFSRegistry()
-        for name, resource_config in self.manifest.resources.items():
-            self.vfs_registry.register_from_config(name, resource_config)
-        self.event_handlers = event_handlers or []
-        self.connection_registry = ConnectionRegistry()
-        servers = self.manifest.get_mcp_servers()
-        self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool")
-        self.skills = SkillsManager(
-            name="pool_skills",
-            owner="pool",
-            config=self.manifest.skills,
-            config_file_path=self._config_file_path,
-        )
-        self.skills_instruction_provider = SkillsInstructionProvider(
-            skills_registry=self.skills.registry,
-            injection_mode=self.manifest.skills.instruction.mode,
-            max_skills=self.manifest.skills.instruction.max_skills,
-            owner="pool",
-        )
-        self._tasks = TaskRegistry()
-        self.prompt_manager = PromptManager(self.manifest.prompts)
-        # Main agent name: explicit param > manifest.default_agent > None (will use first)
-        self._main_agent_name = main_agent_name or self.manifest.default_agent
-        # Register tasks from manifest
-        for name, task in self.manifest.jobs.items():
-            self._tasks.register(name, task)
-        self.process_manager = ProcessManager()
-        self.file_ops = FileOpsTracker()
-        self.todos = TodoTracker()
-        # Create all agents from unified manifest.agents dict
-        for name, config in self.manifest.agents.items():
-            # Ensure name is set on config
-            cfg = config.model_copy(update={"name": name}) if config.name is None else config
-            agent: BaseAgent[TPoolDeps] = cfg.get_agent(
-                event_handlers=self.event_handlers,
-                input_provider=self._input_provider,
-                pool=self,
-                deps_type=shared_deps_type,
-            )
-            self.register(name, agent)
 
-        self._create_teams()
-        if connect_nodes:
-            self._connect_nodes()
-        self.pool_talk = TeamTalk[Any].from_nodes(list(self.nodes.values()))
-        self._enter_lock = Lock()  # Initialize async safety fields
-        self._running_count = 0
+        # Set up context manager if we have a config file path
+        # This enables config-relative path resolution during manifest loading
+        with ConfigContextManager(config_path):
+            if manifest_obj is None:
+                manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]
+
+            self._config_file_path = config_path
+            self.manifest = manifest_obj
+
+            registry.configure_observability(self.manifest.observability)
+            self._memory_log_handler = install_memory_handler()
+            self.shared_deps_type = shared_deps_type
+            self.connect_nodes = connect_nodes
+            self._input_provider = input_provider
+            self.exit_stack = AsyncExitStack()
+            self.parallel_load = parallel_load
+            self.storage = StorageManager(self.manifest.storage)
+            self.vfs_registry = VFSRegistry()
+            for name, resource_config in self.manifest.resources.items():
+                self.vfs_registry.register_from_config(name, resource_config)
+            session_store = self.manifest.storage.get_session_store()
+            self.sessions = SessionManager(pool=self, store=session_store)
+            self.event_handlers = event_handlers or []
+            self.connection_registry = ConnectionRegistry()
+            servers = self.manifest.get_mcp_servers()
+            self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool")
+            self.skills = SkillsManager(
+                name="pool_skills",
+                owner="pool",
+                config=self.manifest.skills,
+                config_file_path=self._config_file_path,
+            )
+            self.skills_instruction_provider = SkillsInstructionProvider(
+                skills_registry=self.skills.registry,
+                injection_mode=self.manifest.skills.instruction.mode,
+                max_skills=self.manifest.skills.instruction.max_skills,
+                owner="pool",
+            )
+            self._tasks = TaskRegistry()
+            self.prompt_manager = PromptManager(self.manifest.prompts)
+            # Main agent name: explicit param > manifest.default_agent > None (will use first)
+            self._main_agent_name = main_agent_name or self.manifest.default_agent
+            # Register tasks from manifest
+            for name, task in self.manifest.jobs.items():
+                self._tasks.register(name, task)
+            self.process_manager = ProcessManager()
+            self.file_ops = FileOpsTracker()
+            self.todos = TodoTracker()
+            # Create all agents from unified manifest.agents dict
+            for name, config in self.manifest.agents.items():
+                # Ensure name is set on config
+                cfg = config.model_copy(update={"name": name}) if config.name is None else config
+                agent: BaseAgent[TPoolDeps] = cfg.get_agent(
+                    event_handlers=self.event_handlers,
+                    input_provider=self._input_provider,
+                    pool=self,
+                    deps_type=shared_deps_type,
+                )
+                self.register(name, agent)
+
+            self._create_teams()
+            if connect_nodes:
+                self._connect_nodes()
+            self.pool_talk = TeamTalk[Any].from_nodes(list(self.nodes.values()))
+            self._enter_lock = Lock()  # Initialize async safety fields
+            self._running_count = 0
 
     async def __aenter__(self) -> Self:
         """Enter async context and initialize all agents."""
@@ -189,6 +205,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                         agent.tools.add_provider(self.skills_instruction_provider)
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
+                await self.exit_stack.enter_async_context(self.sessions)
                 # Initialize agents and teams (can be parallel)
                 comps: list[AbstractAsyncContextManager[Any]] = [*agents, *teams]
                 node_inits = [self.exit_stack.enter_async_context(c) for c in comps]
@@ -397,7 +414,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         agents = self.all_agents
         if not agents:
-            raise RuntimeError("No agents available in pool")
+            msg = "No agents available in pool"
+            raise RuntimeError(msg)
 
         if self._main_agent_name:
             if self._main_agent_name not in agents:

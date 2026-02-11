@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from typing import Literal
+import warnings
 
 from pydantic import ConfigDict, Field
 from schemez import Schema
 from upathtools import UPath
+
+from agentpool_config.paths import ConfigPath
 
 
 DEFAULT_SKILLS_PATHS = [
@@ -83,7 +86,7 @@ class SkillsConfig(Schema):
         }
     )
 
-    paths: list[UPath] = Field(
+    paths: list[ConfigPath] = Field(
         default_factory=list,
         title="Custom skill paths",
         examples=[["/path/to/skills", "./my-skills", "s3://bucket/skills"]],
@@ -96,6 +99,9 @@ class SkillsConfig(Schema):
     - Remote: s3://bucket/skills, github://org/repo/skills
 
     Earlier paths take precedence over later ones ("first path wins").
+
+    Paths are automatically resolved relative to the config file location
+    via ConfigPath validation.
     """
 
     include_default: bool = Field(
@@ -118,30 +124,28 @@ class SkillsConfig(Schema):
     def get_effective_paths(self, config_file_path: UPath | None = None) -> list[UPath]:
         """Get the effective list of paths for skill discovery.
 
-        Resolves relative paths against the config file location (if provided)
-        or current working directory, then appends default paths if enabled.
+        DEPRECATED: ConfigPath now handles path resolution automatically.
+        This method is kept for backward compatibility but the paths
+        field now contains pre-resolved UPath objects.
 
         Args:
             config_file_path: Path to the YAML configuration file.
-                Relative paths in self.paths are resolved against this file's
-                parent directory. If None, relative paths are resolved against
-                the current working directory.
+                This parameter is now ignored as paths are resolved
+                automatically during validation via ConfigPath.
 
         Returns:
             List of UPath objects for skill discovery, ordered by priority
             (custom paths first, then default paths if enabled).
         """
-        result: list[UPath] = []
+        warnings.warn(
+            "get_effective_paths() is deprecated; paths are now resolved automatically "
+            "via ConfigPath",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
-        # Resolve custom paths
-        base_path = config_file_path.parent if config_file_path is not None else UPath.cwd()
-
-        for path in self.paths:
-            if path.is_absolute():
-                result.append(path)
-            else:
-                # Resolve relative paths against base path and normalize
-                result.append((base_path / path).resolve())
+        # Paths are already resolved by ConfigPath validation
+        result: list[UPath] = list(self.paths)
 
         # Append default paths if enabled
         if self.include_default:
