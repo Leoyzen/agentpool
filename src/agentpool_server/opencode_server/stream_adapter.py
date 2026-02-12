@@ -676,10 +676,29 @@ class OpenCodeStreamAdapter:
                         yield PartUpdatedEvent.create(tool_part)
 
             case ToolCallCompleteEvent(tool_name=tool_name, tool_result=result):
-                # Skip rendering subagent tool calls in parent - they're in child session
-                if child_session_id:
-                    return
                 result_str = str(result) if result else ""
+
+                if child_session_id:
+                    # Store tool call in child session's assistant message
+                    if (
+                        child_session_id in self.state.messages
+                        and self.state.messages[child_session_id]
+                    ):
+                        # Get the last message (should be assistant message)
+                        last_msg = self.state.messages[child_session_id][-1]
+                        if isinstance(last_msg, MessageWithParts):
+                            tool_call_part = TextPart(
+                                id=identifier.ascending("part"),
+                                message_id=last_msg.info.id,
+                                session_id=child_session_id,
+                                text=f"Tool: {tool_name}\n{result_str}",
+                                time=TimeStartEndOptional(start=now_ms()),
+                            )
+                            last_msg.parts.append(tool_call_part)
+                            yield PartUpdatedEvent.create(tool_call_part)
+                    return
+
+                # Render in parent session for non-subagent tool calls
                 preview = result_str[:60] + "..." if len(result_str) > 60 else result_str  # noqa: PLR2004
                 summary_part = TextPart(
                     id=identifier.ascending("part"),
