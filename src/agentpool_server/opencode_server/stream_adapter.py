@@ -40,9 +40,14 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from agentpool_server.opencode_server.models import (
+    MessagePath,
+    MessageTime,
+    MessageWithParts,
+    MessageUpdatedEvent,
     PartUpdatedEvent,
     SessionCompactedEvent,
     SessionErrorEvent,
+    TimeCreated,
     TokenCache,
     Tokens,
 )
@@ -578,8 +583,6 @@ class OpenCodeStreamAdapter:
         if child_session_id:
             await self.state.ensure_session(child_session_id, parent_id=self.session_id)
 
-        indent = "  " * (depth - 1)
-
         match wrapped_event:
             case StreamCompleteEvent(message=msg):
                 # Only create ToolPart for subagent navigation, don't render detailed output in parent
@@ -588,10 +591,43 @@ class OpenCodeStreamAdapter:
 
                 if child_session_id:
                     subagent_key = f"{depth}:{source_name}"
+                    current_time = now_ms()
+
+                    # Create messages in child session so OpenCode can navigate to it
+                    if child_session_id not in self.state.messages:
+                        self.state.messages[child_session_id] = []
+
+                    # Create user message in child session
+                    user_msg_id = identifier.ascending("message")
+                    user_msg = MessageWithParts.user(
+                        message_id=user_msg_id,
+                        session_id=child_session_id,
+                        time=TimeCreated(created=current_time),
+                        agent_name=source_name,
+                    )
+                    user_msg.add_text_part(f"Task: {source_name}")
+                    self.state.messages[child_session_id].append(user_msg)
+                    yield MessageUpdatedEvent.create(user_msg.info)
+
+                    # Create assistant message in child session
+                    assistant_msg_id = identifier.ascending("message")
+                    assistant_msg = MessageWithParts.assistant(
+                        message_id=assistant_msg_id,
+                        session_id=child_session_id,
+                        time=MessageTime(created=current_time),
+                        agent_name=source_name,
+                        model_id="subagent",
+                        parent_id=user_msg_id,
+                        provider_id="agentpool",
+                        path=MessagePath(cwd="", root=""),
+                    )
+                    assistant_msg.add_text_part(content)
+                    self.state.messages[child_session_id].append(assistant_msg)
+                    yield MessageUpdatedEvent.create(assistant_msg.info)
+
                     if subagent_key in self._subagent_tool_parts:
                         # Update existing ToolPart to completed state
                         existing = self._subagent_tool_parts[subagent_key]
-                        current_time = now_ms()
                         completed_state = ToolStateCompleted(
                             input={
                                 "description": f"Subagent: {source_name}",
