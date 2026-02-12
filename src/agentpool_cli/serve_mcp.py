@@ -45,12 +45,14 @@ def serve_command(
     async def run_server() -> None:
 
         from agentpool import AgentPool, AgentsManifest
+        from agentpool_config.context import ConfigContextManager
         from agentpool_config.pool_server import MCPPoolServerConfig
         from agentpool_server.mcp_server.server import MCPServer
 
         logger.info("Server PID", pid=os.getpid())
         # Load manifest and create pool (without server config)
-        manifest = AgentsManifest.from_file(config)
+        with ConfigContextManager(config):
+            manifest = AgentsManifest.from_file(config)
         pool = AgentPool(manifest)
         # Create server config and server externally
         server_config = MCPPoolServerConfig(

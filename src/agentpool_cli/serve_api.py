@@ -37,6 +37,7 @@ def api_command(
     import uvicorn
 
     from agentpool import AgentPool, AgentsManifest
+    from agentpool_config.context import ConfigContextManager
     from agentpool_server.openai_api_server.server import OpenAIAPIServer
 
     logger.info("Server PID", pid=os.getpid())
@@ -49,7 +50,8 @@ def api_command(
     except ValueError as e:
         msg = str(e)
         raise t.BadParameter(msg) from e
-    manifest = AgentsManifest.from_file(config_path)
+    with ConfigContextManager(config_path):
+        manifest = AgentsManifest.from_file(config_path)
     pool = AgentPool(manifest)
 
     if show_messages:

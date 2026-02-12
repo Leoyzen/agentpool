@@ -407,9 +407,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     case (str() as sys_prompt) | StaticPromptConfig(content=sys_prompt):
                         sys_prompts.append(sys_prompt)
                     case FilePromptConfig(path=path, variables=variables):
-                        template_path = Path(path)
-                        if not template_path.is_absolute() and config.config_file_path:
-                            template_path = Path(config.config_file_path).parent / path
+                        # ConfigPath has already resolved the path relative to config directory
+                        # Just use it directly
+                        template_path = Path(str(path))
                         template_content = template_path.read_text("utf-8")
                         if variables:
                             from jinja2 import Template

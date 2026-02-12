@@ -689,6 +689,7 @@ class CustomToolsetConfig(BaseToolsetConfig):
             raise ValueError(f"{self.import_path} must be a ResourceProvider subclass")  # noqa: TRY004
         kwargs = self.kw_args.copy()
         name = kwargs.pop("name", provider_cls.__name__)
+
         try:
             return provider_cls(name=name, **kwargs)
         except TypeError as e:

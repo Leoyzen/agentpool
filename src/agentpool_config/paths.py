@@ -22,40 +22,46 @@ LEGACY_PATHS_ENV_VAR = "AGENTPOOL_LEGACY_PATHS"
 
 
 def resolve_config_path(path: str | UPath) -> UPath:
-    """Resolve a config path relative to config directory.
+    """Resolve a configuration path using context-aware resolution.
 
-    Resolution order:
-    1. If AGENTPOOL_LEGACY_PATHS=1: return path unchanged (relative to CWD)
-    2. If AGENTPOOL_CONFIG_DIR env var set: resolve relative to that
-    3. If CONFIG_DIR context var set: resolve relative to that
-    4. Otherwise: resolve relative to CWD (path as-is)
-
-    Absolute paths are always returned unchanged.
+    Resolution priority:
+    1. Legacy mode (AGENTPOOL_LEGACY_PATHS=1) -> Return as-is
+    2. Absolute path -> Return as-is
+    3. Environment variable (AGENTPOOL_CONFIG_DIR)
+    4. Module-level global variable (_config_dir_global from ConfigContextManager)
+    5. ContextVar (CONFIG_DIR within with-block)
+    6. Return relative path (resolves later against CWD)
 
     Args:
-        path: The path to resolve (string or UPath).
+        path: The path to resolve (can be absolute or relative)
 
     Returns:
-        UPath: The resolved path.
-
-    Example:
-        >>> # Legacy mode (returns path unchanged)
-        >>> with setenv(AGENTPOOL_LEGACY_PATHS="1"):
-        ...     resolve_config_path("./foo")  # UPath("./foo")
-
-        >>> # With CONFIG_DIR set via context
-        >>> with ConfigContextManager("/config/agents.yml"):
-        ...     resolve_config_path("./foo")  # UPath("/config/foo")
-
-        >>> # With AGENTPOOL_CONFIG_DIR env var
-        >>> with setenv(AGENTPOOL_CONFIG_DIR="/custom"):
-        ...     resolve_config_path("./foo")  # UPath("/custom/foo")
+        UPath: Resolved absolute path, or original relative path if no context available
     """
     upath = UPath(path)
 
-    # Absolute paths are never resolved
+    # Priority 1: Legacy mode bypasses all resolution
+    if os.environ.get(LEGACY_PATHS_ENV_VAR):
+        return upath
+
+    # Priority 2: Absolute paths are returned as-is
     if upath.is_absolute():
         return upath
+
+    # Priority 3: Environment variable override
+    config_dir_env = os.environ.get(CONFIG_DIR_ENV_VAR)
+    if config_dir_env:
+        return UPath(config_dir_env) / upath
+
+    # Priority 4 & 5: Use get_config_dir() which checks both global and ContextVar
+    from agentpool_config.context import get_config_dir
+
+    config_dir_ctx = get_config_dir()
+    if config_dir_ctx is not None:
+        return config_dir_ctx / upath
+
+    # Fallback: Return relative path (caller can resolve against CWD if needed)
+    return upath
 
     # 1. Legacy mode: return path unchanged (relative to CWD)
     if os.environ.get(LEGACY_PATHS_ENV_VAR) == "1":

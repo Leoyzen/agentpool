@@ -41,8 +41,10 @@ def watch_command(
 
     async def run_watch() -> None:
         from agentpool import AgentPool, AgentsManifest
+        from agentpool_config.context import ConfigContextManager
 
-        manifest = AgentsManifest.from_file(config)
+        with ConfigContextManager(config):
+            manifest = AgentsManifest.from_file(config)
         async with AgentPool(manifest) as pool:
             # Connect message handlers if showing all messages
             if show_messages:

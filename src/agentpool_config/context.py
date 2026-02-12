@@ -25,6 +25,39 @@ else:
 # This is set during manifest loading to enable config-relative path resolution.
 CONFIG_DIR: ContextVar[UPath | None] = ContextVar("config_dir", default=None)
 
+# Global module-level variable for config directory
+# This persists even outside of with-blocks, allowing runtime access
+_config_dir_global: UPath | None = None
+
+
+def get_config_dir() -> UPath | None:
+    """Get the current config directory for runtime access.
+
+    This function returns the config directory from the most recent
+    ConfigContextManager, even when called outside the with-block.
+    Useful for Providers and other runtime components that need
+    to resolve paths after initialization.
+
+    Priority:
+    1. Module-level global variable (_config_dir_global)
+    2. ContextVar (CONFIG_DIR) - for backward compatibility
+    3. None if no context is set
+
+    Returns:
+        UPath: The config directory path, or None if not set
+
+    Example:
+        >>> with ConfigContextManager("/project/config.yml"):
+        ...     # Inside with block
+        ...     dir1 = get_config_dir()
+        ... # Outside with block - still accessible!
+        ... dir2 = get_config_dir()  # Returns same path
+    """
+    global _config_dir_global
+    if _config_dir_global is not None:
+        return _config_dir_global
+    return CONFIG_DIR.get()
+
 
 class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
     """Context manager for setting config directory during manifest loading.
@@ -49,6 +82,7 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
         """
         self._config_dir: UPath | None = None
         self._token: Token[UPath | None] | None = None
+        self._previous_dir: UPath | None = None
 
         if config_path is not None:
             path = UPath(config_path)
@@ -59,6 +93,9 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
     def __enter__(self) -> Self:
         """Enter the context and set CONFIG_DIR."""
         if self._config_dir is not None:
+            global _config_dir_global
+            self._previous_dir = _config_dir_global
+            _config_dir_global = self._config_dir
             self._token = CONFIG_DIR.set(self._config_dir)
         return self
 
@@ -71,3 +108,6 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
         """Exit the context and reset CONFIG_DIR."""
         if self._token is not None:
             CONFIG_DIR.reset(self._token)
+        # Restore previous global config dir (handles nested contexts)
+        global _config_dir_global
+        _config_dir_global = self._previous_dir

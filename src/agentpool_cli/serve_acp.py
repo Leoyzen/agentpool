@@ -129,6 +129,7 @@ def acp_command(  # noqa: PLR0915
     from agentpool import log
     from agentpool.config_resources import ACP_ASSISTANT
     from agentpool.models.manifest import AgentsManifest
+    from agentpool_config.context import ConfigContextManager
     from agentpool_config.resolution import resolve_config
     from agentpool_server.acp_server import ACPServer
 
@@ -164,9 +165,10 @@ def acp_command(  # noqa: PLR0915
     else:
         logger.info("Starting ACP server with built-in defaults only", transport=transport)
 
-    # Load manifest from merged config data
+    # Load manifest from merged config data with config context for path resolution
     try:
-        manifest = AgentsManifest.model_validate(resolved.data)
+        with ConfigContextManager(resolved.primary_path):
+            manifest = AgentsManifest.model_validate(resolved.data)
         if resolved.primary_path:
             manifest = manifest.model_copy(update={"config_file_path": resolved.primary_path})
     except Exception as e:
