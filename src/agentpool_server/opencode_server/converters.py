@@ -337,8 +337,18 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             else:
                                 title = f"Completed {tool_name}"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
+                                # Extract metadata from tool result if present (e.g., subagent sessionId)
+                                metadata = (
+                                    tool_content.get("metadata", {})
+                                    if isinstance(tool_content, dict)
+                                    else {}
+                                )
                                 existing.state = ToolStateCompleted(
-                                    title=title, input=existing_input, output=output, time=tsc
+                                    title=title,
+                                    input=existing_input,
+                                    output=output,
+                                    time=tsc,
+                                    metadata=metadata,
                                 )
                         else:
                             # Orphan return - create completed tool part
@@ -350,7 +360,15 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             else:
                                 title = f"Completed {tool_name}"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
-                                state = ToolStateCompleted(title=title, output=output, time=tsc)
+                                # Extract metadata for orphan returns too
+                                metadata = (
+                                    tool_content.get("metadata", {})
+                                    if isinstance(tool_content, dict)
+                                    else {}
+                                )
+                                state = ToolStateCompleted(
+                                    title=title, output=output, time=tsc, metadata=metadata
+                                )
                             result.add_tool_part(tool_name, call_id, state=state)
         cost = float(msg.cost_info.total_cost) if msg.cost_info else 0.0
         result.add_step_finish_part(reason=msg.finish_reason or "stop", cost=cost, tokens=tokens)
