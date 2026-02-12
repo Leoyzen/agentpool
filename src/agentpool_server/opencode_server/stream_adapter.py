@@ -582,37 +582,10 @@ class OpenCodeStreamAdapter:
 
         match wrapped_event:
             case StreamCompleteEvent(message=msg):
-                icon = "⚡" if source_type == "team_parallel" else "→"
-                type_label = (
-                    " (parallel)"
-                    if source_type == "team_parallel"
-                    else " (sequential)"
-                    if source_type == "team_sequential"
-                    else ""
-                )
-                indicator = f"{indent}{icon} {source_name}{type_label}"
-                indicator_part = TextPart(
-                    id=identifier.ascending("part"),
-                    message_id=self.assistant_msg_id,
-                    session_id=self.session_id,
-                    text=indicator,
-                    time=TimeStartEndOptional(start=now_ms()),
-                )
-                self.assistant_msg.parts.append(indicator_part)
-                yield PartUpdatedEvent.create(indicator_part)
-
+                # Only create ToolPart for subagent navigation, don't render detailed output in parent
+                # The detailed output is available in the child session via metadata.sessionId
                 content = str(msg.content) if msg.content else "(no output)"
-                content_part = TextPart(
-                    id=identifier.ascending("part"),
-                    message_id=self.assistant_msg_id,
-                    session_id=self.session_id,
-                    text=content,
-                    time=TimeStartEndOptional(start=now_ms()),
-                )
-                self.assistant_msg.parts.append(content_part)
-                yield PartUpdatedEvent.create(content_part)
 
-                # Create/update ToolPart for subagent navigation if child_session_id is present
                 if child_session_id:
                     subagent_key = f"{depth}:{source_name}"
                     if subagent_key in self._subagent_tool_parts:
@@ -620,7 +593,11 @@ class OpenCodeStreamAdapter:
                         existing = self._subagent_tool_parts[subagent_key]
                         current_time = now_ms()
                         completed_state = ToolStateCompleted(
-                            input={},
+                            input={
+                                "description": f"Subagent: {source_name}",
+                                "subagent_type": source_type,
+                                "prompt": "",
+                            },
                             output=content,
                             title=source_name,
                             metadata={"sessionId": child_session_id, "title": source_name},
@@ -642,7 +619,11 @@ class OpenCodeStreamAdapter:
                         ts = TimeStart(start=now_ms())
                         running_state = ToolStateRunning(
                             time=ts,
-                            input={},
+                            input={
+                                "description": f"Subagent: {source_name}",
+                                "subagent_type": source_type,
+                                "prompt": "",
+                            },
                             metadata={"sessionId": child_session_id, "title": source_name},
                             title=source_name,
                         )
@@ -659,13 +640,16 @@ class OpenCodeStreamAdapter:
                         yield PartUpdatedEvent.create(tool_part)
 
             case ToolCallCompleteEvent(tool_name=tool_name, tool_result=result):
+                # Skip rendering subagent tool calls in parent - they're in child session
+                if child_session_id:
+                    return
                 result_str = str(result) if result else ""
                 preview = result_str[:60] + "..." if len(result_str) > 60 else result_str  # noqa: PLR2004
                 summary_part = TextPart(
                     id=identifier.ascending("part"),
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
-                    text=f"{indent}  ├─ {tool_name}: {preview}",
+                    text=f"  ├─ {tool_name}: {preview}",
                     time=TimeStartEndOptional(start=now_ms()),
                 )
                 self.assistant_msg.parts.append(summary_part)
