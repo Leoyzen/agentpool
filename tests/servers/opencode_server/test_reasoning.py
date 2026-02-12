@@ -11,6 +11,8 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ThinkingPartDelta,
 )
+import pytest
+
 from agentpool_server.opencode_server.models import PartUpdatedEvent
 from agentpool_server.opencode_server.models.events import PartUpdatedEventProperties
 from agentpool_server.opencode_server.models.parts import (
@@ -20,13 +22,17 @@ from agentpool_server.opencode_server.models.parts import (
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
-def test_thinking_events_create_reasoning_part():
+@pytest.mark.asyncio
+async def test_thinking_events_create_reasoning_part():
     """Verify ThinkingPart/ThinkingPartDelta events create ReasoningPart."""
     # Create a mock MessageWithParts
     mock_msg = MagicMock()
     mock_msg.parts = []
 
+    mock_state = MagicMock()
+
     adapter = OpenCodeStreamAdapter(
+        state=mock_state,
         session_id="test-session",
         assistant_msg_id="msg-1",
         assistant_msg=mock_msg,
@@ -34,15 +40,28 @@ def test_thinking_events_create_reasoning_part():
     )
 
     # Use the adapter's _handle_event method directly
-    events = list(adapter._handle_event(PartStartEvent.thinking(index=0, content="Thinking...")))
-    events.extend(list(adapter._handle_event(PartDeltaEvent.thinking(index=0, content=" more..."))))
+    events = [
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
+        )
+    ]
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more..."))
+        )
+    ])
 
     # Assert reasoning part was created
     # Based on models/events.py, PartUpdatedEvent has properties.part
     reasoning_events = []
     for e in events:
-        match e:
-            case PartUpdatedEvent(properties=PartUpdatedEventProperties(part=ReasoningPart())):
+        if isinstance(e, PartUpdatedEvent):
+            props = e.properties
+            if isinstance(props, PartUpdatedEventProperties) and isinstance(
+                props.part, ReasoningPart
+            ):
                 reasoning_events.append(e)
 
     assert len(reasoning_events) >= 1, "ReasoningPart should be created from thinking events"
@@ -53,7 +72,8 @@ def test_thinking_events_create_reasoning_part():
     assert " more..." in last_part.text
 
 
-def test_multi_turn_thinking_creates_separate_parts():
+@pytest.mark.asyncio
+async def test_multi_turn_thinking_creates_separate_parts():
     """Verify that multiple thinking phases create separate ReasoningParts.
 
     This tests the fix for: "Multi-turn conversation thinking displayed in single block"
@@ -63,7 +83,10 @@ def test_multi_turn_thinking_creates_separate_parts():
     mock_msg = MagicMock()
     mock_msg.parts = []
 
+    mock_state = MagicMock()
+
     adapter = OpenCodeStreamAdapter(
+        state=mock_state,
         session_id="test-session",
         assistant_msg_id="msg-1",
         assistant_msg=mock_msg,
@@ -74,59 +97,54 @@ def test_multi_turn_thinking_creates_separate_parts():
 
     # Simulate multi-turn conversation with thinking in each turn:
     # Turn 1: Thinking -> Text
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartStartEvent(index=0, part=ThinkingPart(content="First thinking..."))
-            )
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=0, part=ThinkingPart(content="First thinking..."))
         )
-    )
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking"))
-            )
+    ])
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking"))
         )
-    )
+    ])
     # End of thinking - text response starts
-    events.extend(
-        list(
-            adapter._handle_event(PartStartEvent(index=1, part=TextPart(content="First response")))
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=1, part=TextPart(content="First response"))
         )
-    )
+    ])
 
     # Turn 2: Thinking -> Text (new turn, should be separate Part)
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartStartEvent(index=2, part=ThinkingPart(content="Second turn thinking..."))
-            )
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=2, part=ThinkingPart(content="Second turn thinking..."))
         )
-    )
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartDeltaEvent(index=2, delta=ThinkingPartDelta(content_delta=" more"))
-            )
+    ])
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartDeltaEvent(index=2, delta=ThinkingPartDelta(content_delta=" more"))
         )
-    )
+    ])
     # End of thinking - text response starts
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartDeltaEvent(index=3, delta=TextPartDelta(content_delta="Second response"))
-            )
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartDeltaEvent(index=3, delta=TextPartDelta(content_delta="Second response"))
         )
-    )
+    ])
 
     # Turn 3: Thinking (should be third separate Part)
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartStartEvent(index=4, part=ThinkingPart(content="Third turn thinking..."))
-            )
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=4, part=ThinkingPart(content="Third turn thinking..."))
         )
-    )
+    ])
 
     # Extract ReasoningParts from events
     reasoning_parts = []
@@ -193,12 +211,16 @@ def test_multi_turn_thinking_creates_separate_parts():
     assert len(text_parts) >= 1, f"Expected at least 1 TextPart, got {len(text_parts)}"
 
 
-def test_single_thinking_phase_accumulates_correctly():
+@pytest.mark.asyncio
+async def test_single_thinking_phase_accumulates_correctly():
     """Verify that a single thinking phase still accumulates correctly."""
     mock_msg = MagicMock()
     mock_msg.parts = []
 
+    mock_state = MagicMock()
+
     adapter = OpenCodeStreamAdapter(
+        state=mock_state,
         session_id="test-session",
         assistant_msg_id="msg-1",
         assistant_msg=mock_msg,
@@ -208,23 +230,24 @@ def test_single_thinking_phase_accumulates_correctly():
     events = []
 
     # Single thinking phase with multiple deltas
-    events.extend(
-        list(adapter._handle_event(PartStartEvent(index=0, part=ThinkingPart(content="Start "))))
-    )
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="middle "))
-            )
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=0, part=ThinkingPart(content="Start "))
         )
-    )
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="end"))
-            )
+    ])
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="middle "))
         )
-    )
+    ])
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="end"))
+        )
+    ])
 
     # Extract ReasoningParts
     reasoning_parts = []

@@ -232,6 +232,7 @@ async def _process_message(  # noqa: PLR0915
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
+        state=state,
         session_id=session_id,
         assistant_msg_id=assistant_msg_id,
         assistant_msg=assistant_msg_with_parts,

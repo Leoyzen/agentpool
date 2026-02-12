@@ -3,25 +3,39 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import anyenv
 from fastapi import APIRouter
-from fastapi.sse import EventSourceResponse, ServerSentEvent
+from sse_starlette.sse import EventSourceResponse
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import (  # noqa: TC001
-    Config,
-    Event,
-    HealthResponse,
+from agentpool_server.opencode_server.models import Event, HealthResponse  # noqa: TC001
+from agentpool_server.opencode_server.models.events import (
+    MessageRemovedEvent,
+    PartRemovedEvent,
+    PartUpdatedEvent,
+    PermissionRequestEvent,
+    PermissionResolvedEvent,
+    QuestionAskedEvent,
+    QuestionRejectedEvent,
+    QuestionRepliedEvent,
     ServerConnectedEvent,
-    ServerHeartbeatEvent,
+    SessionCompactedEvent,
+    SessionCreatedEvent,
+    SessionDeletedEvent,
+    SessionErrorEvent,
+    SessionIdleEvent,
+    SessionStatusEvent,
+    SessionUpdatedEvent,
+    TodoUpdatedEvent,
 )
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -37,9 +51,61 @@ async def get_health() -> HealthResponse:
     return HealthResponse(healthy=True, version=VERSION)
 
 
+def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
+    """Extract session_id from various event types."""
+    match event:
+        # Events with properties.session_id directly
+        case SessionDeletedEvent(properties=props):
+            return props.session_id
+        case SessionStatusEvent(properties=props):
+            return props.session_id
+        case SessionIdleEvent(properties=props):
+            return props.session_id
+        case SessionCompactedEvent(properties=props):
+            return props.session_id
+        case MessageRemovedEvent(properties=props):
+            return props.session_id
+        case PartRemovedEvent(properties=props):
+            return props.session_id
+        case PermissionRequestEvent(properties=props):
+            return props.session_id
+        case PermissionResolvedEvent(properties=props):
+            return props.session_id
+        case QuestionAskedEvent(properties=props):
+            return props.session_id
+        case QuestionRepliedEvent(properties=props):
+            return props.session_id
+        case QuestionRejectedEvent(properties=props):
+            return props.session_id
+        case TodoUpdatedEvent(properties=props):
+            return props.session_id
+        case SessionErrorEvent(properties=props):
+            return props.session_id
+
+        # Events with properties.info.id (Session has id field)
+        case SessionCreatedEvent(properties=props):
+            return props.info.id
+        case SessionUpdatedEvent(properties=props):
+            return props.info.id
+
+        # Events with properties.part.session_id (Part has session_id field)
+        case PartUpdatedEvent(properties=props):
+            return props.part.session_id
+
+        # Events without session_id return None
+        case _:
+            return None
+
+
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
     """Serialize event, optionally wrapping in payload structure."""
     event_data = event.model_dump(by_alias=True, exclude_none=True)
+
+    # Add sessionId at top level if available (for subagent session tracking)
+    session_id = _extract_session_id(event)
+    if session_id is not None:
+        event_data["sessionId"] = session_id
+
     if wrap_payload:
         return anyenv.dump_json({"payload": event_data})
     return anyenv.dump_json(event_data)
@@ -47,7 +113,7 @@ def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
 
 async def _event_generator(
     state: ServerState, *, wrap_payload: bool = False
-) -> AsyncGenerator[ServerSentEvent]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Generate SSE events."""
     queue: asyncio.Queue[Event] = asyncio.Queue()
     state.event_subscribers.append(queue)
@@ -68,61 +134,25 @@ async def _event_generator(
         connected = ServerConnectedEvent()
         data = _serialize_event(connected, wrap_payload=wrap_payload)
         logger.info("SSE: Sending connected event", data=data)
-        yield ServerSentEvent(raw_data=data)
-        # Stream events with heartbeat
-        heartbeat = ServerHeartbeatEvent()
+        yield {"data": data}
+        # Stream events
         while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=10.0)
-            except TimeoutError:
-                # Send heartbeat every 10s to prevent stalled proxy streams
-                data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
-                yield ServerSentEvent(raw_data=data)
-                continue
+            event = await queue.get()
             data = _serialize_event(event, wrap_payload=wrap_payload)
             logger.info("SSE: Sending event", event_type=event.type)
-            yield ServerSentEvent(raw_data=data)
+            yield {"data": data}
     finally:
         state.event_subscribers.remove(queue)
         logger.info("SSE: Client disconnected", remaining_subscribers=len(state.event_subscribers))
 
 
-@router.get("/global/event", response_class=EventSourceResponse)
-async def get_global_events(state: StateDep) -> AsyncGenerator[ServerSentEvent]:
+@router.get("/global/event")
+async def get_global_events(state: StateDep) -> EventSourceResponse:
     """Get global events as SSE stream (uses payload wrapper)."""
-    async for event in _event_generator(state, wrap_payload=True):
-        yield event
+    return EventSourceResponse(_event_generator(state, wrap_payload=True), sep="\n")
 
 
-@router.get("/global/config")
-async def get_global_config(state: StateDep) -> Config:
-    """Get global configuration."""
-    return state.config
-
-
-@router.patch("/global/config")
-async def update_global_config(state: StateDep, config: Config) -> Config:
-    """Update global configuration."""
-    state.config = config
-    return state.config
-
-
-@router.post("/global/dispose")
-async def global_dispose(state: StateDep) -> bool:
-    """Dispose all instances and release resources."""
-    await state.cleanup_tasks()
-    return True
-
-
-@router.post("/instance/dispose")
-async def instance_dispose(state: StateDep) -> bool:
-    """Dispose the current instance."""
-    await state.cleanup_tasks()
-    return True
-
-
-@router.get("/event", response_class=EventSourceResponse)
-async def get_events(state: StateDep) -> AsyncGenerator[ServerSentEvent]:
+@router.get("/event")
+async def get_events(state: StateDep) -> EventSourceResponse:
     """Get events as SSE stream (no payload wrapper)."""
-    async for event in _event_generator(state, wrap_payload=False):
-        yield event
+    return EventSourceResponse(_event_generator(state, wrap_payload=False), sep="\n")
