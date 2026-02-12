@@ -20,7 +20,7 @@ from pydantic_ai.tools import ToolDefinition
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
-from agentpool.agents.events.processors import merge_queue_into_iterator
+from agentpool.agents.events.processors import FileTracker
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
@@ -740,7 +740,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self,
         node_stream: AsyncIterator[Any],
         *,
-
+        file_tracker: FileTracker,
         pending_tcs: dict[str, BaseToolCallPart],
         message_id: str,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
@@ -748,7 +748,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Args:
             node_stream: Stream of events from the node
-            pending_tcs: Dictionary of pending tool calls
+            file_tracker: Tracker for file operations
             pending_tcs: Dictionary of pending tool calls
             message_id: Current message ID
 
@@ -756,14 +756,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             Processed stream events
         """
         async with merge_queue_into_iterator(node_stream, self._event_queue) as merged:
-            async for event in merged:
+            async for event in file_tracker(merged):
                 if self._cancelled:
                     break
                 yield event
                 if combined := process_tool_event(self.name, event, pending_tcs, message_id):
                     yield combined
 
-    async def _stream_events(
+    async def _stream_events(  # noqa: PLR0915
         self,
         prompts: list[UserContent],
         *,
@@ -797,75 +797,107 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         agentlet = await self.get_agentlet(None, self._output_type, input_provider)
         response_msg: ChatMessage[Any] | None = None
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
-        # Create AgentContext with user deps stored in .data
+        # Track tool call starts to combine with results later
+        file_tracker = FileTracker()
         # Create AgentContext with user deps stored in .data
         agent_deps = self.get_context(input_provider=input_provider)
         if deps is not None:
             agent_deps.data = deps
-        async with agentlet.iter(
-            prompts,
-            deps=agent_deps,
-            message_history=[m for run in history_list for m in run.to_pydantic_ai()],
-            usage_limits=self._default_usage_limits,
-        ) as agent_run:
-            pending_tcs: dict[str, BaseToolCallPart] = {}
-            try:
-                async for node in agent_run:
-                    if self._cancelled:
-                        self.log.info("Stream cancelled by user")
-                        break
-                    if isinstance(node, End):
-                        break
 
-                    # Stream events from model request or tool call nodes
-                    if isinstance(node, ModelRequestNode | CallToolsNode):
-                        async with (
-                            node.stream(agent_run.ctx) as stream,
-                            merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
-                        ):
-                            async for event in merged:
-                                if self._cancelled:
-                                    break
-                                yield event
-                                if combined := process_tool_event(
-                                    self.name, event, pending_tcs, message_id
+        # Wrap agent run in try-except to handle GeneratorExit at both levels
+        try:
+            async with agentlet.iter(
+                prompts,
+                deps=agent_deps,
+                message_history=[m for run in history_list for m in run.to_pydantic_ai()],
+                usage_limits=self._default_usage_limits,
+            ) as agent_run:
+                pending_tcs: dict[str, BaseToolCallPart] = {}
+                try:
+                    async for node in agent_run:
+                        if self._cancelled:
+                            self.log.info("Stream cancelled by user")
+                            break
+                        if isinstance(node, End):
+                            break
+
+                        # Stream events from model request or tool call nodes
+                        if isinstance(node, ModelRequestNode | CallToolsNode):
+                            # Handle GeneratorExit to prevent CancelScope issues when
+                            # yield is interrupted by consumer breaking the iteration
+                            try:
+                                async with (
+                                    node.stream(agent_run.ctx) as stream,
+                                    merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
                                 ):
-                                    yield combined
-            except asyncio.CancelledError:
-                self.log.info("Stream cancelled via task cancellation")
-                self._cancelled = True
+                                    async for event in file_tracker(merged):
+                                        if self._cancelled:
+                                            break
+                                        yield event
+                                        if combined := process_tool_event(
+                                            self.name, event, pending_tcs, message_id
+                                        ):
+                                            yield combined
+                            except GeneratorExit:
+                                # Consumer stopped iteration early (e.g., by break)
+                                # Avoid re-raising to prevent cleanup in wrong context
+                                self._cancelled = True
+                                self.log.debug(
+                                    "GeneratorExit caught in node stream, cancelling gracefully"
+                                )
+                                # Do not re-raise - let finally blocks clean up normally
+                except asyncio.CancelledError:
+                    self.log.info("Stream cancelled via task cancellation")
+                    self._cancelled = True
 
-            # Build response message
+                # Build response message
+                response_time = time.perf_counter() - start_time
+                if self._cancelled:
+                    partial_content = extract_text_from_messages(
+                        agent_run.all_messages(), include_interruption_note=True
+                    )
+                    response_msg = ChatMessage(
+                        content=partial_content,
+                        role="assistant",
+                        name=self.name,
+                        message_id=message_id,
+                        session_id=self.session_id,
+                        parent_id=user_msg.message_id,
+                        response_time=response_time,
+                        finish_reason="stop",
+                    )
+                    yield StreamCompleteEvent(message=response_msg)
+                    return
+
+                if agent_run.result:
+                    response_msg = await ChatMessage.from_run_result(
+                        agent_run.result,
+                        agent_name=self.name,
+                        message_id=message_id,
+                        session_id=self.session_id,
+                        parent_id=user_msg.message_id,
+                        response_time=response_time,
+                        metadata=file_tracker.get_metadata(),
+                    )
+                else:
+                    raise RuntimeError("Stream completed without producing a result")
+        except GeneratorExit:
+            # Handle GeneratorExit at agentlet.iter() level
+            self.log.debug("GeneratorExit caught at agent run level, cancelling gracefully")
+            self._cancelled = True
+            # Yield a cancellation event to notify consumer
             response_time = time.perf_counter() - start_time
-            if self._cancelled:
-                partial_content = extract_text_from_messages(
-                    agent_run.all_messages(), include_interruption_note=True
-                )
-                response_msg = ChatMessage(
-                    content=partial_content,
-                    role="assistant",
-                    name=self.name,
-                    message_id=message_id,
-                    session_id=self.session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=response_time,
-                    finish_reason="stop",
-                )
-                yield StreamCompleteEvent(message=response_msg)
-                return
-
-            if agent_run.result:
-                response_msg = await ChatMessage.from_run_result(
-                    agent_run.result,
-                    agent_name=self.name,
-                    message_id=message_id,
-                    session_id=self.session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=response_time,
-                    metadata={},
-                )
-            else:
-                raise RuntimeError("Stream completed without producing a result")
+            response_msg = ChatMessage(
+                content="*Stream cancelled by user*",
+                role="assistant",
+                name=self.name,
+                message_id=message_id,
+                session_id=self.session_id,
+                parent_id=user_msg.message_id,
+                response_time=response_time,
+                finish_reason="stop",
+            )
+            yield StreamCompleteEvent(message=response_msg)
 
         # Send additional enriched completion event
         yield StreamCompleteEvent(message=response_msg)
