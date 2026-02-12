@@ -270,6 +270,8 @@ class OpenCodeStreamAdapter:
 
     def _on_text_start(self, delta: str) -> Iterator[Event]:
         self._response_text = delta
+        # Reset reasoning part when text starts (marks end of thinking phase)
+        self._reasoning_part = None
         self._text_part = TextPart(
             id=identifier.ascending("part"),
             message_id=self.assistant_msg_id,
