@@ -226,7 +226,7 @@ class FileProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
-        agent_type: str | None = None,
+        parent_session_id: str | None = None,
     ) -> None:
         """Log a new conversation."""
         conversation = ConversationData(
@@ -237,6 +237,7 @@ class FileProvider(StorageProvider):
         )
         self._data["conversations"].append(conversation)
         self._save()
+        # Note: parent_session_id is accepted but not stored (no-op for file provider)
 
     async def update_session_title(self, session_id: str, title: str) -> None:
         """Update the title of a conversation."""

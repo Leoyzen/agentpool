@@ -282,6 +282,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         effective_parent_id: str | None,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         input_provider: InputProvider | None = None,
         deps: TDeps | None = None,
@@ -316,7 +317,12 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         thread_id = self._sdk_session_id or self.session_id
-        yield RunStartedEvent(session_id=thread_id, run_id=run_id, agent_name=self.name)
+        yield RunStartedEvent(
+            session_id=thread_id,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
+        )
         # Convert existing conversation history to AG-UI format
         # AG-UI protocol expects full history with each request (stateless server)
         # Extract ModelMessages from ChatMessages

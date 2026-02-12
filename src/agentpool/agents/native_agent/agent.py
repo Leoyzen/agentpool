@@ -676,7 +676,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Resolve history processors with caching
         history_processors = self._resolve_history_processors()
 
-
         context_for_tools = self.get_context(input_provider=input_provider)
 
         # Collect pydantic_ai.tools.Tool instances using Tool.to_pydantic_ai()
@@ -774,6 +773,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         store_history: bool = True,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         input_provider: InputProvider | None = None,
         wait_for_connections: bool | None = None,
@@ -788,7 +788,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         start_time = time.perf_counter()
         history_list = message_history.get_history()
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
-        yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
+        yield RunStartedEvent(
+            session_id=self.session_id,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
+        )
         agentlet = await self.get_agentlet(None, self._output_type, input_provider)
         response_msg: ChatMessage[Any] | None = None
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)

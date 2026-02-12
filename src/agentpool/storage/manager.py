@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from agentpool.common_types import JsonValue
-    from agentpool.sessions.models import ProjectData, SessionData
+    from agentpool.sessions.models import ProjectData
     from agentpool_config.storage import BaseStorageProviderConfig
     from agentpool_storage.base import StorageProvider
 
@@ -78,23 +78,15 @@ class StorageManager:
     # Signal emitted when session metadata is generated
     metadata_generated: Signal[SessionMetadataGeneratedEvent] = Signal()
 
-    def __init__(
-        self,
-        config: StorageConfig | None = None,
-        providers: list[StorageProvider] | None = None,
-    ) -> None:
+    def __init__(self, config: StorageConfig | None = None) -> None:
         """Initialize storage manager.
 
         Args:
             config: Storage configuration including providers and filters
-            providers: Optional pre-created providers (overrides config-based creation)
         """
         self.config = config or StorageConfig()
         self.task_manager = TaskManager()
-        if providers is not None:
-            self.providers = providers
-        else:
-            self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
+        self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
         self._session_logged: set[str] = set()  # Track logged conversations for idempotency
 
     async def __aenter__(self) -> Self:
@@ -230,8 +222,8 @@ class StorageManager:
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
-        agent_type: str | None = None,
         initial_prompt: str | None = None,
+        parent_session_id: str | None = None,
         on_title_generated: Callable[[str], None] | None = None,
     ) -> None:
         """Log session to all providers (idempotent).
@@ -244,8 +236,8 @@ class StorageManager:
             node_name: Name of the node/agent
             start_time: Optional start time
             model: Requested model identifier for this session
-            agent_type: Type of agent backend (native, claude, codex, etc.)
             initial_prompt: Optional initial prompt to trigger title generation
+            parent_session_id: Optional parent session ID
             on_title_generated: Optional callback invoked when title is generated
         """
         if not self.config.log_sessions:
@@ -263,7 +255,7 @@ class StorageManager:
                     node_name=node_name,
                     start_time=start_time,
                     model=model,
-                    agent_type=agent_type,
+                    parent_session_id=parent_session_id,
                 )
 
         # Handle title generation based on prompt length
@@ -527,7 +519,10 @@ class StorageManager:
         )
 
     @method_spawner
-    async def delete_session_messages(self, session_id: str) -> int:
+    async def delete_session_messages(
+        self,
+        session_id: str,
+    ) -> int:
         """Delete all messages for a session in all providers.
 
         Used for compaction - removes existing messages so they can be
@@ -617,6 +612,8 @@ class StorageManager:
         Returns:
             SessionMetadata with title, emoji, and icon, or None if generation fails.
         """
+        from llmling_models.models.helpers import infer_model
+
         from agentpool import Agent
 
         logger.info("_generate_title_core called", session_id=session_id)
@@ -625,8 +622,9 @@ class StorageManager:
             return None
 
         try:
+            model = infer_model(self.config.title_generation_model)
             agent = Agent(
-                model=self.config.title_generation_model,
+                model=model,
                 system_prompt=self.config.title_generation_prompt,
                 output_type=SessionMetadata,
             )
@@ -675,9 +673,10 @@ class StorageManager:
             return existing
         # Generate using core logic
         if metadata := await self._generate_title_core(session_id, f"user: {prompt[:500]}"):
+            title = metadata.title
             if on_title_generated:
-                on_title_generated(metadata.title)
-            return metadata.title
+                on_title_generated(title)
+            return title
         return None
 
     async def generate_session_title(
@@ -698,12 +697,16 @@ class StorageManager:
             The generated title, or None if title generation is disabled.
         """
         # Check if title already exists
-        if existing := await self.get_session_title(session_id):
+        existing = await self.get_session_title(session_id)
+        if existing:
             return existing
+
         # Format messages for the prompt
         formatted = "\n".join(f"{i.role}: {i.content[:500]}" for i in messages[:4])
+
         # Generate using core logic
         metadata = await self._generate_title_core(session_id, formatted)
+
         return metadata.title if metadata else None
 
     # Project methods
@@ -836,91 +839,3 @@ class StorageManager:
                     provider=provider.__class__.__name__,
                     project_id=project_id,
                 )
-
-    # Session data methods
-
-    def generate_session_id(self) -> str:
-        """Generate a unique, chronologically sortable session ID.
-
-        Uses OpenCode-compatible format: ses_{hex_timestamp}{random_base62}
-        IDs are lexicographically sortable by creation time.
-        """
-        from agentpool.utils.identifiers import generate_session_id
-
-        return generate_session_id()
-
-    @method_spawner
-    async def save_session(self, data: SessionData) -> None:
-        """Save or update session data in the primary provider.
-
-        Args:
-            data: Session data to persist
-        """
-        provider = self.get_project_provider()  # Reuses first provider
-        await provider.save_session(data)
-        # Mark as logged so log_session() becomes a no-op for this session
-        self._session_logged.add(data.session_id)
-
-    @method_spawner
-    async def load_session(self, session_id: str) -> SessionData | None:
-        """Load session data by ID.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            Session data if found, None otherwise
-        """
-        provider = self.get_project_provider()
-        return await provider.load_session(session_id)
-
-    @method_spawner
-    async def delete_session(self, session_id: str) -> bool:
-        """Delete a session from all providers.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            True if session was deleted from at least one provider
-        """
-        deleted = False
-        for provider in self.providers:
-            try:
-                if await provider.delete_session(session_id):
-                    deleted = True
-            except Exception:
-                logger.exception(
-                    "Error deleting session",
-                    provider=provider.__class__.__name__,
-                    session_id=session_id,
-                )
-        return deleted
-
-    @method_spawner
-    async def list_session_ids(
-        self,
-        pool_id: str | None = None,
-        agent_name: str | None = None,
-    ) -> list[str]:
-        """List session IDs, optionally filtered.
-
-        Args:
-            pool_id: Filter by pool/manifest ID
-            agent_name: Filter by agent name
-
-        Returns:
-            List of session IDs
-        """
-        provider = self.get_project_provider()
-        return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
-
-    async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
-        """Update the external SDK session ID for a session.
-
-        Args:
-            session_id: Internal session identifier
-            sdk_session_id: External SDK session ID
-        """
-        for provider in self.providers:
-            await provider.update_sdk_session_id(session_id, sdk_session_id)
