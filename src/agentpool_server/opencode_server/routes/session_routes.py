@@ -203,6 +203,23 @@ async def get_session(session_id: str, state: StateDep) -> Session:
     return session
 
 
+@router.get("/{session_id}/children")
+async def get_session_children(
+    session_id: str,
+    state: StateDep,
+) -> list[Session]:
+    """Get all child sessions for a given session.
+
+    Returns a list of sessions where parent_id matches the provided session_id.
+    """
+    children: list[Session] = []
+    # Check all cached sessions
+    for session in state.sessions.values():
+        if session.parent_id == session_id:
+            children.append(session)
+    return children
+
+
 @router.patch("/{session_id}")
 async def update_session(
     session_id: str,

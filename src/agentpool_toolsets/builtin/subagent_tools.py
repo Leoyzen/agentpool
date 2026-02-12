@@ -58,7 +58,7 @@ async def _stream_task(
     depth: int = 1,
     child_session_id: str | None = None,
     parent_session_id: str | None = None,
-) -> str:
+) -> dict[str, Any]:
     """Stream a task's execution, emitting SubAgentEvents into parent stream.
 
     Args:
@@ -72,7 +72,7 @@ async def _stream_task(
         parent_session_id: ID of the parent session
 
     Returns:
-        Final text content from the stream
+        Structured output containing result and metadata
     """
     if batch_deltas:
         stream = batch_stream_deltas(stream)
@@ -107,7 +107,12 @@ async def _stream_task(
                 content = event.message.content
                 final_content = str(content) if content else ""
 
-    return final_content
+    return {
+        "output": final_content,
+        "metadata": {
+            "sessionId": child_session_id,
+        },
+    }
 
 
 async def _stream_task_to_fs(
@@ -233,7 +238,7 @@ class SubagentTools(StaticResourceProvider):
         prompt: str,
         description: str,
         async_mode: bool = False,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Execute a task on an agent or team.
 
         Launch a task to be executed by a specialized agent or team.
@@ -252,8 +257,7 @@ class SubagentTools(StaticResourceProvider):
             async_mode: If True, run in background and return task ID immediately
 
         Returns:
-            In sync mode: The result of the task execution
-            In async mode: Task ID and output file path
+            Structured output containing result and metadata
         """
         from agentpool import Team, TeamRun
         from agentpool.agents.base_agent import BaseAgent
@@ -280,6 +284,8 @@ class SubagentTools(StaticResourceProvider):
             case TeamRun():
                 source_type = "team_sequential"
             case BaseAgent():
+                source_type = "agent"
+            case _:
                 source_type = "agent"
 
         if not isinstance(node, SupportsRunStream):
@@ -323,12 +329,19 @@ class SubagentTools(StaticResourceProvider):
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
 
-            return (
-                f"Task started in background.\n"
-                f"Task ID: {task_id}\n"
-                f"Output will be written to: {output_path}\n"
-                f"Use the read tool to check the output file for results."
-            )
+            return {
+                "output": (
+                    f"Task started in background.\n"
+                    f"Task ID: {task_id}\n"
+                    f"Output will be written to: {output_path}\n"
+                    f"Use the read tool to check the output file for results."
+                ),
+                "metadata": {
+                    "taskId": task_id,
+                    "sessionId": child_session_id,
+                    "outputFile": output_path,
+                },
+            }
 
         # Synchronous mode - stream with SubAgentEvent wrapping
         return await _stream_task(
