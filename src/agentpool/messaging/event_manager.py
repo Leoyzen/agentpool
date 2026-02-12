@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from evented.timed_watcher import TimeEventSource
     from evented_config import EventConfig
 
+    from agentpool.agents.events import RichAgentStreamEvent, SubAgentEvent
+
 
 logger = get_logger(__name__)
 
@@ -47,6 +49,9 @@ class EventManager:
         configs: list[EventConfig] | None = None,
         event_callbacks: list[EventCallback] | None = None,
         enable_events: bool = True,
+        session_id: str | None = None,
+        parent_session_id: str | None = None,
+        parent: EventManager | None = None,
     ) -> None:
         """Initialize event manager.
 
@@ -54,6 +59,9 @@ class EventManager:
             configs: List of event configurations
             event_callbacks: List of event callbacks
             enable_events: Whether to enable event processing
+            session_id: Optional session ID
+            parent_session_id: Optional parent session ID
+            parent: Optional parent event manager
         """
         self.task_manager = TaskManager()
         self.configs = configs or []
@@ -61,6 +69,9 @@ class EventManager:
         self._sources: dict[str, EventSource] = {}
         self._callbacks = event_callbacks or []
         self._observers = defaultdict[str, list[EventObserver]](list)
+        self.session_id = session_id
+        self.parent_session_id = parent_session_id
+        self.parent = parent
 
     def add_callback(self, callback: EventCallback) -> None:
         """Register an event callback."""
@@ -84,6 +95,57 @@ class EventManager:
                 logger.exception("Error in event callback", name=get_fn_name(callback))
 
         await self.event_processed.emit(event)
+
+    async def emit_agent_event(
+        self, event: RichAgentStreamEvent[Any], source_session_id: str | None = None
+    ) -> None:
+        """Emit an agent stream event, optionally forwarding to parent.
+
+        Args:
+            event: The agent stream event to emit
+            source_session_id: Optional ID of the session that produced the event
+        """
+        from agentpool.agents.events import SubAgentEvent
+
+        if not self.enabled:
+            return
+
+        if isinstance(event, SubAgentEvent):
+            await self._forward_to_parent(event)
+        elif self.parent:
+            # Wrap as SubAgentEvent and forward
+            child_id = source_session_id or self.session_id
+            sub_event = SubAgentEvent(
+                source_name="agent",
+                source_type="agent",
+                event=event,
+                child_session_id=child_id,
+                parent_session_id=self.parent_session_id,
+            )
+            await self._forward_to_parent(sub_event)
+
+    async def _forward_to_parent(self, event: SubAgentEvent) -> None:
+        """Forward a subagent event to the parent event manager.
+
+        Args:
+            event: The subagent event to forward
+
+        Raises:
+            RuntimeError: If an event routing loop is detected
+        """
+        if not self.parent:
+            return
+
+        if self.parent_session_id and self.parent_session_id in event.path:
+            raise RuntimeError(
+                f"Event routing loop detected: {self.parent_session_id} already in {event.path}"
+            )
+
+        event.depth += 1
+        if self.session_id:
+            event.path.append(self.session_id)
+
+        await self.parent.emit_agent_event(event)
 
     async def add_file_watch(
         self,
