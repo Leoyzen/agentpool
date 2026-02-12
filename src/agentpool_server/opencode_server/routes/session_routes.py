@@ -211,12 +211,32 @@ async def get_session_children(
     """Get all child sessions for a given session.
 
     Returns a list of sessions where parent_id matches the provided session_id.
+    Queries both memory cache and database for complete results.
     """
     children: list[Session] = []
-    # Check all cached sessions
+    seen_ids: set[str] = set()
+
+    # Check all cached sessions first
     for session in state.sessions.values():
         if session.parent_id == session_id:
             children.append(session)
+            seen_ids.add(session.id)
+
+    # Query database for child sessions not in memory
+    try:
+        store = state.pool.sessions.store
+        if hasattr(store, "list_sessions"):
+            child_ids = await store.list_sessions(parent_id=session_id)
+            for child_id in child_ids:
+                if child_id not in seen_ids:
+                    child_session = await get_or_load_session(state, child_id)
+                    if child_session:
+                        children.append(child_session)
+                        seen_ids.add(child_id)
+    except Exception:  # noqa: BLE001, S110
+        # Graceful fallback if store doesn't support list_sessions or query fails
+        pass
+
     return children
 
 
