@@ -117,6 +117,9 @@ class OpenCodeStreamAdapter:
     _tool_outputs: dict[str, str] = field(default_factory=dict, init=False)
     _tool_inputs: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
 
+    # Subagent tool parts tracking (key: "depth:source_name" -> ToolPart)
+    _subagent_tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
+
     _text_part: TextPart | None = field(default=None, init=False)
     _reasoning_part: ReasoningPart | None = field(default=None, init=False)
     _stream_start_ms: int = field(default=0, init=False)
@@ -608,6 +611,52 @@ class OpenCodeStreamAdapter:
                 )
                 self.assistant_msg.parts.append(content_part)
                 yield PartUpdatedEvent.create(content_part)
+
+                # Create/update ToolPart for subagent navigation if child_session_id is present
+                if child_session_id:
+                    subagent_key = f"{depth}:{source_name}"
+                    if subagent_key in self._subagent_tool_parts:
+                        # Update existing ToolPart to completed state
+                        existing = self._subagent_tool_parts[subagent_key]
+                        current_time = now_ms()
+                        completed_state = ToolStateCompleted(
+                            input={},
+                            output=content,
+                            title=source_name,
+                            metadata={"sessionId": child_session_id, "title": source_name},
+                            time=TimeStartEndCompacted(start=current_time, end=current_time),
+                        )
+                        updated = ToolPart(
+                            id=existing.id,
+                            message_id=existing.message_id,
+                            session_id=existing.session_id,
+                            tool="task",
+                            call_id=existing.call_id,
+                            state=completed_state,
+                        )
+                        self._subagent_tool_parts[subagent_key] = updated
+                        self.assistant_msg.update_part(updated)
+                        yield PartUpdatedEvent.create(updated)
+                    else:
+                        # Create new ToolPart in running state
+                        ts = TimeStart(start=now_ms())
+                        running_state = ToolStateRunning(
+                            time=ts,
+                            input={},
+                            metadata={"sessionId": child_session_id, "title": source_name},
+                            title=source_name,
+                        )
+                        tool_part = ToolPart(
+                            id=identifier.ascending("part"),
+                            message_id=self.assistant_msg_id,
+                            session_id=self.session_id,
+                            tool="task",
+                            call_id=identifier.ascending("part"),
+                            state=running_state,
+                        )
+                        self._subagent_tool_parts[subagent_key] = tool_part
+                        self.assistant_msg.parts.append(tool_part)
+                        yield PartUpdatedEvent.create(tool_part)
 
             case ToolCallCompleteEvent(tool_name=tool_name, tool_result=result):
                 result_str = str(result) if result else ""
