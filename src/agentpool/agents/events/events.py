@@ -630,6 +630,8 @@ class SubAgentEvent:
     """ID of the child session for this subagent run."""
     parent_session_id: str | None = None
     """ID of the parent session that spawned this subagent."""
+    tool_call_id: str | None = None
+    """ID of the tool call that spawned this subagent."""
     path: list[str] = field(default_factory=list)
     """List of session_ids that this event has traversed, starting from source."""
     event_kind: Literal["subagent"] = "subagent"

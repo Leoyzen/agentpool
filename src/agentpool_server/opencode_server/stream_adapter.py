@@ -26,6 +26,7 @@ from agentpool.agents.events import (
     FileContentItem,
     LocationContentItem,
     RunErrorEvent,
+    RunStartedEvent,
     StreamCompleteEvent,
     SubAgentEvent,
     TextContentItem,
@@ -42,8 +43,8 @@ from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageTime,
-    MessageWithParts,
     MessageUpdatedEvent,
+    MessageWithParts,
     PartUpdatedEvent,
     SessionCompactedEvent,
     SessionErrorEvent,
@@ -583,14 +584,41 @@ class OpenCodeStreamAdapter:
         if child_session_id:
             await self.state.ensure_session(child_session_id, parent_id=self.session_id)
 
+        subagent_key = f"{depth}:{source_name}"
+
         match wrapped_event:
+            case RunStartedEvent():
+                # Create ToolPart immediately when subagent starts running
+                if child_session_id and subagent_key not in self._subagent_tool_parts:
+                    ts = TimeStart(start=now_ms())
+                    running_state = ToolStateRunning(
+                        time=ts,
+                        input={
+                            "description": f"Subagent: {source_name}",
+                            "subagent_type": source_type,
+                            "prompt": "",
+                        },
+                        metadata={"sessionId": child_session_id, "title": source_name},
+                        title=source_name,
+                    )
+                    tool_part = ToolPart(
+                        id=identifier.ascending("part"),
+                        message_id=self.assistant_msg_id,
+                        session_id=self.session_id,
+                        tool="task",
+                        call_id=identifier.ascending("part"),
+                        state=running_state,
+                    )
+                    self._subagent_tool_parts[subagent_key] = tool_part
+                    self.assistant_msg.parts.append(tool_part)
+                    yield PartUpdatedEvent.create(tool_part)
+
             case StreamCompleteEvent(message=msg):
-                # Only create ToolPart for subagent navigation, don't render detailed output in parent
+                # Update ToolPart to completed state when subagent finishes
                 # The detailed output is available in the child session via metadata.sessionId
                 content = str(msg.content) if msg.content else "(no output)"
 
                 if child_session_id:
-                    subagent_key = f"{depth}:{source_name}"
                     current_time = now_ms()
 
                     # Create messages in child session so OpenCode can navigate to it
@@ -681,8 +709,7 @@ class OpenCodeStreamAdapter:
                 if child_session_id:
                     # Store tool call in child session's assistant message
                     if (
-                        child_session_id in self.state.messages
-                        and self.state.messages[child_session_id]
+                        self.state.messages.get(child_session_id)
                     ):
                         # Get the last message (should be assistant message)
                         last_msg = self.state.messages[child_session_id][-1]

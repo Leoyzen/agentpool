@@ -58,6 +58,7 @@ async def _stream_task(
     depth: int = 1,
     child_session_id: str | None = None,
     parent_session_id: str | None = None,
+    tool_call_id: str | None = None,
 ) -> dict[str, Any]:
     """Stream a task's execution, emitting SubAgentEvents into parent stream.
 
@@ -70,9 +71,7 @@ async def _stream_task(
         depth: Nesting depth for nested task delegation
         child_session_id: ID of the child session
         parent_session_id: ID of the parent session
-
-    Returns:
-        Structured output containing result and metadata
+        tool_call_id: ID of the tool call
     """
     if batch_deltas:
         stream = batch_stream_deltas(stream)
@@ -88,6 +87,7 @@ async def _stream_task(
                 depth=event.depth + depth,
                 child_session_id=event.child_session_id,
                 parent_session_id=event.parent_session_id,
+                tool_call_id=event.tool_call_id or tool_call_id,
             )
             await ctx.events.emit_event(nested_event)
         else:
@@ -99,6 +99,7 @@ async def _stream_task(
                 depth=depth,
                 child_session_id=child_session_id,
                 parent_session_id=parent_session_id,
+                tool_call_id=tool_call_id,
             )
             await ctx.events.emit_event(subagent_event)
 
@@ -354,4 +355,5 @@ class SubagentTools(StaticResourceProvider):
             batch_deltas=self._batch_stream_deltas,
             child_session_id=child_session_id,
             parent_session_id=parent_session_id,
+            tool_call_id=ctx.tool_call_id,
         )
