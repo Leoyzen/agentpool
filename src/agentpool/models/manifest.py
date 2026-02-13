@@ -406,8 +406,8 @@ class AgentsManifest(Schema):
                 return None
             agent_cfg = agents[name]
             if isinstance(agent_cfg, dict):
-                return str(agent_cfg.get("type", "native"))  # ty: ignore[invalid-return-type]
-            return str(getattr(agent_cfg, "type", "native"))  # ty: ignore[invalid-return-type]
+                return str(agent_cfg.get("type", "native"))  # type: ignore[return-value]
+            return str(getattr(agent_cfg, "type", "native"))  # type: ignore[return-value]
 
         # Process workers for all agents that have them (only dict configs need processing)
         for agent_name, agent_config in agents.items():
@@ -430,28 +430,28 @@ class AgentsManifest(Schema):
                                 case _:  # native, claude_code, or unknown
                                     normalized.append(AgentWorkerConfig(name=name))
 
-                        case {"type": "team", **config}:
+                        case {"type": "team", "name": name}:
                             # If type is explicitly specified, use it
-                            normalized.append(TeamWorkerConfig(**config))
-                        case {"type": "agent", **config}:
-                            normalized.append(AgentWorkerConfig(**config))
-                        case {"type": "acp_agent", **config}:
-                            normalized.append(ACPAgentWorkerConfig(**config))
-                        case {"type": "agui_agent", **config}:
-                            normalized.append(AGUIAgentWorkerConfig(**config))
+                            normalized.append(TeamWorkerConfig(name=name))
+                        case {"type": "agent", "name": name, **config}:
+                            normalized.append(AgentWorkerConfig(name=name, **config))
+                        case {"type": "acp_agent", "name": name}:
+                            normalized.append(ACPAgentWorkerConfig(name=name))
+                        case {"type": "agui_agent", "name": name}:
+                            normalized.append(AGUIAgentWorkerConfig(name=name))
                         case {"type": worker_type, **config}:
                             raise ValueError(f"Invalid worker type: {worker_type}")
-                        case {"name": worker_name, **config} if worker_name in teams:
+                        case {"name": worker_name} if worker_name in teams:
                             # Determine type based on worker name
-                            normalized.append(TeamWorkerConfig(**config))
+                            normalized.append(TeamWorkerConfig(name=name))
                         case {"name": worker_name, **config}:
                             match get_agent_type(worker_name):
                                 case "acp":
-                                    normalized.append(ACPAgentWorkerConfig(**config))
+                                    normalized.append(ACPAgentWorkerConfig(name=name))
                                 case "agui":
-                                    normalized.append(AGUIAgentWorkerConfig(**config))
+                                    normalized.append(AGUIAgentWorkerConfig(name=name))
                                 case _:
-                                    normalized.append(AgentWorkerConfig(**config))
+                                    normalized.append(AgentWorkerConfig(name=name, **config))
 
                         case BaseWorkerConfig():  # Already normalized
                             normalized.append(worker)
