@@ -49,7 +49,6 @@ if TYPE_CHECKING:
         StreamWithCommandsEvent,
     )
     from agentpool.agents.modes import ConfigOptionChanged, ModeCategory, ModeCategoryId
-    from agentpool.agents.native_agent import Agent
     from agentpool.common_types import (
         AgentName,
         AnyEventHandlerType,
@@ -255,12 +254,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
     @overload
     def __and__(  # if other doesnt define deps, we take the agents one
-        self, other: ProcessorCallback[Any] | Team[TDeps] | Agent[TDeps, Any]
+        self, other: ProcessorCallback[Any] | Team[TDeps] | MessageNode[TDeps, Any]
     ) -> Team[TDeps]: ...
 
     @overload
     def __and__(  # otherwise, we dont know and deps is Any
-        self, other: ProcessorCallback[Any] | Team[Any] | Agent[Any, Any]
+        self, other: ProcessorCallback[Any] | Team[Any] | MessageNode[Any, Any]
     ) -> Team[Any]: ...
 
     def __and__(self, other: MessageNode[Any, Any] | ProcessorCallback[Any]) -> Team[Any]:
