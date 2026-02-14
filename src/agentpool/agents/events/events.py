@@ -639,6 +639,36 @@ class SubAgentEvent:
 
 
 @dataclass(kw_only=True)
+class SpawnSessionStart:
+    """Event indicating a subsession (spawn/subagent) is being created.
+
+    This event explicitly signals when a subsession is created, replacing the need
+    for protocol adapters to hardcode detection of specific tool calls.
+    """
+
+    child_session_id: str
+    """ID of the child session being created."""
+    parent_session_id: str
+    """ID of the parent session that is spawning the child."""
+    tool_call_id: str | None = None
+    """ID of the tool call that spawned this subsession, if applicable."""
+    spawn_mechanism: Literal["task", "spawn"]
+    """How the subagent was created: 'task' for task-based, 'spawn' for direct spawn."""
+    source_name: str
+    """Name of the agent or team being spawned."""
+    source_type: Literal["agent", "team_parallel", "team_sequential"]
+    """Type of source being spawned: agent, parallel team, or sequential team."""
+    depth: int = 1
+    """Nesting depth (1 = direct child of the root session, 2 = grandchild, etc.)."""
+    description: str
+    """Human-readable description of the spawn operation."""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    """Additional metadata associated with the spawn operation."""
+    event_kind: Literal["spawn_session_start"] = "spawn_session_start"
+    """Event type identifier."""
+
+
+@dataclass(kw_only=True)
 class CompactionEvent:
     """Event indicating context compaction is starting or completed.
 
@@ -668,6 +698,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | PlanUpdateEvent
     | CompactionEvent
     | SubAgentEvent
+    | SpawnSessionStart
     | ToolResultMetadataEvent
     | CustomEvent[Any]
 )
