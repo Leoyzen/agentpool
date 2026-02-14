@@ -24,6 +24,7 @@ from pydantic_ai.messages import (
 from agentpool.agents.events import (
     FileContentItem,
     LocationContentItem,
+    SpawnSessionStart,
     StreamCompleteEvent,
     SubAgentEvent,
     TextContentItem,
@@ -167,6 +168,10 @@ class EventProcessor:
 
             case SubAgentEvent() as subagent_event:
                 async for e in self._process_subagent_event(subagent_event, ctx):
+                    yield e
+
+            case SpawnSessionStart() as spawn_event:
+                async for e in self._process_spawn_start(spawn_event, ctx):
                     yield e
 
     def _process_text_start(
@@ -777,9 +782,104 @@ class EventProcessor:
                         call_id=existing.call_id,
                         state=completed_state,
                     )
-                    ctx.add_subagent_tool_part(subagent_key, updated)
-                    ctx.assistant_msg.update_part(updated)
-                    yield PartUpdatedEvent.create(updated)
+            ctx.add_subagent_tool_part(subagent_key, updated)
+            ctx.assistant_msg.update_part(updated)
+            yield PartUpdatedEvent.create(updated)
+
+    async def _process_spawn_start(
+        self,
+        event: SpawnSessionStart,
+        ctx: EventProcessorContext,
+    ) -> AsyncIterator[Event]:
+        """Process a SpawnSessionStart event for eager session creation.
+
+        Provides duplicate session guard and eager child session creation,
+        allowing SubAgentEvent processing to focus on event propagation.
+
+        Args:
+            event: The spawn session start event.
+            ctx: The parent event processor context.
+
+        Yields:
+            OpenCode Event objects for broadcasting.
+        """
+        # Duplicate guard - skip if session already exists
+        if event.child_session_id in self._child_contexts:
+            logger.debug(
+                "SpawnSessionStart for %s already exists, skipping",
+                event.child_session_id,
+            )
+            return
+
+        # Ensure child session exists
+        await ctx.state.ensure_session(event.child_session_id, parent_id=ctx.session_id)
+
+        # Import identifiers
+        from agentpool.utils import identifiers
+
+        # Create user message
+        user_msg_id = identifiers.ascending("message")
+        user_msg = MessageWithParts.user(
+            message_id=user_msg_id,
+            session_id=event.child_session_id,
+            time=TimeCreated(created=now_ms()),
+            agent_name=event.source_name,
+        )
+        # Use description if available
+        description = event.description or f"Task: {event.source_name}"
+        user_msg.add_text_part(description)
+        ctx.state.messages[event.child_session_id].append(user_msg)
+        yield MessageUpdatedEvent.create(user_msg.info)
+
+        # Create assistant message
+        child_assistant_msg_id = identifiers.ascending("message")
+        child_assistant_msg = MessageWithParts.assistant(
+            message_id=child_assistant_msg_id,
+            session_id=event.child_session_id,
+            time=MessageTime(created=now_ms()),
+            agent_name=event.source_name,
+            model_id="subagent",
+            parent_id=user_msg_id,
+            provider_id="agentpool",
+            path=MessagePath(cwd=ctx.working_dir, root=ctx.working_dir),
+        )
+
+        child_ctx = EventProcessorContext(
+            session_id=event.child_session_id,
+            assistant_msg_id=child_assistant_msg_id,
+            assistant_msg=child_assistant_msg,
+            state=ctx.state,
+            working_dir=ctx.working_dir,
+        )
+        self._child_contexts[event.child_session_id] = child_ctx
+        ctx.state.messages[event.child_session_id].append(child_assistant_msg)
+        yield MessageUpdatedEvent.create(child_assistant_msg.info)
+
+        # Create ToolPart in parent session
+        subagent_key = f"{event.depth}:{event.source_name}"
+        if not ctx.has_subagent_tool_part(subagent_key):
+            ts = TimeStart(start=now_ms())
+            running_state = ToolStateRunning(
+                time=ts,
+                input={
+                    "description": description,
+                    "subagent_type": event.source_type,
+                    "prompt": "",
+                },
+                metadata={"sessionId": event.child_session_id, "title": event.source_name},
+                title=event.source_name,
+            )
+            tool_part = ToolPart(
+                id=identifiers.ascending("part"),
+                message_id=ctx.assistant_msg_id,
+                session_id=ctx.session_id,
+                tool="task",
+                call_id=identifiers.ascending("part"),
+                state=running_state,
+            )
+            ctx.add_subagent_tool_part(subagent_key, tool_part)
+            ctx.assistant_msg.parts.append(tool_part)
+            yield PartUpdatedEvent.create(tool_part)
 
 
 def _extract_title_from_tool_state(state: ToolState) -> str:
