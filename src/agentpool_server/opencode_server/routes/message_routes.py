@@ -230,6 +230,23 @@ async def _process_message(  # noqa: PLR0915
         with contextlib.suppress(Exception):
             await agent.set_mode(request.variant, category_id="thought_level")
 
+    # Handle model selection if requested
+    original_model: str | None = None
+    if request.model and request.model.model_id and request.model.provider_id:
+        requested_model = f"{request.model.provider_id}:{request.model.model_id}"
+        try:
+            available_models = await agent.get_available_models()
+            if available_models:
+                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
+                if requested_model in valid_ids:
+                    # Store original model to restore later
+                    original_model = agent.model_name
+                    await agent.set_model(requested_model)
+                    logger.info("Switched to requested model", model=requested_model)
+        except Exception:  # noqa: BLE001
+            # Agent doesn't support model selection, ignore
+            pass
+
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
         state=state,
@@ -239,9 +256,20 @@ async def _process_message(  # noqa: PLR0915
         working_dir=state.working_dir,
         on_file_paths=lambda paths: _warmup_lsp_for_files(state, paths),
     )
-    iterator = agent.run_stream(user_prompt, session_id=session_id)
-    async for oc_event in adapter.process_stream(iterator):
-        await state.broadcast_event(oc_event)
+
+    async def run_with_model():
+        try:
+            iterator = agent.run_stream(user_prompt, session_id=session_id)
+            async for oc_event in adapter.process_stream(iterator):
+                await state.broadcast_event(oc_event)
+        finally:
+            # Restore original model if we changed it
+            if original_model is not None:
+                with contextlib.suppress(Exception):
+                    await agent.set_model(original_model)
+                    logger.info("Restored original model", model=original_model)
+
+    await run_with_model()
 
     for oc_event in adapter.finalize():
         await state.broadcast_event(oc_event)
