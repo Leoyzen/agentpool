@@ -277,13 +277,14 @@ class EventProcessor:
             delta: The thinking delta to append.
 
         Yields:
-            PartUpdatedEvent for the updated reasoning part.
+            PartUpdatedEvent for the updated or created reasoning part.
         """
         # Skip empty reasoning content
         if not delta or not delta.strip():
             return
 
         if ctx.reasoning_part is not None:
+            # Update existing reasoning part
             updated = ReasoningPart(
                 id=ctx.reasoning_part.id,
                 message_id=ctx.assistant_msg_id,
@@ -294,6 +295,20 @@ class EventProcessor:
             ctx.assistant_msg.update_part(updated)
             ctx.reasoning_part = updated
             yield PartUpdatedEvent.create(updated, delta=delta)
+        else:
+            # No reasoning part exists yet (e.g., after text reset or orphaned delta)
+            # Create a new reasoning part with the delta content
+            reasoning_part_id = identifier.ascending("part")
+            reasoning_part = ReasoningPart(
+                id=reasoning_part_id,
+                message_id=ctx.assistant_msg_id,
+                session_id=ctx.session_id,
+                text=delta,
+                time=TimeStartEndOptional(start=now_ms()),
+            )
+            ctx.reasoning_part = reasoning_part
+            ctx.assistant_msg.parts.append(reasoning_part)
+            yield PartUpdatedEvent.create(reasoning_part, delta=delta)
 
     def _process_tool_call_start(
         self,
