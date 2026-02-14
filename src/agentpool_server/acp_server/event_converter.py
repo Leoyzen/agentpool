@@ -64,6 +64,7 @@ from agentpool.agents.events import (
     PlanUpdateEvent,
     RunErrorEvent,
     RunStartedEvent,
+    SpawnSessionStart,
     StreamCompleteEvent,
     SubAgentEvent,
     TerminalContentItem,
@@ -690,6 +691,15 @@ class ACPEventConverter:
                 text = get_compaction_text(trigger)
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
+            case SpawnSessionStart(
+                source_name=source_name,
+                description=description,
+                spawn_mechanism=spawn_mechanism,
+            ):
+                icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
+                text = f"\n{icon} **`{source_name}`**: {description}\n"
+                yield AgentMessageChunk.text(text)
+
             case SubAgentEvent(
                 source_name=source_name,
                 source_type=source_type,
@@ -951,6 +961,7 @@ class ACPEventConverter:
                 | PlanUpdateEvent()
                 | RunErrorEvent()
                 | RunStartedEvent()
+                | SpawnSessionStart()
                 | SubAgentEvent()
                 | ToolCallCompleteEvent()
                 | ToolCallProgressEvent()
