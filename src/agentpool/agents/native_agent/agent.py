@@ -447,7 +447,19 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Merge event handlers
         config_handlers = config.get_event_handlers()
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
-        resolved_model = manifest.resolve_model(config.model)
+
+        # Handle model configuration - resolve model_variants reference if needed
+        from llmling_models_config import StringModelConfig
+
+        model_config = config.model
+        if (
+            isinstance(model_config, StringModelConfig)
+            and model_config.identifier in manifest.model_variants
+        ):
+            # The identifier is a model_variants key, use the variant config
+            model_config = manifest.model_variants[model_config.identifier]
+
+        resolved_model = manifest.resolve_model(model_config)
         return cls(
             model=resolved_model.get_model(),
             model_settings=resolved_model.get_model_settings(),
