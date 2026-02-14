@@ -1,18 +1,14 @@
 """Tests for subagent fixes (RFC-0012)."""
+
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
-
-if TYPE_CHECKING:
-    from agentpool_server.opencode_server.state import ServerState
 
 
 @pytest.mark.asyncio
@@ -69,12 +65,12 @@ async def test_task_tool_return_format():
 
     # Mock context
     ctx = MagicMock()
-    
+
     # Mock node (agent) using a class to satisfy runtime_checkable Protocol
     class MockStreamingAgent:
         def __init__(self):
             self.run_stream = MagicMock()
-            
+
     mock_agent = MockStreamingAgent()
 
     # Mock run_stream to yield events
@@ -114,12 +110,15 @@ async def test_task_tool_async_mode_return_format():
     class MockStreamingAgent:
         def __init__(self):
             self.run_stream = MagicMock()
-            
+
     mock_agent = MockStreamingAgent()
     ctx.pool.nodes = {"child_agent": mock_agent}
 
     # Mock internal_fs
     ctx.internal_fs.mkdirs = MagicMock()
+
+    # Mock events.emit_event (needed for SpawnSessionStart emission)
+    ctx.events.emit_event = AsyncMock()
 
     # Execute task in async mode
     result = await tools.task(
