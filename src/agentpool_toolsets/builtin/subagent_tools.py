@@ -11,7 +11,12 @@ from pydantic_ai import ModelRetry
 from pydantic_ai.messages import TextPartDelta, ThinkingPartDelta
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.agents.events import PartDeltaEvent, StreamCompleteEvent, SubAgentEvent
+from agentpool.agents.events import (
+    PartDeltaEvent,
+    SpawnSessionStart,
+    StreamCompleteEvent,
+    SubAgentEvent,
+)
 from agentpool.agents.events.processors import batch_stream_deltas
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
@@ -59,6 +64,7 @@ async def _stream_task(
     child_session_id: str | None = None,
     parent_session_id: str | None = None,
     tool_call_id: str | None = None,
+    prompt: str | None = None,
 ) -> dict[str, Any]:
     """Stream a task's execution, emitting SubAgentEvents into parent stream.
 
@@ -72,9 +78,29 @@ async def _stream_task(
         child_session_id: ID of the child session
         parent_session_id: ID of the parent session
         tool_call_id: ID of the tool call
+        prompt: The task prompt (for metadata)
     """
     if batch_deltas:
         stream = batch_stream_deltas(stream)
+
+    # Ensure we have valid IDs (generate fallbacks as needed)
+    _child_session_id = child_session_id or identifier.ascending("session")
+    _parent_session_id = parent_session_id or ctx.node.session_id or identifier.ascending("session")
+    _tool_call_id = tool_call_id or ctx.tool_call_id
+
+    # Emit SpawnSessionStart before streaming begins
+    spawn_event = SpawnSessionStart(
+        child_session_id=_child_session_id,
+        parent_session_id=_parent_session_id,
+        tool_call_id=_tool_call_id,
+        spawn_mechanism="task",
+        source_name=source_name,
+        source_type=source_type,
+        depth=getattr(ctx, "current_depth", 0) + 1,
+        description=f"Run {source_name} task",
+        metadata={"prompt": prompt[:200]} if prompt else {},
+    )
+    await ctx.events.emit_event(spawn_event)
 
     final_content: str = ""
     async for event in stream:
@@ -302,7 +328,21 @@ class SubagentTools(StaticResourceProvider):
 
         # Generate unique session ID for the subagent run
         child_session_id = identifier.ascending("session")
-        parent_session_id = ctx.node.session_id
+        parent_session_id = ctx.node.session_id or identifier.ascending("session")
+
+        # Emit SpawnSessionStart for both sync and async modes
+        spawn_event = SpawnSessionStart(
+            child_session_id=child_session_id,
+            parent_session_id=parent_session_id,
+            tool_call_id=ctx.tool_call_id,
+            spawn_mechanism="task",
+            source_name=agent_or_team,
+            source_type=source_type,
+            depth=getattr(ctx, "current_depth", 0) + 1,
+            description=f"Run {agent_or_team} task",
+            metadata={"prompt": prompt[:200]} if prompt else {},
+        )
+        await ctx.events.emit_event(spawn_event)
 
         if async_mode:
             # Generate task ID and start background task
@@ -356,4 +396,5 @@ class SubagentTools(StaticResourceProvider):
             child_session_id=child_session_id,
             parent_session_id=parent_session_id,
             tool_call_id=ctx.tool_call_id,
+            prompt=prompt,
         )
