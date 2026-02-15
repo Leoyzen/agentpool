@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-
-if TYPE_CHECKING:
-    from collections.abc import Hashable
+from typing import Any
 
 
 # Root paths
@@ -25,7 +21,7 @@ def extract_page_metadata(python_file: Path) -> dict[str, dict[str, Any]]:
     content = python_file.read_text()
     tree = ast.parse(content)
 
-    metadata: dict[str, dict[Hashable, Any]] = {}
+    metadata: dict[str, dict[str, Any]] = {}
 
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):
@@ -46,7 +42,7 @@ def extract_page_metadata(python_file: Path) -> dict[str, dict[str, Any]]:
                         is_page_decorator = True
 
                     if is_page_decorator:
-                        page_metadata: dict[Hashable, Any] = {}
+                        page_metadata: dict[str, Any] = {}
 
                         # Extract positional args (page title)
                         if decorator.args and isinstance(decorator.args[0], ast.Constant):
@@ -81,6 +77,7 @@ def extract_page_metadata(python_file: Path) -> dict[str, dict[str, Any]]:
                                         and isinstance(right.args[0], ast.Constant)
                                     ):
                                         md_path = right.args[0].value
+                                        assert isinstance(md_path, str)
                                         if page_metadata:
                                             metadata[md_path] = page_metadata  # pyright: ignore[reportArgumentType]
                                             break  # Found the template, move to next function
