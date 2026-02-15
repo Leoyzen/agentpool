@@ -1266,7 +1266,7 @@ def _parse_location(loc: dict[str, Any]) -> Location:
     return Location(uri=loc["uri"], range=_parse_range(loc["range"]))
 
 
-def _parse_locations(result) -> list[Location]:
+def _parse_locations(result: Any) -> list[Location]:
     """Parse LSP definition/references result (can be Location, Location[], or LocationLink[])."""
     if not result:
         return []
@@ -1292,14 +1292,14 @@ def _extract_hover_contents(contents: HoverContents) -> str:
     match contents:
         case str():
             return contents
-        case {"value": value}:
+        case {"value": str() as value}:
             return value
         case list():
             # Array of MarkedString
             parts = []
             for item in contents:
                 match item:
-                    case (str() as value) | {"value": value}:
+                    case (str() as value) | {"value": str() as value}:
                         parts.append(value)
             return "\n\n".join(parts)
         case _:
