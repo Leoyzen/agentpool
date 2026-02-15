@@ -768,6 +768,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             # Direct Model instance assignment (no signal emission)
             self._model = model
+            await self.update_state(config_id="model", value_id=self.model_name)
 
     async def _interrupt(self) -> None:
         """Cancel the current stream task."""
