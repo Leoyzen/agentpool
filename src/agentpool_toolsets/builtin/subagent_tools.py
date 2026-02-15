@@ -272,6 +272,8 @@ class SubagentTools(StaticResourceProvider):
                 source_type = "team_sequential"
             case BaseAgent():
                 source_type = "agent"
+            case _:
+                raise ValueError(f"Unexpected node type: {type(node)}")
 
         if not isinstance(node, SupportsRunStream):
             msg = f"Node {agent_or_team} does not support streaming"
