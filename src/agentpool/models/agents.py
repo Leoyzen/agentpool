@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence  # noqa: TC003
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 from uuid import UUID
@@ -29,8 +30,6 @@ from agentpool_config.workers import WorkerConfig  # noqa: TC001
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
