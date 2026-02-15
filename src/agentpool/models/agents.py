@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence  # noqa: TC003
+import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 from uuid import UUID
@@ -20,13 +21,19 @@ from agentpool.common_types import EndStrategy  # noqa: TC001
 from agentpool.models.fields import OutputTypeField, SystemPromptField  # noqa: TC001
 from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool.resource_providers import StaticResourceProvider
-from agentpool_config import BaseToolConfig, NativeAgentToolConfig
+from agentpool_config import NativeAgentToolConfig
+from agentpool_config.agentpool_tools import BashToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
 from agentpool_config.session import MemoryConfig, SessionQuery
+from agentpool_config.tools import BaseToolConfig, ImportToolConfig
 from agentpool_config.toolsets import BaseToolsetConfig, ToolsetConfig
-from agentpool_config.workers import AgentWorkerConfig, WorkerConfig  # noqa: TC001
+from agentpool_config.workers import (  # noqa: TC001
+    AgentWorkerConfig,
+    TeamWorkerConfig,
+    WorkerConfig,
+)
 
 
 if TYPE_CHECKING:
@@ -38,14 +45,13 @@ if TYPE_CHECKING:
     from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
 
-ToolMode = Literal["codemode"]
-
-logger = log.get_logger(__name__)
-
 # Unified type for all tool configurations (single tools + toolsets)
 AnyToolConfig = Annotated[NativeAgentToolConfig | ToolsetConfig, Field(discriminator="type")]
+ToolMode = Literal["codemode"]
 
 _MAX_PROCESSOR_PARAMS = 2
+
+logger = log.get_logger(__name__)
 
 
 def _validate_processor_signature(processor: Callable[..., Any]) -> None:
@@ -60,8 +66,6 @@ def _validate_processor_signature(processor: Callable[..., Any]) -> None:
     Raises:
         ValueError: If signature is not valid.
     """
-    import inspect
-
     sig = inspect.signature(processor)
     params = list(sig.parameters.values())
     if len(params) not in (1, _MAX_PROCESSOR_PARAMS):
@@ -117,15 +121,8 @@ class NativeAgentConfig(BaseAgentConfig):
         examples=[
             ["webbrowser:open", "builtins:print"],
             [
-                {
-                    "type": "import",
-                    "import_path": "webbrowser:open",
-                    "name": "web_browser",
-                },
-                {
-                    "type": "bash",
-                    "timeout": 30.0,
-                },
+                ImportToolConfig(import_path="webbrowser:open", name="web_browser"),
+                BashToolConfig(timeout=30.0),
             ],
         ],
         title="Tool configurations",
@@ -200,8 +197,8 @@ class NativeAgentConfig(BaseAgentConfig):
     workers: list[WorkerConfig | str] = Field(
         default_factory=list,
         examples=[
-            [{"type": "agent", "name": "web_agent", "reset_history_on_run": True}],
-            [{"type": "team", "name": "analysis_team"}],
+            [AgentWorkerConfig(name="web_agent", reset_history_on_run=True)],
+            [TeamWorkerConfig(name="analysis_team")],
             ["web_agent", "code_analyzer"],
         ],
         title="Worker agents",
@@ -317,17 +314,15 @@ class NativeAgentConfig(BaseAgentConfig):
 
         for tool_config in self.tools:
             # Skip builtin tools - they're handled via get_builtin_tools()
-            if isinstance(tool_config, BaseBuiltinToolConfig):
-                continue
-            if isinstance(tool_config, BaseToolsetConfig):
-                # Toolset -> get its provider directly
-                providers.append(tool_config.get_provider())
-            elif isinstance(tool_config, str):
-                # String import path -> single tool
-                static_tools.append(Tool.from_callable(tool_config))
-            elif isinstance(tool_config, BaseToolConfig):
-                # Single tool config -> single tool
-                static_tools.append(tool_config.get_tool())
+            match tool_config:
+                case BaseBuiltinToolConfig():
+                    continue
+                case BaseToolsetConfig():
+                    providers.append(tool_config.get_provider())
+                case str():
+                    static_tools.append(Tool.from_callable(tool_config))
+                case BaseToolConfig():
+                    static_tools.append(tool_config.get_tool())
 
         # Wrap all single tools in one provider
         if static_tools:
