@@ -203,19 +203,16 @@ class FilterBinaryContent(CompactionStep):
                 case ModelRequest(parts=parts):
                     filtered_parts: list[ModelRequestPart | ModelResponsePart] = []
                     for part in parts:
-                        if isinstance(part, UserPromptPart):
-                            if isinstance(part.content, list):
-                                new_content: list[Any] = []
-                                for item in part.content:
-                                    if isinstance(item, BinaryContent):
-                                        if self.keep_references:
-                                            new_content.append(f"[Binary: {item.media_type}]")
-                                    else:
-                                        new_content.append(item)
-                                if new_content:
-                                    filtered_parts.append(replace(part, content=new_content))
-                            else:
-                                filtered_parts.append(part)
+                        if isinstance(part, UserPromptPart) and isinstance(part.content, list):
+                            new_content: list[Any] = []
+                            for item in part.content:
+                                if isinstance(item, BinaryContent):
+                                    if self.keep_references:
+                                        new_content.append(f"[Binary: {item.media_type}]")
+                                else:
+                                    new_content.append(item)
+                            if new_content:
+                                filtered_parts.append(replace(part, content=new_content))
                         else:
                             filtered_parts.append(part)
                     if filtered_parts:
@@ -490,11 +487,7 @@ class TokenBudget(CompactionStep):
     """Model to use for token counting."""
 
     async def apply(self, messages: MessageSequence) -> list[ModelMessage]:
-        try:
-            import tokonomics
-        except ImportError:
-            # Fall back to character-based estimation
-            return await self._apply_char_estimate(messages)
+        import tokonomics
 
         result: list[ModelMessage] = []
         total_tokens = 0
@@ -510,24 +503,6 @@ class TokenBudget(CompactionStep):
 
             result.insert(0, msg)
             total_tokens += token_count
-
-        return result
-
-    async def _apply_char_estimate(self, messages: MessageSequence) -> list[ModelMessage]:
-        """Fallback using character-based token estimation (4 chars ≈ 1 token)."""
-        result: list[ModelMessage] = []
-        total_chars = 0
-        max_chars = self.max_tokens * 4
-
-        for msg in reversed(messages):
-            text = _extract_text_content(msg)
-            char_count = len(text)
-
-            if total_chars + char_count > max_chars:
-                break
-
-            result.insert(0, msg)
-            total_chars += char_count
 
         return result
 
@@ -566,7 +541,7 @@ class Summarize(CompactionStep):
         # Format conversation for summarization
         conversation_text = _format_session(to_summarize)
         # Get or create summarization agent
-        agent = await self._get_agent()
+        agent = Agent(model=self.model)
         # Generate summary
         prompt = self.summary_prompt.format(conversation=conversation_text)
         result = await agent.run(prompt)
@@ -574,10 +549,6 @@ class Summarize(CompactionStep):
         prompt_part = UserPromptPart(content=f"[Conversation Summary]\n{result.output}")
         summary_request = ModelRequest(parts=[prompt_part])
         return [summary_request, *to_keep]
-
-    async def _get_agent(self) -> Agent[None, str]:
-        """Get or create the summarization agent."""
-        return Agent(model=self.model, output_type=str)
 
 
 # =============================================================================
@@ -740,8 +711,7 @@ def _extract_text_content(msg: ModelMessage) -> str:
                         | UserPromptPart(content=str() as content)
                         | ToolReturnPart(content=content)
                     ):
-                        if content is not None:
-                            parts_text.append(str(content))
+                        parts_text.append(str(content))
                     case UserPromptPart(content=list() as content):
                         for item in content:
                             if isinstance(item, str):
