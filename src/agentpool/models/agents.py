@@ -121,7 +121,7 @@ class NativeAgentConfig(BaseAgentConfig):
         examples=[
             ["webbrowser:open", "builtins:print"],
             [
-                ImportToolConfig(import_path="webbrowser:open", name="web_browser"),
+                ImportToolConfig(import_path="webbrowser:open", name="web_browser"),  # pyright: ignore[reportArgumentType]
                 BashToolConfig(timeout=30.0),
             ],
         ],
@@ -341,10 +341,11 @@ class NativeAgentConfig(BaseAgentConfig):
 
     def get_tool_provider(self) -> ResourceProvider | None:
         """Get single tools provider. Deprecated: use get_tool_providers() instead."""
-        for p in self.get_tool_providers():
-            if isinstance(p, StaticResourceProvider) and p.name == "tools":
-                return p
-        return None
+        providers = self.get_tool_providers()
+        return next(
+            (p for p in providers if isinstance(p, StaticResourceProvider) and p.name == "tools"),
+            None,
+        )
 
     def get_builtin_tools(self) -> list[Any]:
         """Get pydantic-ai builtin tools from config.

@@ -356,19 +356,3 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
             providers.append(StaticResourceProvider(name="tools", tools=static_tools))
 
         return providers
-
-    # Backward compatibility
-    def get_toolset_providers(self) -> list[ResourceProvider]:
-        """Deprecated: use get_tool_providers() instead."""
-        return [
-            p
-            for p in self.get_tool_providers()
-            if not isinstance(p, StaticResourceProvider) or p.name != "tools"
-        ]
-
-    def get_tool_provider(self) -> ResourceProvider | None:
-        """Deprecated: use get_tool_providers() instead."""
-        for p in self.get_tool_providers():
-            if isinstance(p, StaticResourceProvider) and p.name == "tools":
-                return p
-        return None
