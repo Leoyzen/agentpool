@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Self, assert_never
 
 from agentpool.utils.tasks import TaskManager
+from agentpool_storage.models import GroupBy
 
 
 if TYPE_CHECKING:
@@ -276,7 +277,7 @@ class StorageProvider:
     def aggregate_stats(
         self,
         rows: Sequence[tuple[str | None, str | None, datetime, TokenCost | None]],
-        group_by: Literal["agent", "model", "hour", "day"],
+        group_by: GroupBy,
     ) -> dict[str, dict[str, Any]]:
         """Aggregate statistics data by specified grouping.
 
@@ -298,6 +299,8 @@ class StorageProvider:
                     key = timestamp.strftime("%Y-%m-%d %H:00")
                 case "day":
                     key = timestamp.strftime("%Y-%m-%d")
+                case _ as unreachable:
+                    assert_never(unreachable)
 
             entry = stats[key]
             entry["messages"] += 1
@@ -325,11 +328,7 @@ class StorageProvider:
         """
         raise NotImplementedError
 
-    async def get_session_counts(
-        self,
-        *,
-        agent_name: str | None = None,
-    ) -> tuple[int, int]:
+    async def get_session_counts(self, *, agent_name: str | None = None) -> tuple[int, int]:
         """Get counts of conversations and messages.
 
         Args:
@@ -340,10 +339,7 @@ class StorageProvider:
         """
         raise NotImplementedError
 
-    async def delete_session_messages(
-        self,
-        session_id: str,
-    ) -> int:
+    async def delete_session_messages(self, session_id: str) -> int:
         """Delete all messages for a session.
 
         Used for compaction - removes existing messages so they can be
@@ -405,10 +401,7 @@ class StorageProvider:
         msg = f"{self.__class__.__name__} does not support project storage"
         raise NotImplementedError(msg)
 
-    async def list_projects(
-        self,
-        limit: int | None = None,
-    ) -> list[ProjectData]:
+    async def list_projects(self, limit: int | None = None) -> list[ProjectData]:
         """List all projects, ordered by last_active descending.
 
         Args:

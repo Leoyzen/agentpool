@@ -45,8 +45,7 @@ def get_supported_languages() -> set[str]:
 
     supported = set()
     for lang in set(PARSERS.values()):
-        scm = get_scm_fname(lang)
-        if scm and scm.exists():
+        if (scm := get_scm_fname(lang)) and scm.exists():
             supported.add(lang)
     return supported
 

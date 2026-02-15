@@ -360,7 +360,7 @@ class CodeTools(ResourceProvider):
             await agent_ctx.events.tool_call_progress(
                 message,
                 status="in_progress",
-                items=items if items else None,
+                items=items or None,
             )
 
         # Check if path is directory or file
