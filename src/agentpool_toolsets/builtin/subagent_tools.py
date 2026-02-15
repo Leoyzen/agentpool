@@ -126,20 +126,16 @@ async def _stream_task_to_fs(
             # Handle nested SubAgentEvents - unwrap inner event
             inner_event = event.event if isinstance(event, SubAgentEvent) else event
 
-            # Collect text deltas
-            if isinstance(inner_event, PartDeltaEvent) and inner_event.delta:
-                delta = inner_event.delta
-                if isinstance(delta, (TextPartDelta, ThinkingPartDelta)) and delta.content_delta:
-                    content_parts.append(delta.content_delta)
-                # Write incrementally (overwrite with accumulated content)
-                fs.pipe(output_path, "".join(content_parts).encode("utf-8"))
-
-            # Final content from StreamCompleteEvent
-            elif isinstance(inner_event, StreamCompleteEvent):
-                content = inner_event.message.content
-                if content:
-                    final_content = str(content)
-                    fs.pipe(output_path, final_content.encode("utf-8"))
+            match inner_event:
+                case (
+                    PartDeltaEvent(delta=TextPartDelta(content_delta=str(text)))
+                    | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=str(text)))
+                ) if text:
+                    content_parts.append(text)
+                    # Write incrementally (overwrite with accumulated content)
+                    fs.pipe(output_path, "".join(content_parts).encode("utf-8"))
+                case StreamCompleteEvent(message=msg) if msg.content:
+                    fs.pipe(output_path, str(msg.content).encode("utf-8"))
 
         logger.info(
             "Async task completed",
