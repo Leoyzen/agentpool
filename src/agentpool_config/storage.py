@@ -199,29 +199,55 @@ class ClaudeStorageConfig(BaseStorageProviderConfig):
 
 
 class OpenCodeStorageConfig(BaseStorageProviderConfig):
-    """OpenCode native storage format configuration.
+    """OpenCode SQLite storage format configuration.
 
-    Reads from OpenCode's native JSON format in ~/.local/share/opencode/storage/.
-    Useful for importing conversation history from OpenCode.
+    Reads from OpenCode's native SQLite database at ~/.local/share/opencode/opencode.db.
+    This is the current format used by OpenCode >= 1.2.
     """
 
     model_config = ConfigDict(json_schema_extra={"x-doc-title": "OpenCode Storage"})
 
     type: Literal["opencode"] = Field("opencode", init=False)
-    """OpenCode native storage configuration."""
+    """OpenCode SQLite storage configuration."""
+
+    path: str = Field(
+        default="~/.local/share/opencode/opencode.db",
+        examples=["~/.local/share/opencode/opencode.db"],
+        title="OpenCode database path",
+    )
+    """Path to OpenCode SQLite database file."""
+
+    def get_provider(self) -> StorageProvider:
+        """Create an OpenCode SQLite storage provider instance."""
+        from agentpool_storage.opencode_provider import OpenCodeStorageProvider
+
+        return OpenCodeStorageProvider(self)
+
+
+class OpenCodeFileStorageConfig(BaseStorageProviderConfig):
+    """OpenCode file-based storage format configuration (legacy).
+
+    Reads from OpenCode's legacy JSON file format in ~/.local/share/opencode/storage/.
+    This was the format used by OpenCode < 1.2 before the SQLite migration.
+    """
+
+    model_config = ConfigDict(json_schema_extra={"x-doc-title": "OpenCode File Storage"})
+
+    type: Literal["opencode_file"] = Field("opencode_file", init=False)
+    """OpenCode file-based storage configuration (legacy)."""
 
     path: str = Field(
         default="~/.local/share/opencode/storage",
         examples=["~/.local/share/opencode/storage"],
         title="OpenCode storage directory",
     )
-    """Path to OpenCode storage directory."""
+    """Path to OpenCode file-based storage directory."""
 
     def get_provider(self) -> StorageProvider:
-        """Create an OpenCode storage provider instance."""
-        from agentpool_storage.opencode_provider import OpenCodeStorageProvider
+        """Create an OpenCode file storage provider instance."""
+        from agentpool_storage.opencode_file_provider import OpenCodeFileStorageProvider
 
-        return OpenCodeStorageProvider(self)
+        return OpenCodeFileStorageProvider(self)
 
 
 class ZedStorageConfig(BaseStorageProviderConfig):
@@ -296,6 +322,7 @@ StorageProviderConfig = Annotated[
     | MemoryStorageConfig
     | ClaudeStorageConfig
     | OpenCodeStorageConfig
+    | OpenCodeFileStorageConfig
     | ZedStorageConfig
     | ACPStorageConfig
     | CodexStorageConfig,
