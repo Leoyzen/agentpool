@@ -6,9 +6,9 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import json
 from typing import TYPE_CHECKING, Any, Self
 
+import anyenv
 import anyio
 
 from agentpool.log import get_logger
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from exxec.models import ServerInfo
     from exxec_config import ExecutionEnvironmentConfig
     from fastapi import FastAPI
-    from fsspec.implementations.memory import MemoryFileSystem
+    from fsspec.asyn import AsyncFileSystem
     from schemez import ToolsetCodeGenerator
     import uvicorn
 
@@ -92,7 +92,7 @@ class RemoteCodeExecutor:
         self,
         code: str,
         title: str,
-        internal_fs: MemoryFileSystem | None = None,
+        internal_fs: AsyncFileSystem | None = None,
     ) -> Any:
         """Execute code with tools available via HTTP API.
 
@@ -104,7 +104,12 @@ class RemoteCodeExecutor:
         Returns:
             Execution result from the environment
         """
+        from fsspec.asyn import AsyncFileSystem
+        from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
+
         fs = internal_fs or self._fallback_fs
+        if not isinstance(fs, AsyncFileSystem):
+            fs = AsyncFileSystemWrapper(fs)
         start_time = datetime.now(UTC)
         exit_code = 0
         error_msg: str | None = None
@@ -130,7 +135,7 @@ class RemoteCodeExecutor:
 
             # Write script file
             script_path = f"remote_code/scripts/{timestamp}_{title}.py"
-            fs.pipe(script_path, code.encode("utf-8"))
+            await fs._pipe_file(script_path, code.encode("utf-8"))
 
             # Write metadata file
             metadata = {
@@ -142,7 +147,8 @@ class RemoteCodeExecutor:
                 "error": error_msg,
             }
             metadata_path = f"remote_code/scripts/{timestamp}_{title}.json"
-            fs.pipe(metadata_path, json.dumps(metadata, indent=2).encode("utf-8"))
+            dumped = anyenv.dump_json(metadata, indent=True)
+            await fs._pipe_file(metadata_path, dumped.encode("utf-8"))
 
         return exec_result
 
