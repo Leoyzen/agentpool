@@ -122,7 +122,7 @@ class RepoMap:
 
     async def find_files(self, path: str, pattern: str = "**/*.py") -> list[str]:
         """Find files matching pattern recursively."""
-        from agentpool.repomap.rendering import is_directory
+        from upathtools import is_directory
 
         results: list[str] = []
 
@@ -130,9 +130,8 @@ class RepoMap:
             entries = await self._ls(current_path, detail=True)
             for entry in entries:
                 entry_path = entry.get("name", "")
-                entry_type = entry.get("type", "")
 
-                if await is_directory(self.fs, entry_path, entry_type=entry_type):
+                if await is_directory(self.fs, entry):
                     await _recurse(entry_path)
                 # It's a file - process it
                 elif pattern == "**/*.py":

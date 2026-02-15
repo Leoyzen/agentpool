@@ -8,32 +8,6 @@ from __future__ import annotations
 
 import colorsys
 import random
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    from fsspec.asyn import AsyncFileSystem
-
-
-async def is_directory(fs: AsyncFileSystem, path: str, entry_type: str = "") -> bool:
-    """Check if path is a directory.
-
-    Args:
-        fs: Async filesystem instance
-        path: Path to check
-        entry_type: Optional pre-known entry type from listing
-
-    Returns:
-        True if path is a directory
-    """
-    if entry_type:
-        return entry_type == "directory"
-
-    try:
-        info = await fs._info(path)
-        return info.get("type") == "directory"  # type: ignore[no-any-return]
-    except (OSError, FileNotFoundError):
-        return False
 
 
 def get_random_color() -> str:
