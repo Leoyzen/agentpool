@@ -346,14 +346,12 @@ class LSPManager:
             init_params["workspaceFolders"] = [{"uri": root_uri, "name": "workspace"}]
 
         # Send initialize request
-        response = await self._send_request(state.port, "initialize", init_params)
-
-        if "error" in response:
-            raise RuntimeError(f"LSP initialize failed: {response['error']}")
-
-        # Store capabilities
-        if "result" in response:
-            state.capabilities = response["result"].get("capabilities", {})
+        match await self._send_request(state.port, "initialize", init_params):
+            case {"error": error}:
+                raise RuntimeError(f"LSP initialize failed: {error}")
+            case {"result": result}:
+                # Store capabilities
+                state.capabilities = result.get("capabilities", {})
 
         # Send initialized notification (no response expected)
         await self._send_notification(state.port, "initialized", {})

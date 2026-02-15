@@ -154,11 +154,7 @@ class SessionManager:
         # Persist to store
         await self._store.save(data)
 
-        logger.info(
-            "Created session",
-            session_id=session_id,
-            agent=agent_name,
-        )
+        logger.info("Created session", session_id=session_id, agent=agent_name)
         return data
 
     async def get(self, session_id: str) -> SessionData | None:
@@ -191,11 +187,7 @@ class SessionManager:
         """
         return await self._store.delete(session_id)
 
-    async def list_sessions(
-        self,
-        *,
-        agent_name: str | None = None,
-    ) -> list[str]:
+    async def list_sessions(self, *, agent_name: str | None = None) -> list[str]:
         """List session IDs.
 
         Args:
@@ -204,7 +196,4 @@ class SessionManager:
         Returns:
             List of session IDs
         """
-        return await self._store.list_sessions(
-            pool_id=self._pool_id,
-            agent_name=agent_name,
-        )
+        return await self._store.list_sessions(pool_id=self._pool_id, agent_name=agent_name)
