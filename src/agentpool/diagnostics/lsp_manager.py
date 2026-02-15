@@ -139,22 +139,8 @@ class LSPManager:
     _starting: set[str] = field(default_factory=set)
     """Server IDs currently being started (to prevent concurrent start attempts)."""
 
-    def __post_init__(self) -> None:
-        """Initialize internal state."""
-        # dataclass default_factory doesn't work with mutable defaults in __init__
-        if not hasattr(self, "_servers") or self._servers is None:
-            self._servers = {}
-        if not hasattr(self, "_server_configs") or self._server_configs is None:
-            self._server_configs = {}
-        if not hasattr(self, "_starting") or self._starting is None:
-            self._starting = set()
-
     def register_server(self, config: LSPServerInfo) -> None:
-        """Register an LSP server configuration.
-
-        Args:
-            config: LSP server configuration from anyenv
-        """
+        """Register an LSP server configuration."""
         self._server_configs[config.id] = config
 
     def register_defaults(self) -> None:
@@ -167,31 +153,14 @@ class LSPManager:
             self.register_server(server)
 
     def get_server_for_file(self, path: str) -> LSPServerInfo | None:
-        """Get the best LSP server for a file path.
-
-        Args:
-            path: File path to check
-
-        Returns:
-            LSPServerInfo if found, None otherwise
-        """
+        """Get the best LSP server for a file path."""
         import posixpath
 
         ext = posixpath.splitext(path)[1].lower()
-        for config in self._server_configs.values():
-            if config.can_handle(ext):
-                return config
-        return None
+        return next((cfg for cfg in self._server_configs.values() if cfg.can_handle(ext)), None)
 
     def is_running(self, server_id: str) -> bool:
-        """Check if a server is currently running or starting.
-
-        Args:
-            server_id: Server identifier
-
-        Returns:
-            True if server is running or being started
-        """
+        """Check if a server is currently running or starting."""
         if server_id in self._starting:
             return True  # Treat "starting" as running to prevent concurrent starts
         return server_id in self._servers and self._servers[server_id].initialized
@@ -214,6 +183,8 @@ class LSPManager:
             ValueError: If server_id not registered
             RuntimeError: If server fails to start
         """
+        from agentpool.diagnostics.lsp_proxy import LSPProxy
+
         if server_id in self._servers:
             return self._servers[server_id]
 
@@ -237,18 +208,12 @@ class LSPManager:
             # Build the command
             command = config.get_full_command()
             command_str = " ".join(command)
-
             # Port file path for this server
             port_file = f"{self.port_file_dir}/{server_id}.port"
-
             # Start the LSP proxy process
-            from agentpool.diagnostics.lsp_proxy import LSPProxy
-
             proxy_cmd = LSPProxy.get_start_command(command_str, port_file)
-
             # Ensure port file directory exists
             await self.env.execute_command(f"mkdir -p {self.port_file_dir}")
-
             # Start proxy as background process
             process_id = await self.env.process_manager.start_process(
                 command=proxy_cmd[0],
@@ -377,15 +342,9 @@ class LSPManager:
             JSON-RPC response dict
         """
         # Generate client script
-        script = LSP_CLIENT_SCRIPT.format(
-            port=port,
-            method=method,
-            params=params,
-        )
-
+        script = LSP_CLIENT_SCRIPT.format(port=port, method=method, params=params)
         # Execute via environment with retries for connection refused
         cmd = f"python3 -c {_shell_quote(script)}"
-
         last_result = None
         for attempt in range(retries):
             result = await self.env.execute_command(cmd)
@@ -454,8 +413,7 @@ class LSPManager:
 
     async def stop_all(self) -> None:
         """Stop all running LSP servers."""
-        server_ids = list(self._servers.keys())
-        for server_id in server_ids:
+        for server_id in self._servers:
             await self.stop_server(server_id)
 
     async def get_diagnostics(
@@ -550,10 +508,8 @@ class LSPManager:
         # Build and run the diagnostic command
         command = config.build_diagnostic_command(files)
         result = await self.env.execute_command(command)
-
         # Parse the output
         diagnostics = config.parse_diagnostics(result.stdout or "", result.stderr or "")
-
         return DiagnosticsResult(
             diagnostics=[_convert_diagnostic(d, server_id) for d in diagnostics],
             success=True,
@@ -596,7 +552,6 @@ class LSPManager:
         }
 
         response = await self._send_request(state.port, "textDocument/hover", params)
-
         if "error" in response or not response.get("result"):
             return None
 
@@ -632,9 +587,7 @@ class LSPManager:
             "textDocument": {"uri": file_uri},
             "position": {"line": line, "character": character},
         }
-
         response = await self._send_request(state.port, "textDocument/definition", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -666,9 +619,7 @@ class LSPManager:
             "textDocument": {"uri": file_uri},
             "position": {"line": line, "character": character},
         }
-
         response = await self._send_request(state.port, "textDocument/typeDefinition", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -702,9 +653,7 @@ class LSPManager:
             "textDocument": {"uri": file_uri},
             "position": {"line": line, "character": character},
         }
-
         response = await self._send_request(state.port, "textDocument/implementation", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -739,9 +688,7 @@ class LSPManager:
             "position": {"line": line, "character": character},
             "context": {"includeDeclaration": include_declaration},
         }
-
         response = await self._send_request(state.port, "textDocument/references", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -769,9 +716,7 @@ class LSPManager:
 
         state = self._servers[server_id]
         params = {"textDocument": {"uri": file_uri}}
-
         response = await self._send_request(state.port, "textDocument/documentSymbol", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -796,12 +741,9 @@ class LSPManager:
 
         state = self._servers[server_id]
         params = {"query": query}
-
         response = await self._send_request(state.port, "workspace/symbol", params)
-
         if "error" in response or not response.get("result"):
             return []
-
         return _parse_workspace_symbols(response["result"])
 
     async def get_completions(
@@ -830,16 +772,13 @@ class LSPManager:
             "textDocument": {"uri": file_uri},
             "position": {"line": line, "character": character},
         }
-
         response = await self._send_request(state.port, "textDocument/completion", params)
-
         if "error" in response or not response.get("result"):
             return []
 
         result = response["result"]
         # Result can be CompletionList or CompletionItem[]
         items = result.get("items", result) if isinstance(result, dict) else result
-
         return [_parse_completion_item(item) for item in items]
 
     async def get_signature_help(
@@ -872,7 +811,6 @@ class LSPManager:
         }
 
         response = await self._send_request(state.port, "textDocument/signatureHelp", params)
-
         if "error" in response or not response.get("result"):
             return None
 
@@ -921,7 +859,6 @@ class LSPManager:
             return []
 
         state = self._servers[server_id]
-
         # Convert our Diagnostic to LSP format
         lsp_diagnostics = [
             {
@@ -953,7 +890,6 @@ class LSPManager:
         }
 
         response = await self._send_request(state.port, "textDocument/codeAction", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -995,11 +931,7 @@ class LSPManager:
         )
 
         if "error" in prepare_response:
-            return RenameResult(
-                changes={},
-                success=False,
-                error=str(prepare_response["error"]),
-            )
+            return RenameResult(changes={}, success=False, error=str(prepare_response["error"]))
 
         # Now do the rename
         rename_params = {
@@ -1009,13 +941,8 @@ class LSPManager:
         }
 
         response = await self._send_request(state.port, "textDocument/rename", rename_params)
-
         if "error" in response:
-            return RenameResult(
-                changes={},
-                success=False,
-                error=str(response["error"]),
-            )
+            return RenameResult(changes={}, success=False, error=str(response["error"]))
 
         result = response.get("result", {})
         changes = result.get("changes", {})
@@ -1055,17 +982,12 @@ class LSPManager:
         state = self._servers[server_id]
         params = {
             "textDocument": {"uri": file_uri},
-            "options": {
-                "tabSize": tab_size,
-                "insertSpaces": insert_spaces,
-            },
+            "options": {"tabSize": tab_size, "insertSpaces": insert_spaces},
         }
 
         response = await self._send_request(state.port, "textDocument/formatting", params)
-
         if "error" in response or not response.get("result"):
             return []
-
         return response["result"]  # type: ignore[no-any-return]
 
     # =========================================================================
@@ -1103,7 +1025,6 @@ class LSPManager:
         }
 
         response = await self._send_request(state.port, "textDocument/prepareCallHierarchy", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -1128,9 +1049,7 @@ class LSPManager:
 
         state = self._servers[server_id]
         params = {"item": _call_hierarchy_item_to_lsp(item)}
-
         response = await self._send_request(state.port, "callHierarchy/incomingCalls", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -1344,13 +1263,10 @@ def _parse_range(range_: dict[str, Any]) -> Range:
 
 def _parse_location(loc: dict[str, Any]) -> Location:
     """Parse LSP Location."""
-    return Location(
-        uri=loc["uri"],
-        range=_parse_range(loc["range"]),
-    )
+    return Location(uri=loc["uri"], range=_parse_range(loc["range"]))
 
 
-def _parse_locations(result: Any) -> list[Location]:
+def _parse_locations(result) -> list[Location]:
     """Parse LSP definition/references result (can be Location, Location[], or LocationLink[])."""
     if not result:
         return []
@@ -1363,12 +1279,8 @@ def _parse_locations(result: Any) -> list[Location]:
     locations = []
     for item in result:
         if "targetUri" in item:  # LocationLink
-            locations.append(
-                Location(
-                    uri=item["targetUri"],
-                    range=_parse_range(item["targetRange"]),
-                )
-            )
+            rng = _parse_range(item["targetRange"])
+            locations.append(Location(uri=item["targetUri"], range=rng))
         elif "uri" in item:  # Location
             locations.append(_parse_location(item))
 
@@ -1377,38 +1289,32 @@ def _parse_locations(result: Any) -> list[Location]:
 
 def _extract_hover_contents(contents: HoverContents) -> str:
     """Extract string from hover contents."""
-    if isinstance(contents, str):
-        return contents
-
-    if isinstance(contents, dict):
-        # MarkupContent or MarkedString with language
-        if "value" in contents:
-            return contents["value"]
-        if "kind" in contents:
-            return contents.get("value", "")
-
-    if isinstance(contents, list):
-        # Array of MarkedString
-        parts = []
-        for item in contents:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and "value" in item:
-                parts.append(item["value"])
-        return "\n\n".join(parts)
-
-    return str(contents)
+    match contents:
+        case str():
+            return contents
+        case {"value": value}:
+            return value
+        case list():
+            # Array of MarkedString
+            parts = []
+            for item in contents:
+                match item:
+                    case (str() as value) | {"value": value}:
+                        parts.append(value)
+            return "\n\n".join(parts)
+        case _:
+            return str(contents)
 
 
 def _extract_documentation(doc: Any) -> str | None:
     """Extract documentation string."""
-    if doc is None:
-        return None
-    if isinstance(doc, str):
-        return doc
-    if isinstance(doc, dict):
-        return doc.get("value")
-    return str(doc)
+    match doc:
+        case None:
+            return None
+        case (str() as value) | {"value": value}:
+            return value
+        case _:
+            return str(doc)
 
 
 def _parse_document_symbols(result: list[Any], file_uri: str) -> list[SymbolInfo]:
@@ -1440,10 +1346,7 @@ def _parse_document_symbol(item: dict[str, Any], file_uri: str) -> SymbolInfo:
     return SymbolInfo(
         name=item["name"],
         kind=SYMBOL_KIND_MAP.get(item.get("kind", 0), "unknown"),
-        location=Location(
-            uri=file_uri,
-            range=_parse_range(item["range"]),
-        ),
+        location=Location(uri=file_uri, range=_parse_range(item["range"])),
         detail=item.get("detail"),
         children=children,
     )
@@ -1501,13 +1404,8 @@ def _parse_call_hierarchy_item(item: dict[str, Any]) -> CallHierarchyItem:
 
 def _call_hierarchy_item_to_lsp(item: CallHierarchyItem) -> dict[str, Any]:
     """Convert CallHierarchyItem back to LSP format."""
-    # Find the numeric kind
-    kind_num = 12  # function default
-    for num, name in SYMBOL_KIND_MAP.items():
-        if name == item.kind:
-            kind_num = num
-            break
-
+    # Find the numeric kind (12 is function default)
+    kind_num = next((num for num, name in SYMBOL_KIND_MAP.items() if name == item.kind), 12)
     return {
         "name": item.name,
         "kind": kind_num,
@@ -1546,13 +1444,8 @@ def _parse_type_hierarchy_item(item: dict[str, Any]) -> TypeHierarchyItem:
 
 def _type_hierarchy_item_to_lsp(item: TypeHierarchyItem) -> dict[str, Any]:
     """Convert TypeHierarchyItem back to LSP format."""
-    # Find the numeric kind
-    kind_num = 5  # class default
-    for num, name in SYMBOL_KIND_MAP.items():
-        if name == item.kind:
-            kind_num = num
-            break
-
+    # Find the numeric kind (5 is class default)
+    kind_num = next((num for num, name in SYMBOL_KIND_MAP.items() if name == item.kind), 5)
     return {
         "name": item.name,
         "kind": kind_num,
@@ -1578,9 +1471,4 @@ def _type_hierarchy_item_to_lsp(item: TypeHierarchyItem) -> dict[str, Any]:
 
 def _severity_to_lsp(severity: str) -> int:
     """Convert severity string to LSP DiagnosticSeverity."""
-    return {
-        "error": 1,
-        "warning": 2,
-        "info": 3,
-        "hint": 4,
-    }.get(severity, 1)
+    return {"error": 1, "warning": 2, "info": 3, "hint": 4}.get(severity, 1)
