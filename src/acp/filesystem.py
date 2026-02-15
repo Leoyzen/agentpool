@@ -196,12 +196,14 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
     pipe_file = sync_wrapper(_pipe_file)
 
     @overload
-    async def _ls(self, path: str, detail: Literal[True] = ..., **kwargs: Any) -> list[AcpInfo]: ...
+    async def _ls(self, path: str, detail: Literal[True], **kwargs: Any) -> list[AcpInfo]: ...
 
     @overload
-    async def _ls(self, path: str, detail: Literal[False], **kwargs: Any) -> list[str]: ...
+    async def _ls(self, path: str, detail: bool = ..., **kwargs: Any) -> list[str]: ...
 
-    async def _ls(self, path: str, detail: bool = True, **kwargs: Any) -> list[AcpInfo] | list[str]:
+    async def _ls(
+        self, path: str, detail: bool = False, **kwargs: Any
+    ) -> list[AcpInfo] | list[str]:
         """List directory contents via terminal command.
 
         Uses 'ls -la' command through ACP terminal to get directory listings.

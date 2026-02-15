@@ -113,13 +113,6 @@ class RepoMap:
         except (OSError, FileNotFoundError):
             return None
 
-    async def _ls(self, path: str, detail: bool = True) -> list[dict[str, Any]]:
-        """List directory contents."""
-        try:
-            return await self.fs._ls(path, detail=detail)  # type: ignore[no-any-return]
-        except (OSError, FileNotFoundError):
-            return []
-
     async def find_files(self, path: str, pattern: str = "**/*.py") -> list[str]:
         """Find files matching pattern recursively."""
         from upathtools import is_directory
@@ -127,7 +120,7 @@ class RepoMap:
         results: list[str] = []
 
         async def _recurse(current_path: str) -> None:
-            entries = await self._ls(current_path, detail=True)
+            entries = await self.fs._ls(current_path, detail=True)
             for entry in entries:
                 entry_path = entry.get("name", "")
 
