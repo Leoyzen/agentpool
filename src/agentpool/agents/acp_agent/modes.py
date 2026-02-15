@@ -121,27 +121,26 @@ class ACPModeCategory(ModeCategoryProtocol["ACPAgent"]):
                 if config_opt.id != "mode":
                     continue
                 mode_infos: list[ModeInfo] = []
-                if isinstance(config_opt.options, list):
-                    for opt_item in config_opt.options:
-                        if isinstance(opt_item, SessionConfigSelectGroup):
-                            mode_infos.extend(
-                                ModeInfo(
-                                    id=sub_opt.value,
-                                    name=sub_opt.name,
-                                    description=sub_opt.description or "",
-                                    category_id="mode",
-                                )
-                                for sub_opt in opt_item.options
+                for opt_item in config_opt.options:
+                    if isinstance(opt_item, SessionConfigSelectGroup):
+                        mode_infos.extend(
+                            ModeInfo(
+                                id=sub_opt.value,
+                                name=sub_opt.name,
+                                description=sub_opt.description or "",
+                                category_id="mode",
                             )
-                        else:
-                            mode_infos.append(
-                                ModeInfo(
-                                    id=opt_item.value,
-                                    name=opt_item.name,
-                                    description=opt_item.description or "",
-                                    category_id="mode",
-                                )
+                            for sub_opt in opt_item.options
+                        )
+                    else:
+                        mode_infos.append(
+                            ModeInfo(
+                                id=opt_item.value,
+                                name=opt_item.name,
+                                description=opt_item.description or "",
+                                category_id="mode",
                             )
+                        )
                 return cls(available_modes=mode_infos)
 
         # Fall back to legacy modes state
