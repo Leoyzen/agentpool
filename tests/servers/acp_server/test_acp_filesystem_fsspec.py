@@ -44,7 +44,7 @@ async def test_acp_filesystem_fsspec_operations():
 
             # Test writing files
             new_file = temp_path / "written.txt"
-            await fs._put_file(str(new_file), "New content")
+            await fs._pipe_file(str(new_file), b"New content")
             assert new_file.exists()
             assert new_file.read_text("utf-8") == "New content"
 
