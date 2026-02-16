@@ -31,6 +31,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+  "alembic>=1.16.5",
   "anyenv[httpx]>=0.3.0",
   "clawd-code-sdk>=0.1.36",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
@@ -143,7 +144,6 @@ zed = ["zstandard>=0.23.0"]  # Zed IDE storage provider
 
 [dependency-groups]
 dev = [
-  "alembic>=1.16.5",
   "check-jsonschema>=0.35.0",
   "devtools",
   "fastembed>=0.7.4; python_version < '3.14'",

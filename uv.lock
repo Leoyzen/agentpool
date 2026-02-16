@@ -44,6 +44,7 @@ name = "agentpool"
 version = "2.8.12"
 source = { editable = "." }
 dependencies = [
+    { name = "alembic" },
     { name = "anyenv", extra = ["httpx"] },
     { name = "clawd-code-sdk" },
     { name = "docler" },
@@ -159,7 +160,6 @@ benchmark = [
     { name = "pyinstrument" },
 ]
 dev = [
-    { name = "alembic" },
     { name = "check-jsonschema" },
     { name = "devtools" },
     { name = "fastembed", marker = "python_full_version < '3.14'" },
@@ -192,6 +192,7 @@ lint = [
 [package.metadata]
 requires-dist = [
     { name = "ag-ui-protocol", marker = "extra == 'ag-ui'", specifier = ">=0.1.10" },
+    { name = "alembic", specifier = ">=1.16.5" },
     { name = "anyenv", extras = ["httpx"], specifier = ">=0.3.0" },
     { name = "anyvoice", extras = ["tts-edge", "openai"], marker = "extra == 'tts'", specifier = ">=0.0.2" },
     { name = "apprise", marker = "extra == 'notifications'", specifier = ">=1.9.5" },
@@ -271,7 +272,6 @@ provides-extras = ["a2a", "ag-ui", "braintrust", "clipboard", "coding", "composi
 [package.metadata.requires-dev]
 benchmark = [{ name = "pyinstrument" }]
 dev = [
-    { name = "alembic", specifier = ">=1.16.5" },
     { name = "check-jsonschema", specifier = ">=0.35.0" },
     { name = "devtools" },
     { name = "fastembed", marker = "python_full_version < '3.14'", specifier = ">=0.7.4" },
