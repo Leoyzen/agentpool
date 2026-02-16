@@ -110,15 +110,14 @@ class SessionManager:
             ValueError: If session_id already exists
             KeyError: If agent_name not found in pool
         """
-        # Validate agent exists
+        from agentpool_storage.project_store import ProjectStore
+
         if agent_name not in self._pool.all_agents:
             raise KeyError(f"Agent '{agent_name}' not found in pool")
 
-        # Generate session ID if not provided
-        if session_id is None:
+        if session_id is None:  # Generate session ID if not provided
             session_id = self.generate_session_id()
-        else:
-            # Check if session already exists
+        else:  # Check if session already exists
             existing = await self._store.load(session_id)
             if existing is not None:
                 raise ValueError(f"Session '{session_id}' already exists")
@@ -127,8 +126,6 @@ class SessionManager:
         project_id: str | None = None
         if cwd and self._storage:
             try:
-                from agentpool_storage.project_store import ProjectStore
-
                 project_store = ProjectStore(self._storage)
                 project = await project_store.get_or_create(cwd)
                 project_id = project.project_id
@@ -153,19 +150,11 @@ class SessionManager:
 
         # Persist to store
         await self._store.save(data)
-
         logger.info("Created session", session_id=session_id, agent=agent_name)
         return data
 
     async def get(self, session_id: str) -> SessionData | None:
-        """Get session data by ID.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            Session data if found, None otherwise
-        """
+        """Get session data by ID."""
         return await self._store.load(session_id)
 
     async def save(self, data: SessionData) -> None:
@@ -177,14 +166,7 @@ class SessionManager:
         await self._store.save(data)
 
     async def delete(self, session_id: str) -> bool:
-        """Delete a session from store.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            True if session was deleted, False if not found
-        """
+        """Delete a session from store."""
         return await self._store.delete(session_id)
 
     async def list_sessions(self, *, agent_name: str | None = None) -> list[str]:

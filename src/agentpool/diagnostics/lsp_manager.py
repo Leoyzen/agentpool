@@ -341,10 +341,11 @@ class LSPManager:
         Returns:
             JSON-RPC response dict
         """
-        # Generate client script
+        import shlex
+
         script = LSP_CLIENT_SCRIPT.format(port=port, method=method, params=params)
         # Execute via environment with retries for connection refused
-        cmd = f"python3 -c {_shell_quote(script)}"
+        cmd = f"python3 -c {shlex.quote(script)}"
         last_result = None
         for attempt in range(retries):
             result = await self.env.execute_command(cmd)
@@ -445,7 +446,6 @@ class LSPManager:
             )
 
         state = self._servers[server_id]
-
         # Send textDocument/didOpen
         open_params = {
             "textDocument": {
@@ -471,11 +471,7 @@ class LSPManager:
             server_id=server_id,
         )
 
-    async def run_cli_diagnostics(
-        self,
-        server_id: str,
-        files: list[str],
-    ) -> DiagnosticsResult:
+    async def run_cli_diagnostics(self, server_id: str, files: list[str]) -> DiagnosticsResult:
         """Run CLI diagnostics using the server's CLI fallback.
 
         This is more reliable for one-shot diagnostic runs than the full
@@ -489,7 +485,6 @@ class LSPManager:
             DiagnosticsResult with parsed diagnostics
         """
         start_time = time.perf_counter()
-
         config = self._server_configs.get(server_id)
         if not config:
             return DiagnosticsResult(
@@ -558,7 +553,6 @@ class LSPManager:
         result = response["result"]
         contents = _extract_hover_contents(result.get("contents", ""))
         range_ = _parse_range(result.get("range")) if result.get("range") else None
-
         return HoverInfo(contents=contents, range=range_)
 
     async def goto_definition(
@@ -694,11 +688,7 @@ class LSPManager:
 
         return _parse_locations(response["result"])
 
-    async def get_document_symbols(
-        self,
-        server_id: str,
-        file_uri: str,
-    ) -> list[SymbolInfo]:
+    async def get_document_symbols(self, server_id: str, file_uri: str) -> list[SymbolInfo]:
         """Get all symbols in a document (outline).
 
         Returns a hierarchical list of symbols (classes, functions, etc.)
@@ -722,11 +712,7 @@ class LSPManager:
 
         return _parse_document_symbols(response["result"], file_uri)
 
-    async def search_workspace_symbols(
-        self,
-        server_id: str,
-        query: str,
-    ) -> list[SymbolInfo]:
+    async def search_workspace_symbols(self, server_id: str, query: str) -> list[SymbolInfo]:
         """Search for symbols in the workspace.
 
         Args:
@@ -1080,9 +1066,7 @@ class LSPManager:
 
         state = self._servers[server_id]
         params = {"item": _call_hierarchy_item_to_lsp(item)}
-
         response = await self._send_request(state.port, "callHierarchy/outgoingCalls", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -1151,9 +1135,7 @@ class LSPManager:
 
         state = self._servers[server_id]
         params = {"item": _type_hierarchy_item_to_lsp(item)}
-
         response = await self._send_request(state.port, "typeHierarchy/supertypes", params)
-
         if "error" in response or not response.get("result"):
             return []
 
@@ -1178,20 +1160,11 @@ class LSPManager:
 
         state = self._servers[server_id]
         params = {"item": _type_hierarchy_item_to_lsp(item)}
-
         response = await self._send_request(state.port, "typeHierarchy/subtypes", params)
-
         if "error" in response or not response.get("result"):
             return []
 
         return [_parse_type_hierarchy_item(item) for item in response["result"]]
-
-
-def _shell_quote(s: str) -> str:
-    """Quote a string for shell use."""
-    import shlex
-
-    return shlex.quote(s)
 
 
 def _uri_to_language_id(uri: str) -> str:
