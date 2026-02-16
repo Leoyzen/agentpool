@@ -1605,7 +1605,7 @@ wheels = [
 
 [[package]]
 name = "exxec"
-version = "0.3.7"
+version = "0.3.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyenv" },
@@ -1614,9 +1614,9 @@ dependencies = [
     { name = "schemez" },
     { name = "upathtools" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/58/91/20363f4c44131ab4598052f7cdea3e048246a49d792b5ad060f0831267dc/exxec-0.3.7.tar.gz", hash = "sha256:86e208062c771e171d4d8c275e12fef3a53fad89b3c4edb400512b0aa38ab188", size = 86326, upload-time = "2026-02-12T18:02:16.43Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/65/60/e37e3ea013e2185e2e41a88363c538bfa23f0f0e7c32bafc5c2b6ea89f12/exxec-0.3.8.tar.gz", hash = "sha256:8c93e3746209a271f586be905e11feff86de3ee6bcfa42d7450dc78516b9c1f4", size = 79520, upload-time = "2026-02-16T02:44:19.562Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/89/2c189e28ce939ab5baaff02eb42746797b102bed10d4cf80eee0600edc04/exxec-0.3.7-py3-none-any.whl", hash = "sha256:8b3cdeac484309b70ae53f268fc4af985f43772324567b56abd54f8796a50710", size = 120915, upload-time = "2026-02-12T18:02:14.114Z" },
+    { url = "https://files.pythonhosted.org/packages/97/38/149b2f73dc314b27cec9259df7bca4053e58454c0eef17194d00d65b44b5/exxec-0.3.8-py3-none-any.whl", hash = "sha256:55f25ec8296374a8692f72e80a97948e01a67eaf5a39b894989e9eecbf56558e", size = 113515, upload-time = "2026-02-16T02:44:17.067Z" },
 ]
 
 [[package]]
@@ -1760,11 +1760,11 @@ wheels = [
 
 [[package]]
 name = "filelock"
-version = "3.24.0"
+version = "3.24.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/00/cd/fa3ab025a8f9772e8a9146d8fd8eef6d62649274d231ca84249f54a0de4a/filelock-3.24.0.tar.gz", hash = "sha256:aeeab479339ddf463a1cdd1f15a6e6894db976071e5883efc94d22ed5139044b", size = 37166, upload-time = "2026-02-14T16:05:28.723Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/8a/b24ff2c2d7f20ce930b5efe91e7260247d185d8939707721168ad204e465/filelock-3.24.1.tar.gz", hash = "sha256:3440181dd03f8904c108c8e9f5b11d1663e9fc960f1c837586a11f1c5c041e54", size = 37452, upload-time = "2026-02-15T22:03:16.564Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/dd/d7e7f4f49180e8591c9e1281d15ecf8e7f25eb2c829771d9682f1f9fe0c8/filelock-3.24.0-py3-none-any.whl", hash = "sha256:eebebb403d78363ef7be8e236b63cc6760b0004c7464dceaba3fd0afbd637ced", size = 23977, upload-time = "2026-02-14T16:05:27.578Z" },
+    { url = "https://files.pythonhosted.org/packages/97/64/3613e89811e79aca8d0d4f2c984fc66336bc9d83529c1cbe02f5df010d0a/filelock-3.24.1-py3-none-any.whl", hash = "sha256:7c59f595e3cf4887dc95b403a896849da49ed183d7c9d7ee855646ca99f10698", size = 24153, upload-time = "2026-02-15T22:03:15.262Z" },
 ]
 
 [[package]]
@@ -4777,15 +4777,15 @@ crypto = [
 
 [[package]]
 name = "pymdown-extensions"
-version = "10.20.1"
+version = "10.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/6c/9e370934bfa30e889d12e61d0dae009991294f40055c238980066a7fbd83/pymdown_extensions-10.20.1.tar.gz", hash = "sha256:e7e39c865727338d434b55f1dd8da51febcffcaebd6e1a0b9c836243f660740a", size = 852860, upload-time = "2026-01-24T05:56:56.758Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/63/06673d1eb6d8f83c0ea1f677d770e12565fb516928b4109c9e2055656a9e/pymdown_extensions-10.21.tar.gz", hash = "sha256:39f4a020f40773f6b2ff31d2cd2546c2c04d0a6498c31d9c688d2be07e1767d5", size = 853363, upload-time = "2026-02-15T20:44:06.748Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/6d/b6ee155462a0156b94312bdd82d2b92ea56e909740045a87ccb98bf52405/pymdown_extensions-10.20.1-py3-none-any.whl", hash = "sha256:24af7feacbca56504b313b7b418c4f5e1317bb5fea60f03d57be7fcc40912aa0", size = 268768, upload-time = "2026-01-24T05:56:54.537Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/2c/5b079febdc65e1c3fb2729bf958d18b45be7113828528e8a0b5850dd819a/pymdown_extensions-10.21-py3-none-any.whl", hash = "sha256:91b879f9f864d49794c2d9534372b10150e6141096c3908a455e45ca72ad9d3f", size = 268877, upload-time = "2026-02-15T20:44:05.464Z" },
 ]
 
 [[package]]
@@ -6332,7 +6332,7 @@ wheels = [
 
 [[package]]
 name = "upathtools"
-version = "1.19.7"
+version = "1.19.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofile" },
@@ -6341,9 +6341,9 @@ dependencies = [
     { name = "ripgrep-rs" },
     { name = "universal-pathlib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/44/52/d30004829563f1a5325a028d587936b16b6c0ae11986a580d58ceab33c46/upathtools-1.19.7.tar.gz", hash = "sha256:b53f8c67a548d12f7acaba80dd6ed4d62d7d1cf001dfb65a458ed4355627b005", size = 184086, upload-time = "2026-02-15T14:05:21.266Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/9a/73d67ef876158b0676a5c16d6fb192c9f02d25d1f925ddfa0b16f804e7af/upathtools-1.19.8.tar.gz", hash = "sha256:c81f5b247efd636b57a37416704b9439b96a22f4adce4ba777bdb1d7e5ddc113", size = 191508, upload-time = "2026-02-16T02:01:50.627Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/72/d19f39b4da59a1e2488909e26febd5c834547fda823f00ecac9cc39daea8/upathtools-1.19.7-py3-none-any.whl", hash = "sha256:57b2447e0a6776bb1f4a784d9b0f3acd7695eb812972de4e70cad78ffae1252d", size = 243841, upload-time = "2026-02-15T14:05:19.839Z" },
+    { url = "https://files.pythonhosted.org/packages/df/ea/15ed3d5282450d205812039b3439edda4e940841511f6e26a9ab7392566b/upathtools-1.19.8-py3-none-any.whl", hash = "sha256:a4ed0d10fa7424d84d189d4241357444e4ea155fd9ecd602a52bbe4112d2c23d", size = 252371, upload-time = "2026-02-16T02:01:49.08Z" },
 ]
 
 [package.optional-dependencies]
