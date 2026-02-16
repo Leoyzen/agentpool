@@ -96,7 +96,7 @@ class RepoMap:
         except (OSError, UnicodeDecodeError):
             return None
         else:
-            return content  # type: ignore[no-any-return]
+            return content
 
     async def _info(self, path: str) -> FileInfo | None:
         """Get file info."""
