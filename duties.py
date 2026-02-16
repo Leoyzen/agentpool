@@ -154,6 +154,7 @@ def lint(ctx, filepath: str | None = None):  # noqa: D417
     """
     ruff_target, mypy_target, jsonschema_files = _get_lint_targets(filepath)
 
+    ctx.run("ty check .")
     ctx.run(f"uv run ruff check --fix --unsafe-fixes {ruff_target}")
     ctx.run(f"uv run ruff format {ruff_target}")
 
@@ -241,7 +242,7 @@ def version(
 
 
 @duty(capture=False)
-def smoke_test(ctx, timeout: int = 10):
+def smoke_test(ctx, timeout: int = 10):  # noqa: D417
     """Build wheel and verify serve-acp starts successfully via uvx.
 
     Builds the package, installs it in an isolated uvx environment,
@@ -268,13 +269,13 @@ def smoke_test(ctx, timeout: int = 10):
         print(f"Built: {wheel.name}")
 
         # Run serve-acp from the wheel in an isolated environment
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: PLW1510
             ["timeout", str(timeout), "uvx", "--from", str(wheel), "agentpool", "serve-acp"],
             capture_output=True,
             text=True,
         )
 
-        if result.returncode == 124:
+        if result.returncode == 124:  # noqa: PLR2004
             print(f"serve-acp stayed alive for {timeout}s (healthy)")
         else:
             print(f"serve-acp exited with code {result.returncode}")
