@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from exxec.models import ServerInfo
     from exxec_config import ExecutionEnvironmentConfig
     from fastapi import FastAPI
-    from fsspec.asyn import AsyncFileSystem
+    from fsspec import AbstractFileSystem
     from schemez import ToolsetCodeGenerator
     import uvicorn
 
@@ -92,7 +92,7 @@ class RemoteCodeExecutor:
         self,
         code: str,
         title: str,
-        internal_fs: AsyncFileSystem | None = None,
+        internal_fs: AbstractFileSystem | None = None,
     ) -> Any:
         """Execute code with tools available via HTTP API.
 

@@ -121,7 +121,7 @@ class NativeAgentConfig(BaseAgentConfig):
         examples=[
             ["webbrowser:open", "builtins:print"],
             [
-                ImportToolConfig(import_path="webbrowser:open", name="web_browser"),  # pyright: ignore[reportArgumentType]
+                ImportToolConfig(import_path="webbrowser:open", name="web_browser"),  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
                 BashToolConfig(timeout=30.0),
             ],
         ],
