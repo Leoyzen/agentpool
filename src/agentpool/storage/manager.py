@@ -78,15 +78,23 @@ class StorageManager:
     # Signal emitted when session metadata is generated
     metadata_generated: Signal[SessionMetadataGeneratedEvent] = Signal()
 
-    def __init__(self, config: StorageConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: StorageConfig | None = None,
+        providers: list[StorageProvider] | None = None,
+    ) -> None:
         """Initialize storage manager.
 
         Args:
             config: Storage configuration including providers and filters
+            providers: Optional pre-created providers (overrides config-based creation)
         """
         self.config = config or StorageConfig()
         self.task_manager = TaskManager()
-        self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
+        if providers is not None:
+            self.providers = providers
+        else:
+            self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
         self._session_logged: set[str] = set()  # Track logged conversations for idempotency
 
     async def __aenter__(self) -> Self:

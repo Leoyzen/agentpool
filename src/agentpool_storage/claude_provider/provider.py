@@ -46,6 +46,7 @@ from agentpool_storage.models import TokenUsage
 
 if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
+    from agentpool.sessions.models import SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import ConversationData, QueryFilters, StatsFilters
 
@@ -387,6 +388,59 @@ class ClaudeStorageProvider(StorageProvider):
             if metadata := _read_session_metadata(session_path):
                 result.append(metadata)
         return result
+
+    async def list_session_ids(
+        self,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs from Claude storage."""
+        return [sid for sid, _ in self._list_sessions()]
+
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data from Claude storage metadata."""
+        from agentpool.sessions.models import SessionData
+
+        session_path = self._find_session_path(session_id)
+        if not session_path:
+            return None
+        meta = _read_session_metadata(session_path)
+        if not meta:
+            return None
+        now = get_now()
+        created_at = (
+            parse_iso_timestamp(meta.first_timestamp, fallback=now) if meta.first_timestamp else now
+        )
+        last_active = (
+            parse_iso_timestamp(meta.last_timestamp, fallback=created_at)
+            if meta.last_timestamp
+            else created_at
+        )
+        return SessionData(
+            session_id=meta.session_id,
+            agent_name="claude_code",
+            cwd=meta.cwd or "",
+            created_at=created_at,
+            last_active=last_active,
+            metadata={"title": meta.title, "message_count": meta.message_count}
+            if meta.title
+            else {"message_count": meta.message_count},
+        )
+        last_active = (
+            parse_iso_timestamp(meta.last_timestamp, fallback=created_at)
+            if meta.last_timestamp
+            else created_at
+        )
+        return SessionData(
+            session_id=meta.session_id,
+            agent_name="claude_code",
+            cwd=meta.cwd or "",
+            created_at=created_at,
+            last_active=last_active,
+            metadata={"title": meta.title, "message_count": meta.message_count}
+            if meta.title
+            else {"message_count": meta.message_count},
+        )
 
     async def filter_messages(self, query: SessionQuery) -> list[ChatMessage[str]]:
         """Filter messages based on query.

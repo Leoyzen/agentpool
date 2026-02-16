@@ -118,7 +118,7 @@ from agentpool.messaging import ChatMessage
 from agentpool.messaging.messages import TokenCost
 from agentpool.sessions.models import SessionData
 from agentpool.utils.streams import merge_queue_into_iterator
-from agentpool.utils.time_utils import get_now, parse_iso_timestamp
+from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
@@ -294,8 +294,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from agentpool.agents.claude_code_agent.hook_manager import ClaudeCodeHookManager
         from agentpool.agents.sys_prompts import SystemPrompts
         from agentpool.mcp_server.tool_bridge import ToolManagerBridge
+        from agentpool.storage import StorageManager
         from agentpool_storage.claude_provider import ClaudeStorageProvider
 
+        claude_provider = ClaudeStorageProvider()
+        claude_storage = StorageManager(providers=[claude_provider])
         super().__init__(
             name=name or "claude_code",
             description=description,
@@ -310,6 +313,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             event_handlers=event_handlers,
             commands=commands,
             hooks=hooks,
+            storage=claude_storage,
         )
         self._subagents = builtin_subagents
         self._allowed_tools = allowed_tools
@@ -349,8 +353,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._mcp_servers: dict[str, McpServerConfig] = {}  # Claude SDK MCP server configs
         # Track pending tool call for permission matching
         self._pending_tool_call_ids: dict[str, str] = {}
-        # Create Claude storage provider for session management
-        self._claude_storage = ClaudeStorageProvider()
+        # Claude storage provider is available via self.storage
         self._hook_manager = ClaudeCodeHookManager(
             agent_name=self.name,
             agent_hooks=hooks,
@@ -1370,87 +1373,69 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         cwd: str | None = None,
         limit: int | None = None,
     ) -> list[SessionData]:
-        """List sessions from Claude storage (~/.claude/projects/).
-
-        Uses fast metadata reading that only parses timestamps and message counts,
-        without loading full message content.
-        """
-        # Use fast metadata listing - avoids parsing all message content
-        metadata_list = self._claude_storage.list_session_metadata(project_path=cwd)
+        """List sessions from Claude storage (~/.claude/projects/)."""
+        storage = self.storage
+        if not storage:
+            return []
+        session_ids = await storage.list_session_ids(agent_name=self.name)
         result: list[SessionData] = []
         default_cwd = str(self.env.cwd or Path.cwd())
-        for meta in metadata_list:
-            # Parse timestamps
-            now = get_now()
-            created_at = (
-                parse_iso_timestamp(meta.first_timestamp, fallback=now)
-                if meta.first_timestamp
-                else now
-            )
-            last_active = (
-                parse_iso_timestamp(meta.last_timestamp, fallback=created_at)
-                if meta.last_timestamp
-                else created_at
-            )
-
-            session_data = SessionData(
-                session_id=meta.session_id,
-                agent_name=self.name,
-                cwd=meta.cwd or default_cwd,
-                created_at=created_at,
-                last_active=last_active,
-                metadata={"title": meta.title, "message_count": meta.message_count}
-                if meta.title
-                else {"message_count": meta.message_count},
-            )
-            result.append(session_data)
-
-        # Sort by last_active, most recent first
+        for session_id in session_ids:
+            if session_data := await storage.load_session(session_id):
+                if not session_data.cwd:
+                    session_data = session_data.model_copy(update={"cwd": default_cwd})
+                if cwd is not None and session_data.cwd != cwd:
+                    continue
+                result.append(session_data)
+                if limit is not None and len(result) >= limit:
+                    break
         result.sort(key=lambda s: s.updated_at or "", reverse=True)
-        return result if limit is None else result[:limit]
+        return result
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load and restore a session from Claude storage (requires reconnect)."""
-        try:  # Load conversation messages from Claude storage
-            messages = await self._claude_storage.get_session_messages(session_id=session_id)
+        storage = self.storage
+        if not storage:
+            return None
+        try:
+            messages = await storage.get_session_messages(session_id=session_id)
         except Exception:
             self.log.exception("Failed to load Claude session", session_id=session_id)
             return None
-        else:
-            if not messages:
-                self.log.warning("No messages found in session", session_id=session_id)
-                return None
-            # Restore to conversation history
-            self.conversation.chat_messages.clear()
-            self.conversation.chat_messages.extend(messages)
-            self.log.info("Session loaded", session_id=session_id, message_count=len(messages))
-            # Set the SDK session ID so reconnect can resume this session
-            self._sdk_session_id = session_id
-            # Reconnect to Claude SDK with the loaded session to properly resume
-            try:
-                await self.reconnect(resume_session=True)
-                self.log.info("Reconnected with loaded session", session_id=session_id)
-            except Exception:
-                error_msg = "Failed to reconnect with loaded session, continuing with local history"
-                self.log.exception(error_msg, session_id=session_id)
-                # Don't fail the load - we still have the conversation history locally
-
-            # Build SessionData from loaded messages
-            last_active = messages[-1].timestamp if messages[-1].timestamp else get_now()
-            cwd = str(self.env.cwd or Path.cwd())
-            # Try to extract cwd from message metadata
-            for msg in reversed(messages):
-                if (val := msg.metadata.get("cwd")) and isinstance(val, str):
-                    cwd = val
-                    break
-
-            return SessionData(
-                session_id=session_id,
-                agent_name=self.name,
-                cwd=cwd,
-                created_at=messages[0].timestamp if messages[0].timestamp else last_active,
-                last_active=last_active,
-            )
+        if not messages:
+            self.log.warning("No messages found in session", session_id=session_id)
+            return None
+        # Restore to conversation history
+        self.conversation.chat_messages.clear()
+        self.conversation.chat_messages.extend(messages)
+        self.log.info("Session loaded", session_id=session_id, message_count=len(messages))
+        # Set the SDK session ID so reconnect can resume this session
+        self._sdk_session_id = session_id
+        # Reconnect to Claude SDK with the loaded session to properly resume
+        try:
+            await self.reconnect(resume_session=True)
+            self.log.info("Reconnected with loaded session", session_id=session_id)
+        except Exception:
+            error_msg = "Failed to reconnect with loaded session, continuing with local history"
+            self.log.exception(error_msg, session_id=session_id)
+        # Build SessionData from storage metadata
+        session_data = await storage.load_session(session_id)
+        if session_data:
+            return session_data
+        # Fallback: build from messages
+        last_active = messages[-1].timestamp or get_now()
+        cwd = str(self.env.cwd or Path.cwd())
+        for msg in reversed(messages):
+            if (val := msg.metadata.get("cwd")) and isinstance(val, str):
+                cwd = val
+                break
+        return SessionData(
+            session_id=session_id,
+            agent_name=self.name,
+            cwd=cwd,
+            created_at=messages[0].timestamp or last_active,
+            last_active=last_active,
+        )
 
 
 if __name__ == "__main__":

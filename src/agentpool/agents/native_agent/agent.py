@@ -104,6 +104,7 @@ class AgentKwargs(TypedDict, total=False):
     model_settings: ModelSettings | None
     usage_limits: UsageLimits | None
     providers: Sequence[ProviderType] | None
+    storage: StorageManager | None
 
 
 class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
@@ -151,6 +152,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         history_processors: Sequence[Callable[..., Any]] | None = None,
+        storage: StorageManager | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -199,6 +201,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
             history_processors: Pre-resolved history processor callables
+            storage: Optional per-agent StorageManager. Falls back to pool.storage if not provided.
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -236,6 +239,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             event_handlers=event_handlers,
             commands=all_commands,
             hooks=hooks,
+            storage=storage,
         )
         self.tool_confirmation_mode: ToolConfirmationMode = tool_confirmation_mode
         # Store builtin tools for pydantic-ai
@@ -251,9 +255,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if knowledge:
             resources.extend(knowledge.get_resources())
         manifest = agent_pool.manifest if agent_pool else AgentsManifest()
-        storage = agent_pool.storage if agent_pool else StorageManager()
+        effective_storage = self.storage or StorageManager()
         self.conversation = MessageHistory(
-            storage=storage,
+            storage=effective_storage,
             converter=ConversionManager(config=manifest.conversion),
             session_config=memory_cfg,
             resources=resources,
@@ -910,9 +914,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             List of SessionData objects
         """
-        if not self.agent_pool:
+        storage = self.storage
+        if not storage:
             return []
-        storage = self.agent_pool.storage
         try:
             session_ids = await storage.list_session_ids(agent_name=self.name)
             result: list[SessionData] = []
@@ -947,10 +951,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             SessionData if session was found and loaded, None otherwise
         """
-        if not self.agent_pool:
+        storage = self.storage
+        if not storage:
             return None
-
-        storage = self.agent_pool.storage
         try:
             session_data = await storage.load_session(session_id)
             if not session_data:

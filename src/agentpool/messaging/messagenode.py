@@ -60,9 +60,11 @@ class MessageNode[TDeps, TResult](ABC):
         agent_pool: AgentPool[Any] | None = None,
         enable_logging: bool = True,
         event_configs: Sequence[EventConfig] | None = None,
+        storage: StorageManager | None = None,
     ) -> None:
         """Initialize message node."""
         super().__init__()
+        self._storage = storage
 
         from agentpool.mcp_server.manager import MCPManager
         from agentpool.messaging import EventManager
@@ -163,7 +165,9 @@ class MessageNode[TDeps, TResult](ABC):
 
     @property
     def storage(self) -> StorageManager | None:
-        """Get storage manager from pool."""
+        """Get storage manager (per-agent override or from pool)."""
+        if self._storage is not None:
+            return self._storage
         return self.agent_pool.storage if self.agent_pool else None
 
     @property

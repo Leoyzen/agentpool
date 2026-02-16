@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
     from agentpool.sessions import SessionData
+    from agentpool.storage import StorageManager
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
@@ -170,6 +171,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
+        storage: StorageManager | None = None,
     ) -> None:
         """Initialize base agent with shared infrastructure.
 
@@ -189,6 +191,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             event_handlers: Event handlers for this agent
             commands: Slash commands to register with this agent
             hooks: Agent hooks for intercepting agent behavior at run and tool events
+            storage: Optional per-agent StorageManager. Falls back to pool.storage if not provided.
         """
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
@@ -205,13 +208,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             agent_pool=agent_pool,
             enable_logging=enable_logging,
             event_configs=event_configs,
+            storage=storage,
         )
         self._infinite = False
         self.deps_type = deps_type  # or type(None)
         self._background_task: asyncio.Task[ChatMessage[Any]] | None = None
         self._event_queue: asyncio.Queue[RichAgentStreamEvent[Any]] = asyncio.Queue()
-        storage = agent_pool.storage if agent_pool else None
-        self.conversation = MessageHistory(storage=storage)
+        self.conversation = MessageHistory(storage=self.storage)
         match env:
             case ExecutionEnvironment():
                 self.env = env
