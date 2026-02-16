@@ -434,6 +434,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         file_tracker = FileTracker()
         assert self.session_id is not None
         yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
+        # Persist SDK session ID to storage for cross-referencing
+        if self.storage and self.session_id and self._sdk_session_id:
+            await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
         final_blocks = convert_to_acp_content(prompts)
         # Handle ephemeral execution (fork session if store_history=False)
         session_id = self._sdk_session_id

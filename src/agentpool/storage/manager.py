@@ -230,6 +230,7 @@ class StorageManager:
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
         initial_prompt: str | None = None,
         on_title_generated: Callable[[str], None] | None = None,
     ) -> None:
@@ -243,6 +244,7 @@ class StorageManager:
             node_name: Name of the node/agent
             start_time: Optional start time
             model: Requested model identifier for this session
+            agent_type: Type of agent backend (native, claude, codex, etc.)
             initial_prompt: Optional initial prompt to trigger title generation
             on_title_generated: Optional callback invoked when title is generated
         """
@@ -261,6 +263,7 @@ class StorageManager:
                     node_name=node_name,
                     start_time=start_time,
                     model=model,
+                    agent_type=agent_type,
                 )
 
         # Handle title generation based on prompt length
@@ -920,3 +923,17 @@ class StorageManager:
         """
         provider = self.get_project_provider()
         return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """Update the external SDK session ID for a session.
+
+        Args:
+            session_id: Internal session identifier
+            sdk_session_id: External SDK session ID
+        """
+        for provider in self.providers:
+            await provider.update_sdk_session_id(session_id, sdk_session_id)

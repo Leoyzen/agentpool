@@ -915,6 +915,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             assert isinstance(first_msg, SystemMessage)
             assert first_msg.subtype == "init"
             self._sdk_session_id = first_msg.data["session_id"]
+            # Persist SDK session ID to storage for cross-referencing
+            if self.storage and self.session_id:
+                await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
             # Merge SDK messages with event queue for real-time tool event streaming
             async with (
                 self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),

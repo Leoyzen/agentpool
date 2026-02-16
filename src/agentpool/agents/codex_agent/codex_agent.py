@@ -370,6 +370,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         if final_session_id is None:
             raise ValueError("session_id must be set")
         yield RunStartedEvent(session_id=final_session_id, run_id=run_id)
+        # Persist SDK session ID to storage for cross-referencing
+        if self.storage and self.session_id and self._sdk_session_id:
+            await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
         # Stream turn events with bridge context set
         accumulated_text: list[str] = []
         self._token_usage_data = None

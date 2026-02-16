@@ -151,13 +151,20 @@ class SQLModelProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
     ) -> None:
         """Log conversation to database."""
         from agentpool_storage.sql_provider.models import Conversation
 
         async with AsyncSession(self.engine) as session:
             now = start_time or get_now()
-            convo = Conversation(id=session_id, agent_name=node_name, start_time=now, model=model)
+            convo = Conversation(
+                id=session_id,
+                agent_name=node_name,
+                start_time=now,
+                model=model,
+                agent_type=agent_type,
+            )
             session.add(convo)
             await session.commit()
 
@@ -678,6 +685,8 @@ class SQLModelProvider(StorageProvider):
                 parent_id=data.parent_id,
                 version=data.version,
                 cwd=data.cwd,
+                agent_type=data.agent_type,
+                sdk_session_id=data.sdk_session_id,
                 start_time=data.created_at,
                 last_active=data.last_active,
                 metadata_json=data.metadata,
@@ -705,6 +714,8 @@ class SQLModelProvider(StorageProvider):
                 parent_id=row.parent_id,
                 version=row.version,
                 cwd=row.cwd,
+                agent_type=row.agent_type,
+                sdk_session_id=row.sdk_session_id,
                 created_at=row.start_time,
                 last_active=row.last_active,
                 metadata=row.metadata_json or {},
@@ -738,3 +749,20 @@ class SQLModelProvider(StorageProvider):
             stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """Update the external SDK session ID for a session."""
+        from sqlalchemy import update
+
+        async with AsyncSession(self.engine) as db:
+            stmt = (
+                update(Conversation)
+                .where(Conversation.id == session_id)  # type: ignore[arg-type]
+                .values(sdk_session_id=sdk_session_id)
+            )
+            await db.execute(stmt)
+            await db.commit()

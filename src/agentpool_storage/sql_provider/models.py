@@ -270,6 +270,12 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     cwd: str | None = Field(default=None, sa_column=Column(Text))
     """Working directory for the session."""
 
+    agent_type: str | None = Field(default=None, index=True)
+    """Type of agent backend (native, claude, codex, acp, agui)."""
+
+    sdk_session_id: str | None = Field(default=None, index=True)
+    """External SDK session ID for cross-referencing."""
+
     last_active: datetime = Field(
         sa_column=Column(UTCDateTime, index=True),
         default_factory=get_now,

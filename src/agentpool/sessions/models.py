@@ -80,6 +80,12 @@ class SessionData(Schema):
     cwd: str | None = None
     """Working directory for the session."""
 
+    agent_type: str | None = None
+    """Type of agent backend (native, claude, codex, acp, agui)."""
+
+    sdk_session_id: str | None = None
+    """External SDK session ID for cross-referencing (e.g. Claude JSONL stem, Codex thread ID)."""
+
     created_at: datetime = Field(default_factory=get_now)
     """When the session was created."""
 

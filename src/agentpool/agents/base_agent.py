@@ -606,7 +606,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self.session_id = session_id or generate_session_id()
             user_prompts = [str(p) for p in prompts if isinstance(p, str)]
             initial_prompt = user_prompts[-1] if user_prompts else None
-            await self.log_session(initial_prompt, model=self.model_name)
+            await self.log_session(
+                initial_prompt, model=self.model_name, agent_type=self.AGENT_TYPE
+            )
         elif session_id and self.session_id != session_id:
             self.session_id = session_id
 

@@ -93,6 +93,7 @@ class MessageNode[TDeps, TResult](ABC):
         self,
         initial_prompt: str | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
     ) -> None:
         """Log conversation to storage if enabled.
 
@@ -103,6 +104,7 @@ class MessageNode[TDeps, TResult](ABC):
         Args:
             initial_prompt: Optional initial prompt to trigger title generation.
             model: Requested model identifier for this session.
+            agent_type: Type of agent backend (native, claude, codex, etc.).
         """
 
         def _set_session_title(title: str) -> None:
@@ -114,6 +116,7 @@ class MessageNode[TDeps, TResult](ABC):
                 session_id=self.session_id,
                 node_name=self.name,
                 model=model,
+                agent_type=agent_type,
                 initial_prompt=initial_prompt,
                 on_title_generated=_set_session_title,
             )

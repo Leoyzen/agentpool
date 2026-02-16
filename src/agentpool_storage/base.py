@@ -96,6 +96,7 @@ class StorageProvider:
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
     ) -> None:
         """Log a conversation (if supported)."""
 
@@ -479,3 +480,15 @@ class StorageProvider:
             List of session IDs
         """
         return []
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """Update the external SDK session ID for a session.
+
+        Args:
+            session_id: Internal session identifier
+            sdk_session_id: External SDK session ID (e.g. Claude JSONL stem, Codex thread ID)
+        """

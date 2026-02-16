@@ -95,6 +95,7 @@ class MemoryStorageProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
     ) -> None:
         """Store conversation in memory."""
         if next((i for i in self.conversations if i["id"] == session_id), None):
@@ -105,6 +106,7 @@ class MemoryStorageProvider(StorageProvider):
             "agent_name": node_name,
             "title": None,
             "start_time": start_time or get_now(),
+            "agent_type": agent_type,
         })
 
     async def update_session_title(self, session_id: str, title: str) -> None:
@@ -440,6 +442,8 @@ class MemoryStorageProvider(StorageProvider):
             "parent_id": data.parent_id,
             "version": data.version,
             "cwd": data.cwd,
+            "agent_type": data.agent_type,
+            "sdk_session_id": data.sdk_session_id,
             "last_active": data.last_active,
             "metadata": data.metadata,
         })
@@ -458,6 +462,8 @@ class MemoryStorageProvider(StorageProvider):
                     parent_id=conv.get("parent_id"),
                     version=conv.get("version", "1"),
                     cwd=conv.get("cwd"),
+                    agent_type=conv.get("agent_type"),
+                    sdk_session_id=conv.get("sdk_session_id"),
                     created_at=conv["start_time"],
                     last_active=conv.get("last_active", conv["start_time"]),
                     metadata=conv.get("metadata", {}),
@@ -484,3 +490,14 @@ class MemoryStorageProvider(StorageProvider):
                 continue
             result.append(conv["id"])
         return result
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """Update the external SDK session ID in memory."""
+        for conv in self.conversations:
+            if conv["id"] == session_id:
+                conv["sdk_session_id"] = sdk_session_id
+                return
