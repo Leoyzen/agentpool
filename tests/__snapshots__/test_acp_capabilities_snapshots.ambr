@@ -106,7 +106,7 @@
   
   Status: timeout
   Command: cagent acp
-  Error: Initialization timed out (15s)
+  Error: Initialization timed out (30s)
   '''
 # ---
 # name: test_acp_agent_capabilities[ClaudeACPAgentConfig]
@@ -510,6 +510,6 @@
   
   Status: timeout
   Command: vtcode acp
-  Error: Initialization timed out (15s)
+  Error: Initialization timed out (30s)
   '''
 # ---
