@@ -65,7 +65,7 @@ class ServerState:
     # Initialized after state creation
     config: Config | None = None
     # Active sessions cache (session_id -> OpenCode Session model)
-    # This is a cache of sessions loaded from pool.sessions
+    # This is a cache of sessions loaded from pool.storage
     sessions: dict[str, Session] = field(default_factory=dict)
     session_status: dict[str, SessionStatus] = field(default_factory=dict)
     # Message storage (session_id -> messages)

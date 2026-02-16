@@ -900,7 +900,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     ) -> list[SessionData]:
         """List sessions from storage.
 
-        For native agents, queries the pool's session store for all sessions
+        For native agents, queries the storage manager for all sessions
         associated with this agent. Fetches conversation titles from storage.
 
         Args:
@@ -912,26 +912,21 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         """
         if not self.agent_pool:
             return []
-        # Get sessions from session store
+        storage = self.agent_pool.storage
         try:
-            # Get session IDs from store
-            session_ids = await self.agent_pool.sessions.store.list_sessions(agent_name=self.name)
-            # Load each session to get full SessionData
+            session_ids = await storage.list_session_ids(agent_name=self.name)
             result: list[SessionData] = []
             for session_id in session_ids:
-                if session_data := await self.agent_pool.sessions.store.load(session_id):
+                if session_data := await storage.load_session(session_id):
                     # Filter by cwd if specified
                     if cwd is not None and session_data.cwd != cwd:
                         continue
                     # Fetch title from conversation storage if not in metadata
-                    if (
-                        not session_data.title
-                        and (storage := self.agent_pool.storage)
-                        and (title := await storage.get_session_title(session_data.session_id))
+                    if not session_data.title and (
+                        title := await storage.get_session_title(session_data.session_id)
                     ):
                         session_data = session_data.with_metadata(title=title)
                     result.append(session_data)
-                    # Check limit
                     if limit is not None and len(result) >= limit:
                         break
 
@@ -955,17 +950,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if not self.agent_pool:
             return None
 
+        storage = self.agent_pool.storage
         try:
-            # Load session data from session store
-            session_data = await self.agent_pool.sessions.store.load(session_id)
+            session_data = await storage.load_session(session_id)
             if not session_data:
                 return None
             # Load conversation history if available from storage providers
-            if self.agent_pool.storage.providers:
-                provider = self.agent_pool.storage.providers[0]
+            if storage.providers:
+                provider = storage.providers[0]
                 if provider.can_load_history:
                     messages = await provider.get_session_messages(session_id=session_id)
-                    # Restore to conversation history
                     self.conversation.chat_messages.clear()
                     self.conversation.chat_messages.extend(messages)
                     msg = "Session loaded with conversation history"

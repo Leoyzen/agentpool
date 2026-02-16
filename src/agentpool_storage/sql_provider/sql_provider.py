@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     from agentpool.common_types import JsonValue
     from agentpool.messaging import ChatMessage
-    from agentpool.sessions.models import ProjectData
+    from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import ConversationData, StatsFilters
 
@@ -654,3 +654,87 @@ class SQLModelProvider(StorageProvider):
             )
             await session.execute(stmt)
             await session.commit()
+
+    # Session data methods
+
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data.
+
+        Uses the Conversation table to store session lifecycle data alongside
+        conversation tracking data.
+        """
+        from sqlalchemy import delete
+
+        async with AsyncSession(self.engine) as session:
+            # Delete existing if present (upsert via delete+insert)
+            stmt = delete(Conversation).where(Conversation.id == data.session_id)  # type: ignore[arg-type]
+            await session.execute(stmt)
+            # Insert new/updated
+            convo = Conversation(
+                id=data.session_id,
+                agent_name=data.agent_name,
+                pool_id=data.pool_id,
+                project_id=data.project_id,
+                parent_id=data.parent_id,
+                version=data.version,
+                cwd=data.cwd,
+                start_time=data.created_at,
+                last_active=data.last_active,
+                metadata_json=data.metadata,
+                title=data.title,
+            )
+            session.add(convo)
+            await session.commit()
+            logger.debug("Saved session", session_id=data.session_id)
+
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data by ID."""
+        from agentpool.sessions.models import SessionData
+
+        async with AsyncSession(self.engine) as session:
+            stmt = select(Conversation).where(Conversation.id == session_id)
+            result = await session.execute(stmt)
+            row = result.scalars().first()
+            if row is None:
+                return None
+            return SessionData(
+                session_id=row.id,
+                agent_name=row.agent_name,
+                pool_id=row.pool_id,
+                project_id=row.project_id,
+                parent_id=row.parent_id,
+                version=row.version,
+                cwd=row.cwd,
+                created_at=row.start_time,
+                last_active=row.last_active,
+                metadata=row.metadata_json or {},
+            )
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session."""
+        from sqlalchemy import delete
+
+        async with AsyncSession(self.engine) as session:
+            stmt = delete(Conversation).where(Conversation.id == session_id)  # type: ignore[arg-type]
+            result = await session.execute(stmt)
+            await session.commit()
+            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]
+            if deleted:
+                logger.debug("Deleted session", session_id=session_id)
+            return deleted
+
+    async def list_session_ids(
+        self,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs, optionally filtered."""
+        async with AsyncSession(self.engine) as session:
+            stmt = select(Conversation.id)
+            if pool_id is not None:
+                stmt = stmt.where(Conversation.pool_id == pool_id)
+            if agent_name is not None:
+                stmt = stmt.where(Conversation.agent_name == agent_name)
+            stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
+            result = await session.execute(stmt)
+            return list(result.scalars().all())

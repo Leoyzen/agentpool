@@ -153,7 +153,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
                 agent_name=state.agent.name,
                 pool_id=state.pool.manifest.config_file_path,
             )
-            await state.pool.sessions.store.save(session_data)
+            await state.pool.storage.save_session(session_data)
             # Broadcast session update to UI
             await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
         else:

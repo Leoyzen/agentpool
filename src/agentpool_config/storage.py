@@ -16,7 +16,6 @@ from yamling import FormatType
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from agentpool.sessions.store import SessionStore
     from agentpool_storage.base import StorageProvider
 
 
@@ -330,9 +329,6 @@ StorageProviderConfig = Annotated[
 ]
 
 
-SessionStoreType = Literal["sql", "memory"]
-
-
 class StorageConfig(Schema):
     """Global storage configuration.
 
@@ -345,17 +341,6 @@ class StorageConfig(Schema):
         examples=[[{"type": "file", "path": "/data/storage.json"}]],
     )
     """List of configured storage providers"""
-
-    session_store: SessionStoreType = Field(
-        default="sql",
-        title="Session store type",
-        examples=["sql", "memory"],
-    )
-    """Type of session store to use for session persistence.
-
-    - "sql": Persist sessions to SQL database (uses same URL as SQL provider)
-    - "memory": In-memory storage (sessions lost on restart)
-    """
 
     default_provider: str | None = Field(
         default=None,
@@ -420,24 +405,3 @@ class StorageConfig(Schema):
         if self.providers is None:
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
-
-    def get_session_store(self) -> SessionStore:
-        """Create session store based on configuration."""
-        from agentpool.sessions.store import MemorySessionStore
-        from agentpool_storage.session_store import SQLSessionStore
-
-        # Use memory store during tests
-        if is_pytest():
-            return MemorySessionStore()
-
-        match self.session_store:
-            case "memory":
-                return MemorySessionStore()
-            case "sql":
-                # Find SQL config or use default
-                sql_cfg = next(
-                    (p for p in self.effective_providers if isinstance(p, SQLStorageConfig)), None
-                )
-                if sql_cfg is None:
-                    sql_cfg = SQLStorageConfig()
-                return SQLSessionStore(sql_cfg)

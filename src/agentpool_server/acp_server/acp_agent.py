@@ -493,7 +493,7 @@ class AgentPoolACPAgent(ACPAgent):
             # Try to get cwd from stored session data
             cwd = "."
             try:
-                stored = await self.session_manager.session_manager.store.load(params.session_id)
+                stored = await self.session_manager.storage.load_session(params.session_id)
                 if stored and stored.cwd:
                     cwd = stored.cwd
             except Exception:  # noqa: BLE001

@@ -83,29 +83,14 @@ def tmp_git_dir(tmp_project_dir: Path) -> Path:
 
 
 @pytest.fixture
-def mock_session_store() -> Mock:
-    """Create a mock session store."""
-    store = AsyncMock()
-    store.list_sessions = AsyncMock(return_value=[])
-    store.load = AsyncMock(return_value=None)
-    store.save = AsyncMock(return_value=None)
-    store.delete = AsyncMock(return_value=None)
-    return store
-
-
-@pytest.fixture
-def mock_sessions_manager(mock_session_store: Mock) -> Mock:
-    """Create a mock sessions manager."""
-    manager = Mock()
-    manager.store = mock_session_store
-    return manager
-
-
-@pytest.fixture
 def mock_storage() -> Mock:
-    """Create a mock storage backend."""
+    """Create a mock storage backend with session CRUD methods."""
     storage = AsyncMock()
     storage.filter_messages = AsyncMock(return_value=[])
+    storage.save_session = AsyncMock(return_value=None)
+    storage.load_session = AsyncMock(return_value=None)
+    storage.delete_session = AsyncMock(return_value=True)
+    storage.list_session_ids = AsyncMock(return_value=[])
     return storage
 
 
@@ -141,7 +126,6 @@ def mock_manifest() -> Mock:
 
 @pytest.fixture
 def mock_pool(
-    mock_sessions_manager: Mock,
     mock_storage: Mock,
     mock_file_ops: Mock,
     mock_todos: Mock,
@@ -149,7 +133,6 @@ def mock_pool(
 ) -> Mock:
     """Create a mock agent pool with all required components."""
     pool = Mock()
-    pool.sessions = mock_sessions_manager
     pool.storage = mock_storage
     pool.file_ops = mock_file_ops
     pool.todos = mock_todos
