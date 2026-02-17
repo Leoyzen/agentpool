@@ -64,10 +64,7 @@ class TaskSupervisor:
                     on_error(task, exc)
                     handled = True
                 except Exception:
-                    logger.exception(
-                        "Error in task-specific error handler",
-                        source=self._source,
-                    )
+                    logger.exception("Error in task-specific error handler", source=self._source)
             if not handled:
                 for handler in self._error_handlers:
                     try:
