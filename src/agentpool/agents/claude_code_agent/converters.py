@@ -137,7 +137,7 @@ def claude_message_to_events(
                             tool_name=tool_use.name,
                             tool_call_id=block.tool_use_id,
                             tool_input=tool_use.input,
-                            tool_result=block.content,
+                            tool_result=block.get_parsed_content(),
                             agent_name=agent_name,
                             message_id="",
                         )

@@ -1040,7 +1040,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                         for user_block in user_blocks:
                             if isinstance(user_block, ToolResultBlock):
                                 tc_id = user_block.tool_use_id
-                                result_content = user_block.content
+                                result_content = user_block.get_parsed_content()
                                 # Flush response parts
                                 if current_response_parts:
                                     model_response = ModelResponse(parts=current_response_parts)
