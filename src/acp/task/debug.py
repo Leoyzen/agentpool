@@ -103,7 +103,7 @@ class DebuggingMessageStateStore(InMemoryMessageStateStore):
         self._log_debug(entry)
         self._cleanup_request_timing(request_id)
 
-    def reject_all_outgoing(self, error: Any) -> None:
+    def reject_all_outgoing(self, error: BaseException) -> None:
         """Reject all outgoing requests with debug logging."""
         # Log for each pending request
         for request_id in list(self._outgoing.keys()):

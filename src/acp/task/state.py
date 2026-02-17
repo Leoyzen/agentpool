@@ -40,7 +40,7 @@ class MessageStateStore(Protocol):
 
     def reject_outgoing(self, request_id: int, error: RequestError) -> None: ...
 
-    def reject_all_outgoing(self, error: Any) -> None: ...
+    def reject_all_outgoing(self, error: BaseException) -> None: ...
 
     def begin_incoming(self, method: str, params: Any) -> IncomingMessage: ...
 
@@ -66,12 +66,12 @@ class InMemoryMessageStateStore(MessageStateStore):
         if record and not record.future.done():
             record.future.set_result(result)
 
-    def reject_outgoing(self, request_id: int, error: Any) -> None:
+    def reject_outgoing(self, request_id: int, error: RequestError) -> None:
         record = self._outgoing.pop(request_id, None)
         if record and not record.future.done():
             record.future.set_exception(error)
 
-    def reject_all_outgoing(self, error: Any) -> None:
+    def reject_all_outgoing(self, error: BaseException) -> None:
         for record in self._outgoing.values():
             if not record.future.done():
                 record.future.set_exception(error)
