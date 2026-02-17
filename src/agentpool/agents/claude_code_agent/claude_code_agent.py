@@ -1284,15 +1284,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         await self._set_mode(model, "model")
 
     async def set_permission_mode(self, mode: PermissionMode) -> None:
-        """Set permission mode.
-
-        Args:
-            mode: Permission mode - "default", "acceptEdits", "plan", or "bypassPermissions"
-        """
-        self._permission_mode = mode
-        # Update permission mode on client if connected
-        if self._client:
-            await self._client.set_permission_mode(mode)
+        """Set permission mode."""
+        await self._set_mode(mode, "mode")
 
     async def get_available_models(self) -> list[ModelInfo]:
         """Get available models for Claude Code agent (defined as static list)."""
