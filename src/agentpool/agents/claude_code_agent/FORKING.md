@@ -142,7 +142,7 @@ See test files in project root:
 
 ```python
 from clawd_code_sdk import ClaudeSDKClient
-from clawd_code_sdk.types import ClaudeAgentOptions, ResultMessage, AssistantMessage
+from clawd_code_sdk.models import ClaudeAgentOptions, ResultMessage, AssistantMessage
 
 class ClaudeCodeAgent:
     def __init__(self):

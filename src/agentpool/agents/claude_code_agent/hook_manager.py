@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     import asyncio
     from collections.abc import Awaitable, Callable
 
-    from clawd_code_sdk.types import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
+    from clawd_code_sdk.models import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
 
     from agentpool.agents.prompt_injection import PromptInjectionManager
     from agentpool.hooks import AgentHooks
@@ -71,7 +71,7 @@ class ClaudeCodeHookManager:
         Returns:
             Dictionary mapping hook event names to HookMatcher lists
         """
-        from clawd_code_sdk.types import HookMatcher
+        from clawd_code_sdk.models import HookMatcher
 
         from agentpool.agents.claude_code_agent.converters import build_sdk_hooks_from_agent_hooks
 
@@ -120,7 +120,7 @@ class ClaudeCodeHookManager:
         Consumes pending injection from the shared PromptInjectionManager
         and adds it as additionalContext in the response.
         """
-        from clawd_code_sdk.types import PostToolUseHookSpecificOutput
+        from clawd_code_sdk.models import PostToolUseHookSpecificOutput
 
         result: SyncHookJSONOutput = {"continue_": True}
         # Consume pending injection from shared manager

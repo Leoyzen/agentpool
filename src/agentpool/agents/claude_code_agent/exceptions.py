@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from clawd_code_sdk.types import AssistantMessage
+    from clawd_code_sdk.models import AssistantMessage
 
 
 class ThinkingModeAlreadyConfiguredError(ValueError):
@@ -22,7 +22,7 @@ class ThinkingModeAlreadyConfiguredError(ValueError):
 
 def raise_if_usage_limit_reached(message: AssistantMessage) -> None:
     """Raise RuntimeError if usage limit is reached."""
-    from clawd_code_sdk.types import TextBlock
+    from clawd_code_sdk.models import TextBlock
 
     if len(message.content) == 1 and isinstance(message.content[0], TextBlock):
         text_content = message.content[0].text

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
         PermissionResult,
         ThinkingConfig,
     )
-    from clawd_code_sdk.types import SystemPromptPreset
+    from clawd_code_sdk.models import SystemPromptPreset
 
     from agentpool.agents.context import ConfirmationResult
     from agentpool.agents.events import RichAgentStreamEvent
@@ -98,7 +98,7 @@ def confirmation_result_to_native(result: ConfirmationResult) -> PermissionResul
 def to_claude_system_prompt(
     system_prompt: str, include_default: bool = True
 ) -> SystemPromptPreset | str:
-    from clawd_code_sdk.types import SystemPromptPreset
+    from clawd_code_sdk.models import SystemPromptPreset
 
     if include_default:
         # Use SystemPromptPreset to append to builtin prompt
@@ -488,7 +488,7 @@ def build_sdk_hooks_from_agent_hooks(
     Returns:
         Dictionary mapping hook event names to HookMatcher lists
     """
-    from clawd_code_sdk.types import HookMatcher
+    from clawd_code_sdk.models import HookMatcher
 
     result: dict[str, list[Any]] = {}
 

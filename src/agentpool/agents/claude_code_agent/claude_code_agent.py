@@ -136,7 +136,7 @@ if TYPE_CHECKING:
         ToolUseBlock,
         UserMessage,
     )
-    from clawd_code_sdk.types import ReasoningEffort
+    from clawd_code_sdk.models import ReasoningEffort
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
@@ -431,7 +431,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         and starts an MCP bridge to expose them to Claude Code via the SDK's
         native MCP support. Also converts external MCP servers to SDK format.
         """
-        from clawd_code_sdk.types import McpHttpServerConfig
+        from clawd_code_sdk.models import McpHttpServerConfig
 
         # Convert external MCP servers to SDK format first
         if self._external_mcp_servers:
@@ -784,7 +784,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         Returns:
             A slashed Command that executes via Claude Code
         """
-        from clawd_code_sdk.types import AssistantMessage, ResultMessage, TextBlock, UserMessage
+        from clawd_code_sdk.models import AssistantMessage, ResultMessage, TextBlock, UserMessage
         from slashed import Command
 
         name = cmd_info.name
@@ -869,7 +869,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             ToolUseBlock,
             UserMessage,
         )
-        from clawd_code_sdk.types import StreamEvent
+        from clawd_code_sdk.models import StreamEvent
 
         await self.ensure_initialized()
         # Initialize session_id on first run and log to storage
