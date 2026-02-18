@@ -131,12 +131,11 @@ if TYPE_CHECKING:
         McpServerConfig,
         PermissionMode,
         PermissionResult,
-        ToolInput,
         ToolPermissionContext,
         ToolUseBlock,
         UserMessage,
     )
-    from clawd_code_sdk.models import ReasoningEffort
+    from clawd_code_sdk.models import ReasoningEffort, ToolInput
     from clawd_code_sdk.server_info_models import ClaudeCodeCommandInfo
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
