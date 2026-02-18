@@ -160,7 +160,7 @@ class SQLModelProvider(StorageProvider):
 
         async with AsyncSession(self.engine) as session:
             existing = await session.execute(
-                select(Conversation.id).where(Conversation.id == session_id)  # ty: ignore[no-matching-overload]
+                select(Conversation.id).where(Conversation.id == session_id)  # ty: ignore[no-matching-overload]  # pyright: ignore[reportCallIssue, reportArgumentType]
             )
             if existing.scalar_one_or_none() is not None:
                 return
