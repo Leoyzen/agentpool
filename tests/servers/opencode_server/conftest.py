@@ -160,7 +160,7 @@ def mock_env(tmp_project_dir: Path) -> Mock:
 
 
 @pytest.fixture
-def mock_agent(mock_env: Mock, mock_pool: Mock) -> Mock:
+def mock_agent(mock_env: Mock, mock_pool: Mock, mock_storage: Mock) -> Mock:
     """Create a mock agent for testing."""
     agent = Mock()
     agent.name = "test-agent"
@@ -168,6 +168,8 @@ def mock_agent(mock_env: Mock, mock_pool: Mock) -> Mock:
     agent._input_provider = None
     agent.run = AsyncMock(return_value=Mock(data="test response"))
     agent.agent_pool = mock_pool  # Agent carries its pool
+    # Storage manager (accessed via state.storage -> agent.storage)
+    agent.storage = mock_storage
     # Session management methods (used by session routes)
     agent.list_sessions = AsyncMock(return_value=[])
     agent.load_session = AsyncMock(return_value=None)

@@ -349,3 +349,9 @@ class TestSessionTodos:
         """Getting todos for a non-existent session should return 404."""
         response = await async_client.get("/session/nonexistent-id/todo")
         assert response.status_code == 404
+
+
+if __name__ == "__main__":
+    import pytest
+
+    pytest.main([__file__, "-v"])
