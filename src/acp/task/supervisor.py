@@ -79,9 +79,12 @@ class TaskSupervisor:
         self._closed = True
         if not self._tasks:
             return
-        for task in self._tasks:
+        # Snapshot the set before iterating — done-callbacks call discard()
+        # which would mutate self._tasks during iteration.
+        tasks = list(self._tasks)
+        for task in tasks:
             task.cancel()
-        for task in self._tasks:
+        for task in tasks:
             with suppress(asyncio.CancelledError):
                 await task
         self._tasks.clear()
