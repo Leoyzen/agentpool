@@ -92,7 +92,6 @@ from agentpool.agents.claude_code_agent.converters import (
     to_output_format,
     to_thinking_config,
 )
-from agentpool.agents.claude_code_agent.exceptions import raise_if_usage_limit_reached
 from agentpool.agents.claude_code_agent.static_info import models_to_category
 from agentpool.agents.events import (
     PartDeltaEvent,
@@ -945,7 +944,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                         if message.model:
                             resolved_model = message.model
                         # Check for usage limit error
-                        raise_if_usage_limit_reached(message)
                         for block in message.content:
                             match block:
                                 case TextBlock(text=text):
