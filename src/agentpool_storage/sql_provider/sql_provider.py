@@ -153,10 +153,17 @@ class SQLModelProvider(StorageProvider):
         model: str | None = None,
         agent_type: str | None = None,
     ) -> None:
-        """Log conversation to database."""
+        """Log conversation to database (idempotent)."""
+        from sqlalchemy import select
+
         from agentpool_storage.sql_provider.models import Conversation
 
         async with AsyncSession(self.engine) as session:
+            existing = await session.execute(
+                select(Conversation.id).where(Conversation.id == session_id)
+            )
+            if existing.scalar_one_or_none() is not None:
+                return
             now = start_time or get_now()
             convo = Conversation(
                 id=session_id,

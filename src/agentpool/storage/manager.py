@@ -869,6 +869,8 @@ class StorageManager:
         """
         provider = self.get_project_provider()  # Reuses first provider
         await provider.save_session(data)
+        # Mark as logged so log_session() becomes a no-op for this session
+        self._session_logged.add(data.session_id)
 
     @method_spawner
     async def load_session(self, session_id: str) -> SessionData | None:
