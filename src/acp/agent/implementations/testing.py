@@ -17,7 +17,6 @@ from acp.schema import (
     ForkSessionResponse,
     ListSessionsResponse,
     ResumeSessionResponse,
-    SetSessionConfigOptionRequest,
 )
 
 
@@ -33,6 +32,7 @@ if TYPE_CHECKING:
         NewSessionRequest,
         PromptRequest,
         ResumeSessionRequest,
+        SetSessionConfigOptionRequest,
         SetSessionModelRequest,
     )
 

@@ -24,7 +24,6 @@ from acp.schema import (
     ReadTextFileResponse,
     ResumeSessionResponse,
     SessionInfo,
-    SetSessionConfigOptionRequest,
     WriteTextFileResponse,
 )
 
@@ -44,6 +43,7 @@ if TYPE_CHECKING:
         PromptRequest,
         ReadTextFileRequest,
         ResumeSessionRequest,
+        SetSessionConfigOptionRequest,
         WriteTextFileRequest,
     )
 
