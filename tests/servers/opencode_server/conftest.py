@@ -189,10 +189,7 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
 
 
 @pytest.fixture
-def server_state(
-    tmp_project_dir: Path,
-    mock_agent: Mock,
-) -> ServerState:
+def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     """Create a server state for testing."""
     return ServerState(working_dir=str(tmp_project_dir), agent=mock_agent)
 
