@@ -243,7 +243,7 @@ class TestSessionCRUD:
             )
             for i, sid in enumerate(session_ids)
         ]
-        server_state.agent.list_sessions.return_value = session_data_list
+        server_state.agent.list_sessions.return_value = session_data_list  # ty: ignore[unresolved-attribute]
         # List sessions
         response = await async_client.get("/session")
         assert response.status_code == 200
