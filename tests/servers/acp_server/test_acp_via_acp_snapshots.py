@@ -77,8 +77,6 @@ def create_server_config_file(temp_dir: Path, tool_name: str, tool_args: dict[st
 def create_client_config_file(
     temp_dir: Path,
     server_config_path: Path,
-    tool_name: str,
-    tool_args: dict[str, Any],
     tools: list[BaseToolConfig],
     mock_env: MockExecutionEnvironmentConfig,
 ) -> Path:
@@ -87,8 +85,6 @@ def create_client_config_file(
     Args:
         temp_dir: Directory to write config file to
         server_config_path: Path to the server config file
-        tool_name: Name of the tool to call
-        tool_args: Arguments for the tool
         tools: Tool configs with environment (will be provided via MCP bridge)
         mock_env: Mock execution environment for deterministic IDs
     """
@@ -102,7 +98,6 @@ def create_client_config_file(
     }
 
     config = {"agents": {"test_client": agent_config}}
-
     config_path = temp_dir / "client_config.yml"
     config_path.write_text(yaml.dump(config, default_flow_style=False))
     return config_path
@@ -153,8 +148,6 @@ class ACPViaACPHarness:
         client_config_path = create_client_config_file(
             self.temp_dir,
             server_config_path,
-            tool_name,
-            tool_args,
             tools=tools,
             mock_env=mock_env,
         )
