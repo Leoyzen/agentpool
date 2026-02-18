@@ -133,7 +133,6 @@ if TYPE_CHECKING:
         PermissionResult,
         ToolPermissionContext,
         ToolUseBlock,
-        UserMessage,
     )
     from clawd_code_sdk.models import ReasoningEffort, ToolInput
     from clawd_code_sdk.server_info_models import ClaudeCodeCommandInfo
@@ -185,14 +184,6 @@ def _strip_mcp_prefix(tool_name: str) -> str:
     if match := _MCP_TOOL_PATTERN.match(tool_name):
         return match.group(2)  # group(1) is agent name, group(2) is tool name
     return tool_name
-
-
-def parse_command_output(msg: UserMessage) -> str | None:
-    content = msg.content if isinstance(msg.content, str) else ""
-    # Extract content from <local-command-stdout> or <local-command-stderr>
-    pattern = r"<local-command-(?:stdout|stderr)>(.*?)</local-command-(?:stdout|stderr)>"
-    match = re.search(pattern, content, re.DOTALL)
-    return match.group(1) if match else None
 
 
 class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
@@ -814,7 +805,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                             if isinstance(block, TextBlock):
                                 await ctx.print(block.text)
                     case UserMessage():
-                        if parsed := parse_command_output(msg):
+                        if parsed := msg.parse_command_output():
                             await ctx.print(parsed)
                     case ResultMessage():
                         if msg.result:
