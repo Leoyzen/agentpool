@@ -19,6 +19,7 @@ Timestamps are stored as integer milliseconds since epoch.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 import sqlite3
 from typing import TYPE_CHECKING, Any
@@ -34,8 +35,6 @@ from agentpool_storage.opencode_provider import helpers
 
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from agentpool.messaging import ChatMessage
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import QueryFilters, StatsFilters
@@ -141,8 +140,6 @@ class OpenCodeStorageProvider(StorageProvider):
 
     async def filter_messages(self, query: SessionQuery) -> list[ChatMessage[str]]:
         """Filter messages based on query."""
-        from datetime import datetime
-
         messages: list[ChatMessage[str]] = []
         try:
             conn = self._get_connection()
