@@ -1461,18 +1461,16 @@ class FSSpecTools(ResourceProvider):
 
         # Process any remaining content
         for event in parser.finish():
-            if isinstance(event, OldTextChunk):
-                if not event.done:
-                    pending_old_text.append(event.chunk)
-                    matcher.push(event.chunk, line_hint=event.line_hint)
-                else:
-                    matches = matcher.finish()
-                    if matches:
+            match event:
+                case OldTextChunk(chunk=chunk) if not event.done:
+                    pending_old_text.append(chunk)
+                    matcher.push(chunk, line_hint=event.line_hint)
+                case OldTextChunk():
+                    if matches := matcher.finish():
                         current_match_range = matches[0]
-            elif isinstance(event, NewTextChunk):
-                if not event.done:
-                    pending_new_text.append(event.chunk)
-                elif current_match_range and pending_new_text:
+                case NewTextChunk(chunk=chunk) if not event.done:
+                    pending_new_text.append(chunk)
+                case NewTextChunk() if current_match_range and pending_new_text:
                     new_text = "".join(pending_new_text)
                     old_text = "".join(pending_old_text)
                     matched_text = edited_content[

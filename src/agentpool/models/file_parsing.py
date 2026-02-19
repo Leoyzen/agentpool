@@ -9,7 +9,7 @@ Supports loading agents from markdown files with YAML frontmatter in various for
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 from upathtools import to_upath
 
@@ -327,18 +327,17 @@ def parse_agent_file(
 
     # Detect or use specified format
     detected_format = detect_format(metadata) if file_format == "auto" else file_format
-
-    # Parse based on format
-    if detected_format == "claude":
-        config_kwargs = parse_claude_format(
-            metadata, system_prompt, file_path, skills_registry=skills_registry
-        )
-    elif detected_format == "opencode":
-        config_kwargs = parse_opencode_format(metadata, system_prompt, file_path)
-    elif detected_format == "native":
-        config_kwargs = parse_native_format(metadata, system_prompt)
-    else:
-        raise ValueError(f"Unknown format {detected_format!r} for {file_path}")
+    match detected_format:
+        case "claude":
+            config_kwargs = parse_claude_format(
+                metadata, system_prompt, file_path, skills_registry=skills_registry
+            )
+        case "opencode":
+            config_kwargs = parse_opencode_format(metadata, system_prompt, file_path)
+        case "native":
+            config_kwargs = parse_native_format(metadata, system_prompt)
+        case _ as unreachable:
+            assert_never(unreachable)
 
     return NativeAgentConfig(**config_kwargs)
 

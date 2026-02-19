@@ -177,16 +177,17 @@ def convert_mcp_servers_to_sdk_format(
 
     for idx, server in enumerate(mcp_servers):
         # Determine server name
-        if server.name:
-            name = server.name
-        elif isinstance(server, StdioMCPServerConfig) and server.args:
-            name = server.args[-1].split("/")[-1].split("@")[0]
-        elif isinstance(server, StdioMCPServerConfig):
-            name = server.command
-        elif isinstance(server, SSEMCPServerConfig | StreamableHTTPMCPServerConfig):
-            name = urlparse(str(server.url)).hostname or f"server_{idx}"
-        else:
-            name = f"server_{idx}"
+        match server:
+            case _ if server.name:
+                name = server.name
+            case StdioMCPServerConfig() if server.args:
+                name = server.args[-1].split("/")[-1].split("@")[0]
+            case StdioMCPServerConfig():
+                name = server.command
+            case SSEMCPServerConfig() | StreamableHTTPMCPServerConfig():
+                name = urlparse(str(server.url)).hostname or f"server_{idx}"
+            case _ as unreachable:
+                assert_never(unreachable)
 
         # Build SDK-compatible config
         config: dict[str, Any]

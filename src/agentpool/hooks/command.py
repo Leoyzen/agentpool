@@ -146,14 +146,13 @@ def _normalize_result(data: dict[str, Any]) -> HookResult:
     result: HookResult = {}
 
     # Handle decision field (support various naming conventions)
-    decision = data.get("decision") or data.get("permissionDecision")
-    if decision:
+    match data.get("decision") or data.get("permissionDecision"):
         # Normalize decision values
-        if decision in ("approve", "allow"):
+        case "approve" | "allow":
             result["decision"] = "allow"
-        elif decision in ("block", "deny"):
+        case "block" | "deny":
             result["decision"] = "deny"
-        elif decision == "ask":
+        case "ask":
             result["decision"] = "ask"
 
     # Handle reason field

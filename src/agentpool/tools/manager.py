@@ -298,15 +298,16 @@ class ToolManager:
         result: dict[str, MCPServerStatus] = {}
         try:
             for provider in self.external_providers:
-                if isinstance(provider, MCPResourceProvider):
-                    add_status(provider, result)
-                elif isinstance(provider, AggregatingResourceProvider):
-                    for nested in provider.providers:
-                        if isinstance(nested, MCPResourceProvider):
-                            add_status(nested, result)
-                elif isinstance(provider, MCPManager):
-                    for mcp_provider in provider.get_mcp_providers():
-                        add_status(mcp_provider, result)
+                match provider:
+                    case MCPResourceProvider():
+                        add_status(provider, result)
+                    case AggregatingResourceProvider():
+                        for nested in provider.providers:
+                            if isinstance(nested, MCPResourceProvider):
+                                add_status(nested, result)
+                    case MCPManager():
+                        for mcp_provider in provider.get_mcp_providers():
+                            add_status(mcp_provider, result)
         except Exception:  # noqa: BLE001
             pass
 

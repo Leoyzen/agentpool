@@ -108,50 +108,36 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         file_entries = self._get_file_entries()
 
         entries: list[dict[str, Any]] = []
+        match path:
+            case "/":
+                entries = [
+                    {"name": "/messages", "type": "directory", "size": 0},
+                    {"name": "/by_role", "type": "directory", "size": 0},
+                    {
+                        "name": "/summary.json",
+                        "type": "file",
+                        "size": len(file_entries.get("/summary.json", b"")),
+                    },
+                ]
+            case "/messages":
+                for file_path, content in file_entries.items():
+                    if file_path.startswith("/messages/"):
+                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+            case "/by_role":
+                entries = [
+                    {"name": "/by_role/user", "type": "directory", "size": 0},
+                    {"name": "/by_role/assistant", "type": "directory", "size": 0},
+                ]
+            case "/by_role/user":
+                for file_path, content in file_entries.items():
+                    if file_path.startswith("/messages/") and "_user_" in file_path:
+                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+            case "/by_role/assistant":
+                for file_path, content in file_entries.items():
+                    if file_path.startswith("/messages/") and "_assistant_" in file_path:
+                        entries.append({"name": file_path, "type": "file", "size": len(content)})
 
-        if path == "/":
-            entries = [
-                {"name": "/messages", "type": "directory", "size": 0},
-                {"name": "/by_role", "type": "directory", "size": 0},
-                {
-                    "name": "/summary.json",
-                    "type": "file",
-                    "size": len(file_entries.get("/summary.json", b"")),
-                },
-            ]
-        elif path == "/messages":
-            for file_path, content in file_entries.items():
-                if file_path.startswith("/messages/"):
-                    entries.append({
-                        "name": file_path,
-                        "type": "file",
-                        "size": len(content),
-                    })
-        elif path == "/by_role":
-            entries = [
-                {"name": "/by_role/user", "type": "directory", "size": 0},
-                {"name": "/by_role/assistant", "type": "directory", "size": 0},
-            ]
-        elif path == "/by_role/user":
-            for file_path, content in file_entries.items():
-                if file_path.startswith("/messages/") and "_user_" in file_path:
-                    entries.append({
-                        "name": file_path,
-                        "type": "file",
-                        "size": len(content),
-                    })
-        elif path == "/by_role/assistant":
-            for file_path, content in file_entries.items():
-                if file_path.startswith("/messages/") and "_assistant_" in file_path:
-                    entries.append({
-                        "name": file_path,
-                        "type": "file",
-                        "size": len(content),
-                    })
-
-        if detail:
-            return entries
-        return [e["name"] for e in entries]
+        return entries if detail else [e["name"] for e in entries]
 
     async def _cat_file(
         self,
