@@ -180,6 +180,7 @@ lint = [
   "ruff",
   "types-PyYAML",
   "types-Pygments",
+  "types-croniter",
   "types-jsonschema>=4.25.1.20251009",
   # Only add below (Copier)
 ]

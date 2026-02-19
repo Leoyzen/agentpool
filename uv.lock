@@ -190,6 +190,7 @@ docs = [
 lint = [
     { name = "mypy", extra = ["faster-cache"] },
     { name = "ruff" },
+    { name = "types-croniter" },
     { name = "types-jsonschema" },
     { name = "types-pygments" },
     { name = "types-pyyaml" },
@@ -306,6 +307,7 @@ docs = [
 lint = [
     { name = "mypy", extras = ["faster-cache"] },
     { name = "ruff" },
+    { name = "types-croniter" },
     { name = "types-jsonschema", specifier = ">=4.25.1.20251009" },
     { name = "types-pygments" },
     { name = "types-pyyaml" },
@@ -6254,6 +6256,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a7/a7/e6aecc4b4eb59598829a3b5076a93aff291b4fdaa2ded25efc4e1f4d219c/typer_slim-0.24.0.tar.gz", hash = "sha256:f0ed36127183f52ae6ced2ecb2521789995992c521a46083bfcdbb652d22ad34", size = 4776, upload-time = "2026-02-16T22:08:51.2Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/24/5480c20380dfd18cf33d14784096dca45a24eae6102e91d49a718d3b6855/typer_slim-0.24.0-py3-none-any.whl", hash = "sha256:d5d7ee1ee2834d5020c7c616ed5e0d0f29b9a4b1dd283bdebae198ec09778d0e", size = 3394, upload-time = "2026-02-16T22:08:49.92Z" },
+]
+
+[[package]]
+name = "types-croniter"
+version = "6.0.0.20250809"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/ac/7b26a9b19cc2b137293b14af71402ba83d13674c208b141474b6887465ae/types_croniter-6.0.0.20250809.tar.gz", hash = "sha256:c829295d4d65eaddcfafec905b0fbab59e72c3c91ee934a4d504dcafad79ff95", size = 11745, upload-time = "2025-08-09T03:14:10.729Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/99/e8e40592fbecb6671b32e4dab4cca2a1d4fa7d5b2f54aece134ccb42e839/types_croniter-6.0.0.20250809-py3-none-any.whl", hash = "sha256:d9f53f3e837eb6af509e2090fd2f5bb29b38425dd78f77d7b3bf37ccd2b2bf93", size = 9712, upload-time = "2025-08-09T03:14:09.966Z" },
 ]
 
 [[package]]
