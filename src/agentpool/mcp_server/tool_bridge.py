@@ -345,13 +345,11 @@ class ToolManagerBridge:
         # Keys are prefixed with 'tool:', e.g., 'tool:bash'
         current_names = {
             key.removeprefix("tool:")
-            for key in self._mcp._local_provider._components
+            for key in self._mcp.local_provider._components
             if key.startswith("tool:")
         }
-
         new_tools = await self.node.tools.get_tools(state="enabled")
         new_names = {t.name for t in new_tools}
-
         # Remove tools that are no longer present
         for name in current_names - new_names:
             with suppress(Exception):

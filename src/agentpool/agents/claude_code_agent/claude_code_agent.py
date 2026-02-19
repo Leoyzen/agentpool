@@ -588,21 +588,20 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             agent_ctx = self.get_context()
             return await handle_clarifying_questions(agent_ctx, input_dict, context)
         # Auto-grant if bypassPermissions mode is active
-        if self._permission_mode == "bypassPermissions":
-            return PermissionResultAllow()
-        # Plan mode: auto-deny all tool executions (planning only, no execution)
-        if self._permission_mode == "plan":
-            return PermissionResultDeny(message="Plan mode active - tool execution disabled")
-        # For "acceptEdits" mode: auto-allow edit/write tools only
-        if self._permission_mode == "acceptEdits":
-            # Extract the actual tool name from MCP-style names
-            # e.g., "mcp__agentpool-claude-tools__edit" -> "edit"
-            actual_tool_name = tool_name
-            if "__" in tool_name:
-                actual_tool_name = tool_name.rsplit("__", 1)[-1]
-            # Auto-allow file editing tools
-            if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
+        match self._permission_mode:
+            case "bypassPermissions":
                 return PermissionResultAllow()
+            case "plan":
+                return PermissionResultDeny(message="Plan mode active - tool execution disabled")
+            case "acceptEdits":
+                # Extract the actual tool name from MCP-style names
+                # e.g., "mcp__agentpool-claude-tools__edit" -> "edit"
+                actual_tool_name = tool_name
+                if "__" in tool_name:
+                    actual_tool_name = tool_name.rsplit("__", 1)[-1]
+                # Auto-allow file editing tools
+                if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
+                    return PermissionResultAllow()
 
         # For "default" mode and non-edit tools in "acceptEdits" mode:
         # Ask for confirmation via input provider

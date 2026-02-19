@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 from typing import TYPE_CHECKING, Any
 
+import anyenv
 from pydantic_ai import (
     BinaryContent,
     FileUrl,
@@ -299,17 +300,15 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                 # ModelRequest can contain user prompts, system prompts, or tool returns
                 for req_part in request_parts:
                     match req_part:
+                        case UserPromptPart(content=str() as content):
+                            text = content
+
+                        case UserPromptPart(content=list() as content):
+                            # Join text parts
+                            text = " ".join(p if isinstance(p, str) else str(p) for p in content)
+
                         case UserPromptPart(content=content):
-                            # Convert content to string
-                            if isinstance(content, str):
-                                text = content
-                            elif isinstance(content, list):
-                                # Join text parts
-                                text = " ".join(
-                                    p if isinstance(p, str) else str(p) for p in content
-                                )
-                            else:
-                                text = str(content)
+                            text = str(content)
                             result.append(UserMessage(id=str(uuid4()), content=text))
 
                         case SystemPromptPart(content=content):
@@ -320,16 +319,13 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                             if isinstance(content, str):
                                 content_str = content
                             else:
-                                import json
-
-                                content_str = json.dumps(content)
-                            result.append(
-                                ToolMessage(
-                                    id=str(uuid4()),
-                                    tool_call_id=tool_call_id,
-                                    content=content_str,
-                                )
+                                content_str = anyenv.dump_json(content)
+                            tool_msg = ToolMessage(
+                                id=str(uuid4()),
+                                tool_call_id=tool_call_id,
+                                content=content_str,
                             )
+                            result.append(tool_msg)
 
             case ModelResponse(parts=response_parts):
                 # ModelResponse contains assistant content and/or tool calls
