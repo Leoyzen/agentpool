@@ -278,12 +278,6 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     )
     """Fallback model when default is overloaded."""
 
-    dangerously_skip_permissions: bool = Field(
-        default=False,
-        title="Dangerously Skip Permissions",
-    )
-    """Bypass all permission checks. Only for sandboxed environments."""
-
     setting_sources: list[SettingSource] | None = Field(
         default=None,
         title="Setting Sources",

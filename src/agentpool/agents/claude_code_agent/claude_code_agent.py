@@ -233,7 +233,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         add_dir: list[str] | None = None,
         builtin_tools: list[str] | None = None,
         fallback_model: AnthropicMaxModelName | str | None = None,
-        dangerously_skip_permissions: bool = False,
         setting_sources: list[SettingSource] | None = None,
         use_subscription: bool = False,
         env: ExecutionEnvironment | StrPath | None = None,
@@ -272,7 +271,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             builtin_tools: Available tools from built-in set. Special: "LSP" for code intelligence,
                            "Chrome" for browser control
             fallback_model: Fallback model when default is overloaded
-            dangerously_skip_permissions: Bypass all permission checks (sandboxed only)
             setting_sources: Setting sources to load ("user", "project", "local")
             use_subscription: Force Claude subscription usage instead of API key
             env: Execution environment
@@ -337,7 +335,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._add_dir = add_dir
         self._builtin_tools = builtin_tools
         self._fallback_model = fallback_model
-        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._setting_sources = setting_sources
         self._use_subscription = use_subscription
         self._toolsets = toolsets or []
@@ -407,7 +404,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             builtin_subagents=config.get_subagent_configs(),
             builtin_tools=config.builtin_tools,
             fallback_model=config.fallback_model,
-            dangerously_skip_permissions=config.dangerously_skip_permissions,
             setting_sources=config.setting_sources,
             use_subscription=config.use_subscription,
             # Toolsets
@@ -513,15 +509,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         sys_prompt = to_claude_system_prompt(system_prompt) if system_prompt else None
         # Determine effective permission mode
         permission_mode = self._permission_mode
-        if self._dangerously_skip_permissions and not permission_mode:
-            permission_mode = "bypassPermissions"
         # Determine can_use_tool callback
-        bypass = permission_mode == "bypassPermissions" or self._dangerously_skip_permissions
-        can_use_tool = (
-            self._can_use_tool
-            if self._permission_mode != "bypassPermissions" and not bypass
-            else None
-        )
+        bypass = permission_mode == "bypassPermissions"
+        can_use_tool = self._can_use_tool if not bypass else None
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []
         # Build extra_args for CLI flags not directly exposed
