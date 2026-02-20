@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.websockets import SocketModeClient
@@ -156,18 +156,12 @@ class SlackChannel(BaseChannel):
                 )
         except Exception:  # noqa: BLE001
             logger.debug("Slack reactions_add failed", exc_info=True)
-
+        meta = {"slack": {"event": event, "thread_ts": thread_ts, "channel_type": channel_type}}
         await self._handle_message(
             sender_id=sender_id,
             chat_id=chat_id,
             content=text,
-            metadata={
-                "slack": {
-                    "event": event,
-                    "thread_ts": thread_ts,
-                    "channel_type": channel_type,
-                }
-            },
+            metadata=meta,
         )
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
@@ -184,15 +178,17 @@ class SlackChannel(BaseChannel):
         return True
 
     def _should_respond_in_channel(self, event_type: str, text: str, chat_id: str) -> bool:
-        if self.config.group_policy == "open":
-            return True
-        if self.config.group_policy == "mention":
-            if event_type == "app_mention":
+        match self.config.group_policy:
+            case "open":
                 return True
-            return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
-        if self.config.group_policy == "allowlist":
-            return chat_id in self.config.group_allow_from
-        return False
+            case "mention" if event_type == "app_mention":
+                return True
+            case "mention":
+                return self._bot_user_id is not None and f"<@{self._bot_user_id}>" in text
+            case "allowlist":
+                return chat_id in self.config.group_allow_from
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def _strip_bot_mention(self, text: str) -> str:
         if not text or not self._bot_user_id:

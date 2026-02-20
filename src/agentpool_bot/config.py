@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -17,13 +17,13 @@ if TYPE_CHECKING:
     from agentpool_bot.channels.whatsapp import WhatsAppChannel
 
 
-class _Base(BaseModel):
+class BaseChannelConfig(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
-class WhatsAppConfig(_Base):
+class WhatsAppConfig(BaseChannelConfig):
     """WhatsApp channel configuration."""
 
     enabled: bool = False
@@ -37,7 +37,7 @@ class WhatsAppConfig(_Base):
         return WhatsAppChannel(self, bus)
 
 
-class TelegramConfig(_Base):
+class TelegramConfig(BaseChannelConfig):
     """Telegram channel configuration."""
 
     enabled: bool = False
@@ -51,7 +51,7 @@ class TelegramConfig(_Base):
         return TelegramChannel(self, bus)
 
 
-class DiscordConfig(_Base):
+class DiscordConfig(BaseChannelConfig):
     """Discord channel configuration."""
 
     enabled: bool = False
@@ -66,7 +66,7 @@ class DiscordConfig(_Base):
         return DiscordChannel(self, bus)
 
 
-class EmailConfig(_Base):
+class EmailConfig(BaseChannelConfig):
     """Email channel configuration (IMAP inbound + SMTP outbound)."""
 
     enabled: bool = False
@@ -89,6 +89,24 @@ class EmailConfig(_Base):
     smtp_use_ssl: bool = False
     from_address: str = ""
 
+    @model_validator(mode="after")
+    def _check_credentials_when_enabled(self) -> EmailConfig:
+        if not self.enabled:
+            return self
+        fields = {
+            "imap_host": self.imap_host,
+            "imap_username": self.imap_username,
+            "imap_password": self.imap_password,
+            "smtp_host": self.smtp_host,
+            "smtp_username": self.smtp_username,
+            "smtp_password": self.smtp_password,
+        }
+        missing = [name for name, value in fields.items() if not value]
+        if missing:
+            msg = f"Email channel enabled but missing required fields: {', '.join(missing)}"
+            raise ValueError(msg)
+        return self
+
     # Behavior
     auto_reply_enabled: bool = True
     poll_interval_seconds: int = 30
@@ -103,15 +121,15 @@ class EmailConfig(_Base):
         return EmailChannel(self, bus)
 
 
-class SlackDMConfig(_Base):
+class SlackDMConfig(BaseChannelConfig):
     """Slack DM policy configuration."""
 
     enabled: bool = True
-    policy: str = "open"  # "open" or "allowlist"
+    policy: Literal["open", "allowlist"] = "open"
     allow_from: list[str] = Field(default_factory=list)
 
 
-class SlackConfig(_Base):
+class SlackConfig(BaseChannelConfig):
     """Slack channel configuration."""
 
     enabled: bool = False
@@ -122,7 +140,7 @@ class SlackConfig(_Base):
     user_token_read_only: bool = True
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
-    group_policy: str = "mention"
+    group_policy: Literal["open", "mention", "allowlist"] = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
@@ -132,7 +150,10 @@ class SlackConfig(_Base):
         return SlackChannel(self, bus)
 
 
-class ChannelsConfig(_Base):
+ChannelConfig = WhatsAppConfig | TelegramConfig | DiscordConfig | EmailConfig | SlackConfig
+
+
+class ChannelsConfig(BaseChannelConfig):
     """Configuration for all chat channels."""
 
     whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)

@@ -8,12 +8,7 @@ import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from telegram import BotCommand
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from agentpool.log import get_logger
@@ -54,42 +49,31 @@ def _markdown_to_telegram_html(text: str) -> str:
         return f"\x00IC{len(inline_codes) - 1}\x00"
 
     text = re.sub(r"`([^`]+)`", save_inline_code, text)
-
     # 3. Headers
     text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
-
     # 4. Blockquotes
     text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
-
     # 5. Escape HTML special characters
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
     # 6. Links
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
-
     # 7. Bold
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
-
     # 8. Italic
     text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
-
     # 9. Strikethrough
     text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
-
     # 10. Bullet lists
     text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
-
     # 11. Restore inline code
     for i, code in enumerate(inline_codes):
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
-
     # 12. Restore code blocks
     for i, code in enumerate(code_blocks):
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
-
     return text
 
 
@@ -162,7 +146,6 @@ class TelegramChannel(BaseChannel):
             builder = builder.proxy(self.config.proxy).get_updates_proxy(self.config.proxy)
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
-
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
@@ -184,13 +167,10 @@ class TelegramChannel(BaseChannel):
         )
 
         logger.info("Starting Telegram bot (polling mode)...")
-
         await self._app.initialize()
         await self._app.start()
-
         bot_info = await self._app.bot.get_me()
         logger.info("Telegram bot connected", username=bot_info.username)
-
         try:
             await self._app.bot.set_my_commands(self.BOT_COMMANDS)
         except Exception:  # noqa: BLE001
@@ -223,13 +203,15 @@ class TelegramChannel(BaseChannel):
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-        if ext in ("jpg", "jpeg", "png", "gif", "webp"):
-            return "photo"
-        if ext == "ogg":
-            return "voice"
-        if ext in ("mp3", "m4a", "wav", "aac"):
-            return "audio"
-        return "document"
+        match ext:
+            case "jpg" | "jpeg" | "png" | "gif" | "webp":
+                return "photo"
+            case "ogg":
+                return "voice"
+            case "mp3" | "m4a" | "wav" | "aac":
+                return "audio"
+            case _:
+                return "document"
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""

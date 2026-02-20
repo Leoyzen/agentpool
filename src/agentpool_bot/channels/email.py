@@ -74,9 +74,6 @@ class EmailChannel(BaseChannel):
             )
             return
 
-        if not self._validate_config():
-            return
-
         self._running = True
         logger.info("Starting Email channel (IMAP polling mode)...")
 
@@ -154,26 +151,6 @@ class EmailChannel(BaseChannel):
         except Exception:
             logger.exception("Error sending email", to=to_addr)
             raise
-
-    def _validate_config(self) -> bool:
-        missing = []
-        if not self.config.imap_host:
-            missing.append("imap_host")
-        if not self.config.imap_username:
-            missing.append("imap_username")
-        if not self.config.imap_password:
-            missing.append("imap_password")
-        if not self.config.smtp_host:
-            missing.append("smtp_host")
-        if not self.config.smtp_username:
-            missing.append("smtp_username")
-        if not self.config.smtp_password:
-            missing.append("smtp_password")
-
-        if missing:
-            logger.error("Email channel not configured", missing=", ".join(missing))
-            return False
-        return True
 
     def _smtp_send(self, msg: EmailMessage) -> None:
         timeout = 30

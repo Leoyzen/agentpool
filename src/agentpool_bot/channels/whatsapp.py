@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+import anyenv
 
 from agentpool.log import get_logger
 from agentpool_bot.channels.base import BaseChannel
 
 
 if TYPE_CHECKING:
+    from websockets import ClientConnection
+
     from agentpool_bot.bus import MessageBus, OutboundMessage
     from agentpool_bot.config import WhatsAppConfig
 
@@ -30,7 +33,7 @@ class WhatsAppChannel(BaseChannel):
     def __init__(self, config: WhatsAppConfig, bus: MessageBus) -> None:
         super().__init__(config, bus)
         self.config: WhatsAppConfig = config
-        self._ws: Any = None
+        self._ws: ClientConnection | None = None
         self._connected = False
 
     async def start(self) -> None:
@@ -38,11 +41,8 @@ class WhatsAppChannel(BaseChannel):
         import websockets
 
         bridge_url = self.config.bridge_url
-
         logger.info("Connecting to WhatsApp bridge", url=bridge_url)
-
         self._running = True
-
         while self._running:
             try:
                 async with websockets.connect(bridge_url) as ws:
@@ -50,7 +50,7 @@ class WhatsAppChannel(BaseChannel):
                     # Send auth token if configured
                     if self.config.bridge_token:
                         await ws.send(
-                            json.dumps({"type": "auth", "token": self.config.bridge_token})
+                            anyenv.dump_json({"type": "auth", "token": self.config.bridge_token})
                         )
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")
@@ -90,15 +90,15 @@ class WhatsAppChannel(BaseChannel):
 
         try:
             payload = {"type": "send", "to": msg.chat_id, "text": msg.content}
-            await self._ws.send(json.dumps(payload))
+            await self._ws.send(anyenv.dump_json(payload))
         except Exception:
             logger.exception("Error sending WhatsApp message")
 
     async def _handle_bridge_message(self, raw: str | bytes) -> None:
         """Handle a message from the bridge."""
         try:
-            data: dict[str, Any] = json.loads(raw)
-        except json.JSONDecodeError:
+            data = anyenv.load_json(raw, return_type=dict)
+        except anyenv.JsonLoadError:
             logger.warning("Invalid JSON from bridge")
             return
 
@@ -116,16 +116,16 @@ class WhatsAppChannel(BaseChannel):
             if content == "[Voice Message]":
                 logger.info("Voice message received, transcription not available for WhatsApp")
                 content = "[Voice Message: Transcription not available for WhatsApp yet]"
-
+            meta = {
+                "message_id": data.get("id"),
+                "timestamp": data.get("timestamp"),
+                "is_group": data.get("isGroup", False),
+            }
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,
                 content=content,
-                metadata={
-                    "message_id": data.get("id"),
-                    "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False),
-                },
+                metadata=meta,
             )
 
         elif msg_type == "status":
