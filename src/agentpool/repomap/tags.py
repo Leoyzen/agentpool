@@ -43,10 +43,10 @@ def get_tags_from_content(content: str, filename: str) -> list[Tag]:
 
     from agentpool.repomap.languages import get_scm_fname
 
-    lang = cast(SupportedLanguage, filename_to_lang(filename))
-    if not lang:
+    val = filename_to_lang(filename)
+    if not val:
         return []
-
+    lang = cast(SupportedLanguage, val)
     try:
         language = get_language(lang)
         parser = get_parser(lang)

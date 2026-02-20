@@ -116,9 +116,6 @@ async def persist_message_to_storage(
         msg: OpenCode message to persist
         session_id: Session/conversation ID
     """
-    if state.storage is None:
-        return
-
     chat_msg = opencode_to_chat_message(msg, session_id=session_id)
     with contextlib.suppress(Exception):
         await state.storage.log_message(chat_msg)
