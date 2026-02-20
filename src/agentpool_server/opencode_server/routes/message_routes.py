@@ -29,7 +29,6 @@ from agentpool_server.opencode_server.models import (
     StepStartPart,
     TimeCreated,
     TimeCreatedUpdated,
-    TokenCache,
     Tokens,
     UserMessage,
 )
@@ -205,7 +204,6 @@ async def _process_message(  # noqa: PLR0915
     # --- Create assistant message ---
     assistant_msg_id = identifier.ascending("message")
     now = now_ms()
-    tokens = Tokens(cache=TokenCache(read=0, write=0))
     assistant_msg = AssistantMessage(
         id=assistant_msg_id,
         session_id=session_id,
@@ -216,8 +214,6 @@ async def _process_message(  # noqa: PLR0915
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now, completed=None),
-        tokens=tokens,
-        cost=0.0,
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
@@ -254,10 +250,10 @@ async def _process_message(  # noqa: PLR0915
     response_time = now_ms()
     preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
     logger.info("Response text", text_preview=preview)
-    token_cache = TokenCache(read=0, write=0)
-    tokens = Tokens(cache=token_cache, input=adapter.input_tokens, output=adapter.output_tokens)
+    tokens = Tokens.from_pydantic_ai(adapter.usage)
+    cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
     msg_time = MessageTime(created=now, completed=response_time)
-    update = {"time": msg_time, "tokens": tokens, "cost": adapter.total_cost}
+    update = {"time": msg_time, "tokens": tokens, "cost": cost}
     updated_assistant = assistant_msg.model_copy(update=update)
     assistant_msg_with_parts.info = updated_assistant
     await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))

@@ -1,11 +1,17 @@
 """Common/shared models used across multiple domains."""
 
-from typing import Self
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Self
 
 from pydantic import Field
 
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+
+
+if TYPE_CHECKING:
+    from pydantic_ai import RequestUsage
 
 
 class TimeCreatedUpdated(OpenCodeBaseModel):
@@ -54,6 +60,25 @@ class Tokens(OpenCodeBaseModel):
     reasoning: int = 0
     cache: TokenCache = Field(default_factory=TokenCache)
     total: int | None = None
+
+    @classmethod
+    def from_pydantic_ai(cls, usage: RequestUsage) -> Tokens:
+        """Create from a pydantic-ai RequestUsage.
+
+        Args:
+            usage: pydantic-ai request usage with token counts.
+        """
+        reasoning = usage.details.get("reasoning_tokens", 0)
+        return cls(
+            input=usage.input_tokens,
+            output=usage.output_tokens,
+            reasoning=reasoning,
+            cache=TokenCache(
+                read=usage.cache_read_tokens,
+                write=usage.cache_write_tokens,
+            ),
+            total=usage.total_tokens + reasoning,
+        )
 
 
 class TextSpan(OpenCodeBaseModel):

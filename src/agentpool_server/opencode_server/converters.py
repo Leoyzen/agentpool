@@ -40,7 +40,6 @@ from agentpool_server.opencode_server.models import (
     TimeStartEnd,
     TimeStartEndCompacted,
     TimeStartEndOptional,
-    TokenCache,
     Tokens,
     ToolPart,
     ToolStateCompleted,
@@ -233,14 +232,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
         if msg.response_time:
             completed_ms = created_ms + int(msg.response_time * 1000)
 
-        usage = msg.usage
-        cache = TokenCache(read=usage.cache_read_tokens, write=usage.cache_write_tokens)
-        tokens = Tokens(
-            input=usage.input_tokens,
-            output=usage.output_tokens,
-            cache=cache,
-            total=usage.total_tokens,
-        )
+        tokens = Tokens.from_pydantic_ai(msg.usage)
         result = MessageWithParts.assistant(
             message_id=message_id,
             session_id=session_id,

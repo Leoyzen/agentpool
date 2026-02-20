@@ -508,8 +508,6 @@ async def run_shell_command(
         agent=request.agent,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now, completed=None),
-        tokens=Tokens(cache=TokenCache(read=0, write=0), input=0, output=0, reasoning=0),
-        cost=0.0,
     )
 
     # Initialize message with empty parts
@@ -555,7 +553,6 @@ async def run_shell_command(
         id=identifier.ascending("part"),
         message_id=assistant_msg_id,
         session_id=session_id,
-        tokens=Tokens(cache=TokenCache(read=0, write=0)),
     )
     assistant_msg_with_parts.parts.append(step_finish)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
@@ -682,8 +679,6 @@ async def summarize_session(  # noqa: PLR0915
         agent="summarizer",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now, completed=None),
-        tokens=Tokens(cache=TokenCache(read=0, write=0), input=0, output=0, reasoning=0),
-        cost=0.0,
         summary=True,  # Mark as summary message
     )
 
@@ -807,7 +802,7 @@ async def summarize_session(  # noqa: PLR0915
         message_id=assistant_msg_id,
         session_id=session_id,
         tokens=Tokens(
-            cache=TokenCache(read=0, write=0),
+            cache=TokenCache(),
             input=input_tokens,
             output=output_tokens,
             reasoning=0,
@@ -820,7 +815,7 @@ async def summarize_session(  # noqa: PLR0915
         update={
             "time": MessageTime(created=now, completed=response_time),
             "tokens": Tokens(
-                cache=TokenCache(read=0, write=0),
+                cache=TokenCache(),
                 input=input_tokens,
                 output=output_tokens,
                 reasoning=0,
@@ -1106,8 +1101,6 @@ async def execute_command(  # noqa: PLR0915
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now, completed=None),
-        tokens=Tokens(cache=TokenCache(read=0, write=0), input=0, output=0, reasoning=0),
-        cost=0.0,
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
@@ -1160,8 +1153,6 @@ async def execute_command(  # noqa: PLR0915
         id=identifier.ascending("part"),
         message_id=assistant_msg_id,
         session_id=session_id,
-        tokens=Tokens(cache=TokenCache()),
-        cost=0.0,
     )
     assistant_msg_with_parts.parts.append(step_finish)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))

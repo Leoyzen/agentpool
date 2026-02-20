@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import FunctionToolCallEvent
+from pydantic_ai import FunctionToolCallEvent, RequestUsage
 from pydantic_ai.messages import (
     PartDeltaEvent,
     PartStartEvent,
@@ -43,7 +43,6 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     SessionCompactedEvent,
     SessionErrorEvent,
-    TokenCache,
     Tokens,
 )
 from agentpool_server.opencode_server.models.parts import (
@@ -68,6 +67,7 @@ if TYPE_CHECKING:
     from agentpool.agents.events import ToolCallContentItem
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.messaging import ChatMessage
+    from agentpool.messaging.messages import TokenCost
     from agentpool_server.opencode_server.models import MessageWithParts
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
@@ -106,9 +106,8 @@ class OpenCodeStreamAdapter:
 
     # --- mutable tracking state ---
     _response_text: str = field(default="", init=False)
-    _input_tokens: int = field(default=0, init=False)
-    _output_tokens: int = field(default=0, init=False)
-    _total_cost: float = field(default=0.0, init=False)
+    _usage: RequestUsage = field(default_factory=RequestUsage, init=False)
+    _cost_info: TokenCost | None = field(default=None, init=False)
 
     _tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
     _tool_outputs: dict[str, str] = field(default_factory=dict, init=False)
@@ -128,16 +127,12 @@ class OpenCodeStreamAdapter:
         return self._response_text
 
     @property
-    def input_tokens(self) -> int:
-        return self._input_tokens
+    def usage(self) -> RequestUsage:
+        return self._usage
 
     @property
-    def output_tokens(self) -> int:
-        return self._output_tokens
-
-    @property
-    def total_cost(self) -> float:
-        return self._total_cost
+    def cost_info(self) -> TokenCost | None:
+        return self._cost_info
 
     @property
     def text_part(self) -> TextPart | None:
@@ -195,19 +190,14 @@ class OpenCodeStreamAdapter:
             self.assistant_msg.update_part(final_text_part)
 
         # Step finish
-        cache = TokenCache(read=0, write=0)
-        tokens = Tokens(
-            cache=cache,
-            input=self._input_tokens,
-            output=self._output_tokens,
-            reasoning=0,
-        )
+        tokens = Tokens.from_pydantic_ai(self._usage)
+        cost = float(self._cost_info.total_cost) if self._cost_info else 0.0
         step_finish = StepFinishPart(
             id=identifier.ascending("part"),
             message_id=self.assistant_msg_id,
             session_id=self.session_id,
             tokens=tokens,
-            cost=self._total_cost,
+            cost=cost,
         )
         self.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
@@ -538,11 +528,8 @@ class OpenCodeStreamAdapter:
 
     def _on_stream_complete(self, msg: ChatMessage[Any]) -> None:
         """Extract token usage and cost from the completed stream message."""
-        if msg.usage:
-            self._input_tokens = msg.usage.input_tokens or 0
-            self._output_tokens = msg.usage.output_tokens or 0
-        if msg.cost_info and msg.cost_info.total_cost:
-            self._total_cost = float(msg.cost_info.total_cost)
+        self._usage = msg.usage
+        self._cost_info = msg.cost_info
 
     # --- sub-agent / team events ---
 
