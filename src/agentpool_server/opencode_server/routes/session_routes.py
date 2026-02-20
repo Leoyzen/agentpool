@@ -507,7 +507,7 @@ async def run_shell_command(
         mode="shell",
         agent=request.agent,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
+        time=MessageTime(created=now),
     )
 
     # Initialize message with empty parts
@@ -678,7 +678,7 @@ async def summarize_session(  # noqa: PLR0915
         mode="summarize",
         agent="summarizer",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
+        time=MessageTime(created=now),
         summary=True,  # Mark as summary message
     )
 
@@ -857,16 +857,6 @@ async def share_session(
     # Convert our messages to OpenCode Message format
     opencode_messages: list[Message] = []
     for msg_with_parts in messages:
-        info = msg_with_parts.info
-        # Map role to OpenCode sharing roles
-        role = info.role
-        if role == "model":  # type: ignore[comparison-overlap]
-            mapped_role: Literal["user", "assistant", "system"] = "assistant"
-        elif role in ("user", "assistant", "system"):
-            mapped_role = role
-        else:
-            mapped_role = "user"
-
         # Extract text parts
         parts = [
             MessagePart(type="text", text=part.text)
@@ -874,7 +864,7 @@ async def share_session(
             if isinstance(part, TextPart) and part.text
         ]
         if parts:
-            opencode_messages.append(Message(role=mapped_role, parts=parts))
+            opencode_messages.append(Message(role=msg_with_parts.info.role, parts=parts))
     if not opencode_messages:
         raise HTTPException(status_code=400, detail="No content to share")
 
@@ -935,10 +925,8 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
     # Store removed messages for unrevert
     state.reverted_messages[session_id] = messages_to_remove
-
     # Update message list - keep only messages before revert point
     state.messages[session_id] = messages_to_keep
-
     # Emit message.removed and part.removed events for all removed messages
     for msg in messages_to_remove:
         # Emit message.removed event
@@ -950,21 +938,20 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
     # Also revert file changes if any
     file_ops = state.pool.file_ops
-    if file_ops.changes:
-        revert_ops = file_ops.get_revert_operations(since_message_id=request.message_id)
-        if revert_ops:
-            fs = state.fs
-            for path, content in revert_ops:
-                try:
-                    if content is None:
-                        await fs._rm_file(path)
-                    else:
-                        content_bytes = content.encode("utf-8")
-                        await fs._pipe_file(path, content_bytes)
-                except Exception as e:
-                    detail = f"Failed to revert {path}: {e}"
-                    raise HTTPException(status_code=500, detail=detail) from e
-            file_ops.remove_changes_since_message(request.message_id)
+    if file_ops.changes and (
+        revert_ops := file_ops.get_revert_operations(since_message_id=request.message_id)
+    ):
+        for path, content in revert_ops:
+            try:
+                if content is None:
+                    await state.fs._rm_file(path)
+                else:
+                    content_bytes = content.encode("utf-8")
+                    await state.fs._pipe_file(path, content_bytes)
+            except Exception as e:
+                detail = f"Failed to revert {path}: {e}"
+                raise HTTPException(status_code=500, detail=detail) from e
+        file_ops.remove_changes_since_message(request.message_id)
 
     # Update session with revert info
     session = state.sessions[session_id]
@@ -1003,7 +990,6 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
     for msg in reverted_messages:
         # Emit message.updated event
         await state.broadcast_event(MessageUpdatedEvent.create(msg.info))
-
         # Emit part.updated events for all parts
         for part in msg.parts:
             await state.broadcast_event(PartUpdatedEvent.create(part))
@@ -1015,14 +1001,13 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
     file_ops = state.pool.file_ops
     if file_ops.reverted_changes:
         unrevert_ops = file_ops.get_unrevert_operations()
-        fs = state.fs
         for path, content in unrevert_ops:
             try:
                 if content is None:
-                    await fs._rm_file(path)
+                    await state.fs._rm_file(path)
                 else:
                     content_bytes = content.encode("utf-8")
-                    await fs._pipe_file(path, content_bytes)
+                    await state.fs._pipe_file(path, content_bytes)
             except Exception as e:
                 detail = f"Failed to unrevert {path}: {e}"
                 raise HTTPException(status_code=500, detail=detail) from e
@@ -1100,7 +1085,7 @@ async def execute_command(  # noqa: PLR0915
         mode="command",
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
+        time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)

@@ -213,7 +213,7 @@ async def _process_message(  # noqa: PLR0915
         mode=request.agent or "default",
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
+        time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
@@ -302,11 +302,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 
 
 @router.get("/message/{message_id}")
-async def get_message(
-    session_id: str,
-    message_id: str,
-    state: StateDep,
-) -> MessageWithParts:
+async def get_message(session_id: str, message_id: str, state: StateDep) -> MessageWithParts:
     """Get a specific message."""
     session = await get_or_load_session(state, session_id)
     if session is None:
