@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass, field
 from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage
@@ -25,6 +26,38 @@ if TYPE_CHECKING:
 
     from agentpool_bot.bus import MessageBus, OutboundMessage
     from agentpool_bot.config import EmailConfig
+
+
+@dataclass(frozen=True, slots=True)
+class EmailMetadata:
+    """Metadata extracted from a parsed email message."""
+
+    message_id: str = ""
+    subject: str = ""
+    date: str = ""
+    sender_email: str = ""
+    uid: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert to plain dict for passing to channel base class."""
+        return {
+            "message_id": self.message_id,
+            "subject": self.subject,
+            "date": self.date,
+            "sender_email": self.sender_email,
+            "uid": self.uid,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedEmail:
+    """A parsed inbound email message."""
+
+    sender: str
+    content: str
+    subject: str = ""
+    message_id: str = ""
+    metadata: EmailMetadata = field(default_factory=EmailMetadata)
 
 
 logger = get_logger(__name__)
@@ -82,20 +115,16 @@ class EmailChannel(BaseChannel):
             try:
                 inbound_items = await asyncio.to_thread(self._fetch_new_messages)
                 for item in inbound_items:
-                    sender: str = item["sender"]
-                    subject: str = item.get("subject", "")
-                    message_id: str = item.get("message_id", "")
-
-                    if subject:
-                        self._last_subject_by_chat[sender] = subject
-                    if message_id:
-                        self._last_message_id_by_chat[sender] = message_id
+                    if item.subject:
+                        self._last_subject_by_chat[item.sender] = item.subject
+                    if item.message_id:
+                        self._last_message_id_by_chat[item.sender] = item.message_id
 
                     await self._handle_message(
-                        sender_id=sender,
-                        chat_id=sender,
-                        content=item["content"],
-                        metadata=item.get("metadata", {}),
+                        sender_id=item.sender,
+                        chat_id=item.sender,
+                        content=item.content,
+                        metadata=item.metadata.to_dict(),
                     )
             except Exception:
                 logger.exception("Email polling error")
@@ -170,7 +199,7 @@ class EmailChannel(BaseChannel):
             smtp.login(self.config.smtp_username, self.config.smtp_password)
             smtp.send_message(msg)
 
-    def _fetch_new_messages(self) -> list[dict[str, Any]]:
+    def _fetch_new_messages(self) -> list[ParsedEmail]:
         """Poll IMAP and return parsed unread messages."""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
@@ -184,7 +213,7 @@ class EmailChannel(BaseChannel):
         start_date: date,
         end_date: date,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedEmail]:
         """Fetch messages in [start_date, end_date) by IMAP date search.
 
         This is used for historical summarization tasks (e.g. "yesterday").
@@ -206,9 +235,9 @@ class EmailChannel(BaseChannel):
         mark_seen: bool,
         dedupe: bool,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ParsedEmail]:
         """Fetch messages by arbitrary IMAP search criteria."""
-        messages: list[dict[str, Any]] = []
+        messages: list[ParsedEmail] = []
         mailbox = self.config.imap_mailbox or "INBOX"
 
         if not self.config.imap_use_ssl:
@@ -263,20 +292,22 @@ class EmailChannel(BaseChannel):
                     f"Date: {date_value}\n\n"
                     f"{body}"
                 )
-                metadata = {
-                    "message_id": message_id,
-                    "subject": subject,
-                    "date": date_value,
-                    "sender_email": sender,
-                    "uid": uid,
-                }
-                messages.append({
-                    "sender": sender,
-                    "subject": subject,
-                    "message_id": message_id,
-                    "content": content,
-                    "metadata": metadata,
-                })
+                metadata = EmailMetadata(
+                    message_id=message_id,
+                    subject=subject,
+                    date=date_value,
+                    sender_email=sender,
+                    uid=uid,
+                )
+                messages.append(
+                    ParsedEmail(
+                        sender=sender,
+                        subject=subject,
+                        message_id=message_id,
+                        content=content,
+                        metadata=metadata,
+                    )
+                )
 
                 if dedupe and uid:
                     self._processed_uids.add(uid)

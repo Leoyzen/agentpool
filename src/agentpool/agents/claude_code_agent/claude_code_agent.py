@@ -478,6 +478,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 for server in live_status.mcp_servers:
                     name = server.name
                     server_info = server.server_info
+                    assert server_info  # TODO: remove assert
                     result[name] = MCPServerStatus(
                         name=name,
                         status=server.status,
