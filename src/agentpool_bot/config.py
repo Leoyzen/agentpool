@@ -21,12 +21,14 @@ class BaseChannelConfig(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    enabled: bool = False
 
 
 class WhatsAppConfig(BaseChannelConfig):
     """WhatsApp channel configuration."""
 
-    enabled: bool = False
+    type: Literal["whatsapp"] = Field("whatsapp", init=False)
+    """WhatsApp channel."""
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
@@ -40,7 +42,8 @@ class WhatsAppConfig(BaseChannelConfig):
 class TelegramConfig(BaseChannelConfig):
     """Telegram channel configuration."""
 
-    enabled: bool = False
+    type: Literal["telegram"] = Field("telegram", init=False)
+    """Telegram channel."""
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     proxy: str | None = None
@@ -54,7 +57,8 @@ class TelegramConfig(BaseChannelConfig):
 class DiscordConfig(BaseChannelConfig):
     """Discord channel configuration."""
 
-    enabled: bool = False
+    type: Literal["discord"] = Field("discord", init=False)
+    """Discord channel."""
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
@@ -69,7 +73,8 @@ class DiscordConfig(BaseChannelConfig):
 class EmailConfig(BaseChannelConfig):
     """Email channel configuration (IMAP inbound + SMTP outbound)."""
 
-    enabled: bool = False
+    type: Literal["email"] = Field("email", init=False)
+    """Email channel."""
     consent_granted: bool = False
 
     # IMAP (receive)
@@ -132,7 +137,8 @@ class SlackDMConfig(BaseChannelConfig):
 class SlackConfig(BaseChannelConfig):
     """Slack channel configuration."""
 
-    enabled: bool = False
+    type: Literal["slack"] = Field("slack", init=False)
+    """Slack channel."""
     mode: str = "socket"
     webhook_path: str = "/slack/events"
     bot_token: str = ""
