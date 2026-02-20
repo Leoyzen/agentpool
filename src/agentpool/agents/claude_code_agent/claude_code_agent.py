@@ -507,17 +507,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
         sys_prompt = to_claude_system_prompt(system_prompt) if system_prompt else None
-        # Determine effective permission mode
-        permission_mode = self._permission_mode
         # Determine can_use_tool callback
-        bypass = permission_mode == "bypassPermissions"
+        bypass = self._permission_mode == "bypassPermissions"
         can_use_tool = self._can_use_tool if not bypass else None
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []
-        # Build extra_args for CLI flags not directly exposed
-        extra_args: dict[str, str | None] = {}
-        if "Chrome" in builtin_tools:
-            extra_args["chrome"] = None
         # Build environment variables
         env = dict(self._env_vars or {})
         env["CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"] = "1"
@@ -539,7 +533,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             max_budget_usd=self._max_budget_usd,
             thinking=to_thinking_config(self._max_thinking_tokens),
             effort=self._effort,
-            permission_mode=permission_mode,
+            permission_mode=self._permission_mode,
             env=env,
             agents=self._subagents,
             add_dirs=self._add_dir or [],  # type: ignore[arg-type]
@@ -551,7 +545,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             mcp_servers=self._mcp_servers or {},
             hooks=self._hook_manager.build_hooks(),  # type: ignore[arg-type]
             setting_sources=self._setting_sources,
-            extra_args=extra_args,
+            chrome="Chrome" in builtin_tools,
             resume=self._sdk_session_id,
             fork_session=fork_session,
         )
@@ -593,11 +587,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             case "plan":
                 return PermissionResultDeny(message="Plan mode active - tool execution disabled")
             case "acceptEdits":
-                # Extract the actual tool name from MCP-style names
-                # e.g., "mcp__agentpool-claude-tools__edit" -> "edit"
-                actual_tool_name = tool_name
-                if "__" in tool_name:
-                    actual_tool_name = tool_name.rsplit("__", 1)[-1]
+                actual_tool_name = _strip_mcp_prefix(tool_name)
                 # Auto-allow file editing tools
                 if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
                     return PermissionResultAllow()

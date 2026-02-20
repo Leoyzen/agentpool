@@ -1034,7 +1034,7 @@ wheels = [
 
 [[package]]
 name = "clawd-code-sdk"
-version = "0.1.78"
+version = "0.1.79"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -1042,9 +1042,9 @@ dependencies = [
     { name = "anyio" },
     { name = "mcp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/b1/477f93dc86d37fce5d81fae07e683c69f285cca407a6a7d28d800adcef69/clawd_code_sdk-0.1.78.tar.gz", hash = "sha256:f15171fd9584b91c91991f23dccbb0b0ff04b4b5bc13517f37d700a47a6ed9db", size = 91391, upload-time = "2026-02-20T10:29:28.138Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/0d/95ea5f1f06796cd3993cea170d3e0f9313b3a3c5d6e73c4be985c6dbcdce/clawd_code_sdk-0.1.79.tar.gz", hash = "sha256:c7e04e88bcf7f7e7601f10dd6871dbdda958543d74d09ddd8e4aaa250bdd12ae", size = 91407, upload-time = "2026-02-20T14:16:48.044Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/d2/d9793b3ab078519a50b710269976e9e7eb214f1d72237234362992732f46/clawd_code_sdk-0.1.78-py3-none-any.whl", hash = "sha256:5cf66e15d851c82ae543ee6bdf5a260bf638efb4f15f063bfd1576bcc90c0210", size = 77178, upload-time = "2026-02-20T10:29:30.758Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/1f/d5046cae6c4a181e009a7d94c8a3fa74eb7dade2c0a012d4c47778aa3307/clawd_code_sdk-0.1.79-py3-none-any.whl", hash = "sha256:cc20aa0b2b8b177a5ad54e20f2cb3b36c436b2957a0812854ea9b78e121a0fd4", size = 77199, upload-time = "2026-02-20T14:16:44.917Z" },
 ]
 
 [[package]]
@@ -3246,16 +3246,16 @@ python = [
 
 [[package]]
 name = "mkdocstrings-python"
-version = "2.0.2"
+version = "2.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "griffe" },
+    { name = "griffelib" },
     { name = "mkdocs-autorefs" },
     { name = "mkdocstrings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/84/78243847ad9d5c21d30a2842720425b17e880d99dfe824dee11d6b2149b4/mkdocstrings_python-2.0.2.tar.gz", hash = "sha256:4a32ccfc4b8d29639864698e81cfeb04137bce76bb9f3c251040f55d4b6e1ad8", size = 199124, upload-time = "2026-02-09T15:12:01.543Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/33/c225eaf898634bdda489a6766fc35d1683c640bffe0e0acd10646b13536d/mkdocstrings_python-2.0.3.tar.gz", hash = "sha256:c518632751cc869439b31c9d3177678ad2bfa5c21b79b863956ad68fc92c13b8", size = 199083, upload-time = "2026-02-20T10:38:36.368Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/31/7ee938abbde2322e553a2cb5f604cdd1e4728e08bba39c7ee6fae9af840b/mkdocstrings_python-2.0.2-py3-none-any.whl", hash = "sha256:31241c0f43d85a69306d704d5725786015510ea3f3c4bdfdb5a5731d83cdc2b0", size = 104900, upload-time = "2026-02-09T15:12:00.166Z" },
+    { url = "https://files.pythonhosted.org/packages/32/28/79f0f8de97cce916d5ae88a7bee1ad724855e83e6019c0b4d5b3fabc80f3/mkdocstrings_python-2.0.3-py3-none-any.whl", hash = "sha256:0b83513478bdfd803ff05aa43e9b1fca9dd22bcd9471f09ca6257f009bc5ee12", size = 104779, upload-time = "2026-02-20T10:38:34.517Z" },
 ]
 
 [[package]]
