@@ -60,35 +60,48 @@ class ServerState:
     """
 
     working_dir: str
+    """Working directory for the server."""
+
     agent: BaseAgent[Any, Any]
+    """The agent instance handling requests."""
+
     start_time: float = field(default_factory=time.time)
-    # Configuration (mutable runtime config)
-    # Initialized after state creation
+    """Server start time (seconds since epoch)."""
+
     config: Config | None = None
-    # Active sessions cache (session_id -> OpenCode Session model)
-    # This is a cache of sessions loaded from pool.storage
+    """Mutable runtime configuration. Initialized after state creation."""
+
     sessions: dict[str, Session] = field(default_factory=dict)
+    """Cache of active sessions loaded from storage."""
+
     session_status: dict[str, SessionStatus] = field(default_factory=dict)
-    # Message storage (session_id -> messages)
-    # Runtime cache - messages are also persisted via pool.storage
+    """Current status for each session."""
+
     messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
-    # Reverted messages storage (session_id -> removed messages)
-    # Stores messages removed during revert for unrevert operation
+    """Runtime message cache. Also persisted via storage."""
+
     reverted_messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
-    # Todo storage (session_id -> todos)
-    # Uses pool.todos for persistence
+    """Messages removed during revert, kept for unrevert."""
+
     todos: dict[str, list[Todo]] = field(default_factory=dict)
-    # Input providers for permission handling (session_id -> provider)
+    """Todo items per session."""
+
     input_providers: dict[str, OpenCodeInputProvider] = field(default_factory=dict)
-    # Question storage (question_id -> pending question info)
+    """Input providers for permission handling per session."""
+
     pending_questions: dict[str, PendingQuestion] = field(default_factory=dict)
-    # SSE event subscribers
+    """Pending questions awaiting user response."""
+
     event_subscribers: list[asyncio.Queue[Event]] = field(default_factory=list)
-    # Callback for first subscriber connection (e.g., for update check)
+    """SSE event subscriber queues."""
+
     on_first_subscriber: OnFirstSubscriberCallback | None = None
+    """Callback triggered on first subscriber connection."""
+
     _first_subscriber_triggered: bool = field(default=False, repr=False)
-    # Background tasks (for cleanup on shutdown)
+
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    """Background tasks tracked for cleanup on shutdown."""
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
