@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -76,7 +75,7 @@ class CommandHook(Hook):
             command = command.replace("$PROJECT_DIR", str(project_dir))
 
         # Serialize input
-        input_json = json.dumps(dict(input_data))
+        input_json = anyenv.dump_json(dict(input_data))
 
         try:
             proc = await asyncio.create_subprocess_shell(

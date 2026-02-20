@@ -6,10 +6,10 @@ import asyncio
 from collections.abc import Callable
 import contextlib
 from dataclasses import dataclass
-import json
 import logging
 from typing import Any
 
+import anyenv
 import anyio
 from anyio.abc import ByteSendStream
 
@@ -57,7 +57,7 @@ class MessageSender:
 
     async def send(self, payload: dict[str, Any]) -> None:
         try:
-            data = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+            data = (anyenv.dump_json(payload) + "\n").encode()
         except TypeError:
             offenders = _find_non_serializable(payload)
             logger.exception(

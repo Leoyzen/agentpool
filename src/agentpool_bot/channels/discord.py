@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import anyenv
 import httpx
 import websockets
 
@@ -134,8 +134,8 @@ class DiscordChannel(BaseChannel):
 
         async for raw in self._ws:
             try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
+                data = anyenv.load_json(raw)
+            except anyenv.JsonLoadError:
                 logger.warning("Invalid JSON from Discord gateway")
                 continue
 
@@ -179,7 +179,7 @@ class DiscordChannel(BaseChannel):
                 },
             },
         }
-        await self._ws.send(json.dumps(identify))
+        await self._ws.send(anyenv.dump_json(identify))
 
     async def _start_heartbeat(self, interval_s: float) -> None:
         """Start or restart the heartbeat loop."""
@@ -190,7 +190,7 @@ class DiscordChannel(BaseChannel):
             while self._running and self._ws:
                 payload = {"op": _OP_HEARTBEAT, "d": self._seq}
                 try:
-                    await self._ws.send(json.dumps(payload))
+                    await self._ws.send(anyenv.dump_json(payload))
                 except Exception:  # noqa: BLE001
                     logger.warning("Discord heartbeat failed", exc_info=True)
                     break

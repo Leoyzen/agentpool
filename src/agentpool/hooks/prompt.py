@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from string import Template
 from typing import TYPE_CHECKING, Literal
 
+import anyenv
 from pydantic import Field
 from schemez import Schema
 
@@ -90,10 +90,10 @@ class PromptHook(Hook):
             Formatted prompt string.
         """
         variables = {
-            "INPUT": json.dumps(dict(input_data), indent=2),
+            "INPUT": anyenv.dump_json(dict(input_data), indent=True),
             "TOOL_NAME": input_data.get("tool_name", ""),
-            "TOOL_INPUT": json.dumps(input_data.get("tool_input", {}), indent=2),
-            "TOOL_OUTPUT": json.dumps(input_data.get("tool_output", ""), indent=2),
+            "TOOL_INPUT": anyenv.dump_json(input_data.get("tool_input", {}), indent=True),
+            "TOOL_OUTPUT": anyenv.dump_json(input_data.get("tool_output", ""), indent=True),
             "AGENT_NAME": input_data.get("agent_name", ""),
             "PROMPT": input_data.get("prompt", ""),
             "EVENT": input_data.get("event", ""),

@@ -6,9 +6,9 @@ allowing tools and agents to browse messages as files.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import anyenv
 from fsspec.asyn import AsyncFileSystem
 
 
@@ -71,7 +71,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
                 "cost": float(msg.cost_info.total_cost) if msg.cost_info else None,
             }
             metadata_path = f"/messages/{base_name}.json"
-            entries[metadata_path] = json.dumps(metadata, indent=2).encode("utf-8")
+            entries[metadata_path] = anyenv.dump_json(metadata, indent=True).encode()
 
         # Summary file
         summary = {
@@ -83,7 +83,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
                 "assistant": len([m for m in self._messages if m.role == "assistant"]),
             },
         }
-        entries["/summary.json"] = json.dumps(summary, indent=2).encode("utf-8")
+        entries["/summary.json"] = anyenv.dump_json(summary, indent=True).encode("utf-8")
 
         return entries
 

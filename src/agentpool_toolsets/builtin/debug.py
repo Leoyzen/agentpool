@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-import json
 import logging
 from typing import Any, Literal
 
+import anyenv
 from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
@@ -336,6 +336,6 @@ class DebugTools(StaticResourceProvider):
                 "error": error_msg,
             }
             metadata_path = f"debug/scripts/{timestamp}_{title}.json"
-            ctx.internal_fs.pipe(metadata_path, json.dumps(metadata, indent=2).encode())
+            ctx.internal_fs.pipe(metadata_path, anyenv.dump_json(metadata, indent=True).encode())
         assert result_str
         return result_str

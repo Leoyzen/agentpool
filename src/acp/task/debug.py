@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+
+import anyenv
 
 from acp.task.state import InMemoryMessageStateStore
 
@@ -162,7 +163,7 @@ class DebuggingMessageStateStore(InMemoryMessageStateStore):
         try:
             # Write as JSONL (one JSON object per line)
             with self._debug_file.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(data, separators=(",", ":")) + "\n")
+                f.write(anyenv.dump_json(data) + "\n")
         except Exception:
             # Don't let debug logging break the connection
             logging.exception("Failed to write debug entry")
