@@ -9,7 +9,6 @@ import uuid
 from clawd_code_sdk.storage.models import (
     ClaudeApiMessage,
     ClaudeAssistantEntry,
-    ClaudeMessageContent,
     ClaudeTextBlock,
     ClaudeThinkingBlock,
     ClaudeToolResultBlock,
@@ -66,7 +65,7 @@ def chat_message_to_entry(
         )
 
     # Assistant message
-    content_blocks = [ClaudeMessageContent(type="text", text=message.content)]
+    content_blocks = [ClaudeTextBlock(type="text", text=message.content)]
     usage = ClaudeUsage()
     if message.cost_info:
         usage = ClaudeUsage(
