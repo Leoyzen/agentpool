@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 import anyenv
 
 from agentpool.log import get_logger
-from agentpool.utils.time_utils import get_now, ms_to_datetime
+from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime
 from agentpool_config.storage import OpenCodeStorageConfig
 from agentpool_server.opencode_server.models.message import (
     AssistantMessage,
@@ -256,7 +256,7 @@ class OpenCodeStorageProvider(StorageProvider):
             params: list[Any] = []
 
             if filters.since:
-                since_ms = int(filters.since.timestamp() * 1000)
+                since_ms = datetime_to_ms(filters.since)
                 conditions.append("s.time_created >= ?")
                 params.append(since_ms)
 
@@ -330,19 +330,14 @@ class OpenCodeStorageProvider(StorageProvider):
     async def get_session_stats(self, filters: StatsFilters) -> dict[str, dict[str, Any]]:
         """Get conversation statistics."""
         stats: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {
-                "total_tokens": 0,
-                "messages": 0,
-                "models": set(),
-                "total_cost": 0.0,
-            }
+            lambda: {"total_tokens": 0, "messages": 0, "models": set(), "total_cost": 0.0}
         )
         try:
             conn = self._get_connection()
         except FileNotFoundError:
             return {}
         try:
-            cutoff_ms = int(filters.cutoff.timestamp() * 1000)
+            cutoff_ms = datetime_to_ms(filters.cutoff)
 
             # Query messages with their data, filtered by time
             cursor = conn.execute(
