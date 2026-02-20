@@ -61,10 +61,10 @@ def _build_tool_id_mapping(entries: list[ClaudeJSONLEntry]) -> dict[str, str]:
     for entry in entries:
         if not isinstance(entry, ClaudeAssistantEntry):
             continue
-        msg = entry.message
-        if not isinstance(msg.content, list):
+        content = entry.message.content
+        if not isinstance(content, list):
             continue
-        for block in msg.content:
+        for block in content:
             if block.type == "tool_use" and block.id and block.name:
                 mapping[block.id] = block.name
     return mapping
