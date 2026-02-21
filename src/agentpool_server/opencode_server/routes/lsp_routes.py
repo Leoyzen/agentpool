@@ -8,58 +8,16 @@ from __future__ import annotations
 
 from contextlib import suppress
 import os
-from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 
 from agentpool_server.opencode_server.dependencies import StateDep
+from agentpool_server.opencode_server.models.diagnostics import (
+    Diagnostic,
+    DiagnosticRange,
+    FormatterStatus,
+)
 from agentpool_server.opencode_server.models.events import LspStatus, LspUpdatedEvent
-
-
-# =============================================================================
-# Diagnostic Models (matching OpenCode's LSP diagnostic format)
-# =============================================================================
-
-
-class DiagnosticPosition(BaseModel):
-    """Position in a text document."""
-
-    line: int
-    character: int
-
-
-class DiagnosticRange(BaseModel):
-    """Range in a text document."""
-
-    start: DiagnosticPosition
-    end: DiagnosticPosition
-
-
-class Diagnostic(BaseModel):
-    """LSP Diagnostic matching vscode-languageserver-types format."""
-
-    range: DiagnosticRange
-    message: str
-    severity: int | None = None  # 1=Error, 2=Warning, 3=Info, 4=Hint
-    code: str | int | None = None
-    source: str | None = None
-
-
-class FormatterStatus(BaseModel):
-    """Formatter status information."""
-
-    id: str
-    """Formatter identifier."""
-
-    name: str
-    """Formatter name."""
-
-    root: str
-    """Workspace root path."""
-
-    status: Literal["connected", "error"]
-    """Connection status."""
 
 
 router = APIRouter(tags=["lsp"])
@@ -195,24 +153,20 @@ async def get_diagnostics(
                         if file_path not in results:
                             results[file_path] = []
                         # Convert from 1-based (CLI tools) to 0-based (LSP)
-                        results[file_path].append(
-                            Diagnostic(
-                                range=DiagnosticRange(
-                                    start=DiagnosticPosition(
-                                        line=max(0, diag.line - 1),
-                                        character=max(0, diag.column - 1),
-                                    ),
-                                    end=DiagnosticPosition(
-                                        line=max(0, (diag.end_line or diag.line) - 1),
-                                        character=max(0, (diag.end_column or diag.column) - 1),
-                                    ),
-                                ),
-                                message=diag.message,
-                                severity=_severity_to_lsp(diag.severity),
-                                code=diag.code,
-                                source=diag.source or server_info.id,
-                            )
+                        rng = DiagnosticRange.create(
+                            start_line=max(0, diag.line - 1),
+                            start_char=max(0, diag.column - 1),
+                            end_line=max(0, (diag.end_line or diag.line) - 1),
+                            end_char=max(0, (diag.end_column or diag.column) - 1),
                         )
+                        diagnostics = Diagnostic(
+                            range=rng,
+                            message=diag.message,
+                            severity=_severity_to_lsp(diag.severity),
+                            code=diag.code,
+                            source=diag.source or server_info.id,
+                        )
+                        results[file_path].append(diagnostics)
             except Exception:  # noqa: BLE001
                 # CLI diagnostics failed, return empty
                 pass
@@ -222,12 +176,7 @@ async def get_diagnostics(
 
 def _severity_to_lsp(severity: str) -> int:
     """Convert severity string to LSP severity number."""
-    mapping = {
-        "error": 1,
-        "warning": 2,
-        "info": 3,
-        "hint": 4,
-    }
+    mapping = {"error": 1, "warning": 2, "info": 3, "hint": 4}
     return mapping.get(severity.lower(), 1)
 
 
@@ -241,15 +190,14 @@ async def list_available_servers(state: StateDep) -> list[dict[str, object]]:
     Returns:
         List of server configurations.
     """
-    servers = []
-    for server_id, config in state.lsp_manager._server_configs.items():
-        servers.append({
+    return [
+        {
             "id": server_id,
             "extensions": config.extensions,
             "running": server_id in state.lsp_manager._servers,
-        })
-
-    return servers
+        }
+        for server_id, config in state.lsp_manager._server_configs.items()
+    ]
 
 
 # =============================================================================
