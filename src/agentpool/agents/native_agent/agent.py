@@ -536,8 +536,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     @property
     def model_name(self) -> str | None:
         """Get the model name in a consistent format (provider:model_name)."""
-        # Construct full model ID with provider prefix (e.g., "anthropic:claude-haiku-4-5")
-        return f"{self._model.system}:{self._model.model_name}" if self._model else None
+        return self._model.model_id if self._model else None
 
     def to_tool(
         self,
