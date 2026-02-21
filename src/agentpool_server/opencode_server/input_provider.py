@@ -282,16 +282,14 @@ class OpenCodeInputProvider(InputProvider):
         # Extract descriptions if available (custom x-option-descriptions field)
         descriptions = schema.get("x-option-descriptions", {})
         question_id = self._generate_permission_id()  # Reuse ID generator
+        opts = [
+            QuestionOption(label=str(val), description=descriptions.get(str(val), ""))
+            for val in enum_values
+        ]
         question_info = QuestionInfo(
             question=params.message,
             header=params.message[:12],  # Truncate to 12 chars
-            options=[
-                QuestionOption(
-                    label=str(val),
-                    description=descriptions.get(str(val), ""),
-                )
-                for val in enum_values
-            ],
+            options=opts,
             multiple=is_multi or None,
         )
         # Create future to wait for answer
@@ -314,7 +312,6 @@ class OpenCodeInputProvider(InputProvider):
             message=params.message,
             is_multi=is_multi,
         )
-
         # Wait for answer
         try:
             answers = await future  # list[list[str]]

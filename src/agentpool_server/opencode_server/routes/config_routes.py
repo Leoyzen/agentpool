@@ -105,11 +105,8 @@ async def get_config(state: StateDep) -> Config:
     # Set a default model if not already configured
     if state.config.model is None:
         try:
-            # Get available models
-            toko_models = await state.agent.get_available_models()
-            if toko_models:
+            if toko_models := await state.agent.get_available_models():
                 providers = _build_providers(toko_models)
-
                 # Find first connected provider and use its first model
                 for provider in providers:
                     if any(os.environ.get(env) for env in provider.env) and provider.models:
@@ -220,8 +217,7 @@ async def get_providers(state: StateDep) -> ProvidersResponse:
     providers: list[Provider] = []
     # Try to get models from the agent
     try:
-        toko_models = await state.agent.get_available_models()
-        if toko_models:
+        if toko_models := await state.agent.get_available_models():
             providers = _build_providers(toko_models)
     except Exception:  # noqa: BLE001
         pass  # Fall through to dummy providers
@@ -231,8 +227,7 @@ async def get_providers(state: StateDep) -> ProvidersResponse:
         providers = _get_dummy_providers()
 
     # Get variants from agent's thought_level modes (for Codex, Claude Code, etc.)
-    variants = await _get_variants_from_agent(state.agent)
-    if variants:
+    if variants := await _get_variants_from_agent(state.agent):
         providers = _apply_variants_to_providers(providers, variants)
 
     # Build default models map: use first model for each connected provider
@@ -252,32 +247,22 @@ async def get_providers(state: StateDep) -> ProvidersResponse:
 @router.get("/provider")
 async def list_providers(state: StateDep) -> ProviderListResponse:
     """List all providers."""
-    import os
-
     providers: list[Provider] = []
-
-    # Try to get models from the agent
     try:
-        toko_models = await state.agent.get_available_models()
-        if toko_models:
+        if toko_models := await state.agent.get_available_models():
             providers = _build_providers(toko_models)
     except Exception:  # noqa: BLE001
         pass  # Fall through to dummy providers
-
     # Fall back to dummy providers if no models available
     if not providers:
         providers = _get_dummy_providers()
-
     # Get variants from agent's thought_level modes (for Codex, Claude Code, etc.)
     variants = await _get_variants_from_agent(state.agent)
     if variants:
         providers = _apply_variants_to_providers(providers, variants)
 
     # Determine which providers are "connected" based on env vars
-    connected = [
-        provider.id for provider in providers if any(os.environ.get(env) for env in provider.env)
-    ]
-
+    connected = [p.id for p in providers if any(os.environ.get(env) for env in p.env)]
     # Build default models map: use first model for each connected provider
     default_models: dict[str, str] = {}
     for provider in providers:
@@ -285,20 +270,11 @@ async def list_providers(state: StateDep) -> ProviderListResponse:
             # Simply use the first available model
             default_models[provider.id] = next(iter(provider.models.keys()))
 
-    return ProviderListResponse(
-        all=providers,
-        default=default_models,
-        connected=connected,
-    )
+    return ProviderListResponse(all=providers, default=default_models, connected=connected)
 
 
 @router.get("/mode")
 async def list_modes(state: StateDep) -> list[Mode]:
     """List available modes."""
     _ = state  # unused for now
-    return [
-        Mode(
-            name="default",
-            tools={},
-        )
-    ]
+    return [Mode(name="default", tools={})]
