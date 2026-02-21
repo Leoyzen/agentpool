@@ -643,8 +643,7 @@ async def summarize_session(  # noqa: PLR0915
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = state.messages.get(session_id, [])
-    if not messages:
+    if not state.messages.get(session_id):
         raise HTTPException(status_code=400, detail="No messages to summarize")
 
     # Determine model to use
@@ -683,6 +682,7 @@ async def summarize_session(  # noqa: PLR0915
     # The LLM sees the complete conversation and generates a continuation prompt.
     response_text = ""
     usage = None
+    cost = 0
     text_part: TextPart | None = None
     try:
         # Stream events from the agent with the summarization prompt
@@ -721,12 +721,12 @@ async def summarize_session(  # noqa: PLR0915
                 # Stream complete - extract token usage
                 case StreamCompleteEvent(message=msg) if msg and msg.usage:
                     usage = msg.usage
+                    cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
 
     except Exception as e:  # noqa: BLE001
         response_text = f"Error generating summary: {e}"
 
     response_time = now_ms()
-
     # Create/update text part with final response
     if text_part is None:
         text_part = TextPart(
@@ -771,12 +771,14 @@ async def summarize_session(  # noqa: PLR0915
         message_id=assistant_msg_id,
         session_id=session_id,
         tokens=tokens,
+        cost=cost,
     )
     assistant_msg_with_parts.parts.append(step_finish)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time and tokens
     msg_time = MessageTime(created=now, completed=response_time)
-    updated_assistant = assistant_message.model_copy(update={"time": msg_time, "tokens": tokens})
+    update = {"time": msg_time, "tokens": tokens, "cost": cost}
+    updated_assistant = assistant_message.model_copy(update=update)
     assistant_msg_with_parts.info = updated_assistant
     await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
     # Mark session as idle
