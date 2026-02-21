@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -76,7 +76,7 @@ class Config(OpenCodeBaseModel):
     """Custom username to display instead of system username."""
 
     # Sharing
-    share: str | None = None
+    share: Literal["manual", "auto", "disabled"] | None = None
     """Sharing behavior: 'manual', 'auto', or 'disabled'."""
 
     # Provider configurations

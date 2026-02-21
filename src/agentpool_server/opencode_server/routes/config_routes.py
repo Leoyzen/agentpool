@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter
 
-from agentpool.agents.base_agent import BaseAgent
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
     Config,
@@ -25,6 +24,8 @@ from agentpool_server.opencode_server.models import (
 
 if TYPE_CHECKING:
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
+
+    from agentpool.agents.base_agent import BaseAgent
 
 
 router = APIRouter(tags=["config"])

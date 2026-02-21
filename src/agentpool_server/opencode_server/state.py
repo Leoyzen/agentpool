@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentpool.diagnostics.lsp_manager import LSPManager
+from agentpool_server.opencode_server.models import Config
 
 
 if TYPE_CHECKING:
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
     from agentpool_server.opencode_server.models import (
-        Config,
         Event,
         MessageWithParts,
         QuestionInfo,
