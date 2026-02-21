@@ -1102,11 +1102,11 @@ wheels = [
 
 [[package]]
 name = "coloraide"
-version = "8.3"
+version = "8.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8f/47/9679e442fa5625b28678f16bae79df16e4488cff093c0156f557d50b9990/coloraide-8.3.tar.gz", hash = "sha256:35b9b43cf6434505b4e8fb639b4000a9069fe44b3ae76f2f70c7fe536c6e6acb", size = 20186507, upload-time = "2026-02-14T00:35:57.884Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/2f/137decfe89f2b36ffe39e303bbcbca2fd1b2fe3c4dc9134a55ec2129b028/coloraide-8.4.tar.gz", hash = "sha256:55c7f8c4a97fa470c6726a1b1b4e71d2fc0f12e1782069aa13587882f3159363", size = 20414877, upload-time = "2026-02-21T05:48:36.972Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/30/25561f8792a333edc79465613b1ba735e72db98945bb44fcf12aaf7d4065/coloraide-8.3-py3-none-any.whl", hash = "sha256:9ca4b9cd8ccb297690b3cb6406f6b06df6a922cafbb2269a24805aa98b32ea14", size = 333053, upload-time = "2026-02-14T00:35:55.726Z" },
+    { url = "https://files.pythonhosted.org/packages/36/f3/30d58569d38240fa262c97ce0934aa9e9a0160918c66bc7219542f8e34d1/coloraide-8.4-py3-none-any.whl", hash = "sha256:14cf5b945c55ca10eed3253b06b0c518be9dc09f3786802f47c4d5df60a44d52", size = 334466, upload-time = "2026-02-21T05:48:34.98Z" },
 ]
 
 [[package]]
@@ -1656,7 +1656,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.129.0"
+version = "0.129.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -1665,9 +1665,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/48/47/75f6bea02e797abff1bca968d5997793898032d9923c1935ae2efdece642/fastapi-0.129.0.tar.gz", hash = "sha256:61315cebd2e65df5f97ec298c888f9de30430dd0612d59d6480beafbc10655af", size = 375450, upload-time = "2026-02-12T13:54:52.541Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/37/4aa7f6ce92745458b6ce0acd706dde2ac23a3bf341266b5311c904109f67/fastapi-0.129.1.tar.gz", hash = "sha256:6ccf0eca9644e0d6280115b4fc8281bf55ec5878d4d95572f7b2034ab15708ba", size = 369852, upload-time = "2026-02-21T13:10:03.335Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/dd/d0ee25348ac58245ee9f90b6f3cbb666bf01f69be7e0911f9851bddbda16/fastapi-0.129.0-py3-none-any.whl", hash = "sha256:b4946880e48f462692b31c083be0432275cbfb6e2274566b1be91479cc1a84ec", size = 102950, upload-time = "2026-02-12T13:54:54.528Z" },
+    { url = "https://files.pythonhosted.org/packages/01/f9/f15d92bd6035d4f83be8b82dc527a3e7abc87648fda62cf8d1df344410a7/fastapi-0.129.1-py3-none-any.whl", hash = "sha256:022462403bc385b791df418d8f088eb0e8f1fe7cb8f625d682f5e9da6157cc83", size = 103226, upload-time = "2026-02-21T13:10:05.058Z" },
 ]
 
 [[package]]
@@ -1722,7 +1722,7 @@ wheels = [
 
 [[package]]
 name = "fastmcp"
-version = "3.0.0"
+version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib" },
@@ -1746,9 +1746,9 @@ dependencies = [
     { name = "watchfiles" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/be/beb5d3e485983b9dd122f3f74772bcceeb085ca824e11c52c14ba71cf21a/fastmcp-3.0.0.tar.gz", hash = "sha256:f3b0cfa012f6b2b50b877da181431c6f9a551197f466b0bb7de7f39ceae159a1", size = 16093079, upload-time = "2026-02-18T21:25:34.461Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/39/0847a868a8681f0d9bf42ad4b6856ef675f799eb464bd10dbcfe9ae87323/fastmcp-3.0.1.tar.gz", hash = "sha256:ba463ae51e357fba2bafe513cc97f0a06c9f31220e6584990b7d8bcbf69f0516", size = 17236395, upload-time = "2026-02-21T01:35:25.696Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/14/05bebaf3764ea71ce6fa9d3fcf870610bbc8b1e7be2505e870d709375316/fastmcp-3.0.0-py3-none-any.whl", hash = "sha256:561d537cb789f995174c5591f1b54f758ce3f82da3cd951ffe51ce18609569e9", size = 603327, upload-time = "2026-02-18T21:25:36.701Z" },
+    { url = "https://files.pythonhosted.org/packages/87/f9/94f2531d0c519e1e394c264941848caf2309284c5318c070f7b0e95ac496/fastmcp-3.0.1-py3-none-any.whl", hash = "sha256:71de15ffa4e54baebb78d7031c4c9a042a1ab8d1c0b44a9961b75d65809b67e8", size = 605494, upload-time = "2026-02-21T01:35:22.857Z" },
 ]
 
 [[package]]
@@ -6289,11 +6289,11 @@ wheels = [
 
 [[package]]
 name = "types-protobuf"
-version = "6.32.1.20251210"
+version = "6.32.1.20260221"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c2/59/c743a842911887cd96d56aa8936522b0cd5f7a7f228c96e81b59fced45be/types_protobuf-6.32.1.20251210.tar.gz", hash = "sha256:c698bb3f020274b1a2798ae09dc773728ce3f75209a35187bd11916ebfde6763", size = 63900, upload-time = "2025-12-10T03:14:25.451Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5f/e2/9aa4a3b2469508bd7b4e2ae11cbedaf419222a09a1b94daffcd5efca4023/types_protobuf-6.32.1.20260221.tar.gz", hash = "sha256:6d5fb060a616bfb076cbb61b4b3c3969f5fc8bec5810f9a2f7e648ee5cbcbf6e", size = 64408, upload-time = "2026-02-21T03:55:13.916Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/43/58e75bac4219cbafee83179505ff44cae3153ec279be0e30583a73b8f108/types_protobuf-6.32.1.20251210-py3-none-any.whl", hash = "sha256:2641f78f3696822a048cfb8d0ff42ccd85c25f12f871fbebe86da63793692140", size = 77921, upload-time = "2025-12-10T03:14:24.477Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/e8/1fd38926f9cf031188fbc5a96694203ea6f24b0e34bd64a225ec6f6291ba/types_protobuf-6.32.1.20260221-py3-none-any.whl", hash = "sha256:da7cdd947975964a93c30bfbcc2c6841ee646b318d3816b033adc2c4eb6448e4", size = 77956, upload-time = "2026-02-21T03:55:12.894Z" },
 ]
 
 [[package]]
