@@ -1215,19 +1215,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         if result_message and result_message.usage:
             usage_dict = result_message.usage
             run_usage = RunUsage(
-                input_tokens=usage_dict.get("input_tokens", 0),
-                output_tokens=usage_dict.get("output_tokens", 0),
-                cache_read_tokens=usage_dict.get("cache_read_input_tokens", 0),
-                cache_write_tokens=usage_dict.get("cache_creation_input_tokens", 0),
+                input_tokens=usage_dict["input_tokens"],
+                output_tokens=usage_dict["output_tokens"],
+                cache_read_tokens=usage_dict["cache_read_input_tokens"],
+                cache_write_tokens=usage_dict["cache_creation_input_tokens"],
             )
             total_cost = Decimal(str(result_message.total_cost_usd or 0))
             cost_info = TokenCost(token_usage=run_usage, total_cost=total_cost)
             # Also set usage for OpenCode compatibility
             request_usage = RequestUsage(
-                input_tokens=usage_dict.get("input_tokens", 0),
-                output_tokens=usage_dict.get("output_tokens", 0),
-                cache_read_tokens=usage_dict.get("cache_read_input_tokens", 0),
-                cache_write_tokens=usage_dict.get("cache_creation_input_tokens", 0),
+                input_tokens=usage_dict["input_tokens"],
+                output_tokens=usage_dict["output_tokens"],
+                cache_read_tokens=usage_dict["cache_read_input_tokens"],
+                cache_write_tokens=usage_dict["cache_creation_input_tokens"],
             )
 
         # Determine finish reason - check if we were cancelled
