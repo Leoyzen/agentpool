@@ -25,7 +25,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
-from pydantic_ai import PartDeltaEvent, TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
+from pydantic_ai import (
+    PartDeltaEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+    ToolCallPart,
+    ToolCallPartDelta,
+)
+
+from agentpool.agents.events import ToolCallStartEvent
 
 
 if TYPE_CHECKING:
@@ -145,6 +155,20 @@ def event_handler_processor(
             yield event
 
     return process
+
+
+def event_to_part(
+    event: RichAgentStreamEvent[Any],
+) -> TextPart | ThinkingPart | ToolCallPart | None:
+    match event:
+        case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+            return TextPart(content=delta)
+        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)) if delta:
+            return ThinkingPart(content=delta)
+        case ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc_name, raw_input=tc_input):
+            return ToolCallPart(tool_name=tc_name, args=tc_input, tool_call_id=tc_id)
+        case _:
+            return None
 
 
 async def batch_stream_deltas(  # noqa: PLR0915

@@ -43,7 +43,6 @@ from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
-from agentpool.agents.acp_agent.acp_converters import event_to_part
 from agentpool.agents.acp_agent.session_state import ACPSessionState
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
@@ -52,6 +51,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolResultMetadataEvent,
 )
+from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
