@@ -11,7 +11,7 @@ from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
 
 
 if TYPE_CHECKING:
-    from pydantic_ai import RequestUsage
+    from pydantic_ai.usage import UsageBase
 
 
 class TimeCreatedUpdated(OpenCodeBaseModel):
@@ -62,8 +62,8 @@ class Tokens(OpenCodeBaseModel):
     total: int | None = None
 
     @classmethod
-    def from_pydantic_ai(cls, usage: RequestUsage) -> Tokens:
-        """Create from a pydantic-ai RequestUsage.
+    def from_pydantic_ai(cls, usage: UsageBase) -> Tokens:
+        """Create from a pydantic-ai Usage object.
 
         Args:
             usage: pydantic-ai request usage with token counts.
@@ -73,10 +73,7 @@ class Tokens(OpenCodeBaseModel):
             input=usage.input_tokens,
             output=usage.output_tokens,
             reasoning=reasoning,
-            cache=TokenCache(
-                read=usage.cache_read_tokens,
-                write=usage.cache_write_tokens,
-            ),
+            cache=TokenCache(read=usage.cache_read_tokens, write=usage.cache_write_tokens),
             total=usage.total_tokens + reasoning,
         )
 
