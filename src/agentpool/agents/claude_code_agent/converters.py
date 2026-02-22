@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 import uuid
 
+from clawd_code_sdk.models import BashInput
+from clawd_code_sdk.models.output_types import (
+    EditOutput,
+    TodoWriteOutput,
+    WriteOutput,
+)
 from pydantic import TypeAdapter
 from pydantic_ai import PartDeltaEvent, RequestUsage, RunUsage, TextPartDelta, ThinkingPartDelta
 
@@ -27,6 +33,7 @@ if TYPE_CHECKING:
         ThinkingConfig,
     )
     from clawd_code_sdk.models import SystemPromptPreset, ToolInput, Usage
+    from clawd_code_sdk.models.output_types import StructuredPatchHunk
 
     from agentpool.agents.context import ConfirmationResult
     from agentpool.agents.events import RichAgentStreamEvent
@@ -93,7 +100,7 @@ def content_block_to_event(block: ContentBlock, index: int = 0) -> RichAgentStre
                 kind=rich_info.kind,
                 locations=rich_info.locations,
                 content=rich_info.content,
-                raw_input=input_data,
+                raw_input=cast(dict[str, Any], input_data),
             )
         case _:
             return None
@@ -154,7 +161,7 @@ def claude_message_to_events(
                         complete_event = ToolCallCompleteEvent(
                             tool_name=tool_use.name,
                             tool_call_id=block.tool_use_id,
-                            tool_input=tool_use.input,
+                            tool_input=cast(dict[str, Any], tool_use.input),
                             tool_result=block.get_parsed_content(),
                             agent_name=agent_name,
                             message_id="",
@@ -252,20 +259,20 @@ def convert_to_opencode_metadata(  # noqa: PLR0911
     # Dispatch to appropriate converter based on tool name
     match tool_name.lower():
         case "write":
-            return _convert_write_result(tool_use_result)
+            return _convert_write_result(cast(WriteOutput, tool_use_result))
         case "edit":
-            return _convert_edit_result(tool_use_result)
+            return _convert_edit_result(cast(EditOutput, tool_use_result))
         case "read":
             return _convert_read_result(tool_use_result)
         case "bash":
-            return _convert_bash_result(tool_use_result, tool_input)
+            return _convert_bash_result(tool_use_result, cast(BashInput, tool_input))
         case "todowrite":
-            return _convert_todowrite_result(tool_use_result)
+            return _convert_todowrite_result(cast(TodoWriteOutput, tool_use_result))
         case _:
             return None
 
 
-def _convert_write_result(result: dict[str, Any]) -> dict[str, Any] | None:
+def _convert_write_result(result: WriteOutput) -> dict[str, Any] | None:
     """Convert Write tool result to OpenCode metadata."""
     file_path = result.get("filePath")
     content = result.get("content")
@@ -274,7 +281,7 @@ def _convert_write_result(result: dict[str, Any]) -> dict[str, Any] | None:
     return {"filePath": file_path, "content": content}
 
 
-def _convert_edit_result(result: dict[str, Any]) -> dict[str, Any] | None:
+def _convert_edit_result(result: EditOutput) -> dict[str, Any] | None:
     """Convert Edit tool result to OpenCode metadata."""
     file_path = result.get("filePath")
     original_file = result.get("originalFile")
@@ -324,7 +331,7 @@ def _convert_read_result(result: dict[str, Any]) -> dict[str, Any] | None:
 
 def _convert_bash_result(
     result: dict[str, Any],
-    tool_input: ToolInput | dict[str, Any] | None,
+    tool_input: BashInput | None,
 ) -> dict[str, Any] | None:
     """Convert Bash tool result to OpenCode metadata."""
     stdout = result.get("stdout", "")
@@ -349,7 +356,7 @@ def _convert_bash_result(
     return {"output": output, "exit": exit_code, "description": description}
 
 
-def _convert_todowrite_result(result: dict[str, Any]) -> dict[str, Any] | None:
+def _convert_todowrite_result(result: TodoWriteOutput) -> dict[str, Any] | None:
     """Convert TodoWrite tool result to OpenCode metadata."""
     new_todos = result.get("newTodos", [])
     if not new_todos:
@@ -409,7 +416,7 @@ def _build_unified_diff(
     file_path: str,
     before: str | None,
     after: str | None,
-    structured_patch: list[dict[str, Any]],
+    structured_patch: list[StructuredPatchHunk],
 ) -> str:
     """Build unified diff string from structured patch or content."""
     # If we have both before and after, compute proper diff
@@ -439,10 +446,7 @@ def _build_unified_diff(
     return ""
 
 
-def _structured_patch_to_diff(
-    file_path: str,
-    structured_patch: list[dict[str, Any]],
-) -> str:
+def _structured_patch_to_diff(file_path: str, structured_patch: list[StructuredPatchHunk]) -> str:
     """Convert Claude Code's structuredPatch to unified diff format.
 
     structuredPatch format:
@@ -479,7 +483,7 @@ def _structured_patch_to_diff(
     return "\n".join(lines) + "\n" if lines else ""
 
 
-def _count_diff_changes(structured_patch: list[dict[str, Any]]) -> tuple[int, int]:
+def _count_diff_changes(structured_patch: list[StructuredPatchHunk]) -> tuple[int, int]:
     """Count additions and deletions from structured patch."""
     additions = 0
     deletions = 0

@@ -945,7 +945,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                     display_name = _strip_mcp_prefix(name)
                                     tool_call_part = ToolCallPart(
                                         tool_name=display_name,
-                                        args=input_data,
+                                        args=cast(dict[str, Any], input_data),
                                         tool_call_id=tc_id,
                                     )
                                     current_response_parts.append(tool_call_part)
@@ -965,7 +965,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                             kind=rich_info.kind,
                                             locations=rich_info.locations,
                                             content=rich_info.content,
-                                            raw_input=input_data,
+                                            raw_input=cast(dict[str, Any], input_data),
                                         )
                                         yield tool_start_event
                                     # Clean up from accumulator (always, both branches)
@@ -979,7 +979,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                     # Get tool name from pending calls
                                     tool_use = pending_tool_calls.pop(tc_id)
                                     tool_name = _strip_mcp_prefix(tool_use.name)
-                                    tool_input = tool_use.input if tool_use else {}
+                                    tool_input = (
+                                        cast(dict[str, Any], tool_use.input) if tool_use else {}
+                                    )
                                     # Create ToolReturnPart for the result
                                     return_part = ToolReturnPart(
                                         tool_name=tool_name,
@@ -1030,7 +1032,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                 yield FunctionToolResultEvent(result=return_part)
                                 # Build metadata: prefer existing tool_metadata,
                                 # then convert SDK result
-                                tool_input = tool_use.input if tool_use else {}
+                                tool_input = (
+                                    cast(dict[str, Any], tool_use.input) if tool_use else {}
+                                )
                                 metadata = tool_metadata.get(tc_id)
                                 if not metadata and isinstance(message.tool_use_result, list):
                                     result = (
