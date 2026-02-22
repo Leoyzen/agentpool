@@ -196,6 +196,7 @@ class MessageNode[TDeps, TResult](ABC):
         Returns:
             Tool instance that can be registered
         """
+        from agentpool.agents.base_agent import BaseAgent
         from agentpool.tools.base import FunctionTool
 
         async def wrapped(prompt: str) -> TResult:
@@ -208,6 +209,11 @@ class MessageNode[TDeps, TResult](ABC):
             docstring = f"{docstring}\n\n{self.description}"
         wrapped.__doc__ = docstring
         wrapped.__name__ = tool_name
+        if isinstance(self, BaseAgent):  # override TResult with concrete type
+            wrapped.__annotations__ = {"prompt": str, "return": self._output_type or Any}
+        else:
+            wrapped.__annotations__ = {"prompt": str, "return": Any}
+
         return FunctionTool.from_callable(wrapped)
 
     @overload
