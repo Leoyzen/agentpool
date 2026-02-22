@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
     from agentpool import AgentPool
     from agentpool.prompts.prompts import BasePrompt
-    from agentpool.tools import FunctionTool
     from agentpool_config.pool_server import MCPPoolServerConfig
 
     LifespanHandler = Callable[
@@ -104,26 +103,8 @@ class MCPServer(BaseServer):
         tools = await self.provider.get_tools()
 
         for tool in tools:
-            # Create handler with closure to capture tool instance
-            def make_handler(tool_instance: FunctionTool) -> Callable[..., Awaitable[str]]:
-                async def handler(**kwargs: Any) -> str:
-                    """Dynamically generated tool handler."""
-                    # Filter out _meta arguments
-                    args = {k: v for k, v in kwargs.items() if not k.startswith("_")}
-                    try:
-                        result = await tool_instance.execute(**args)
-                        return str(result)
-                    except Exception as exc:
-                        logger.exception("Tool execution failed", name=tool_instance.name)
-                        return f"Tool execution failed: {exc}"
-
-                # Set proper function metadata for FastMCP
-                handler.__name__ = tool_instance.name
-                handler.__doc__ = tool_instance.description or f"Execute {tool_instance.name}"
-                return handler
-
-            # Register using FastMCP's tool decorator
-            tool_handler = make_handler(tool)
+            # TODO: previously there was code to filter private attributes using a wrapper.
+            # comment said it was to remove _meta params, but not sure if it was required at all.
             tool_annotations = types.ToolAnnotations(
                 title=tool.name,
                 readOnlyHint=tool.hints.read_only,
@@ -132,7 +113,7 @@ class MCPServer(BaseServer):
                 openWorldHint=tool.hints.open_world,
             )
             # TODO: set task=True?
-            self.fastmcp.tool(annotations=tool_annotations)(tool_handler)
+            self.fastmcp.tool(annotations=tool_annotations)(tool.callable)
 
         self._tools_registered = True
         logger.info("Registered MCP tools", count=len(tools))
