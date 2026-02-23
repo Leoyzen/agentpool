@@ -1035,7 +1035,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                 tool_input = (
                                     cast(dict[str, Any], tool_use.input) if tool_use else {}
                                 )
-                                metadata = tool_metadata.get(tc_id)
+                                metadata: dict[str, Any] | None = tool_metadata.get(tc_id)
                                 if not metadata and isinstance(message.tool_use_result, list):
                                     result = (
                                         message.tool_use_result[0]
@@ -1046,7 +1046,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                     # Convert Claude Code SDK's tool_use_result to OpenCode format
                                     metadata = convert_to_opencode_metadata(
                                         tool_name, result, tool_input
-                                    )
+                                    )  # type: ignore[assignment]
 
                                 # Also emit ToolCallCompleteEvent for consumers that expect it
                                 yield ToolCallCompleteEvent(

@@ -16,6 +16,7 @@ from clawd_code_sdk.models.output_types import (
     BashOutput,
     EditOutput,
     ReadOutput,
+    ReadTextOutput,
     TodoWriteOutput,
     WriteOutput,
 )
@@ -326,17 +327,21 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata | None:
 
 def _convert_read_result(result: ReadOutput) -> ReadMetadata | None:
     """Convert Read tool result to OpenCode metadata."""
-    # Read results have a nested "file" object
-    file_info = result.get("file")
+    # Only text reads have meaningful content for preview
+    if result.get("type") != "text":
+        return ReadMetadata(preview="", truncated=False, loaded=[])
+
+    text_result = cast(ReadTextOutput, result)
+    file_info = text_result.get("file")
     if not file_info:
         return None
 
-    content = file_info.get("content", "")
+    content: str = file_info.get("content", "")
     # Build preview from first ~20 lines
     lines = content.splitlines()
     preview = "\n".join(lines[:20])
-    num_lines = file_info.get("numLines", 0)
-    total_lines = file_info.get("totalLines", 0)
+    num_lines: int = file_info.get("numLines", 0)
+    total_lines: int = file_info.get("totalLines", 0)
     truncated = num_lines < total_lines if total_lines else False
     return ReadMetadata(preview=preview, truncated=truncated, loaded=[])
 
