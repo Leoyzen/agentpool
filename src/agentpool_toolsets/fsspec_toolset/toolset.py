@@ -455,7 +455,6 @@ class FSSpecTools(ResourceProvider):
             return f"error: Failed to read file {path}: {e}"
         else:
             # Emit file content for UI display (formatted at ACP layer)
-
             # Use non-negative line for display (negative lines are internal Python convention)
             display_start_line = max(1, line) if line and line > 0 else None
             await agent_ctx.events.tool_call_progress(
@@ -521,7 +520,6 @@ class FSSpecTools(ResourceProvider):
         path = self._resolve_path(path, agent_ctx)
         msg = f"Writing file: {path}"
         await agent_ctx.events.tool_call_start(title=msg, kind="edit", locations=[path])
-
         content_bytes = len(content.encode("utf-8"))
         try:
             if mode not in ("w", "a"):
@@ -573,20 +571,6 @@ class FSSpecTools(ResourceProvider):
 
             action = "Appended to" if mode == "a" and file_exists else "Wrote"
             success_msg = f"{action} {path} ({content_bytes} bytes){diagnostics_msg}"
-            # TODO: Include diagnostics in metadata for UI display
-            # Expected metadata shape:
-            # {
-            #   "diagnostics": {
-            #     "<file_path>": [
-            #       {
-            #         "range": {"start": {"line": 0, "character": 0}, "end": {...}},
-            #         "message": "...",
-            #         "severity": 1  # 1=error, 2=warning, 3=info, 4=hint
-            #       }
-            #     ]
-            #   }
-            # }
-            # TODO: Add structured diagnostics here for UI
             meta = {"filePath": str(Path(path).absolute()), "content": content}
             return ToolResult(content=success_msg, metadata=meta)  # Agent sees content
         except Exception as e:  # noqa: BLE001
