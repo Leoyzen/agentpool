@@ -9,9 +9,10 @@ The metadata is stored in ``ToolStateCompleted.metadata`` /
 ``ToolStateRunning.metadata`` and rendered by the UI components in
 ``packages/ui/src/components/message-part.tsx``.
 
-All tool metadata dicts additionally receive ``truncated`` (bool) and
-``outputPath`` (str) fields from the tool framework's automatic truncation
-logic (see ``Tool.define`` in ``tool.ts``).
+All tool metadata dicts inherit from :class:`TruncationFields` which provides
+the ``truncated`` and ``output_path`` fields that the tool framework
+(``Tool.define`` in ``tool.ts``) conditionally injects after each tool
+execution.
 """
 
 from __future__ import annotations
@@ -68,14 +69,21 @@ class FileDiff(TypedDict):
 
 
 class TruncationFields(TypedDict, total=False):
-    """Fields added automatically by the tool framework's truncation logic.
+    """Fields injected by the tool framework's automatic truncation logic.
 
-    Every tool metadata dict may include these fields. They are injected by
-    ``Tool.define`` after the tool's ``execute`` returns.
+    ``Tool.define`` in ``tool.ts`` wraps every tool's ``execute`` and
+    conditionally adds these fields to the returned metadata when the
+    output exceeds size limits.
+
+    All tool metadata TypedDicts inherit from this base so that these
+    framework-level fields are available on every metadata dict without
+    repetition.
     """
 
     truncated: bool
+    """Whether the tool output was truncated by the framework."""
     output_path: str
+    """Path to the full output file when truncation occurred."""
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +91,7 @@ class TruncationFields(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class BashMetadata(TypedDict, total=False):
+class BashMetadata(TruncationFields):
     """Metadata returned by the ``bash`` tool.
 
     The UI reads ``output`` for display and ``description`` for the subtitle.
@@ -95,10 +103,8 @@ class BashMetadata(TypedDict, total=False):
     """Process exit code (``None`` when the process was killed/interrupted)."""
     description: str
     """Short human-readable description of the command."""
-    command: str
+    command: NotRequired[str]
     """The command that was executed (fallback used by UI if not in input)."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +112,7 @@ class BashMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class EditMetadata(TypedDict, total=False):
+class EditMetadata(TruncationFields):
     """Metadata returned by the ``edit`` tool.
 
     The UI reads ``filediff`` for the diff viewer and ``diagnostics``
@@ -119,8 +125,6 @@ class EditMetadata(TypedDict, total=False):
     """Structured before/after content with change counts."""
     diagnostics: LSPDiagnosticsMap
     """LSP diagnostics keyed by normalized file path."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +132,7 @@ class EditMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class MultiEditMetadata(TypedDict, total=False):
+class MultiEditMetadata(TruncationFields):
     """Metadata returned by the ``multiedit`` tool.
 
     Contains a list of individual edit metadata results.
@@ -136,8 +140,6 @@ class MultiEditMetadata(TypedDict, total=False):
 
     results: list[EditMetadata]
     """Metadata from each individual edit operation."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ class MultiEditMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class WriteMetadata(TypedDict, total=False):
+class WriteMetadata(TruncationFields):
     """Metadata returned by the ``write`` tool.
 
     The UI reads ``diagnostics`` for inline LSP error display.
@@ -157,8 +159,6 @@ class WriteMetadata(TypedDict, total=False):
     """Absolute path to the written file."""
     exists: bool
     """Whether the file existed before the write."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -166,10 +166,13 @@ class WriteMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class ReadMetadata(TypedDict, total=False):
+class ReadMetadata(TypedDict):
     """Metadata returned by the ``read`` tool.
 
     The UI reads ``loaded`` for showing instruction file references.
+
+    Note: ``truncated`` is always set by the tool itself — the framework
+    skips its own truncation when it sees ``truncated`` already present.
     """
 
     preview: str
@@ -178,7 +181,8 @@ class ReadMetadata(TypedDict, total=False):
     """Whether the file content was truncated."""
     loaded: list[str]
     """Paths to instruction files that were loaded alongside the read."""
-    output_path: str
+    output_path: NotRequired[str]
+    """Path to the full output file when truncation occurred."""
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +190,18 @@ class ReadMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class GlobMetadata(TypedDict, total=False):
-    """Metadata returned by the ``glob`` tool."""
+class GlobMetadata(TypedDict):
+    """Metadata returned by the ``glob`` tool.
+
+    Note: ``truncated`` is always set by the tool itself.
+    """
 
     count: int
     """Number of files matched."""
     truncated: bool
     """Whether results were truncated (limited to 100 files)."""
-    output_path: str
+    output_path: NotRequired[str]
+    """Path to the full output file when truncation occurred."""
 
 
 # ---------------------------------------------------------------------------
@@ -201,14 +209,18 @@ class GlobMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class GrepMetadata(TypedDict, total=False):
-    """Metadata returned by the ``grep`` tool."""
+class GrepMetadata(TypedDict):
+    """Metadata returned by the ``grep`` tool.
+
+    Note: ``truncated`` is always set by the tool itself.
+    """
 
     matches: int
     """Number of matching lines found."""
     truncated: bool
     """Whether results were truncated (limited to 100 matches)."""
-    output_path: str
+    output_path: NotRequired[str]
+    """Path to the full output file when truncation occurred."""
 
 
 # ---------------------------------------------------------------------------
@@ -216,14 +228,18 @@ class GrepMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class ListMetadata(TypedDict, total=False):
-    """Metadata returned by the ``list`` tool."""
+class ListMetadata(TypedDict):
+    """Metadata returned by the ``list`` tool.
+
+    Note: ``truncated`` is always set by the tool itself.
+    """
 
     count: int
     """Number of files listed."""
     truncated: bool
     """Whether results were truncated (limited to 100 entries)."""
-    output_path: str
+    output_path: NotRequired[str]
+    """Path to the full output file when truncation occurred."""
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +254,7 @@ class TaskModelRef(TypedDict):
     providerID: str
 
 
-class TaskMetadata(TypedDict, total=False):
+class TaskMetadata(TruncationFields):
     """Metadata returned by the ``task`` tool.
 
     The UI reads ``sessionId`` to link to the sub-agent's session.
@@ -248,8 +264,6 @@ class TaskMetadata(TypedDict, total=False):
     """Session ID of the spawned sub-agent session."""
     model: TaskModelRef
     """The model used for the sub-agent."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +285,7 @@ class TodoInfo(TypedDict):
     """Priority level: ``high``, ``medium``, ``low``."""
 
 
-class TodoMetadata(TypedDict, total=False):
+class TodoMetadata(TruncationFields):
     """Metadata returned by the ``todowrite`` and ``todoread`` tools.
 
     The UI reads ``todos`` to render the todo checklist.
@@ -279,8 +293,6 @@ class TodoMetadata(TypedDict, total=False):
 
     todos: list[TodoInfo]
     """The current todo list."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +300,7 @@ class TodoMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class QuestionMetadata(TypedDict, total=False):
+class QuestionMetadata(TruncationFields):
     """Metadata returned by the ``question`` tool.
 
     The UI reads ``answers`` to show completed question/answer pairs.
@@ -299,8 +311,6 @@ class QuestionMetadata(TypedDict, total=False):
 
     Each answer is a list of selected labels (multiple selections).
     """
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +344,7 @@ class ApplyPatchFileInfo(TypedDict):
     """Target path when the file was moved/renamed."""
 
 
-class ApplyPatchMetadata(TypedDict, total=False):
+class ApplyPatchMetadata(TruncationFields):
     """Metadata returned by the ``apply_patch`` tool.
 
     The UI reads ``files`` to render per-file diffs.
@@ -346,8 +356,6 @@ class ApplyPatchMetadata(TypedDict, total=False):
     """Per-file change information."""
     diagnostics: LSPDiagnosticsMap
     """LSP diagnostics keyed by normalized file path."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +372,7 @@ class BatchCallDetail(TypedDict):
     """Whether the call succeeded."""
 
 
-class BatchMetadata(TypedDict, total=False):
+class BatchMetadata(TruncationFields):
     """Metadata returned by the ``batch`` tool."""
 
     totalCalls: int
@@ -377,34 +385,26 @@ class BatchMetadata(TypedDict, total=False):
     """Names of tools that were called."""
     details: list[BatchCallDetail]
     """Per-call success/failure details."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
 # websearch / webfetch / codesearch
+#
+# These tools return empty metadata ``{}``. Only framework-injected
+# truncation fields may be present.
 # ---------------------------------------------------------------------------
 
 
-class WebSearchMetadata(TypedDict, total=False):
+class WebSearchMetadata(TruncationFields):
     """Metadata returned by the ``websearch`` tool (empty by default)."""
 
-    truncated: bool
-    output_path: str
 
-
-class WebFetchMetadata(TypedDict, total=False):
+class WebFetchMetadata(TruncationFields):
     """Metadata returned by the ``webfetch`` tool (empty by default)."""
 
-    truncated: bool
-    output_path: str
 
-
-class CodeSearchMetadata(TypedDict, total=False):
+class CodeSearchMetadata(TruncationFields):
     """Metadata returned by the ``codesearch`` tool (empty by default)."""
-
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -412,15 +412,13 @@ class CodeSearchMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class SkillMetadata(TypedDict, total=False):
+class SkillMetadata(TruncationFields):
     """Metadata returned by the ``skill`` tool."""
 
     name: str
     """Name of the loaded skill."""
     dir: str
     """Directory path containing the skill files."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -428,32 +426,27 @@ class SkillMetadata(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 
 
-class LspMetadata(TypedDict, total=False):
+class LspMetadata(TruncationFields):
     """Metadata returned by the ``lsp`` tool."""
 
     result: list[Any]
     """Raw LSP results (definitions, references, hover info, etc.)."""
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
 # plan_exit / plan_enter
+#
+# These tools return empty metadata ``{}``. Only framework-injected
+# truncation fields may be present.
 # ---------------------------------------------------------------------------
 
 
-class PlanExitMetadata(TypedDict, total=False):
+class PlanExitMetadata(TruncationFields):
     """Metadata returned by the ``plan_exit`` tool (empty by default)."""
 
-    truncated: bool
-    output_path: str
 
-
-class PlanEnterMetadata(TypedDict, total=False):
+class PlanEnterMetadata(TruncationFields):
     """Metadata returned by the ``plan_enter`` tool (empty by default)."""
-
-    truncated: bool
-    output_path: str
 
 
 # ---------------------------------------------------------------------------
