@@ -11,6 +11,7 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 
+from clawd_code_sdk import McpServerConfig
 from clawd_code_sdk.models import BashInput
 from clawd_code_sdk.models.output_types import (
     BashOutput,
@@ -36,7 +37,6 @@ from agentpool_server.opencode_server.models.tool_metadata import (
 if TYPE_CHECKING:
     from clawd_code_sdk import (
         ContentBlock,
-        McpServerConfig,
         Message,
         PermissionResult,
         ThinkingConfig,
@@ -245,7 +245,7 @@ def convert_mcp_servers_to_sdk_format(
 
 def convert_to_opencode_metadata(  # noqa: PLR0911
     tool_name: str,
-    tool_use_result: dict[str, Any] | str | None,
+    tool_use_result: dict[str, Any] | ToolInput | str | None,
     tool_input: ToolInput | dict[str, Any] | None = None,
 ) -> ToolMetadata | None:
     """Convert Claude Code SDK tool_use_result to OpenCode metadata format."""

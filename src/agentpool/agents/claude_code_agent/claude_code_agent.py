@@ -64,6 +64,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast
 import uuid
 
 import anyio
+from clawd_code_sdk import ResultSuccessMessage
 from pydantic import TypeAdapter
 from pydantic_ai import (
     FunctionToolResultEvent,
@@ -1204,7 +1205,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Determine final content - use structured output if available
         content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))
         final_content: TResult
-        if self._output_type is not str and result_message and result_message.structured_output:
+        if (
+            self._output_type is not str
+            and isinstance(result_message, ResultSuccessMessage)
+            and result_message.structured_output
+        ):
             # Validate structured output against expected type
             adapter = TypeAdapter(self._output_type)
             final_content = adapter.validate_python(result_message.structured_output)
