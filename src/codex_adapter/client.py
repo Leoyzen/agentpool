@@ -8,7 +8,7 @@ import contextlib
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, assert_never
 
 import anyenv
 from pydantic import BaseModel, TypeAdapter
@@ -464,33 +464,32 @@ class CodexClient:
             CodexEvent: Streaming events from the turn
         """
         # Convert user_input to typed input format
-        input_items: list[TurnInputItem]
-        if isinstance(user_input, str):
-            input_items = [TextInputItem(text=user_input)]
-        else:
-            input_items = user_input
-
+        input_items: list[TurnInputItem] = (
+            [TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input
+        )
         # Handle output_schema - convert type to JSON Schema if needed
-        schema_dict: dict[str, Any] | None = None
-        if output_schema is not None:
-            if isinstance(output_schema, dict):
+        match output_schema:
+            case None:
+                schema_dict: dict[str, Any] | None = None
+            case dict():
                 schema_dict = output_schema
-            else:
-                # It's a type - use TypeAdapter to extract schema
-                adapter = TypeAdapter(output_schema)
-                schema_dict = adapter.json_schema()
-
+            case type():  # It's a type - use TypeAdapter to extract schema
+                schema_dict = TypeAdapter(output_schema).json_schema()
+            case _ as unreachable:
+                assert_never(unreachable)
         # Handle sandbox_policy - convert string to dict if needed
         # Turn-level API uses camelCase (workspaceWrite), thread-level uses kebab-case
-        sandbox_dict: dict[str, Any] | None = None
-        if sandbox_policy is not None:
-            if isinstance(sandbox_policy, str):
+        match sandbox_policy:
+            case None:
+                sandbox_dict: dict[str, Any] | None = None
+            case str():
                 # Convert kebab-case to camelCase for turn API
                 camel_mode = _kebab_to_camel(sandbox_policy)
                 sandbox_dict = {"type": camel_mode}
-            else:
+            case dict():
                 sandbox_dict = sandbox_policy
-
+            case _ as unreachable:
+                assert_never(unreachable)
         # Build typed params
         params = TurnStartParams(
             thread_id=thread_id,
@@ -820,6 +819,6 @@ if __name__ == "__main__":
         async with CodexClient() as client:
             response = await client.thread_start()
             async for e in client.turn_stream(response.thread.id, "Show available tools"):
-                print(get_text_delta(e), end="")
+                print(e)
 
     asyncio.run(main())
