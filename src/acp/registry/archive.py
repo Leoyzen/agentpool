@@ -22,8 +22,7 @@ def _extract_from_zip(archive_path: Path, binary_name: str, dest_path: Path) -> 
             ):
                 shutil.copyfileobj(source, target)
             return dest_path
-    msg = f"Binary '{binary_name}' not found in ZIP archive '{archive_path}'"
-    raise FileNotFoundError(msg)
+    raise FileNotFoundError(f"Binary {binary_name!r} not found in ZIP archive {archive_path!r}")
 
 
 def _extract_from_tar(archive_path: Path, binary_name: str, dest_path: Path) -> Path:
@@ -40,8 +39,7 @@ def _extract_from_tar(archive_path: Path, binary_name: str, dest_path: Path) -> 
             with source, dest_path.open("wb") as target:
                 shutil.copyfileobj(source, target)
             return dest_path
-    msg = f"Binary '{binary_name}' not found in TAR archive '{archive_path}'"
-    raise FileNotFoundError(msg)
+    raise FileNotFoundError(f"Binary {binary_name!r} not found in TAR archive {archive_path!r}")
 
 
 def extract_binary(archive_path: Path, binary_name: str, dest_dir: Path) -> Path:

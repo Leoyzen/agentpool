@@ -114,13 +114,12 @@ class RegistryAgent(BaseModel):
                 return uvx
             case DistributionUnion(binary=dict() as binaries):
                 platform_key = get_platform_key()
-                if binary_distro := binaries.get(platform_key):
+                binary_distro: BinaryDistribution | None = binaries.get(platform_key)
+                if binary_distro is not None:
                     return binary_distro
-                msg = f"No binary distribution found for platform '{platform_key}'"
-                raise ValueError(msg)
+                raise ValueError(f"No binary distribution found for platform {platform_key!r}")
             case _:
-                msg = "Unsupported distribution type."
-                raise ValueError(msg)
+                raise ValueError("Unsupported distribution type.")
 
 
 class Registry(BaseModel):
