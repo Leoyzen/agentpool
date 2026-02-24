@@ -522,12 +522,18 @@ class FSSpecToolsetConfig(BaseToolsetConfig):
             if isinstance(self.model, str) or self.model is None
             else self.model.get_model()
         )
+        cwd: str | None = None
         match self.fs:
             case None:
                 fs = None
             case str():
                 # URI string - use fsspec directly
-                fs, _url_path = core.url_to_fs(self.fs, **self.storage_options)
+                fs, url_path = core.url_to_fs(self.fs, **self.storage_options)
+                # Only extract cwd for local filesystem (file:// protocol).
+                # For remote filesystems (s3://, memory://, etc.), the path
+                # component has different semantics and should not be used as cwd.
+                if self.fs.startswith("file://"):
+                    cwd = url_path if url_path else None
             case FileSystemConfig():
                 # Full config object - use create_fs()
                 fs = self.fs.create_fs()
@@ -536,6 +542,7 @@ class FSSpecToolsetConfig(BaseToolsetConfig):
         converter = ConversionManager(self.conversion) if self.conversion else None
         return FSSpecTools(
             fs,
+            cwd=cwd,
             converter=converter,
             edit_model=model,
             max_file_size_kb=self.max_file_size_kb,

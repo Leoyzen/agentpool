@@ -129,24 +129,26 @@ class SkillsInstructionProvider(ResourceProvider):
     def _format_skill_metadata(self, name: str, skill: Any) -> str:
         """Format skill metadata in XML."""
         desc = escape(str(skill.description)) if hasattr(skill, "description") else ""
-        return f'  <skill id="{escape(name)}" name="{escape(name)}" description="{desc}" />'
+        return f"""<skill>
+<id>{escape(name)}</id>
+<name>{escape(name)}</name>
+<description>{desc}</description>
+</skill>"""
 
     def _format_skill_full(self, name: str, skill: Any, instructions: str) -> str:
         """Format full skill content in XML."""
-        desc = escape(str(skill.description)) if hasattr(skill, "description") else ""
+        # desc = escape(str(skill.description)) if hasattr(skill, "description") else ""
         path = str(skill.skill_path) if hasattr(skill, "skill_path") else ""
 
-        return f"""  <skill id="{escape(name)}" name="{escape(name)}" description="{desc}">
-    <instructions>
-      <skill-instruction>
-      Base directory for this skill: {path}/
-      File references (@path) are relative to this directory.
+        return f"""<skill_content id="{escape(name)}" name="{escape(name)}">
+<skill-instruction>
+Base directory for this skill: {path}/
+File references (@path) are relative to this directory.
 
-      {instructions}
-      </skill-instruction>
+{instructions}
+</skill-instruction>
 
-      <user-request>
-      $ARGUMENTS
-      </user-request>
-    </instructions>
-  </skill>"""
+<user-request>
+$ARGUMENTS
+</user-request>
+</skill>"""
