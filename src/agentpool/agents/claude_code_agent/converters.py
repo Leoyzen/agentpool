@@ -311,13 +311,9 @@ def _convert_read_result(result: ReadOutput) -> ReadMetadata:
     if result["type"] != "text":
         return ReadMetadata(preview="", truncated=False, loaded=[])
     file_info = result["file"]
-    content: str = file_info["content"]
-    # Build preview from first ~20 lines
-    lines = content.splitlines()
-    preview = "\n".join(lines[:20])
-    num_lines: int = file_info["numLines"]
-    total_lines: int = file_info["totalLines"]
-    truncated = num_lines < total_lines if total_lines else False
+    lines = file_info["content"].splitlines()
+    preview = "\n".join(lines[:20])  # Build preview from first ~20 lines
+    truncated = file_info["numLines"] < file_info["totalLines"]
     return ReadMetadata(preview=preview, truncated=truncated, loaded=[])
 
 
