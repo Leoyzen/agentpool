@@ -484,12 +484,11 @@ class CodexClient:
                 sandbox_dict: dict[str, Any] | None = None
             case str():
                 # Convert kebab-case to camelCase for turn API
-                camel_mode = _kebab_to_camel(sandbox_policy)
-                sandbox_dict = {"type": camel_mode}
+                sandbox_dict = {"type": _kebab_to_camel(sandbox_policy)}
             case dict():
                 sandbox_dict = sandbox_policy
-            case _ as unreachable:
-                assert_never(unreachable)
+            case _:
+                assert_never(sandbox_policy)
         # Build typed params
         params = TurnStartParams(
             thread_id=thread_id,

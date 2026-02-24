@@ -16,7 +16,6 @@ from clawd_code_sdk.models.output_types import (
     BashOutput,
     EditOutput,
     ReadOutput,
-    ReadTextOutput,
     TodoWriteOutput,
     WriteOutput,
 )
@@ -261,13 +260,13 @@ def to_output_format(output_type: type) -> dict[str, Any] | None:
 def convert_to_opencode_metadata(  # noqa: PLR0911
     tool_name: str,
     tool_use_result: dict[str, Any] | str | None,
-    tool_input: ToolInput | dict[str, Any],
+    tool_input: ToolInput | dict[str, Any] | None = None,
 ) -> ToolMetadata | None:
     """Convert Claude Code SDK tool_use_result to OpenCode metadata format."""
     # Handle None or string results (bash errors come as plain strings)
     if tool_use_result is None or not isinstance(tool_use_result, dict):
         return None
-
+    tool_input = tool_input or {}
     # Dispatch to appropriate converter based on tool name
     match tool_name.lower():
         case "write":
@@ -323,8 +322,7 @@ def _convert_read_result(result: ReadOutput) -> ReadMetadata:
     # Only text reads have meaningful content for preview
     if result["type"] != "text":
         return ReadMetadata(preview="", truncated=False, loaded=[])
-    text_result = cast(ReadTextOutput, result)
-    file_info = text_result["file"]
+    file_info = result["file"]
     content: str = file_info["content"]
     # Build preview from first ~20 lines
     lines = content.splitlines()

@@ -1042,7 +1042,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
                                     # Convert Claude Code SDK's tool_use_result to OpenCode format
                                     metadata = convert_to_opencode_metadata(
-                                        tool_use.name, result, tool_input
+                                        tool_use.name,
+                                        result,  # ty:ignore[invalid-argument-type]
+                                        tool_input,
                                     )  # type: ignore[assignment]
 
                                 # Also emit ToolCallCompleteEvent for consumers that expect it
