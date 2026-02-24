@@ -16,8 +16,8 @@ from pydantic import BaseModel, TypeAdapter
 from codex_adapter.codex_types import HttpMcpServer, StdioMcpServer
 from codex_adapter.events import (
     AgentMessageDeltaEvent,
+    TurnCompletedEvent,
     TurnErrorEvent,
-    get_text_delta,
     parse_codex_event,
 )
 from codex_adapter.exceptions import CodexProcessError, CodexRequestError
@@ -53,8 +53,6 @@ from codex_adapter.models import (
 )
 
 
-ResultType = TypeVar("ResultType", bound=BaseModel)
-
 if TYPE_CHECKING:
     from typing import Self
 
@@ -67,6 +65,8 @@ if TYPE_CHECKING:
     from codex_adapter.events import CodexEvent
     from codex_adapter.models import ModelData, SkillData, TurnInputItem
 
+
+ResultType = TypeVar("ResultType", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
 
@@ -514,16 +514,15 @@ class CodexClient:
             # Stream events until turn completes
             while True:
                 event = await turn_queue.get()
-                if event is None:
-                    break
-
-                yield event
-                # Check for turn completion
-                if event.event_type == "turn/completed":
-                    break
-                elif event.event_type == "turn/error":
-                    msg = event.data.error if isinstance(event.data, TurnErrorData) else "Error"
-                    raise CodexRequestError(-32000, msg)
+                match event:
+                    case None:
+                        break
+                    case TurnCompletedEvent():
+                        yield event
+                        break
+                    case TurnErrorEvent(data=TurnErrorData(error=error)):
+                        yield event
+                        raise CodexRequestError(-32000, error)
         finally:
             # Cleanup turn queue
             if turn_key in self._turn_queues:
@@ -766,54 +765,51 @@ class CodexClient:
         Args:
             message: Raw JSON-RPC message (response or notification)
         """
-        # Response (has "id" field)
-        if "id" in message:
-            try:
-                response = JsonRpcResponse.model_validate(message)
-                request_id = response.id
-                future = self._pending_requests.pop(request_id, None)
-                if future and not future.done():
-                    if err := response.error:
-                        future.set_exception(CodexRequestError(err.code, err.message, err.data))
-                    else:
-                        future.set_result(response.result)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to parse response: %s", exc)
-                # Fallback to old behavior for unrecognized responses
-                fallback_id = message.get("id")
-                if fallback_id is not None and isinstance(fallback_id, int):
-                    future = self._pending_requests.pop(fallback_id, None)
+        match message:
+            # Response (has "id" field)
+            case {"id": msg_id}:
+                try:
+                    response = JsonRpcResponse.model_validate(message)
+                    future = self._pending_requests.pop(response.id, None)
                     if future and not future.done():
-                        future.set_result(message.get("result"))
-            return
-
-        # Notification (has "method" field, no "id")
-        if method := message.get("method"):
-            params = message.get("params") or {}
-            event = parse_codex_event(method, params)
-            # Skip legacy V1 events (parse_codex_event returns None for these)
-            if event is None:
+                        if err := response.error:
+                            future.set_exception(CodexRequestError(err.code, err.message, err.data))
+                        else:
+                            future.set_result(response.result)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to parse response: %s", exc)
+                    # Fallback to old behavior for unrecognized responses
+                    if isinstance(msg_id, int):
+                        future = self._pending_requests.pop(msg_id, None)
+                        if future and not future.done():
+                            future.set_result(message.get("result"))
                 return
-            # Route event to appropriate turn queue
-            thread_id = params.get("threadId")
-            turn_id = params.get("turnId")
-            # Also check nested turn object (some events have it there)
-            if not turn_id and "turn" in params:
-                turn_data = params.get("turn", {})
-                if isinstance(turn_data, dict):
+            # Notification (has "method" field, no "id")
+            case {"method": method}:
+                params = message.get("params") or {}
+                event = parse_codex_event(method, params)
+                # Skip legacy V1 events (parse_codex_event returns None for these)
+                if event is None:
+                    return
+                # Route event to appropriate turn queue
+                thread_id = params.get("threadId")
+                turn_id = params.get("turnId")
+                # Also check nested turn object (some events have it there)
+                if not turn_id and "turn" in params:
+                    turn_data = params.get("turn", {})
                     turn_id = turn_data.get("id")
 
-            if thread_id and turn_id:
-                # Turn-specific event - route to turn queue
-                turn_key = f"{thread_id}:{turn_id}"
-                if turn_key in self._turn_queues:
-                    await self._turn_queues[turn_key].put(event)
+                if thread_id and turn_id:
+                    # Turn-specific event - route to turn queue
+                    turn_key = f"{thread_id}:{turn_id}"
+                    if turn_key in self._turn_queues:
+                        await self._turn_queues[turn_key].put(event)
+                    else:
+                        # Turn queue not found (might be old event) - put in global queue
+                        await self._event_queue.put(event)
                 else:
-                    # Turn queue not found (might be old event) - put in global queue
+                    # Global event (account, MCP, etc.) - put in global queue
                     await self._event_queue.put(event)
-            else:
-                # Global event (account, MCP, etc.) - put in global queue
-                await self._event_queue.put(event)
 
 
 if __name__ == "__main__":
