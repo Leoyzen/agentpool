@@ -689,26 +689,26 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     if self._cancelled:
                         self.log.info("Stream cancelled by user")
                         break
-                    if isinstance(node, End):
-                        break
-
-                    # Stream events from model request or tool call nodes
-                    if isinstance(node, ModelRequestNode | CallToolsNode):
-                        async with (
-                            node.stream(agent_run.ctx) as stream,
-                            merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
-                        ):
-                            async for event in merged:
-                                if self._cancelled:
-                                    break
-                                yield event
-                                if combined := process_tool_event(
-                                    self.name,
-                                    event,  # ty: ignore[invalid-argument-type]
-                                    pending_tcs,
-                                    message_id,
-                                ):
-                                    yield combined
+                    match node:
+                        case End():
+                            break
+                        # Stream events from model request or tool call nodes
+                        case ModelRequestNode() | CallToolsNode():
+                            async with (
+                                node.stream(agent_run.ctx) as stream,
+                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
+                            ):
+                                async for event in merged:
+                                    if self._cancelled:
+                                        break
+                                    yield event
+                                    if combined := process_tool_event(
+                                        self.name,
+                                        event,  # ty: ignore[invalid-argument-type]
+                                        pending_tcs,
+                                        message_id,
+                                    ):
+                                        yield combined
             except asyncio.CancelledError:
                 self.log.info("Stream cancelled via task cancellation")
                 self._cancelled = True
@@ -802,6 +802,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pause_routing: Whether to pause message routing
             model: Temporary model override
         """
+        from pydantic_ai.models import Model
+
         old_model = self._model
         old_settings = self.model_settings
         if output_type:
@@ -820,15 +822,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
             if pause_routing:  # Routing
                 await stack.enter_async_context(self.connections.paused_routing())
-
-            if model is not None:  # Model
-                if isinstance(model, str):
+            match model:
+                case str():
                     self._model, settings = self._resolve_model_string(model)
                     if settings:
                         self.model_settings = settings
-                else:
+                case Model():
                     self._model = model
-
             try:
                 yield self
             finally:  # Restore model and settings
