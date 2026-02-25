@@ -123,7 +123,7 @@ agents:
     type: native
     model: openai:gpt-4o
     tools:
-      - type: agent_management  # Can delegate to claude
+      - type: agent_cli  # Can delegate to claude
 ```
 
 ### Supported Providers
@@ -177,7 +177,7 @@ agents:
     provider: claude
     tools:
       - type: subagent        # Delegation tools
-      - type: agent_management # Lifecycle tools
+      - type: agent_cli # Lifecycle tools
       - type: search          # Web search
 ```
 
