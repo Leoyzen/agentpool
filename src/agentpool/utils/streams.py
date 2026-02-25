@@ -149,12 +149,14 @@ class FileChange:
         Returns:
             Unified diff string
         """
-        from difflib import unified_diff
+        from agentpool.utils.diffs import compute_unified_diff
 
-        old = (self.old_content or "").splitlines(keepends=True)
-        new = (self.new_content or "").splitlines(keepends=True)
-        diff = unified_diff(old, new, fromfile=f"a/{self.path}", tofile=f"b/{self.path}")
-        return "".join(diff)
+        return compute_unified_diff(
+            self.old_content or "",
+            self.new_content or "",
+            fromfile=f"a/{self.path}",
+            tofile=f"b/{self.path}",
+        )
 
 
 @dataclass

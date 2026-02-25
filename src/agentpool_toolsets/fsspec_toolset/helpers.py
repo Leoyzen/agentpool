@@ -262,52 +262,6 @@ def apply_structured_edits(original_content: str, edits_response: str) -> str:
     return content
 
 
-def get_changed_lines(original_content: str, new_content: str, path: str) -> list[str]:
-    import difflib
-
-    old = original_content.splitlines(keepends=True)
-    new = new_content.splitlines(keepends=True)
-    diff = list(difflib.unified_diff(old, new, fromfile=path, tofile=path, lineterm=""))
-    return [line for line in diff if line.startswith(("+", "-"))]
-
-
-def get_changed_line_numbers(original_content: str, new_content: str) -> list[int]:
-    """Extract line numbers where changes occurred for ACP UI highlighting.
-
-    Similar to Claude Code's line tracking for precise change location reporting.
-    Returns line numbers in the new content where changes happened.
-
-    Args:
-        original_content: Original file content
-        new_content: Modified file content
-
-    Returns:
-        List of line numbers (1-based) where changes occurred in new content
-    """
-    import difflib
-
-    old_lines = original_content.splitlines(keepends=True)
-    new_lines = new_content.splitlines(keepends=True)
-    # Use SequenceMatcher to find changed blocks
-    matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
-    changed_line_numbers = set()
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
-        if tag in ("replace", "insert", "delete"):
-            # For replacements and insertions, mark lines in new content
-            # For deletions, mark the position where deletion occurred
-            if tag == "delete":
-                # Mark the line where deletion occurred (or next line if at end)
-                line_num = min(j1 + 1, len(new_lines))
-                if line_num > 0:
-                    changed_line_numbers.add(line_num)
-            else:
-                # Mark all affected lines in new content
-                for line_num in range(j1 + 1, j2 + 1):  # Convert to 1-based
-                    changed_line_numbers.add(line_num)
-
-    return sorted(changed_line_numbers)
-
-
 def truncate_content(content: str, max_size: int = DEFAULT_MAX_SIZE) -> tuple[str, bool]:
     """Truncate text content to a maximum size in bytes.
 

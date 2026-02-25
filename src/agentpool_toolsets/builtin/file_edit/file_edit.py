@@ -6,11 +6,11 @@ replacement engine with multiple fallback strategies.
 
 from __future__ import annotations
 
-import difflib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentpool.tools.base import Tool
+from agentpool.utils.diffs import compute_unified_diff, count_changed_lines
 
 
 if TYPE_CHECKING:
@@ -80,16 +80,9 @@ async def edit_file_tool(
         new_content = result.content
 
     # Generate diff
-    diff_lines = list(
-        difflib.unified_diff(
-            original_content.splitlines(keepends=True),
-            new_content.splitlines(keepends=True),
-            fromfile=str(path),
-            tofile=str(path),
-            lineterm="",
-        )
+    diff_text = compute_unified_diff(
+        original_content, new_content, fromfile=str(path), tofile=str(path)
     )
-    diff_text = "".join(diff_lines)
     # Write new content
     try:
         path.write_text(new_content, encoding="utf-8")
@@ -101,7 +94,7 @@ async def edit_file_tool(
         "file_path": str(path),
         "diff": trim_diff(diff_text) if diff_text else "",
         "message": f"Successfully edited {path.name}",
-        "lines_changed": len([line for line in diff_lines if line.startswith(("+", "-"))]),
+        "lines_changed": count_changed_lines(diff_text),
     }
 
 

@@ -7,7 +7,6 @@ event types as native agents.
 
 from __future__ import annotations
 
-from difflib import unified_diff
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 
@@ -22,6 +21,7 @@ from clawd_code_sdk.models.output_types import (
 )
 from pydantic_ai import RequestUsage, RunUsage
 
+from agentpool.utils.diffs import compute_unified_diff
 from agentpool_server.opencode_server.models.tool_metadata import (
     BashMetadata,
     EditMetadata,
@@ -299,23 +299,14 @@ def _build_unified_diff(
     """Build unified diff string from structured patch or content."""
     # If we have both before and after, compute proper diff
     if before is not None and after is not None:
-        before_lines = before.splitlines(keepends=True)
-        after_lines = after.splitlines(keepends=True)
-
-        # Ensure trailing newline for proper diff
-        if before_lines and not before_lines[-1].endswith("\n"):
-            before_lines[-1] += "\n"
-        if after_lines and not after_lines[-1].endswith("\n"):
-            after_lines[-1] += "\n"
-
         name = Path(file_path).name
-        diff_lines = unified_diff(
-            before_lines,
-            after_lines,
+        return compute_unified_diff(
+            before,
+            after,
             fromfile=f"a/{name}",
             tofile=f"b/{name}",
+            ensure_trailing_newline=True,
         )
-        return "".join(diff_lines)
 
     # Fallback: reconstruct from structuredPatch
     if structured_patch:

@@ -36,6 +36,7 @@ from agentpool.tool_impls.grep import create_grep_tool
 from agentpool.tool_impls.list_directory import create_list_directory_tool
 from agentpool.tool_impls.read import create_read_tool
 from agentpool.tools.base import ToolResult  # noqa: TC001
+from agentpool.utils.diffs import get_changed_line_numbers
 from agentpool_toolsets.fsspec_toolset.diagnostics import (
     DiagnosticsConfig,
     DiagnosticsManager,
@@ -43,7 +44,6 @@ from agentpool_toolsets.fsspec_toolset.diagnostics import (
 )
 from agentpool_toolsets.fsspec_toolset.helpers import (
     format_directory_listing,
-    get_changed_line_numbers,
     truncate_lines,
 )
 from agentpool_toolsets.fsspec_toolset.streaming_diff_parser import (
@@ -1571,24 +1571,21 @@ class FSSpecTools(ResourceProvider):
 
 
 def to_opencode_edit_metadata(original_content: str, new_content: str, path: str) -> dict[str, Any]:
-    from difflib import unified_diff
+    from agentpool.utils.diffs import compute_unified_diff
 
-    original_for_diff = (
-        original_content if original_content.endswith("\n") else original_content + "\n"
-    )
-    new_for_diff = new_content if new_content.endswith("\n") else new_content + "\n"
-
-    diff_lines = unified_diff(
-        original_for_diff.splitlines(keepends=True),
-        new_for_diff.splitlines(keepends=True),
-        fromfile=f"a/{Path(path).name}",
-        tofile=f"b/{Path(path).name}",
+    name = Path(path).name
+    diff = compute_unified_diff(
+        original_content,
+        new_content,
+        fromfile=f"a/{name}",
+        tofile=f"b/{name}",
+        ensure_trailing_newline=True,
     )
     # Count additions and deletions
     original_lines = set(original_content.splitlines())
     new_lines = set(new_content.splitlines())
     return {
-        "diff": "".join(diff_lines),
+        "diff": diff,
         "filediff": {
             "file": str(Path(path).absolute()),
             "before": original_content,
