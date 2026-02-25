@@ -295,8 +295,8 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             to_agui_tool,
         )
 
-        if input_provider is not None:
-            self._input_provider = input_provider
+        # Resolve input provider: explicit parameter overrides agent default
+        effective_input_provider = input_provider or self._input_provider
 
         if not self._client:
             raise AgentNotInitializedError
@@ -367,7 +367,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     tool_calls_pending,
                     {t.name: t for t in tools},
                     confirmation_mode=self.tool_confirmation_mode,
-                    input_provider=self._input_provider,
+                    input_provider=effective_input_provider,
                     context=self.get_context(data=deps),
                 )
                 # If no results (all tools were server-side), we're done

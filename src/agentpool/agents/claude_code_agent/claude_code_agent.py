@@ -796,9 +796,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         #   ClaudeAgentOptions(session=ResumeSession(session_id=session_id))
         # Conversation ID initialization handled by BaseAgent
 
-        # Update input provider if provided
-        if input_provider is not None:
-            self._input_provider = input_provider
+        # Resolve input provider: explicit parameter overrides agent default
+        effective_input_provider = input_provider or self._input_provider
         if not self._client:
             raise AgentNotInitializedError
         # Get pending parts from conversation (staged content)
@@ -843,7 +842,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Persist SDK session ID to storage for cross-referencing
             if self.storage and self.session_id:
                 await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
-            async with self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts):
+            async with self._tool_bridge.set_run_context(
+                deps, effective_input_provider, prompt=prompts
+            ):
                 async for message in stream:
                     match message:
                         case AssistantMessage(model=model, content=msg_content):
