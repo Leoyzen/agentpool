@@ -25,6 +25,7 @@ from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     FilePartInput,
+    MCPStatus,
     MessagePath,
     MessageTime,
     MessageWithParts,
@@ -55,9 +56,12 @@ if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import UserContent
 
-    from agentpool.common_types import PathReference
+    from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
     from agentpool_server.opencode_server.models import ToolState
+    from agentpool_server.opencode_server.models.mcp import (
+        MCPConnectionStatus as OpenCodeMCPConnectionStatus,
+    )
     from agentpool_server.opencode_server.models.message import PartInput
     from agentpool_server.opencode_server.models.parts import ResourceSource
 
@@ -73,6 +77,27 @@ _PARAM_NAME_MAP: dict[str, str] = {
     "replace_all": "replaceAll",
     "line_hint": "lineHint",
 }
+
+
+def to_mcp_status(status: MCPServerStatus) -> MCPStatus:
+    return MCPStatus(
+        name=status.name,
+        status=to_opencode_mcp_status(status.status),
+        error=status.error,
+    )
+
+
+def to_opencode_mcp_status(status: MCPConnectionStatus) -> OpenCodeMCPConnectionStatus:
+    mapping: dict[MCPConnectionStatus, OpenCodeMCPConnectionStatus] = {
+        "connected": "connected",
+        "disconnected": "disconnected",
+        "error": "error",
+        "pending": "disconnected",
+        "failed": "error",
+        "needs-auth": "disconnected",
+        "disabled": "disconnected",
+    }
+    return mapping[status]
 
 
 def _convert_params_for_ui(params: dict[str, Any]) -> dict[str, Any]:

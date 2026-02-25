@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
@@ -15,6 +15,7 @@ from agentpool_config.mcp_server import (
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
 )
+from agentpool_server.opencode_server.converters import to_mcp_status
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
     Agent,
@@ -37,14 +38,36 @@ from agentpool_server.opencode_server.models.diagnostics import FormatterStatus
 from agentpool_server.opencode_server.models.events import ConnectionStatus, LspStatus
 
 
-if TYPE_CHECKING:
-    from agentpool.common_types import MCPConnectionStatus
-    from agentpool_server.opencode_server.models.mcp import (
-        MCPConnectionStatus as OpenCodeMCPConnectionStatus,
-    )
-
-
 router = APIRouter(tags=["agent"])
+
+
+class AddMCPServerRequest(BaseModel):
+    """Request to add an MCP server dynamically."""
+
+    command: str | None = None
+    """Command to run (for stdio servers)."""
+
+    args: list[str] | None = None
+    """Arguments for the command."""
+
+    url: str | None = None
+    """URL for HTTP/SSE servers."""
+
+    env: dict[str, str] | None = None
+    """Environment variables for the server."""
+
+
+def _find_mcp_manager(state: Any) -> MCPManager | None:
+    """Find the MCPManager from the agent's tool providers."""
+    for provider in state.agent.tools.external_providers:
+        match provider:
+            case MCPManager():
+                return provider
+            case AggregatingResourceProvider():
+                for nested in provider.providers:
+                    if isinstance(nested, MCPManager):
+                        return nested
+    return None
 
 
 @router.get("/agent")
@@ -100,51 +123,9 @@ async def list_commands(state: StateDep) -> list[Command]:
 
 @router.get("/mcp")
 async def get_mcp_status(state: StateDep) -> dict[str, MCPStatus]:
-    """Get MCP server status.
-
-    Returns status for each connected MCP server.
-    """
-    # Use agent's get_mcp_server_info method which handles different agent types
+    """Get MCP server status."""
     server_info = await state.agent.get_mcp_server_info()
-
-    # Convert MCPServerStatus dataclass to MCPStatus response model
-    return {
-        name: MCPStatus(
-            name=status.name,
-            status=to_opencode_mcp_status(status.status),
-            error=status.error,
-        )
-        for name, status in server_info.items()
-    }
-
-
-def to_opencode_mcp_status(status: MCPConnectionStatus) -> OpenCodeMCPConnectionStatus:
-    mapping: dict[MCPConnectionStatus, OpenCodeMCPConnectionStatus] = {
-        "connected": "connected",
-        "disconnected": "disconnected",
-        "error": "error",
-        "pending": "disconnected",
-        "failed": "error",
-        "needs-auth": "disconnected",
-        "disabled": "disconnected",
-    }
-    return mapping[status]
-
-
-class AddMCPServerRequest(BaseModel):
-    """Request to add an MCP server dynamically."""
-
-    command: str | None = None
-    """Command to run (for stdio servers)."""
-
-    args: list[str] | None = None
-    """Arguments for the command."""
-
-    url: str | None = None
-    """URL for HTTP/SSE servers."""
-
-    env: dict[str, str] | None = None
-    """Environment variables for the server."""
+    return {name: to_mcp_status(status) for name, status in server_info.items()}
 
 
 @router.post("/mcp")
@@ -186,19 +167,6 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
         return MCPStatus(name=config.client_id, status="connected")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add MCP server: {e}") from e
-
-
-def _find_mcp_manager(state: Any) -> MCPManager | None:
-    """Find the MCPManager from the agent's tool providers."""
-    for provider in state.agent.tools.external_providers:
-        match provider:
-            case MCPManager():
-                return provider
-            case AggregatingResourceProvider():
-                for nested in provider.providers:
-                    if isinstance(nested, MCPManager):
-                        return nested
-    return None
 
 
 @router.post("/mcp/{name}/connect")
