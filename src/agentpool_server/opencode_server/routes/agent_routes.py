@@ -14,6 +14,7 @@ from llmling_models.auth.anthropic_auth import (
 )
 from pydantic import BaseModel, HttpUrl
 
+from agentpool.log import get_logger
 from agentpool.mcp_server.manager import MCPManager
 from agentpool.resource_providers import AggregatingResourceProvider
 from agentpool_config.mcp_server import (
@@ -289,12 +290,19 @@ async def remove_mcp_auth(name: str, state: StateDep) -> dict[str, bool]:
 
 @router.post("/log")
 async def log(request: LogRequest, state: StateDep) -> bool:
-    """Write a log entry.
-
-    TODO: Integrate with proper logging.
-    """
+    """Write a log entry."""
     _ = state  # unused for now
-    print(f"[{request.level}] {request.service}: {request.message}")
+    logger = get_logger(request.service)
+    extra = request.extra or {}
+    match request.level:
+        case "debug":
+            logger.debug(request.message, **extra)
+        case "info":
+            logger.info(request.message, **extra)
+        case "warn":
+            logger.warning(request.message, **extra)
+        case "error":
+            logger.error(request.message, **extra)
     return True
 
 
