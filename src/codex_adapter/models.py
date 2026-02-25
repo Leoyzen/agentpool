@@ -85,6 +85,10 @@ class InitializeParams(CodexBaseModel):
 
     client_info: ClientInfo
 
+    @classmethod
+    def create(cls, name: str, version: str):
+        return cls(client_info=ClientInfo(name=name, version=version))
+
 
 class ThreadStartParams(CodexBaseModel):
     """Parameters for thread/start request."""

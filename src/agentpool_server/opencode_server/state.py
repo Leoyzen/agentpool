@@ -11,10 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool_server.opencode_server.models import Config
-from agentpool_server.opencode_server.provider_auth import (
-    ProviderAuthService,
-    create_default_auth_service,
-)
+from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 
 
 if TYPE_CHECKING:
@@ -33,6 +30,7 @@ if TYPE_CHECKING:
         Todo,
     )
     from agentpool_server.opencode_server.models.question import QuestionToolInfo
+    from agentpool_server.opencode_server.provider_auth import ProviderAuthService
 
 # Type alias for async callback
 OnFirstSubscriberCallback = Callable[[], Coroutine[Any, Any, None]]

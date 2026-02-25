@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from llmling_models.auth.anthropic_auth import (
@@ -21,10 +21,13 @@ from llmling_models.auth.anthropic_auth import (
 )
 
 from agentpool_server.opencode_server.models.agent import (
-    AuthInfo,
     ProviderAuthAuthorization,
     ProviderAuthMethod,
 )
+
+
+if TYPE_CHECKING:
+    from agentpool_server.opencode_server.models.agent import AuthInfo
 
 
 class ProviderAuthBackend(ABC):

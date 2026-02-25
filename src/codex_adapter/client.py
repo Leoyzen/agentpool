@@ -27,7 +27,6 @@ from codex_adapter.models import (
     AppsListResponse,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
-    ClientInfo,
     CommandExecParams,
     CommandExecResponse,
     ConfigBatchWriteParams,
@@ -168,14 +167,6 @@ class CodexClient:
     - Thread management (conversations)
     - Turn management (message exchanges)
     - Event streaming via notifications
-
-    Example:
-        from codex_adapter.events import get_text_delta
-
-        async with CodexClient() as client:
-            thread = await client.thread_start(cwd="/path/to/project")
-            async for event in client.turn_stream(thread.id, "Help me refactor"):
-                print(get_text_delta(event), end="", flush=True)
     """
 
     def __init__(
@@ -193,9 +184,6 @@ class CodexClient:
             env_vars: Optional environment variables to set for the Codex process.
             mcp_servers: Optional MCP servers to inject programmatically.
                 Keys are server names, values are server configurations.
-
-        Example:
-                    {"tools": HttpMcpServer(url="http://localhost:8000/mcp")}
         """
         self._codex_command = codex_command
         self._profile = profile
@@ -255,8 +243,10 @@ class CodexClient:
         # Start reader task
         self._reader_task = asyncio.create_task(self._read_loop())
         # Initialize connection
-        client_info = ClientInfo(name="agentpool-codex-adapter", version=agentpool.__version__)
-        init_params = InitializeParams(client_info=client_info)
+        init_params = InitializeParams.create(
+            name="agentpool-codex-adapter",
+            version=agentpool.__version__,
+        )
         await self._send_request("initialize", init_params)
 
     async def stop(self) -> None:
@@ -484,15 +474,7 @@ class CodexClient:
         return ThreadListResponse.model_validate(result)
 
     async def thread_read(self, thread_id: str, *, include_turns: bool = False) -> ThreadResponse:
-        """Read a thread's data.
-
-        Args:
-            thread_id: The thread ID to read
-            include_turns: When True, include turns and their items
-
-        Returns:
-            ThreadResponse with thread data
-        """
+        """Read a thread's data."""
         params = ThreadReadParams(thread_id=thread_id, include_turns=include_turns)
         result = await self._send_request("thread/read", params)
         return ThreadResponse.model_validate(result)
@@ -510,34 +492,18 @@ class CodexClient:
         self._active_threads.discard(thread_id)
 
     async def thread_unarchive(self, thread_id: str) -> ThreadUnarchiveResponse:
-        """Unarchive a previously archived thread.
-
-        Args:
-            thread_id: The thread ID to unarchive
-
-        Returns:
-            ThreadUnarchiveResponse with the unarchived thread data
-        """
+        """Unarchive a previously archived thread. Returns unarchived thread data."""
         params = ThreadUnarchiveParams(thread_id=thread_id)
         result = await self._send_request("thread/unarchive", params)
         return ThreadUnarchiveResponse.model_validate(result)
 
     async def thread_set_name(self, thread_id: str, name: str) -> None:
-        """Set a user-facing name for a thread.
-
-        Args:
-            thread_id: The thread ID
-            name: The name to set
-        """
+        """Set a user-facing name for a thread."""
         params = ThreadSetNameParams(thread_id=thread_id, name=name)
         await self._send_request("thread/name/set", params)
 
     async def thread_compact_start(self, thread_id: str) -> None:
-        """Trigger context compaction for a thread.
-
-        Args:
-            thread_id: The thread ID to compact
-        """
+        """Trigger context compaction for a thread."""
         params = ThreadCompactStartParams(thread_id=thread_id)
         await self._send_request("thread/compact/start", params)
 
