@@ -122,6 +122,10 @@ from agentpool_server.opencode_server.models.agent import (
     ProviderAuthAuthorization,
     ProviderAuthMethod,
     SkillInfo,
+    WorktreeCreateRequest,
+    WorktreeInfo,
+    WorktreeRemoveRequest,
+    WorktreeResetRequest,
 )
 from agentpool_server.opencode_server.models.pty import (
     PtyCreateRequest,
@@ -325,4 +329,8 @@ __all__ = [
     "UnknownErrorData",
     "UserMessage",
     "VcsInfo",
+    "WorktreeCreateRequest",
+    "WorktreeInfo",
+    "WorktreeRemoveRequest",
+    "WorktreeResetRequest",
 ]

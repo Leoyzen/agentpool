@@ -86,6 +86,43 @@ class ProviderAuthAuthorization(OpenCodeBaseModel):
     """Instructions to display to the user."""
 
 
+class WorktreeInfo(OpenCodeBaseModel):
+    """Git worktree information."""
+
+    name: str
+    """Worktree name."""
+
+    branch: str
+    """Git branch name."""
+
+    directory: str
+    """Full path to the worktree directory."""
+
+
+class WorktreeCreateRequest(OpenCodeBaseModel):
+    """Request to create a new git worktree."""
+
+    name: str | None = None
+    """Optional worktree name. Auto-generated if not provided."""
+
+    start_command: str | None = None
+    """Optional startup script to run after creation."""
+
+
+class WorktreeRemoveRequest(OpenCodeBaseModel):
+    """Request to remove a git worktree."""
+
+    directory: str
+    """Worktree directory path to remove."""
+
+
+class WorktreeResetRequest(OpenCodeBaseModel):
+    """Request to reset a git worktree."""
+
+    directory: str
+    """Worktree directory path to reset."""
+
+
 class AuthInfo(OpenCodeBaseModel):
     """Authentication credential info."""
 

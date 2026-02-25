@@ -34,6 +34,10 @@ from agentpool_server.opencode_server.models import (
     ProviderAuthMethod,
     Session,
     SkillInfo,
+    WorktreeCreateRequest,
+    WorktreeInfo,
+    WorktreeRemoveRequest,
+    WorktreeResetRequest,
 )
 from agentpool_server.opencode_server.models.diagnostics import FormatterStatus
 from agentpool_server.opencode_server.models.events import LspStatus
@@ -322,6 +326,34 @@ async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
         return {}
     else:
         return result
+
+
+@router.post("/experimental/worktree")
+async def create_worktree(request: WorktreeCreateRequest, state: StateDep) -> WorktreeInfo:
+    """Create a new git worktree for isolated agent work."""
+    _ = state, request
+    raise HTTPException(status_code=501, detail="Worktrees not yet supported")
+
+
+@router.get("/experimental/worktree")
+async def list_worktrees(state: StateDep) -> list[str]:
+    """List all sandbox worktree directories."""
+    _ = state
+    return []
+
+
+@router.delete("/experimental/worktree")
+async def remove_worktree(request: WorktreeRemoveRequest, state: StateDep) -> bool:
+    """Remove a git worktree and delete its branch."""
+    _ = state, request
+    raise HTTPException(status_code=501, detail="Worktrees not yet supported")
+
+
+@router.post("/experimental/worktree/reset")
+async def reset_worktree(request: WorktreeResetRequest, state: StateDep) -> bool:
+    """Reset a worktree branch to the primary default branch."""
+    _ = state, request
+    raise HTTPException(status_code=501, detail="Worktrees not yet supported")
 
 
 @router.get("/experimental/session")
