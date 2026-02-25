@@ -5987,7 +5987,7 @@ wheels = [
 
 [[package]]
 name = "tokonomics"
-version = "1.2.17"
+version = "1.2.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyenv", extra = ["httpx"] },
@@ -5996,9 +5996,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "schemez" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/85/a9/6c5e6fc5a8c0fe2471cc834978750454ed2f1fb8c6ffb42e92e9791d3c8f/tokonomics-1.2.17.tar.gz", hash = "sha256:047fe6d8033183b4996d14a3697c512a490c3300f4674db45173984c391c6a9a", size = 62416, upload-time = "2026-01-18T13:24:41.578Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/0a/c8093f6836f898a9f587aa30786bba25f08e92c9c11f13f9e638b0b97688/tokonomics-1.2.18.tar.gz", hash = "sha256:6b40461c8c8ce71f4bc378c61a4743a55b20b5ddee50d27b9398c85c29279c17", size = 65636, upload-time = "2026-02-25T21:23:44.719Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/65/784e1d79538dc957c47147f0638583696f48482e84acc2b3330567244e0e/tokonomics-1.2.17-py3-none-any.whl", hash = "sha256:f7b59a4d1102b601a18ae88b4aa2e81c048edd0d1514d5450f81fd871dc48cca", size = 101151, upload-time = "2026-01-18T13:24:39.409Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/c4/fc9b68acb9d10a44b2c7121c8e02094c46244f9e7b07fa86ef47ee2d1073/tokonomics-1.2.18-py3-none-any.whl", hash = "sha256:8ff42a59c16be309a0d8d29e66a079f0b1ed72dce4380a545d8f20c32e4c9ab8", size = 103907, upload-time = "2026-02-25T21:23:43.281Z" },
 ]
 
 [[package]]
