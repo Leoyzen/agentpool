@@ -90,6 +90,7 @@ from agentpool.agents.claude_code_agent.converters import (
     to_run_usage,
     to_thinking_config,
 )
+from agentpool.agents.claude_code_agent.slash_commands import create_claude_code_command
 from agentpool.agents.claude_code_agent.static_info import models_to_category
 from agentpool.agents.events import (
     PartDeltaEvent,
@@ -131,11 +132,10 @@ if TYPE_CHECKING:
         ToolUseBlock,
     )
     from clawd_code_sdk.models import ReasoningEffort, ToolInput
-    from clawd_code_sdk.models.server_info import ClaudeCodeCommandInfo
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
-    from slashed import BaseCommand, Command, CommandContext
+    from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
     from tokonomics.model_names import AnthropicMaxModelName
     from toprompt import AnyPromptType
@@ -740,76 +740,13 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         assert server_info, "No server info returned (streaming mode should always provide it)"
         # Commands to skip - not useful or problematic in this context
         commands = [
-            self._create_claude_code_command(cmd_info)
+            create_claude_code_command(cmd_info)
             for cmd_info in server_info.commands
             if cmd_info.name and cmd_info.name in ALLOWED_SLASH_COMMANDS
         ]
         for command in commands:
             self._command_store.register_command(command, replace=True)
         self.log.info("Populated command store", command_count=len(commands))
-
-    def _create_claude_code_command(self, cmd_info: ClaudeCodeCommandInfo) -> Command:
-        """Create a slashed Command from Claude Code command info.
-
-        Args:
-            cmd_info: Command info dict with 'name', 'description', 'argumentHint'
-
-        Returns:
-            A slashed Command that executes via Claude Code
-        """
-        from clawd_code_sdk.models import (
-            AssistantMessage,
-            ResultErrorMessage,
-            ResultSuccessMessage,
-            TextBlock,
-            UserMessage,
-        )
-        from slashed import Command
-
-        name = cmd_info.name
-        # Handle MCP commands - they have " (MCP)" suffix in Claude Code
-        category = "claude_code"
-        if name.endswith(" (MCP)"):
-            name = f"mcp:{name.replace(' (MCP)', '')}"
-            category = "mcp"
-
-        async def execute_command(
-            ctx: CommandContext[Any],
-            args: list[str],
-            kwargs: dict[str, str],
-        ) -> None:
-            """Execute the Claude Code slash command."""
-            # Build command string
-            args_str = " ".join(args) if args else ""
-            if kwargs:
-                kwargs_str = " ".join(f"{k}={v}" for k, v in kwargs.items())
-                args_str = f"{args_str} {kwargs_str}".strip()
-            # Execute via agent run - slash commands go through as prompts
-            if not self._client:
-                return
-            await self._client.query(f"/{name} {args_str}".strip())
-            async for msg in self._client.receive_response():
-                match msg:
-                    case AssistantMessage():
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                await ctx.print(block.text)
-                    case UserMessage() if parsed := msg.parse_command_output():
-                        await ctx.print(parsed)
-                    case ResultSuccessMessage(result=result) if result:
-                        await ctx.print(result)
-                    case ResultErrorMessage(subtype=subtype, errors=errors):
-                        await ctx.print(f"Error: {subtype}")
-                        if errors:
-                            await ctx.print(f"Errors: {errors}")
-
-        return Command.from_raw(
-            execute_command,
-            name=name,
-            description=cmd_info.description or f"Claude Code command: {name}",
-            category=category,
-            usage=cmd_info.argument_hint,
-        )
 
     async def _stream_events(  # noqa: PLR0915
         self,
