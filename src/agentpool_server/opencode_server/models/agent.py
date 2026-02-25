@@ -45,3 +45,13 @@ class Command(OpenCodeBaseModel):
 
     name: str
     description: str = ""
+
+
+class ProviderAuthMethod(OpenCodeBaseModel):
+    """Authentication method for a provider."""
+
+    type: Literal["oauth", "api"]
+    """Auth type."""
+
+    label: str
+    """Human-readable label for the auth method."""

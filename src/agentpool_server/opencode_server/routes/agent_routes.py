@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, HTTPException
 import httpx
@@ -28,7 +28,10 @@ from agentpool_server.opencode_server.models import (
     LogRequest,
     McpResource,
     MCPStatus,
+    ProviderAuthMethod,
 )
+from agentpool_server.opencode_server.models.diagnostics import FormatterStatus
+from agentpool_server.opencode_server.models.events import LspStatus
 
 
 if TYPE_CHECKING:
@@ -166,14 +169,15 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
     # Find the MCPManager and add the server
     manager: MCPManager | None = None
     for provider in state.agent.tools.external_providers:
-        if isinstance(provider, MCPManager):
-            manager = provider
-            break
-        if isinstance(provider, AggregatingResourceProvider):
-            for nested in provider.providers:
-                if isinstance(nested, MCPManager):
-                    manager = nested
-                    break
+        match provider:
+            case MCPManager():
+                manager = provider
+                break
+            case AggregatingResourceProvider():
+                for nested in provider.providers:
+                    if isinstance(nested, MCPManager):
+                        manager = nested
+                        break
 
     if manager is None:
         raise HTTPException(status_code=400, detail="No MCP manager available")
@@ -188,12 +192,13 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
 def _find_mcp_manager(state: Any) -> MCPManager | None:
     """Find the MCPManager from the agent's tool providers."""
     for provider in state.agent.tools.external_providers:
-        if isinstance(provider, MCPManager):
-            return provider
-        if isinstance(provider, AggregatingResourceProvider):
-            for nested in provider.providers:
-                if isinstance(nested, MCPManager):
-                    return nested
+        match provider:
+            case MCPManager():
+                return provider
+            case AggregatingResourceProvider():
+                for nested in provider.providers:
+                    if isinstance(nested, MCPManager):
+                        return nested
     return None
 
 
@@ -409,27 +414,22 @@ async def list_tools_with_schemas(  # noqa: D417
 
 
 @router.get("/lsp")
-async def get_lsp_status(state: StateDep) -> list[dict[str, Any]]:
+async def get_lsp_status(state: StateDep) -> list[LspStatus]:
     """Get LSP server status.
 
     Returns status of all running LSP servers.
     """
-    servers = []
+    servers: list[LspStatus] = []
     for server_id, server_state in state.lsp_manager._servers.items():
-        # OpenCode TUI expects "connected" or "error" for status colors
-        status = "connected" if server_state.initialized else "error"
-        servers.append({
-            "id": server_id,
-            "name": server_id,
-            "status": status,
-            "language": server_state.language,
-            "root": server_state.root_uri,  # TUI uses "root" not "rootUri"
-        })
+        status: Literal["connected", "error"] = "connected" if server_state.initialized else "error"
+        servers.append(
+            LspStatus(id=server_id, name=server_id, status=status, root=server_state.root_uri or "")
+        )
     return servers
 
 
 @router.get("/formatter")
-async def get_formatter_status(state: StateDep) -> list[dict[str, Any]]:
+async def get_formatter_status(state: StateDep) -> list[FormatterStatus]:
     """Get formatter status.
 
     Returns empty list - formatters not supported yet.
@@ -439,7 +439,7 @@ async def get_formatter_status(state: StateDep) -> list[dict[str, Any]]:
 
 
 @router.get("/provider/auth")
-async def get_provider_auth(state: StateDep) -> dict[str, list[dict[str, Any]]]:
+async def get_provider_auth(state: StateDep) -> dict[str, list[ProviderAuthMethod]]:
     """Get provider authentication methods.
 
     Returns available OAuth providers with their auth methods.
@@ -447,18 +447,10 @@ async def get_provider_auth(state: StateDep) -> dict[str, list[dict[str, Any]]]:
     _ = state
     return {
         "anthropic": [
-            {
-                "type": "oauth",
-                "label": "Connect Claude Max/Pro",
-                "method": "code",
-            }
+            ProviderAuthMethod(type="oauth", label="Connect Claude Max/Pro"),
         ],
         "copilot": [
-            {
-                "type": "oauth",
-                "label": "Connect GitHub Copilot",
-                "method": "device_code",
-            }
+            ProviderAuthMethod(type="oauth", label="Connect GitHub Copilot"),
         ],
     }
 

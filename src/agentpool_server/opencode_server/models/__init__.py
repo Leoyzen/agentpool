@@ -118,6 +118,7 @@ from agentpool_server.opencode_server.models.file import (
 from agentpool_server.opencode_server.models.agent import (
     Agent,
     Command,
+    ProviderAuthMethod,
 )
 from agentpool_server.opencode_server.models.pty import (
     PtyCreateRequest,
@@ -239,6 +240,7 @@ __all__ = [
     "Provider",
     "ProviderAuthError",
     "ProviderAuthErrorData",
+    "ProviderAuthMethod",
     "ProviderListResponse",
     "ProvidersResponse",
     "PtyCreateRequest",

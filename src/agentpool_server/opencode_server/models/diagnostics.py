@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel
 
 
@@ -47,14 +45,11 @@ class Diagnostic(BaseModel):
 class FormatterStatus(BaseModel):
     """Formatter status information."""
 
-    id: str
-    """Formatter identifier."""
-
     name: str
     """Formatter name."""
 
-    root: str
-    """Workspace root path."""
+    extensions: list[str]
+    """File extensions this formatter handles."""
 
-    status: Literal["connected", "error"]
-    """Connection status."""
+    enabled: bool
+    """Whether this formatter is currently enabled."""
