@@ -28,9 +28,12 @@ from agentpool_config.agentpool_tools import BashToolConfig
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syrupy.assertion import SnapshotAssertion
 
-    from agentpool_config.tools import BaseToolConfig
+    from agentpool.models.agents import AnyToolConfig
+
 
 # Skip on Windows due to temp file locking issues with subprocesses
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows temp file locking")
@@ -78,7 +81,7 @@ def create_server_config_file(temp_dir: Path, tool_name: str, tool_args: dict[st
 def create_client_config_file(
     temp_dir: Path,
     server_config_path: Path,
-    tools: list[BaseToolConfig],
+    tools: Sequence[AnyToolConfig | str],
     mock_env: MockExecutionEnvironmentConfig,
 ) -> Path:
     """Create client config that spawns ACP server with MCP bridge.
@@ -122,7 +125,7 @@ class ACPViaACPHarness:
         self,
         tool_name: str,
         tool_args: dict[str, Any],
-        tools: list[BaseToolConfig],
+        tools: Sequence[AnyToolConfig | str],
     ) -> list[dict[str, Any]]:
         """Execute a tool via ACP subprocess with MCP bridge and capture events.
 

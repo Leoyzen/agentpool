@@ -106,16 +106,15 @@ class FileDiff(OpenCodeBaseModel):
         diff_text = change.to_unified_diff()
         additions = diff_text.count("\n+")
         deletions = diff_text.count("\n-")
-        op = change.operation
-        status: Literal["added", "deleted", "modified"] | None
-        if op == "create":
-            status = "added"
-        elif op == "delete":
-            status = "deleted"
-        elif op in ("edit", "write"):
-            status = "modified"
-        else:
-            status = None
+        match change.operation:
+            case "create":
+                status: Literal["added", "deleted", "modified"] | None = "added"
+            case "delete":
+                status = "deleted"
+            case "edit" | "write":
+                status = "modified"
+            case _:
+                status = None
         return cls(
             file=change.path,
             before=before,
