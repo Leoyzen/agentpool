@@ -44,6 +44,7 @@ from codex_adapter.codex_types import (
 # Strict validation in tests to catch schema changes, lenient in production
 IS_DEV = "pytest" in sys.modules
 
+LoginType = Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
 
 # ============================================================================
 # Base classes with shared configuration
@@ -386,7 +387,7 @@ class LoginAccountParams(CodexBaseModel):
     This is a discriminated union - use type field.
     """
 
-    type: Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
+    type: LoginType
     api_key: str | None = None
     access_token: str | None = None
     chatgpt_account_id: str | None = None

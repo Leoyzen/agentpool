@@ -106,6 +106,7 @@ if TYPE_CHECKING:
     from codex_adapter.models import (
         AppInfo,
         ExperimentalFeature,
+        LoginType,
         ModelData,
         SkillData,
         TurnInputItem,
@@ -955,7 +956,7 @@ class CodexClient:
 
     async def account_login_start(
         self,
-        login_type: str,
+        login_type: LoginType,
         *,
         api_key: str | None = None,
         access_token: str | None = None,

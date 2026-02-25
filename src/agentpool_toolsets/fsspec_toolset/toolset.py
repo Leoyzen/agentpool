@@ -1471,9 +1471,8 @@ class FSSpecTools(ResourceProvider):
                 ):
                     # Parse diff chunk and process events
                     for event in parser.push(chunk):
-                        if isinstance(event, OldTextChunk):
-                            if not event.done:
-                                pending_old_text.append(event.chunk)
+                        if isinstance(event, OldTextChunk) and not event.done:
+                            pending_old_text.append(event.chunk)
                             # When old_text is done, we just wait for new_text
 
                         elif isinstance(event, NewTextChunk):
