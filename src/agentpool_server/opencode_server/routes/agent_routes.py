@@ -335,13 +335,11 @@ async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
 @router.post("/experimental/worktree")
 async def create_worktree(request: WorktreeCreateRequest, state: StateDep) -> WorktreeInfo:
     """Create a new git worktree for isolated agent work."""
-    from agentpool.utils.worktree import (
-        create_worktree as _create_worktree,
-    )
+    from agentpool.utils.worktree import create_worktree
 
     repo_dir = state.agent.env.cwd or state.working_dir
     try:
-        name, branch, directory = await _create_worktree(repo_dir, request.name)
+        name, branch, directory = await create_worktree(repo_dir, request.name)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return WorktreeInfo(name=name, branch=branch, directory=directory)
@@ -350,24 +348,20 @@ async def create_worktree(request: WorktreeCreateRequest, state: StateDep) -> Wo
 @router.get("/experimental/worktree")
 async def list_worktrees(state: StateDep) -> list[str]:
     """List all sandbox worktree directories."""
-    from agentpool.utils.worktree import (
-        list_worktrees as _list_worktrees,
-    )
+    from agentpool.utils.worktree import list_worktrees
 
     repo_dir = state.agent.env.cwd or state.working_dir
-    return await _list_worktrees(repo_dir)
+    return await list_worktrees(repo_dir)
 
 
 @router.delete("/experimental/worktree")
 async def remove_worktree(request: WorktreeRemoveRequest, state: StateDep) -> bool:
     """Remove a git worktree and delete its branch."""
-    from agentpool.utils.worktree import (
-        remove_worktree as _remove_worktree,
-    )
+    from agentpool.utils.worktree import remove_worktree
 
     repo_dir = state.agent.env.cwd or state.working_dir
     try:
-        await _remove_worktree(repo_dir, request.directory)
+        await remove_worktree(repo_dir, request.directory)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return True
@@ -376,13 +370,11 @@ async def remove_worktree(request: WorktreeRemoveRequest, state: StateDep) -> bo
 @router.post("/experimental/worktree/reset")
 async def reset_worktree(request: WorktreeResetRequest, state: StateDep) -> bool:
     """Reset a worktree branch to the primary default branch."""
-    from agentpool.utils.worktree import (
-        reset_worktree as _reset_worktree,
-    )
+    from agentpool.utils.worktree import reset_worktree
 
     repo_dir = state.agent.env.cwd or state.working_dir
     try:
-        await _reset_worktree(repo_dir, request.directory)
+        await reset_worktree(repo_dir, request.directory)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return True
@@ -407,7 +399,9 @@ async def list_sessions_global(
 
     effective_limit = limit or 100
     sessions: list[Session] = []
-    for data in await state.agent.list_sessions(cwd=directory or state.agent.env.cwd):
+    for data in await state.agent.list_sessions(
+        cwd=directory or state.agent.env.cwd, limit=effective_limit
+    ):
         session = session_data_to_opencode(data)
         sessions.append(session)
     # Apply filters
@@ -420,7 +414,7 @@ async def list_sessions_global(
     if search:
         lower_search = search.lower()
         sessions = [s for s in sessions if lower_search in s.title.lower()]
-    return sessions[:effective_limit]
+    return sessions
 
 
 @router.get("/experimental/tool/ids")
