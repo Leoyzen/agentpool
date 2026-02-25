@@ -499,6 +499,7 @@ def _user_input_to_content(inp: UserInput) -> UserContent:
     from codex_adapter.models import (
         UserInputImage,
         UserInputLocalImage,
+        UserInputMention,
         UserInputSkill,
         UserInputText,
     )
@@ -512,6 +513,8 @@ def _user_input_to_content(inp: UserInput) -> UserContent:
             return ImageUrl(url=f"file://{inp.path}")
         case UserInputSkill():
             return f"[Skill: {inp.name}]"
+        case UserInputMention():
+            return f"@{inp.name}"
 
 
 def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]:  # noqa: PLR0915
@@ -639,15 +642,18 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 )
 
             case ThreadItemCollabAgentToolCall():
-                status = item.agent_state.status if item.agent_state else "unknown"
-                display = f"[Collab Agent: {item.tool}] {item.receiver_thread_id or ''} ({status})"
+                # Get first agent state from the dict, if any
+                first_state = next(iter(item.agents_states.values()), None)
+                status = first_state.status if first_state else "unknown"
+                receiver_ids = ", ".join(item.receiver_thread_ids)
+                display = f"[Collab Agent: {item.tool}] {receiver_ids} ({status})"
                 assistant_display_parts.append(display)
                 collab_args: dict[str, Any] = {
                     "tool": item.tool,
                     "sender_thread_id": item.sender_thread_id,
                 }
-                if item.receiver_thread_id:
-                    collab_args["receiver_thread_id"] = item.receiver_thread_id
+                if item.receiver_thread_ids:
+                    collab_args["receiver_thread_ids"] = item.receiver_thread_ids
                 if item.prompt:
                     collab_args["prompt"] = item.prompt
                 collab_call = BuiltinToolCallPart(

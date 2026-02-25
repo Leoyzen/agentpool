@@ -11,8 +11,10 @@ from pydantic import BaseModel
 # Type aliases for Codex types
 ModelProvider = Literal["openai", "anthropic", "google", "mistral"]
 ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
+ReasoningSummary = Literal["auto", "concise", "detailed", "none"]
 ApprovalPolicy = Literal["untrusted", "on-failure", "on-request", "never"]
-SandboxMode = Literal["read-only", "workspace-write", "danger-full-access", "external-sandbox"]
+SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
+Personality = Literal["none", "friendly", "pragmatic"]
 TurnStatus = Literal["pending", "inProgress", "completed", "error", "interrupted"]
 ItemType = Literal[
     "reasoning",
@@ -23,6 +25,44 @@ ItemType = Literal[
     "mcp_tool_call",
 ]
 ItemStatus = Literal["pending", "running", "completed", "error"]
+
+# New type aliases
+SessionSource = Literal["cli", "vscode", "exec", "appServer", "unknown"]
+ThreadSortKey = Literal["created_at", "updated_at"]
+ThreadSourceKind = Literal[
+    "cli",
+    "vscode",
+    "exec",
+    "appServer",
+    "subAgent",
+    "subAgentReview",
+    "subAgentCompact",
+    "subAgentThreadSpawn",
+    "subAgentOther",
+    "unknown",
+]
+MessagePhase = Literal["commentary", "final_answer"]
+PatchApplyStatus = Literal["inProgress", "completed", "failed", "declined"]
+CommandExecutionStatus = Literal["inProgress", "completed", "failed", "declined"]
+McpToolCallStatus = Literal["inProgress", "completed", "failed"]
+DynamicToolCallStatus = Literal["inProgress", "completed", "failed"]
+CollabAgentTool = Literal["spawnAgent", "sendInput", "resumeAgent", "wait", "closeAgent"]
+CollabAgentToolCallStatus = Literal["inProgress", "completed", "failed"]
+CollabAgentStatus = Literal[
+    "pendingInit", "running", "completed", "errored", "shutdown", "notFound"
+]
+InputModality = Literal["text", "image"]
+SkillScope = Literal["user", "repo", "system", "admin"]
+McpAuthStatusValue = Literal["Unsupported", "NotAuthenticated", "Authenticated"]
+ReviewDelivery = Literal["inline", "detached"]
+ThreadActiveFlag = Literal["waitingOnApproval", "waitingOnUserInput"]
+CommandExecutionApprovalDecision = Literal["allow", "allowForSession", "deny", "denyForSession"]
+FileChangeApprovalDecision = Literal["allow", "allowForSession", "deny", "denyForSession"]
+SkillApprovalDecision = Literal["allow", "deny"]
+ModelRerouteReason = Literal["rateLimited", "contextWindowExceeded", "other"]
+WriteStatus = Literal["ok", "conflict"]
+MergeStrategy = Literal["replace", "merge"]
+ExperimentalFeatureStage = Literal["alpha", "beta"]
 
 
 @dataclass

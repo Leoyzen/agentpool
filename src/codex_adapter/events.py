@@ -16,9 +16,12 @@ from codex_adapter.models import (
     AccountRateLimitsUpdatedData,
     AccountUpdatedData,
     AgentMessageDeltaData,
+    AppListUpdatedData,
     AuthStatusChangeData,
     CommandExecutionOutputDeltaData,
     CommandExecutionTerminalInteractionData,
+    ConfigWarningData,
+    ContextCompactedData,
     DeprecationNoticeData,
     ErrorEventData,
     FileChangeOutputDeltaData,
@@ -27,14 +30,20 @@ from codex_adapter.models import (
     LoginChatGptCompleteData,
     McpServerOAuthLoginCompletedData,
     McpToolCallProgressData,
+    ModelReroutedData,
+    PlanDeltaData,
     RawResponseItemCompletedData,
     ReasoningSummaryPartAddedData,
     ReasoningSummaryTextDeltaData,
     ReasoningTextDeltaData,
     SessionConfiguredData,
+    ThreadArchivedData,
     ThreadCompactedData,
+    ThreadNameUpdatedData,
     ThreadStartedData,
+    ThreadStatusChangedData,
     ThreadTokenUsageUpdatedData,
+    ThreadUnarchivedData,
     TurnCompletedData,
     TurnDiffUpdatedData,
     TurnErrorData,
@@ -84,6 +93,34 @@ class ThreadStartedEvent(CodexEventBase):
 
     event_type: Literal["thread/started"] = "thread/started"
     data: ThreadStartedData
+
+
+class ThreadStatusChangedEvent(CodexEventBase):
+    """Thread status changed event."""
+
+    event_type: Literal["thread/status/changed"] = "thread/status/changed"
+    data: ThreadStatusChangedData
+
+
+class ThreadArchivedEvent(CodexEventBase):
+    """Thread archived event."""
+
+    event_type: Literal["thread/archived"] = "thread/archived"
+    data: ThreadArchivedData
+
+
+class ThreadUnarchivedEvent(CodexEventBase):
+    """Thread unarchived event."""
+
+    event_type: Literal["thread/unarchived"] = "thread/unarchived"
+    data: ThreadUnarchivedData
+
+
+class ThreadNameUpdatedEvent(CodexEventBase):
+    """Thread name updated event."""
+
+    event_type: Literal["thread/name/updated"] = "thread/name/updated"
+    data: ThreadNameUpdatedData
 
 
 class ThreadTokenUsageUpdatedEvent(CodexEventBase):
@@ -176,6 +213,18 @@ class AgentMessageDeltaEvent(CodexEventBase):
 
     event_type: Literal["item/agentMessage/delta"] = "item/agentMessage/delta"
     data: AgentMessageDeltaData
+
+
+# ============================================================================
+# Item delta events - Plan
+# ============================================================================
+
+
+class PlanDeltaEvent(CodexEventBase):
+    """Plan delta event (streaming plan text)."""
+
+    event_type: Literal["item/plan/delta"] = "item/plan/delta"
+    data: PlanDeltaData
 
 
 # ============================================================================
@@ -328,6 +377,39 @@ class WindowsWorldWritableWarningEvent(CodexEventBase):
 
 
 # ============================================================================
+# New events
+# ============================================================================
+
+
+class ModelReroutedEvent(CodexEventBase):
+    """Model rerouted event."""
+
+    event_type: Literal["model/rerouted"] = "model/rerouted"
+    data: ModelReroutedData
+
+
+class ConfigWarningEvent(CodexEventBase):
+    """Config warning event."""
+
+    event_type: Literal["configWarning"] = "configWarning"
+    data: ConfigWarningData
+
+
+class AppListUpdatedEvent(CodexEventBase):
+    """App list updated event."""
+
+    event_type: Literal["app/list/updated"] = "app/list/updated"
+    data: AppListUpdatedData
+
+
+class ContextCompactedEvent(CodexEventBase):
+    """Context compacted event (alias for ThreadCompactedEvent with turnId)."""
+
+    event_type: Literal["thread/compacted/v2"] = "thread/compacted/v2"
+    data: ContextCompactedData
+
+
+# ============================================================================
 # Discriminated union of all event types
 # ============================================================================
 
@@ -337,6 +419,10 @@ CodexEvent = Annotated[
     ErrorEvent
     # Thread lifecycle
     | ThreadStartedEvent
+    | ThreadStatusChangedEvent
+    | ThreadArchivedEvent
+    | ThreadUnarchivedEvent
+    | ThreadNameUpdatedEvent
     | ThreadTokenUsageUpdatedEvent
     | ThreadCompactedEvent
     # Turn lifecycle
@@ -351,6 +437,8 @@ CodexEvent = Annotated[
     | RawResponseItemCompletedEvent
     # Item deltas - agent messages
     | AgentMessageDeltaEvent
+    # Item deltas - plan
+    | PlanDeltaEvent
     # Item deltas - reasoning
     | ReasoningSummaryTextDeltaEvent
     | ReasoningSummaryPartAddedEvent
@@ -373,7 +461,11 @@ CodexEvent = Annotated[
     # System events
     | SessionConfiguredEvent
     | DeprecationNoticeEvent
-    | WindowsWorldWritableWarningEvent,
+    | WindowsWorldWritableWarningEvent
+    # New events
+    | ModelReroutedEvent
+    | ConfigWarningEvent
+    | AppListUpdatedEvent,
     Field(discriminator="event_type"),
 ]
 
@@ -392,6 +484,10 @@ EventType = Literal[
     "error",
     # Thread lifecycle
     "thread/started",
+    "thread/status/changed",
+    "thread/archived",
+    "thread/unarchived",
+    "thread/name/updated",
     "thread/tokenUsage/updated",
     "thread/compacted",
     # Turn lifecycle
@@ -406,6 +502,8 @@ EventType = Literal[
     "rawResponseItem/completed",
     # Item deltas - agent messages
     "item/agentMessage/delta",
+    # Item deltas - plan
+    "item/plan/delta",
     # Item deltas - reasoning
     "item/reasoning/summaryTextDelta",
     "item/reasoning/summaryPartAdded",
@@ -429,6 +527,10 @@ EventType = Literal[
     "sessionConfigured",
     "deprecationNotice",
     "windows/worldWritableWarning",
+    # New events
+    "model/rerouted",
+    "configWarning",
+    "app/list/updated",
 ]
 
 
@@ -469,6 +571,7 @@ def parse_codex_event(method: str, params: dict[str, Any] | None) -> CodexEvent 
 # Type alias for all delta events
 DeltaEvent = (
     AgentMessageDeltaEvent
+    | PlanDeltaEvent
     | ReasoningTextDeltaEvent
     | ReasoningSummaryTextDeltaEvent
     | CommandExecutionOutputDeltaEvent
@@ -490,6 +593,7 @@ def get_text_delta(event: CodexEvent) -> str:
     match event:
         case (
             AgentMessageDeltaEvent(data=data)
+            | PlanDeltaEvent(data=data)
             | ReasoningTextDeltaEvent(data=data)
             | ReasoningSummaryTextDeltaEvent(data=data)
             | CommandExecutionOutputDeltaEvent(data=data)
@@ -505,6 +609,7 @@ def is_delta_event(event: CodexEvent) -> bool:
     return isinstance(
         event,
         AgentMessageDeltaEvent
+        | PlanDeltaEvent
         | ReasoningTextDeltaEvent
         | ReasoningSummaryTextDeltaEvent
         | CommandExecutionOutputDeltaEvent

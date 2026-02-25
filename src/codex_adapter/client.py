@@ -23,19 +23,48 @@ from codex_adapter.events import (
 from codex_adapter.exceptions import CodexProcessError, CodexRequestError
 from codex_adapter.models import (
     AgentMessageDeltaData,
+    AppsListParams,
+    AppsListResponse,
+    CancelLoginAccountParams,
+    CancelLoginAccountResponse,
     ClientInfo,
     CommandExecParams,
     CommandExecResponse,
+    ConfigBatchWriteParams,
+    ConfigReadParams,
+    ConfigReadResponse,
+    ConfigRequirementsReadResponse,
+    ConfigValueWriteParams,
+    ConfigWriteResponse,
+    ExperimentalFeatureListParams,
+    ExperimentalFeatureListResponse,
+    ExternalAgentConfigDetectParams,
+    ExternalAgentConfigDetectResponse,
+    ExternalAgentConfigImportParams,
+    FeedbackUploadParams,
+    FeedbackUploadResponse,
+    GetAccountParams,
+    GetAccountRateLimitsResponse,
+    GetAccountResponse,
     InitializeParams,
     JsonRpcRequest,
     JsonRpcResponse,
     ListMcpServerStatusParams,
     ListMcpServerStatusResponse,
+    LoginAccountParams,
+    LoginAccountResponse,
+    McpServerOauthLoginParams,
+    McpServerOauthLoginResponse,
+    ModelListParams,
     ModelListResponse,
+    ReviewStartParams,
+    ReviewStartResponse,
+    SkillsConfigWriteParams,
     SkillsListParams,
     SkillsListResponse,
     TextInputItem,
     ThreadArchiveParams,
+    ThreadCompactStartParams,
     ThreadForkParams,
     ThreadListParams,
     ThreadListResponse,
@@ -45,11 +74,16 @@ from codex_adapter.models import (
     ThreadResumeParams,
     ThreadRollbackParams,
     ThreadRollbackResponse,
+    ThreadSetNameParams,
     ThreadStartParams,
+    ThreadUnarchiveParams,
+    ThreadUnarchiveResponse,
     TurnErrorData,
     TurnInterruptParams,
     TurnStartParams,
     TurnStartResponse,
+    TurnSteerParams,
+    TurnSteerResponse,
 )
 
 
@@ -59,11 +93,23 @@ if TYPE_CHECKING:
     from codex_adapter.codex_types import (
         ApprovalPolicy,
         McpServerConfig,
+        MergeStrategy,
+        Personality,
         ReasoningEffort,
+        ReasoningSummary,
+        ReviewDelivery,
         SandboxMode,
+        ThreadSortKey,
+        ThreadSourceKind,
     )
     from codex_adapter.events import CodexEvent
-    from codex_adapter.models import ModelData, SkillData, TurnInputItem
+    from codex_adapter.models import (
+        AppInfo,
+        ExperimentalFeature,
+        ModelData,
+        SkillData,
+        TurnInputItem,
+    )
 
 
 ResultType = TypeVar("ResultType", bound=BaseModel)
@@ -239,6 +285,10 @@ class CodexClient:
                 future.set_exception(CodexProcessError("Connection closed"))
         self._pending_requests.clear()
 
+    # ========================================================================
+    # Thread lifecycle methods
+    # ========================================================================
+
     async def thread_start(
         self,
         *,
@@ -250,6 +300,9 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
+        service_name: str | None = None,
+        personality: Personality | None = None,
+        ephemeral: bool | None = None,
     ) -> ThreadResponse:
         """Start a new conversation thread.
 
@@ -262,6 +315,9 @@ class CodexClient:
             approval_policy: Tool approval policy
             sandbox: Sandbox mode for file operations
             config: Additional configuration overrides
+            service_name: Optional service name
+            personality: Personality preset (none, friendly, pragmatic)
+            ephemeral: If true, thread is not persisted to disk
 
         Returns:
             ThreadResponse containing thread data and configuration
@@ -275,6 +331,9 @@ class CodexClient:
             approval_policy=approval_policy,
             sandbox=sandbox,
             config=config,
+            service_name=service_name,
+            personality=personality,
+            ephemeral=ephemeral,
         )
         result = await self._send_request("thread/start", params)
         response = ThreadResponse.model_validate(result)
@@ -294,6 +353,7 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
+        personality: Personality | None = None,
     ) -> ThreadResponse:
         """Resume an existing thread by ID.
 
@@ -308,6 +368,7 @@ class CodexClient:
             approval_policy: Tool approval policy override
             sandbox: Sandbox mode override
             config: Additional configuration overrides
+            personality: Personality override
 
         Returns:
             ThreadResponse containing thread data with conversation history
@@ -323,6 +384,7 @@ class CodexClient:
             approval_policy=approval_policy,
             sandbox=sandbox,
             config=config,
+            personality=personality,
         )
         result = await self._send_request("thread/resume", params)
         response = ThreadResponse.model_validate(result)
@@ -342,6 +404,7 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
+        personality: Personality | None = None,
     ) -> ThreadResponse:
         """Fork an existing thread into a new thread with copied history.
 
@@ -356,6 +419,7 @@ class CodexClient:
             approval_policy: Tool approval policy for forked thread
             sandbox: Sandbox mode for forked thread
             config: Additional configuration overrides
+            personality: Personality for forked thread
 
         Returns:
             ThreadResponse containing the new forked thread data
@@ -371,6 +435,7 @@ class CodexClient:
             approval_policy=approval_policy,
             sandbox=sandbox,
             config=config,
+            personality=personality,
         )
         result = await self._send_request("thread/fork", params)
         response = ThreadResponse.model_validate(result)
@@ -382,19 +447,38 @@ class CodexClient:
         *,
         cursor: str | None = None,
         limit: int | None = None,
+        sort_key: ThreadSortKey | None = None,
         model_providers: list[str] | None = None,
+        source_kinds: list[ThreadSourceKind] | None = None,
+        archived: bool | None = None,
+        cwd: str | None = None,
+        search_term: str | None = None,
     ) -> ThreadListResponse:
         """List stored threads with pagination.
 
         Args:
             cursor: Opaque pagination cursor from previous response
             limit: Maximum number of threads to return
-            model_providers: Filter by model providers (e.g., ["openai", "anthropic"])
+            sort_key: Sort key (created_at or updated_at)
+            model_providers: Filter by model providers
+            source_kinds: Filter by source kinds
+            archived: If true, only return archived threads
+            cwd: Filter by working directory
+            search_term: Substring filter for thread title
 
         Returns:
             ThreadListResponse with data (list of threads) and next_cursor
         """
-        params = ThreadListParams(cursor=cursor, limit=limit, model_providers=model_providers)
+        params = ThreadListParams(
+            cursor=cursor,
+            limit=limit,
+            sort_key=sort_key,
+            model_providers=model_providers,
+            source_kinds=source_kinds,
+            archived=archived,
+            cwd=cwd,
+            search_term=search_term,
+        )
         result = await self._send_request("thread/list", params)
         return ThreadListResponse.model_validate(result)
 
@@ -424,6 +508,38 @@ class CodexClient:
         await self._send_request("thread/archive", params)
         self._active_threads.discard(thread_id)
 
+    async def thread_unarchive(self, thread_id: str) -> ThreadUnarchiveResponse:
+        """Unarchive a previously archived thread.
+
+        Args:
+            thread_id: The thread ID to unarchive
+
+        Returns:
+            ThreadUnarchiveResponse with the unarchived thread data
+        """
+        params = ThreadUnarchiveParams(thread_id=thread_id)
+        result = await self._send_request("thread/unarchive", params)
+        return ThreadUnarchiveResponse.model_validate(result)
+
+    async def thread_set_name(self, thread_id: str, name: str) -> None:
+        """Set a user-facing name for a thread.
+
+        Args:
+            thread_id: The thread ID
+            name: The name to set
+        """
+        params = ThreadSetNameParams(thread_id=thread_id, name=name)
+        await self._send_request("thread/name/set", params)
+
+    async def thread_compact_start(self, thread_id: str) -> None:
+        """Trigger context compaction for a thread.
+
+        Args:
+            thread_id: The thread ID to compact
+        """
+        params = ThreadCompactStartParams(thread_id=thread_id)
+        await self._send_request("thread/compact/start", params)
+
     async def thread_rollback(self, thread_id: str, turns: int) -> ThreadRollbackResponse:
         """Rollback the last N turns from a thread.
 
@@ -438,6 +554,10 @@ class CodexClient:
         result = await self._send_request("thread/rollback", params)
         return ThreadRollbackResponse.model_validate(result)
 
+    # ========================================================================
+    # Turn methods
+    # ========================================================================
+
     async def turn_stream(
         self,
         thread_id: str,
@@ -448,6 +568,8 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox_policy: SandboxMode | dict[str, Any] | None = None,
         output_schema: dict[str, Any] | type[Any] | None = None,
+        personality: Personality | None = None,
+        summary: ReasoningSummary | None = None,
     ) -> AsyncIterator[CodexEvent]:
         """Start a turn and stream events.
 
@@ -459,6 +581,8 @@ class CodexClient:
             approval_policy: Optional approval policy
             sandbox_policy: Optional sandbox mode or policy dict
             output_schema: Optional JSON Schema dict or Pydantic type to constrain output
+            personality: Optional personality override
+            summary: Optional reasoning summary mode
 
         Yields:
             CodexEvent: Streaming events from the turn
@@ -498,6 +622,8 @@ class CodexClient:
             approval_policy=approval_policy,
             sandbox_policy=sandbox_dict,
             output_schema=schema_dict,
+            personality=personality,
+            summary=summary,
         )
 
         # Start turn (non-blocking request)
@@ -527,6 +653,34 @@ class CodexClient:
             # Cleanup turn queue
             if turn_key in self._turn_queues:
                 del self._turn_queues[turn_key]
+
+    async def turn_steer(
+        self,
+        thread_id: str,
+        user_input: str | list[TurnInputItem],
+        *,
+        expected_turn_id: str,
+    ) -> TurnSteerResponse:
+        """Steer a running turn with additional input.
+
+        Args:
+            thread_id: The thread ID
+            user_input: Additional user input
+            expected_turn_id: The expected active turn ID (precondition)
+
+        Returns:
+            TurnSteerResponse with the turn ID
+        """
+        input_items: list[TurnInputItem] = (
+            [TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input
+        )
+        params = TurnSteerParams(
+            thread_id=thread_id,
+            input=input_items,
+            expected_turn_id=expected_turn_id,
+        )
+        result = await self._send_request("turn/steer", params)
+        return TurnSteerResponse.model_validate(result)
 
     async def turn_interrupt(self, thread_id: str, turn_id: str) -> None:
         """Interrupt a running turn.
@@ -606,22 +760,55 @@ class CodexClient:
         # Parse into typed model
         return result_type.model_validate_json(response_text)
 
+    # ========================================================================
+    # Review methods
+    # ========================================================================
+
+    async def review_start(
+        self,
+        thread_id: str,
+        target: dict[str, Any],
+        *,
+        delivery: ReviewDelivery | None = None,
+    ) -> ReviewStartResponse:
+        """Start a code review.
+
+        Args:
+            thread_id: The thread ID to start the review on
+            target: Review target (uncommittedChanges, baseBranch, commit, or custom)
+            delivery: Where to run the review (inline or detached)
+
+        Returns:
+            ReviewStartResponse with turn and review thread ID
+        """
+        params = ReviewStartParams(
+            thread_id=thread_id,
+            target=target,
+            delivery=delivery,
+        )
+        result = await self._send_request("review/start", params)
+        return ReviewStartResponse.model_validate(result)
+
+    # ========================================================================
+    # Skills methods
+    # ========================================================================
+
     async def skills_list(
         self,
         *,
-        cwd: str | None = None,
-        force_reload: bool = False,
+        cwds: list[str] | None = None,
+        force_reload: bool | None = None,
     ) -> list[SkillData]:
         """List available skills.
 
         Args:
-            cwd: Optional working directory to scope skills
+            cwds: Optional working directories to scope skills
             force_reload: Force reload of skills cache
 
         Returns:
-            List of skills with name and description
+            List of skills with metadata
         """
-        params = SkillsListParams(cwd=cwd, force_reload=force_reload)
+        params = SkillsListParams(cwds=cwds, force_reload=force_reload)
         result = await self._send_request("skills/list", params)
         response = SkillsListResponse.model_validate(result)
         # Return skills from first container (usually only one)
@@ -629,15 +816,41 @@ class CodexClient:
             return response.data[0].skills
         return []
 
-    async def model_list(self) -> list[ModelData]:
+    async def skills_config_write(self, path: str, *, enabled: bool) -> None:
+        """Write skills configuration.
+
+        Args:
+            path: Path to the skill
+            enabled: Whether the skill is enabled
+        """
+        params = SkillsConfigWriteParams(path=path, enabled=enabled)
+        await self._send_request("skills/config/write", params)
+
+    # ========================================================================
+    # Model methods
+    # ========================================================================
+
+    async def model_list(
+        self,
+        *,
+        include_hidden: bool | None = None,
+    ) -> list[ModelData]:
         """List available models with reasoning effort options.
+
+        Args:
+            include_hidden: When true, include hidden models
 
         Returns:
             List of available models
         """
-        result = await self._send_request("model/list")
+        params = ModelListParams(include_hidden=include_hidden)
+        result = await self._send_request("model/list", params)
         response = ModelListResponse.model_validate(result)
         return response.data
+
+    # ========================================================================
+    # Command execution
+    # ========================================================================
 
     async def command_exec(
         self,
@@ -667,6 +880,10 @@ class CodexClient:
         result = await self._send_request("command/exec", params)
         return CommandExecResponse.model_validate(result)
 
+    # ========================================================================
+    # MCP server methods
+    # ========================================================================
+
     async def mcp_server_refresh(self) -> None:
         """Reload MCP server configurations from disk.
 
@@ -693,6 +910,321 @@ class CodexClient:
         params = ListMcpServerStatusParams(cursor=cursor, limit=limit)
         result = await self._send_request("mcpServerStatus/list", params)
         return ListMcpServerStatusResponse.model_validate(result)
+
+    async def mcp_server_oauth_login(
+        self,
+        name: str,
+        *,
+        scopes: list[str] | None = None,
+        timeout_secs: int | None = None,
+    ) -> McpServerOauthLoginResponse:
+        """Start OAuth login for an MCP server.
+
+        Args:
+            name: Name of the MCP server
+            scopes: Optional OAuth scopes to request
+            timeout_secs: Optional timeout in seconds
+
+        Returns:
+            Response with authorization URL
+        """
+        params = McpServerOauthLoginParams(
+            name=name,
+            scopes=scopes,
+            timeout_secs=timeout_secs,
+        )
+        result = await self._send_request("mcpServer/oauth/login", params)
+        return McpServerOauthLoginResponse.model_validate(result)
+
+    # ========================================================================
+    # Account methods
+    # ========================================================================
+
+    async def account_read(self, *, refresh_token: bool = False) -> GetAccountResponse:
+        """Read account information.
+
+        Args:
+            refresh_token: When true, trigger a proactive token refresh
+
+        Returns:
+            GetAccountResponse with account info
+        """
+        params = GetAccountParams(refresh_token=refresh_token)
+        result = await self._send_request("account/read", params)
+        return GetAccountResponse.model_validate(result)
+
+    async def account_login_start(
+        self,
+        login_type: str,
+        *,
+        api_key: str | None = None,
+        access_token: str | None = None,
+        chatgpt_account_id: str | None = None,
+    ) -> LoginAccountResponse:
+        """Start account login.
+
+        Args:
+            login_type: Login type (apiKey, chatgpt, chatgptAuthTokens)
+            api_key: API key (for apiKey type)
+            access_token: Access token (for chatgptAuthTokens type)
+            chatgpt_account_id: ChatGPT account ID (for chatgptAuthTokens type)
+
+        Returns:
+            LoginAccountResponse with login details
+        """
+        params = LoginAccountParams(
+            type=login_type,
+            api_key=api_key,
+            access_token=access_token,
+            chatgpt_account_id=chatgpt_account_id,
+        )
+        result = await self._send_request("account/login/start", params)
+        return LoginAccountResponse.model_validate(result)
+
+    async def account_login_cancel(self, login_id: str) -> CancelLoginAccountResponse:
+        """Cancel an in-progress account login.
+
+        Args:
+            login_id: The login ID to cancel
+
+        Returns:
+            CancelLoginAccountResponse with status
+        """
+        params = CancelLoginAccountParams(login_id=login_id)
+        result = await self._send_request("account/login/cancel", params)
+        return CancelLoginAccountResponse.model_validate(result)
+
+    async def account_logout(self) -> None:
+        """Logout from the current account."""
+        await self._send_request("account/logout")
+
+    async def account_rate_limits_read(self) -> GetAccountRateLimitsResponse:
+        """Read account rate limits.
+
+        Returns:
+            GetAccountRateLimitsResponse with rate limit information
+        """
+        result = await self._send_request("account/rateLimits/read")
+        return GetAccountRateLimitsResponse.model_validate(result)
+
+    # ========================================================================
+    # Config methods
+    # ========================================================================
+
+    async def config_read(
+        self,
+        *,
+        include_layers: bool = False,
+        cwd: str | None = None,
+    ) -> ConfigReadResponse:
+        """Read configuration.
+
+        Args:
+            include_layers: Whether to include config layer details
+            cwd: Optional working directory for project config resolution
+
+        Returns:
+            ConfigReadResponse with config data
+        """
+        params = ConfigReadParams(include_layers=include_layers, cwd=cwd)
+        result = await self._send_request("config/read", params)
+        return ConfigReadResponse.model_validate(result)
+
+    async def config_value_write(
+        self,
+        key_path: str,
+        value: Any,
+        merge_strategy: MergeStrategy,
+        *,
+        file_path: str | None = None,
+        expected_version: str | None = None,
+    ) -> ConfigWriteResponse:
+        """Write a config value.
+
+        Args:
+            key_path: Dotted key path (e.g., "model")
+            value: Value to write
+            merge_strategy: How to merge (replace or merge)
+            file_path: Optional config file path
+            expected_version: Optional expected version for optimistic locking
+
+        Returns:
+            ConfigWriteResponse with status
+        """
+        params = ConfigValueWriteParams(
+            key_path=key_path,
+            value=value,
+            merge_strategy=merge_strategy,
+            file_path=file_path,
+            expected_version=expected_version,
+        )
+        result = await self._send_request("config/value/write", params)
+        return ConfigWriteResponse.model_validate(result)
+
+    async def config_batch_write(
+        self,
+        edits: list[dict[str, Any]],
+        *,
+        file_path: str | None = None,
+        expected_version: str | None = None,
+    ) -> ConfigWriteResponse:
+        """Batch write config values.
+
+        Args:
+            edits: List of ConfigEdit objects
+            file_path: Optional config file path
+            expected_version: Optional expected version for optimistic locking
+
+        Returns:
+            ConfigWriteResponse with status
+        """
+        params = ConfigBatchWriteParams(
+            edits=edits,
+            file_path=file_path,
+            expected_version=expected_version,
+        )
+        result = await self._send_request("config/batchWrite", params)
+        return ConfigWriteResponse.model_validate(result)
+
+    async def config_requirements_read(self) -> ConfigRequirementsReadResponse:
+        """Read config requirements.
+
+        Returns:
+            ConfigRequirementsReadResponse with requirements
+        """
+        result = await self._send_request("configRequirements/read")
+        return ConfigRequirementsReadResponse.model_validate(result)
+
+    # ========================================================================
+    # Apps methods
+    # ========================================================================
+
+    async def apps_list(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+        thread_id: str | None = None,
+        force_refetch: bool | None = None,
+    ) -> list[AppInfo]:
+        """List available apps/connectors.
+
+        Args:
+            cursor: Pagination cursor
+            limit: Maximum number of apps to return
+            thread_id: Optional thread ID for feature gating
+            force_refetch: Bypass caches and fetch latest
+
+        Returns:
+            List of AppInfo objects
+        """
+        params = AppsListParams(
+            cursor=cursor,
+            limit=limit,
+            thread_id=thread_id,
+            force_refetch=force_refetch,
+        )
+        result = await self._send_request("app/list", params)
+        response = AppsListResponse.model_validate(result)
+        return response.data
+
+    # ========================================================================
+    # Experimental feature methods
+    # ========================================================================
+
+    async def experimental_feature_list(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> list[ExperimentalFeature]:
+        """List experimental features.
+
+        Args:
+            cursor: Pagination cursor
+            limit: Maximum number of features to return
+
+        Returns:
+            List of ExperimentalFeature objects
+        """
+        params = ExperimentalFeatureListParams(cursor=cursor, limit=limit)
+        result = await self._send_request("experimentalFeature/list", params)
+        response = ExperimentalFeatureListResponse.model_validate(result)
+        return response.data
+
+    # ========================================================================
+    # Feedback methods
+    # ========================================================================
+
+    async def feedback_upload(
+        self,
+        classification: str,
+        *,
+        reason: str | None = None,
+        thread_id: str | None = None,
+        include_logs: bool = False,
+        extra_log_files: list[str] | None = None,
+    ) -> FeedbackUploadResponse:
+        """Upload feedback.
+
+        Args:
+            classification: Feedback classification
+            reason: Optional reason text
+            thread_id: Optional thread ID to associate
+            include_logs: Whether to include logs
+            extra_log_files: Additional log files to include
+
+        Returns:
+            FeedbackUploadResponse with thread ID
+        """
+        params = FeedbackUploadParams(
+            classification=classification,
+            reason=reason,
+            thread_id=thread_id,
+            include_logs=include_logs,
+            extra_log_files=extra_log_files,
+        )
+        result = await self._send_request("feedback/upload", params)
+        return FeedbackUploadResponse.model_validate(result)
+
+    # ========================================================================
+    # External agent config methods
+    # ========================================================================
+
+    async def external_agent_config_detect(
+        self,
+        *,
+        include_home: bool | None = None,
+        cwds: list[str] | None = None,
+    ) -> ExternalAgentConfigDetectResponse:
+        """Detect external agent configurations.
+
+        Args:
+            include_home: Include detection under user's home directory
+            cwds: Working directories for repo-scoped detection
+
+        Returns:
+            ExternalAgentConfigDetectResponse with migration items
+        """
+        params = ExternalAgentConfigDetectParams(include_home=include_home, cwds=cwds)
+        result = await self._send_request("externalAgentConfig/detect", params)
+        return ExternalAgentConfigDetectResponse.model_validate(result)
+
+    async def external_agent_config_import(
+        self,
+        migration_items: list[dict[str, Any]],
+    ) -> None:
+        """Import external agent configurations.
+
+        Args:
+            migration_items: List of migration items to import
+        """
+        params = ExternalAgentConfigImportParams(migration_items=migration_items)
+        await self._send_request("externalAgentConfig/import", params)
+
+    # ========================================================================
+    # Internal transport methods
+    # ========================================================================
 
     async def _send_request(self, method: str, params: BaseModel | None = None) -> Any:
         """Send a JSON-RPC request and wait for response.

@@ -10,9 +10,34 @@ from pydantic.alias_generators import to_camel
 
 from codex_adapter.codex_types import (
     ApprovalPolicy,
+    CollabAgentStatus,
+    CollabAgentTool,
+    CollabAgentToolCallStatus,
+    CommandExecutionApprovalDecision,
+    CommandExecutionStatus,
+    DynamicToolCallStatus,
+    ExperimentalFeatureStage,
+    FileChangeApprovalDecision,
+    InputModality,
+    McpAuthStatusValue,
+    McpToolCallStatus,
+    MergeStrategy,
+    MessagePhase,
     ModelProvider,
+    ModelRerouteReason,
+    PatchApplyStatus,
+    Personality,
     ReasoningEffort,
+    ReasoningSummary,
+    ReviewDelivery,
     SandboxMode,
+    SessionSource,
+    SkillApprovalDecision,
+    SkillScope,
+    ThreadActiveFlag,
+    ThreadSortKey,
+    ThreadSourceKind,
+    WriteStatus,
 )
 
 
@@ -71,12 +96,18 @@ class ThreadStartParams(CodexBaseModel):
     approval_policy: ApprovalPolicy | None = None
     sandbox: SandboxMode | None = None
     config: dict[str, Any] | None = None
+    service_name: str | None = None
+    personality: Personality | None = None
+    ephemeral: bool | None = None
+    experimental_raw_events: bool = False
+    persist_extended_history: bool = False
 
 
 class ThreadResumeParams(CodexBaseModel):
     """Parameters for thread/resume request."""
 
     thread_id: str
+    history: list[dict[str, Any]] | None = None
     path: str | None = None
     cwd: str | None = None
     model: str | None = None
@@ -86,6 +117,8 @@ class ThreadResumeParams(CodexBaseModel):
     approval_policy: ApprovalPolicy | None = None
     sandbox: SandboxMode | None = None
     config: dict[str, Any] | None = None
+    personality: Personality | None = None
+    persist_extended_history: bool = False
 
 
 class ThreadForkParams(CodexBaseModel):
@@ -101,6 +134,8 @@ class ThreadForkParams(CodexBaseModel):
     approval_policy: ApprovalPolicy | None = None
     sandbox: SandboxMode | None = None
     config: dict[str, Any] | None = None
+    personality: Personality | None = None
+    persist_extended_history: bool = False
 
 
 class ThreadListParams(CodexBaseModel):
@@ -108,7 +143,12 @@ class ThreadListParams(CodexBaseModel):
 
     cursor: str | None = None
     limit: int | None = None
+    sort_key: ThreadSortKey | None = None
     model_providers: list[str] | None = None
+    source_kinds: list[ThreadSourceKind] | None = None
+    archived: bool | None = None
+    cwd: str | None = None
+    search_term: str | None = None
 
 
 class ThreadReadParams(CodexBaseModel):
@@ -124,11 +164,34 @@ class ThreadArchiveParams(CodexBaseModel):
     thread_id: str
 
 
+class ThreadUnarchiveParams(CodexBaseModel):
+    """Parameters for thread/unarchive request."""
+
+    thread_id: str
+
+
+class ThreadSetNameParams(CodexBaseModel):
+    """Parameters for thread/name/set request."""
+
+    thread_id: str
+    name: str
+
+
+class ThreadCompactStartParams(CodexBaseModel):
+    """Parameters for thread/compact/start request."""
+
+    thread_id: str
+
+
 class ThreadRollbackParams(CodexBaseModel):
     """Parameters for thread/rollback request."""
 
     thread_id: str
     turns: int
+
+
+class ThreadLoadedListParams(CodexBaseModel):
+    """Parameters for thread/loaded/list request."""
 
 
 class TextInputItem(CodexBaseModel):
@@ -160,8 +223,18 @@ class SkillInputItem(CodexBaseModel):
     path: str
 
 
+class MentionInputItem(CodexBaseModel):
+    """Mention input for a turn."""
+
+    type: Literal["mention"] = "mention"
+    name: str
+    path: str
+
+
 # Discriminated union of input types
-TurnInputItem = TextInputItem | LocalImageInputItem | ImageInputItem | SkillInputItem
+TurnInputItem = (
+    TextInputItem | LocalImageInputItem | ImageInputItem | SkillInputItem | MentionInputItem
+)
 
 
 class TurnStartParams(CodexBaseModel):
@@ -174,8 +247,18 @@ class TurnStartParams(CodexBaseModel):
     approval_policy: ApprovalPolicy | None = None
     cwd: str | None = None
     sandbox_policy: dict[str, Any] | None = None  # Sandbox config - flexible structure
-    summary: Literal["concise"] | None = None
+    summary: ReasoningSummary | None = None
     output_schema: dict[str, Any] | None = None  # JSON Schema - arbitrary structure
+    personality: Personality | None = None
+    collaboration_mode: dict[str, Any] | None = None  # CollaborationMode - flexible structure
+
+
+class TurnSteerParams(CodexBaseModel):
+    """Parameters for turn/steer request."""
+
+    thread_id: str
+    input: list[TurnInputItem]
+    expected_turn_id: str
 
 
 class TurnInterruptParams(CodexBaseModel):
@@ -185,11 +268,27 @@ class TurnInterruptParams(CodexBaseModel):
     turn_id: str
 
 
+class ReviewStartParams(CodexBaseModel):
+    """Parameters for review/start request."""
+
+    thread_id: str
+    target: dict[str, Any]  # ReviewTarget - discriminated union
+    delivery: ReviewDelivery | None = None
+
+
 class SkillsListParams(CodexBaseModel):
     """Parameters for skills/list request."""
 
-    cwd: str | None = None
-    force_reload: bool = False
+    cwds: list[str] | None = None
+    force_reload: bool | None = None
+    per_cwd_extra_user_roots: list[dict[str, Any]] | None = None
+
+
+class SkillsConfigWriteParams(CodexBaseModel):
+    """Parameters for skills/config/write request."""
+
+    path: str
+    enabled: bool
 
 
 class CommandExecParams(CodexBaseModel):
@@ -199,6 +298,223 @@ class CommandExecParams(CodexBaseModel):
     cwd: str | None = None
     sandbox_policy: dict[str, Any] | None = None  # Sandbox config - flexible structure
     timeout_ms: int | None = None
+
+
+class ModelListParams(CodexBaseModel):
+    """Parameters for model/list request."""
+
+    cursor: str | None = None
+    limit: int | None = None
+    include_hidden: bool | None = None
+
+
+class McpServerOauthLoginParams(CodexBaseModel):
+    """Parameters for mcpServer/oauth/login request."""
+
+    name: str
+    scopes: list[str] | None = None
+    timeout_secs: int | None = None
+
+
+class ListMcpServerStatusParams(CodexBaseModel):
+    """Parameters for mcpServerStatus/list request."""
+
+    cursor: str | None = None
+    limit: int | None = None
+
+
+class AppsListParams(CodexBaseModel):
+    """Parameters for app/list request."""
+
+    cursor: str | None = None
+    limit: int | None = None
+    thread_id: str | None = None
+    force_refetch: bool | None = None
+
+
+class ExperimentalFeatureListParams(CodexBaseModel):
+    """Parameters for experimentalFeature/list request."""
+
+    cursor: str | None = None
+    limit: int | None = None
+
+
+class FeedbackUploadParams(CodexBaseModel):
+    """Parameters for feedback/upload request."""
+
+    classification: str
+    reason: str | None = None
+    thread_id: str | None = None
+    include_logs: bool = False
+    extra_log_files: list[str] | None = None
+
+
+class ConfigReadParams(CodexBaseModel):
+    """Parameters for config/read request."""
+
+    include_layers: bool
+    cwd: str | None = None
+
+
+class ConfigValueWriteParams(CodexBaseModel):
+    """Parameters for config/value/write request."""
+
+    key_path: str
+    value: Any
+    merge_strategy: MergeStrategy
+    file_path: str | None = None
+    expected_version: str | None = None
+
+
+class ConfigBatchWriteParams(CodexBaseModel):
+    """Parameters for config/batchWrite request."""
+
+    edits: list[dict[str, Any]]  # ConfigEdit objects
+    file_path: str | None = None
+    expected_version: str | None = None
+
+
+class GetAccountParams(CodexBaseModel):
+    """Parameters for account/read request."""
+
+    refresh_token: bool
+
+
+class LoginAccountParams(CodexBaseModel):
+    """Parameters for account/login/start request.
+
+    This is a discriminated union - use type field.
+    """
+
+    type: Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
+    api_key: str | None = None
+    access_token: str | None = None
+    chatgpt_account_id: str | None = None
+    chatgpt_plan_type: str | None = None
+
+
+class CancelLoginAccountParams(CodexBaseModel):
+    """Parameters for account/login/cancel request."""
+
+    login_id: str
+
+
+class ExternalAgentConfigDetectParams(CodexBaseModel):
+    """Parameters for externalAgentConfig/detect request."""
+
+    include_home: bool | None = None
+    cwds: list[str] | None = None
+
+
+class ExternalAgentConfigImportParams(CodexBaseModel):
+    """Parameters for externalAgentConfig/import request."""
+
+    migration_items: list[dict[str, Any]]
+
+
+# ============================================================================
+# Server Request models (server -> client callbacks)
+# ============================================================================
+
+
+class CommandExecutionRequestApprovalParams(CodexBaseModel):
+    """Parameters for item/commandExecution/requestApproval server request."""
+
+    thread_id: str
+    turn_id: str
+    item_id: str
+    approval_id: str | None = None
+    reason: str | None = None
+    network_approval_context: dict[str, Any] | None = None
+    command: str | None = None
+    cwd: str | None = None
+    command_actions: list[dict[str, Any]] | None = None
+    additional_permissions: dict[str, Any] | None = None
+    proposed_execpolicy_amendment: dict[str, Any] | None = None
+    proposed_network_policy_amendments: list[dict[str, Any]] | None = None
+
+
+class CommandExecutionRequestApprovalResponse(CodexBaseModel):
+    """Response for item/commandExecution/requestApproval server request."""
+
+    decision: CommandExecutionApprovalDecision
+
+
+class FileChangeRequestApprovalParams(CodexBaseModel):
+    """Parameters for item/fileChange/requestApproval server request."""
+
+    thread_id: str
+    turn_id: str
+    item_id: str
+    reason: str | None = None
+    grant_root: str | None = None
+
+
+class FileChangeRequestApprovalResponse(CodexBaseModel):
+    """Response for item/fileChange/requestApproval server request."""
+
+    decision: FileChangeApprovalDecision
+
+
+class ToolRequestUserInputQuestion(CodexBaseModel):
+    """A question in a tool request for user input."""
+
+    id: str
+    text: str
+    options: list[dict[str, Any]] | None = None
+
+
+class ToolRequestUserInputParams(CodexBaseModel):
+    """Parameters for item/tool/requestUserInput server request."""
+
+    thread_id: str
+    turn_id: str
+    item_id: str
+    questions: list[ToolRequestUserInputQuestion]
+
+
+class ToolRequestUserInputResponse(CodexBaseModel):
+    """Response for item/tool/requestUserInput server request."""
+
+    answers: dict[str, Any]
+
+
+class SkillRequestApprovalParams(CodexBaseModel):
+    """Parameters for skill/requestApproval server request."""
+
+    item_id: str
+    skill_name: str
+
+
+class SkillRequestApprovalResponse(CodexBaseModel):
+    """Response for skill/requestApproval server request."""
+
+    decision: SkillApprovalDecision
+
+
+class DynamicToolCallParams(CodexBaseModel):
+    """Parameters for item/tool/call server request."""
+
+    thread_id: str
+    turn_id: str
+    call_id: str
+    tool: str
+    arguments: Any
+
+
+class DynamicToolCallOutputContentItem(CodexBaseModel):
+    """Output content item for dynamic tool call response."""
+
+    type: Literal["inputText", "inputImage"]
+    text: str | None = None
+    image_url: str | None = None
+
+
+class DynamicToolCallResponse(CodexBaseModel):
+    """Response for item/tool/call server request."""
+
+    content_items: list[DynamicToolCallOutputContentItem]
+    success: bool
 
 
 # ============================================================================
@@ -288,8 +604,16 @@ class UserInputSkill(CodexBaseModel):
     path: str
 
 
+class UserInputMention(CodexBaseModel):
+    """Mention user input."""
+
+    type: Literal["mention"] = "mention"
+    name: str
+    path: str
+
+
 # Discriminated union of user input types
-UserInput = UserInputText | UserInputImage | UserInputLocalImage | UserInputSkill
+UserInput = UserInputText | UserInputImage | UserInputLocalImage | UserInputSkill | UserInputMention
 
 
 class CommandActionRead(CodexBaseModel):
@@ -331,10 +655,10 @@ CommandAction = (
 )
 
 
-class FileChangeKind(CodexBaseModel):
+class PatchChangeKind(CodexBaseModel):
     """Kind of file change (nested object in Codex's fileChange item)."""
 
-    # Codex sends 'type' but we prefer 'kind' to avoid shadowing builtin
+    # Codex sends 'type' but we use validation_alias to map it
     kind: Literal["add", "delete", "update"] = Field(validation_alias="type")
     move_path: str | None = None
 
@@ -343,7 +667,7 @@ class FileUpdateChange(CodexBaseModel):
     """File update change."""
 
     path: str
-    kind: FileChangeKind
+    kind: PatchChangeKind
     diff: str | None = None  # May be absent in "inProgress" state
 
 
@@ -370,7 +694,49 @@ class McpToolCallError(CodexBaseModel):
 
 
 # ============================================================================
-# ThreadItem discriminated union - 10 variants
+# WebSearch types
+# ============================================================================
+
+
+class WebSearchActionSearch(CodexBaseModel):
+    """Web search action - search."""
+
+    type: Literal["search"] = "search"
+    query: str | None = None
+    queries: list[str] | None = None
+
+
+class WebSearchActionOpenPage(CodexBaseModel):
+    """Web search action - open page."""
+
+    type: Literal["openPage"] = "openPage"
+    url: str | None = None
+
+
+class WebSearchActionFindInPage(CodexBaseModel):
+    """Web search action - find in page."""
+
+    type: Literal["findInPage"] = "findInPage"
+    url: str | None = None
+    pattern: str | None = None
+
+
+class WebSearchActionOther(CodexBaseModel):
+    """Web search action - other."""
+
+    type: Literal["other"] = "other"
+
+
+WebSearchAction = (
+    WebSearchActionSearch
+    | WebSearchActionOpenPage
+    | WebSearchActionFindInPage
+    | WebSearchActionOther
+)
+
+
+# ============================================================================
+# ThreadItem discriminated union
 # ============================================================================
 
 
@@ -386,6 +752,15 @@ class ThreadItemAgentMessage(CodexBaseModel):
     """Agent message item."""
 
     type: Literal["agentMessage"] = "agentMessage"
+    id: str
+    text: str
+    phase: MessagePhase | None = None
+
+
+class ThreadItemPlan(CodexBaseModel):
+    """Plan item."""
+
+    type: Literal["plan"] = "plan"
     id: str
     text: str
 
@@ -407,7 +782,7 @@ class ThreadItemCommandExecution(CodexBaseModel):
     command: str
     cwd: str
     process_id: str | None = None
-    status: Literal["inProgress", "completed", "failed", "declined"]
+    status: CommandExecutionStatus
     command_actions: list[CommandAction] = Field(default_factory=list)
     aggregated_output: str | None = None
     exit_code: int | None = None
@@ -420,7 +795,7 @@ class ThreadItemFileChange(CodexBaseModel):
     type: Literal["fileChange"] = "fileChange"
     id: str
     changes: list[FileUpdateChange]
-    status: Literal["inProgress", "completed", "failed", "declined"]
+    status: PatchApplyStatus
 
 
 class ThreadItemMcpToolCall(CodexBaseModel):
@@ -430,10 +805,23 @@ class ThreadItemMcpToolCall(CodexBaseModel):
     id: str
     server: str
     tool: str
-    status: Literal["inProgress", "completed", "failed"]
+    status: McpToolCallStatus
     arguments: dict[str, Any] | list[Any] | str | int | float | bool | None = None
     result: McpToolCallResult | None = None
     error: McpToolCallError | None = None
+    duration_ms: int | None = None
+
+
+class ThreadItemDynamicToolCall(CodexBaseModel):
+    """Dynamic tool call item."""
+
+    type: Literal["dynamicToolCall"] = "dynamicToolCall"
+    id: str
+    tool: str
+    arguments: Any = None
+    status: DynamicToolCallStatus
+    content_items: list[DynamicToolCallOutputContentItem] | None = None
+    success: bool | None = None
     duration_ms: int | None = None
 
 
@@ -443,6 +831,7 @@ class ThreadItemWebSearch(CodexBaseModel):
     type: Literal["webSearch"] = "webSearch"
     id: str
     query: str
+    action: WebSearchAction | None = None
 
 
 class ThreadItemImageView(CodexBaseModel):
@@ -469,11 +858,11 @@ class ThreadItemExitedReviewMode(CodexBaseModel):
     review: str
 
 
-CollabAgentTool = Literal["spawnAgent", "sendInput", "wait", "closeAgent"]
-CollabAgentToolCallStatus = Literal["inProgress", "completed", "failed"]
-CollabAgentStatus = Literal[
-    "pendingInit", "running", "completed", "errored", "shutdown", "notFound"
-]
+class ThreadItemContextCompaction(CodexBaseModel):
+    """Context compaction item."""
+
+    type: Literal["contextCompaction"] = "contextCompaction"
+    id: str
 
 
 class CollabAgentState(CodexBaseModel):
@@ -491,24 +880,62 @@ class ThreadItemCollabAgentToolCall(CodexBaseModel):
     tool: CollabAgentTool
     status: CollabAgentToolCallStatus
     sender_thread_id: str
-    receiver_thread_id: str | None = None
+    receiver_thread_ids: list[str] = Field(default_factory=list)
     prompt: str | None = None
-    agent_state: CollabAgentState | None = None
+    agents_states: dict[str, CollabAgentState] = Field(default_factory=dict)
 
 
 # Discriminated union of all ThreadItem types
 ThreadItem = (
     ThreadItemUserMessage
     | ThreadItemAgentMessage
+    | ThreadItemPlan
     | ThreadItemReasoning
     | ThreadItemCommandExecution
     | ThreadItemFileChange
     | ThreadItemMcpToolCall
+    | ThreadItemDynamicToolCall
     | ThreadItemCollabAgentToolCall
     | ThreadItemWebSearch
     | ThreadItemImageView
     | ThreadItemEnteredReviewMode
     | ThreadItemExitedReviewMode
+    | ThreadItemContextCompaction
+)
+
+
+# ============================================================================
+# Thread status types
+# ============================================================================
+
+
+class ThreadStatusNotLoaded(CodexBaseModel):
+    """Thread status: not loaded."""
+
+    type: Literal["notLoaded"] = "notLoaded"
+
+
+class ThreadStatusIdle(CodexBaseModel):
+    """Thread status: idle."""
+
+    type: Literal["idle"] = "idle"
+
+
+class ThreadStatusSystemError(CodexBaseModel):
+    """Thread status: system error."""
+
+    type: Literal["systemError"] = "systemError"
+
+
+class ThreadStatusActive(CodexBaseModel):
+    """Thread status: active."""
+
+    type: Literal["active"] = "active"
+    active_flags: list[ThreadActiveFlag] = Field(default_factory=list)
+
+
+ThreadStatusValue = (
+    ThreadStatusNotLoaded | ThreadStatusIdle | ThreadStatusSystemError | ThreadStatusActive
 )
 
 
@@ -528,26 +955,36 @@ class Thread(CodexBaseModel):
     preview: str = ""
     model_provider: str = "openai"
     created_at: int = 0
-    path: str = ""
+    updated_at: int = 0
+    status: ThreadStatusValue | None = None
+    path: str | None = None
     cwd: str = ""
     cli_version: str = ""
-    source: str = "appServer"
+    source: SessionSource = "appServer"
+    agent_nickname: str | None = None
+    agent_role: str | None = None
     git_info: GitInfo | None = None
+    name: str | None = None
     turns: list[Turn] = Field(default_factory=list)
 
 
 class ThreadData(CodexBaseModel):
-    """Thread data in responses (legacy, kept for compatibility)."""
+    """Thread data in responses."""
 
     id: str
     preview: str = ""
     model_provider: ModelProvider = "openai"
     created_at: int = 0
+    updated_at: int = 0
+    status: ThreadStatusValue | None = None
     path: str | None = None
     cwd: str | None = None
     cli_version: str | None = None
     source: str | None = None
+    agent_nickname: str | None = None
+    agent_role: str | None = None
     git_info: GitInfo | None = None
+    name: str | None = None
     turns: list[Turn] = Field(default_factory=list)
 
 
@@ -564,7 +1001,7 @@ class ThreadResponse(CodexBaseModel):
 
 
 class TurnData(CodexBaseModel):
-    """Turn data in responses (legacy, kept for compatibility)."""
+    """Turn data in responses."""
 
     id: str
     status: Literal["pending", "inProgress", "completed", "error", "interrupted"] = "pending"
@@ -577,6 +1014,19 @@ class TurnStartResponse(CodexBaseModel):
     """Response for turn/start request."""
 
     turn: TurnData
+
+
+class TurnSteerResponse(CodexBaseModel):
+    """Response for turn/steer request."""
+
+    turn_id: str
+
+
+class ReviewStartResponse(CodexBaseModel):
+    """Response for review/start request."""
+
+    turn: TurnData
+    review_thread_id: str
 
 
 class ThreadListResponse(CodexBaseModel):
@@ -599,25 +1049,86 @@ class ThreadRollbackResponse(CodexBaseModel):
     turns: list[Turn]
 
 
+class ThreadUnarchiveResponse(CodexBaseModel):
+    """Response for thread/unarchive request."""
+
+    thread: ThreadData
+
+
+# ============================================================================
+# Skills models
+# ============================================================================
+
+
+class SkillInterface(CodexBaseModel):
+    """Skill interface metadata."""
+
+    display_name: str | None = None
+    short_description: str | None = None
+    icon_small: str | None = None
+    icon_large: str | None = None
+    brand_color: str | None = None
+    default_prompt: str | None = None
+
+
+class SkillToolDependency(CodexBaseModel):
+    """Skill tool dependency."""
+
+    type: str
+    value: str
+    description: str | None = None
+    transport: str | None = None
+    command: str | None = None
+    url: str | None = None
+
+
+class SkillDependencies(CodexBaseModel):
+    """Skill dependencies."""
+
+    tools: list[SkillToolDependency] = Field(default_factory=list)
+
+
 class SkillData(CodexBaseModel):
-    """A single skill definition."""
+    """A single skill definition (SkillMetadata in upstream)."""
 
     name: str
     description: str | None = None
+    short_description: str | None = None
+    interface: SkillInterface | None = None
+    dependencies: SkillDependencies | None = None
+    path: str | None = None
+    scope: SkillScope | None = None
+    enabled: bool | None = None
+
+
+class SkillErrorInfo(CodexBaseModel):
+    """Skill error information."""
+
+    path: str
+    message: str
 
 
 class SkillsContainer(CodexBaseModel):
-    """Container for skills with cwd."""
+    """Container for skills with cwd (SkillsListEntry in upstream)."""
 
     cwd: str
     skills: list[SkillData]
-    errors: list[str] = Field(default_factory=list)
+    errors: list[SkillErrorInfo] = Field(default_factory=list)
 
 
 class SkillsListResponse(CodexBaseModel):
     """Response for skills/list request."""
 
     data: list[SkillsContainer]
+
+
+class SkillsConfigWriteResponse(CodexBaseModel):
+    """Response for skills/config/write request."""
+
+
+# ============================================================================
+# Model models
+# ============================================================================
 
 
 class ReasoningEffortOption(CodexBaseModel):
@@ -632,11 +1143,15 @@ class ModelData(CodexBaseModel):
 
     id: str
     model: str
-    description: str | None = None
+    upgrade: str | None = None
     display_name: str | None = None
+    description: str | None = None
+    hidden: bool = False
     is_default: bool = False
     supported_reasoning_efforts: list[ReasoningEffortOption] | None = None
     default_reasoning_effort: ReasoningEffort | None = None
+    input_modalities: list[InputModality] | None = None
+    supports_personality: bool = False
 
 
 class ModelListResponse(CodexBaseModel):
@@ -644,6 +1159,11 @@ class ModelListResponse(CodexBaseModel):
 
     data: list[ModelData]
     next_cursor: str | None = None
+
+
+# ============================================================================
+# Command exec models
+# ============================================================================
 
 
 class CommandExecResponse(CodexBaseModel):
@@ -691,14 +1211,7 @@ class McpServerStatusEntry(CodexBaseModel):
     tools: dict[str, McpTool] = Field(default_factory=dict)
     resources: list[McpResource] = Field(default_factory=list)
     resource_templates: list[McpResourceTemplate] = Field(default_factory=list)
-    auth_status: str = "Unsupported"
-
-
-class ListMcpServerStatusParams(CodexBaseModel):
-    """Parameters for mcpServerStatus/list request."""
-
-    cursor: str | None = None
-    limit: int | None = None
+    auth_status: McpAuthStatusValue = "Unsupported"
 
 
 class ListMcpServerStatusResponse(CodexBaseModel):
@@ -706,6 +1219,195 @@ class ListMcpServerStatusResponse(CodexBaseModel):
 
     data: list[McpServerStatusEntry]
     next_cursor: str | None = None
+
+
+class McpServerOauthLoginResponse(CodexBaseModel):
+    """Response for mcpServer/oauth/login request."""
+
+    authorization_url: str
+
+
+class McpServerRefreshResponse(CodexBaseModel):
+    """Response for config/mcpServer/reload request."""
+
+
+# ============================================================================
+# Account models
+# ============================================================================
+
+
+class GetAccountResponse(CodexBaseModel):
+    """Response for account/read request."""
+
+    account: dict[str, Any] | None = None  # Account enum - flexible
+    requires_openai_auth: bool = False
+
+
+class LoginAccountResponse(CodexBaseModel):
+    """Response for account/login/start request."""
+
+    type: Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
+    login_id: str | None = None
+    auth_url: str | None = None
+
+
+class CancelLoginAccountResponse(CodexBaseModel):
+    """Response for account/login/cancel request."""
+
+    status: str
+
+
+class GetAccountRateLimitsResponse(CodexBaseModel):
+    """Response for account/rateLimits/read request."""
+
+    rate_limits: dict[str, Any]  # RateLimitSnapshot - flexible
+    rate_limits_by_limit_id: dict[str, Any] | None = None
+
+
+# ============================================================================
+# Config models
+# ============================================================================
+
+
+class ConfigLayerMetadata(CodexBaseModel):
+    """Config layer metadata."""
+
+    source: str
+    path: str | None = None
+
+
+class ConfigLayer(CodexBaseModel):
+    """A single config layer."""
+
+    source: str
+    path: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConfigReadResponse(CodexBaseModel):
+    """Response for config/read request."""
+
+    config: dict[str, Any]
+    origins: dict[str, ConfigLayerMetadata] | None = None
+    layers: list[ConfigLayer] | None = None
+
+
+class ConfigWriteResponse(CodexBaseModel):
+    """Response for config/value/write and config/batchWrite requests."""
+
+    status: WriteStatus
+    version: str
+    file_path: str
+    overridden_metadata: dict[str, Any] | None = None
+
+
+class ConfigRequirementsReadResponse(CodexBaseModel):
+    """Response for configRequirements/read request."""
+
+    requirements: dict[str, Any] | None = None
+
+
+# ============================================================================
+# Apps models
+# ============================================================================
+
+
+class AppBranding(CodexBaseModel):
+    """App branding information."""
+
+    primary_color: str | None = None
+    icon: str | None = None
+
+
+class AppMetadata(CodexBaseModel):
+    """App metadata information."""
+
+    review: dict[str, Any] | None = None
+    categories: list[str] | None = None
+    sub_categories: list[str] | None = None
+    seo_description: str | None = None
+    screenshots: list[dict[str, Any]] | None = None
+    developer: str | None = None
+    version: str | None = None
+    version_id: str | None = None
+    version_notes: str | None = None
+    first_party_type: str | None = None
+    first_party_requires_install: bool | None = None
+    show_in_composer_when_unlinked: bool | None = None
+
+
+class AppInfo(CodexBaseModel):
+    """App information."""
+
+    id: str
+    name: str
+    description: str | None = None
+    logo_url: str | None = None
+    logo_url_dark: str | None = None
+    distribution_channel: str | None = None
+    branding: AppBranding | None = None
+    app_metadata: AppMetadata | None = None
+    labels: dict[str, str] | None = None
+    install_url: str | None = None
+    is_accessible: bool = False
+    is_enabled: bool = True
+
+
+class AppsListResponse(CodexBaseModel):
+    """Response for app/list request."""
+
+    data: list[AppInfo]
+    next_cursor: str | None = None
+
+
+# ============================================================================
+# Experimental feature models
+# ============================================================================
+
+
+class ExperimentalFeature(CodexBaseModel):
+    """An experimental feature."""
+
+    name: str
+    stage: ExperimentalFeatureStage
+    description: str | None = None
+
+
+class ExperimentalFeatureListResponse(CodexBaseModel):
+    """Response for experimentalFeature/list request."""
+
+    data: list[ExperimentalFeature]
+    next_cursor: str | None = None
+
+
+# ============================================================================
+# Feedback models
+# ============================================================================
+
+
+class FeedbackUploadResponse(CodexBaseModel):
+    """Response for feedback/upload request."""
+
+    thread_id: str
+
+
+# ============================================================================
+# External agent config models
+# ============================================================================
+
+
+class ExternalAgentConfigMigrationItem(CodexBaseModel):
+    """External agent config migration item."""
+
+    type: str
+    source_path: str
+    dest_path: str | None = None
+
+
+class ExternalAgentConfigDetectResponse(CodexBaseModel):
+    """Response for externalAgentConfig/detect request."""
+
+    items: list[ExternalAgentConfigMigrationItem]
 
 
 # ============================================================================
@@ -788,6 +1490,32 @@ class ThreadStartedData(CodexBaseModel):
     thread_id: str | None = None
 
 
+class ThreadStatusChangedData(CodexBaseModel):
+    """Payload for thread/status/changed notification."""
+
+    thread_id: str
+    status: ThreadStatusValue
+
+
+class ThreadArchivedData(CodexBaseModel):
+    """Payload for thread/archived notification."""
+
+    thread_id: str
+
+
+class ThreadUnarchivedData(CodexBaseModel):
+    """Payload for thread/unarchived notification."""
+
+    thread_id: str
+
+
+class ThreadNameUpdatedData(CodexBaseModel):
+    """Payload for thread/name/updated notification."""
+
+    thread_id: str
+    thread_name: str | None = None
+
+
 class ThreadTokenUsageUpdatedData(CodexBaseModel):
     """Payload for thread/tokenUsage/updated notification (V2 protocol)."""
 
@@ -800,6 +1528,7 @@ class ThreadCompactedData(CodexBaseModel):
     """Payload for thread/compacted notification."""
 
     thread_id: str
+    turn_id: str | None = None
 
 
 # Turn lifecycle notifications
@@ -883,6 +1612,15 @@ class RawResponseItemCompletedData(CodexBaseModel):
 
 class AgentMessageDeltaData(CodexBaseModel):
     """Payload for item/agentMessage/delta notification."""
+
+    thread_id: str
+    turn_id: str
+    item_id: str
+    delta: str
+
+
+class PlanDeltaData(CodexBaseModel):
+    """Payload for item/plan/delta notification."""
 
     thread_id: str
     turn_id: str
@@ -1054,10 +1792,46 @@ class ErrorEventData(CodexBaseModel):
     turn_id: str
 
 
+class ModelReroutedData(CodexBaseModel):
+    """Payload for model/rerouted notification."""
+
+    thread_id: str
+    turn_id: str
+    from_model: str
+    to_model: str
+    reason: ModelRerouteReason
+
+
+class ConfigWarningData(CodexBaseModel):
+    """Payload for configWarning notification."""
+
+    summary: str
+    details: str | None = None
+    path: str | None = None
+    range: dict[str, Any] | None = None
+
+
+class AppListUpdatedData(CodexBaseModel):
+    """Payload for app/list/updated notification."""
+
+    data: list[AppInfo]
+
+
+class ContextCompactedData(CodexBaseModel):
+    """Payload for thread/compacted notification (updated to include turnId)."""
+
+    thread_id: str
+    turn_id: str | None = None
+
+
 # Union type of all event data
 EventData = (
     # Thread lifecycle
     ThreadStartedData
+    | ThreadStatusChangedData
+    | ThreadArchivedData
+    | ThreadUnarchivedData
+    | ThreadNameUpdatedData
     | ThreadTokenUsageUpdatedData
     | ThreadCompactedData
     # Turn lifecycle
@@ -1072,6 +1846,8 @@ EventData = (
     | RawResponseItemCompletedData
     # Item deltas - agent messages
     | AgentMessageDeltaData
+    # Item deltas - plan
+    | PlanDeltaData
     # Item deltas - reasoning
     | ReasoningTextDeltaData
     | ReasoningSummaryTextDeltaData
@@ -1097,4 +1873,9 @@ EventData = (
     | WindowsWorldWritableWarningData
     # Error events
     | ErrorEventData
+    # New events
+    | ModelReroutedData
+    | ConfigWarningData
+    | AppListUpdatedData
+    | ContextCompactedData
 )
