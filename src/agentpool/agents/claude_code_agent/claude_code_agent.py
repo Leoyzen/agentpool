@@ -885,7 +885,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                         # fn_tool_event = FunctionToolCallEvent(part=tool_call_part)
                                         # await event_handlers(None, fn_tool_event)
                                         # yield fn_tool_event
-
                                         # Only emit ToolCallStartEvent if not already emitted
                                         # via streaming (emits early with partial info)
                                         if tc_id not in emitted_tool_starts:
@@ -905,10 +904,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                     case ToolResultBlock():
                                         pass  # ToolResult Blocks only appear in UserMessages
                         # Process user messages - may contain tool results
-                        case UserMessage(content=user_content):
-                            user_blocks = (
-                                [user_content] if isinstance(user_content, str) else user_content
-                            )
+                        case UserMessage(content=list() as user_blocks):  # TODO: handle str?
                             # Extract tool_use_result from UserMessage for metadata conversion
                             for user_block in user_blocks:
                                 if isinstance(user_block, ToolResultBlock):
