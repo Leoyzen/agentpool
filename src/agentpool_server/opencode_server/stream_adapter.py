@@ -517,14 +517,16 @@ class OpenCodeStreamAdapter:
 
         match wrapped_event:
             case StreamCompleteEvent(message=msg):
-                icon = "⚡" if source_type == "team_parallel" else "→"
                 match source_type:
                     case "team_parallel":
                         type_label = " (parallel)"
+                        icon = "⚡"
                     case "team_sequential":
                         type_label = " (sequential)"
+                        icon = "→"
                     case _:
                         type_label = ""
+                        icon = "→"
                 indicator = f"{indent}{icon} {source_name}{type_label}"
                 indicator_part = TextPart(
                     id=identifier.ascending("part"),
