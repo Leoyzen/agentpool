@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 
 SubAgentType = Literal["agent", "team_parallel", "team_sequential"]
 # Lifecycle events (aligned with AG-UI protocol)
+CompactionTrigger = Literal["auto", "manual"]
+CompactionPhase = Literal["starting", "completed"]
 
 
 class PartStartEvent(PyAIPartStartEvent):
@@ -616,9 +618,9 @@ class CompactionEvent:
 
     session_id: str
     """The session ID being compacted."""
-    trigger: Literal["auto", "manual"] = "auto"
+    trigger: CompactionTrigger = "auto"
     """What triggered the compaction (auto = context overflow, manual = slash command)."""
-    phase: Literal["starting", "completed"] = "starting"
+    phase: CompactionPhase = "starting"
     """Current phase of compaction."""
     event_kind: Literal["compaction"] = "compaction"
     """Event type identifier."""
