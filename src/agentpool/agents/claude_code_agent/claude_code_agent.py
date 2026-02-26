@@ -829,12 +829,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         emitted_tool_starts: set[str] = set()
         tool_accumulator = ToolCallAccumulator()
         resolved_model: str | None = None
-
         # Handle ephemeral execution (fork session if store_history=False)
         fork_client = None
         client = self._client
         result_message: ResultMessage | None = None
-        msg_metadata: SimpleJsonType = {}
 
         if not store_history and self._sdk_session_id:
             # Create fork client that shares parent's context but has separate session ID
@@ -871,10 +869,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                 match block:
                                     case TextBlock(text=text):
                                         current_response_parts.append(TextPart(content=text))
-                                    case ThinkingBlock(thinking=thinking):
-                                        current_response_parts.append(
-                                            ThinkingPart(content=thinking)
-                                        )
+                                    case ThinkingBlock(thinking=text):
+                                        current_response_parts.append(ThinkingPart(content=text))
                                     case ToolUseBlock(id=tc_id, name=name, input=input_data):
                                         pending_tool_calls[tc_id] = block
                                         display_name = _strip_mcp_prefix(name)
@@ -1078,7 +1074,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             self.log.info("Stream cancelled via CancelledError")
             # Emit partial response on cancellation
             # Build metadata with SDK session ID
-            msg_metadata = {}
+            msg_metadata: SimpleJsonType = {}
             if self._sdk_session_id:
                 msg_metadata["sdk_session_id"] = self._sdk_session_id
             content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))

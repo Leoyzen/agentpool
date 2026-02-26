@@ -297,15 +297,13 @@ class RepoMap:
             return []
 
         file_mtime = info.mtime
-        cache_key = fname
-
-        cached = self.TAGS_CACHE.get(cache_key)
+        cached = self.TAGS_CACHE.get(fname)
         if cached is not None and cached.get("mtime") == file_mtime:
             return cast(list[Tag], cached["data"])
 
         data = await self._get_tags_raw(fname, rel_fname)
 
-        self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
+        self.TAGS_CACHE[fname] = {"mtime": file_mtime, "data": data}
         return data
 
     async def _get_tags_raw(self, fname: str, rel_fname: str) -> list[Tag]:
@@ -366,12 +364,13 @@ class RepoMap:
 
             tags = await self._get_tags(fname, rel_fname)
             for tag in tags:
-                if tag.kind == "def":
-                    defines[tag.name].add(rel_fname)
-                    key = (rel_fname, tag.name)
-                    definitions[key].add(tag)
-                elif tag.kind == "ref":
-                    references[tag.name].append(rel_fname)
+                match tag.kind:
+                    case "def":
+                        defines[tag.name].add(rel_fname)
+                        key = (rel_fname, tag.name)
+                        definitions[key].add(tag)
+                    case "ref":
+                        references[tag.name].append(rel_fname)
 
         if not references:
             references = defaultdict(list, {k: list(v) for k, v in defines.items()})

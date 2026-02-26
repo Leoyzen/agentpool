@@ -795,10 +795,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Command output and completion events
         """
-        from slashed.events import (
-            CommandExecutedEvent,
-            CommandOutputEvent as SlashedCommandOutputEvent,
-        )
+        from slashed import CommandExecutedEvent, CommandOutputEvent as SlashedCommandOutputEvent
 
         from agentpool.agents.events import CommandCompleteEvent, CommandOutputEvent
 
@@ -975,11 +972,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
 
     def is_cancelled(self) -> bool:
-        """Check if the agent has been cancelled.
-
-        Returns:
-            True if cancellation was requested
-        """
+        """Check if the agent has been cancelled."""
         return self._cancelled
 
     async def interrupt(self) -> None:

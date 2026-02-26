@@ -151,23 +151,6 @@ metadata: {
 
 ---
 
-## Implementation Priority
-
-### Must Have (P0) - Core Functionality
-- ✅ All filesystem tools: read, list, grep
-- ✅ Basic execution: bash
-- ✅ File editing: edit
-- ✅ Planning: todowrite
-- ✅ Interaction: question
-
-### Should Have (P1) - Enhanced Features
-- ❌ **`glob`** - File pattern search (HIGH - complements grep)
-- ❌ **`task`** - Sub-agent tracking (HIGH - important for delegation)
-- ⚠️ **`write` diagnostics** - LSP integration (MEDIUM)
-
-### Nice to Have (P2) - Optional
-- ❌ **`webfetch`** - Web content (LOW - external dependency)
-
 ---
 
 ## What's Missing vs OpenCode
