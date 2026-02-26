@@ -48,6 +48,10 @@ class TimeStartEndOptional(OpenCodeBaseModel):
     start: int
     end: int | None = None
 
+    @classmethod
+    def now(cls) -> Self:
+        return cls(start=now_ms())
+
 
 class TimeStartEndCompacted(OpenCodeBaseModel):
     """Time with start, end required, and optional compacted (milliseconds).

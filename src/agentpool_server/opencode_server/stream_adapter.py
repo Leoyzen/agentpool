@@ -303,7 +303,7 @@ class OpenCodeStreamAdapter:
             message_id=self.assistant_msg_id,
             session_id=self.session_id,
             text=delta,
-            time=TimeStartEndOptional(start=now_ms()),
+            time=TimeStartEndOptional.now(),
         )
         self.assistant_msg.parts.append(self._reasoning_part)
         yield PartUpdatedEvent.create(self._reasoning_part)
@@ -533,7 +533,7 @@ class OpenCodeStreamAdapter:
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
                     text=indicator,
-                    time=TimeStartEndOptional(start=now_ms()),
+                    time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(indicator_part)
                 yield PartUpdatedEvent.create(indicator_part)
@@ -544,7 +544,7 @@ class OpenCodeStreamAdapter:
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
                     text=content,
-                    time=TimeStartEndOptional(start=now_ms()),
+                    time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(content_part)
                 yield PartUpdatedEvent.create(content_part)
@@ -557,7 +557,7 @@ class OpenCodeStreamAdapter:
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
                     text=f"{indent}  ├─ {tool_name}: {preview}",
-                    time=TimeStartEndOptional(start=now_ms()),
+                    time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(summary_part)
                 yield PartUpdatedEvent.create(summary_part)
