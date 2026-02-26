@@ -35,7 +35,7 @@ from agentpool_server.opencode_server.models.tool_metadata import (
 
 if TYPE_CHECKING:
     from clawd_code_sdk import PermissionResult, ThinkingConfig
-    from clawd_code_sdk.models import HookEvent, StopReason, SystemPromptPreset, ToolInput, Usage
+    from clawd_code_sdk.models import HookEvent, StopReason, ToolInput, Usage
     from clawd_code_sdk.models.output_types import StructuredPatchHunk
     from exxec import ExecutionEnvironment
     from pydantic_ai import FinishReason
@@ -90,17 +90,6 @@ def confirmation_result_to_native(result: ConfirmationResult) -> PermissionResul
             return PermissionResultDeny(message="User aborted execution", interrupt=True)
         case _ as unreachable:
             raise assert_never(unreachable)
-
-
-def to_claude_system_prompt(
-    system_prompt: str, include_default: bool = True
-) -> SystemPromptPreset | str:
-    from clawd_code_sdk.models import SystemPromptPreset
-
-    if include_default:
-        # Use SystemPromptPreset to append to builtin prompt
-        return SystemPromptPreset(type="preset", preset="claude_code", append=system_prompt)
-    return system_prompt
 
 
 def to_finish_reason(reason: StopReason) -> FinishReason:

@@ -85,7 +85,6 @@ from agentpool.agents.claude_code_agent.converters import (
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
     convert_to_opencode_metadata,
-    to_claude_system_prompt,
     to_finish_reason,
     to_request_usage,
     to_run_usage,
@@ -503,7 +502,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient
         from clawd_code_sdk.models.options import NewSession, ResumeSession
 
-        sys_prompt = to_claude_system_prompt(system_prompt) if system_prompt else None
         # Determine permission and elicitation callbacks
         bypass = self._permission_mode == "bypassPermissions"
         can_use_tool = self._can_use_tool if not bypass else None
@@ -515,10 +513,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         env["CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"] = "1"
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         if "LSP" in builtin_tools:
-            # Enable LSP tool support
             env["ENABLE_LSP_TOOL"] = "1"
-        if self._use_subscription:
-            # Force subscription usage by clearing API key
+        if self._use_subscription:  # Force subscription usage by clearing API key
             env["ANTHROPIC_API_KEY"] = ""
 
         # Build session config
@@ -532,7 +528,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             cwd=self.env.cwd,
             allowed_tools=self._allowed_tools or [],
             disallowed_tools=self._disallowed_tools,
-            system_prompt=sys_prompt,
+            system_prompt=system_prompt,
+            include_builtin_system_prompt=self._include_builtin_system_prompt,
             model=self._model,
             max_turns=self._max_turns,
             max_budget_usd=self._max_budget_usd,
@@ -541,12 +538,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             permission_mode=self._permission_mode,
             env=env,
             agents=self._subagents,
-            add_dirs=self._add_dir or [],  # type: ignore[arg-type]
+            add_dirs=self._add_dir or [],
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
             can_use_tool=can_use_tool,
             on_user_question=on_user_question,
-            max_buffer_size=10 * 1024 * 1024,
             output_schema=self._output_type if self._output_type is not str else None,
             mcp_servers=self._mcp_servers or {},
             hooks=self._hook_manager.build_hooks(),
