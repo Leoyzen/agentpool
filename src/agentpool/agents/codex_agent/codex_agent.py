@@ -14,6 +14,7 @@ from pydantic_ai.usage import RequestUsage, RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
+    codex_turn_status_to_finish_reason,
     convert_codex_stream,
     mcp_config_to_codex,
     to_model_info,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from codex_adapter import ApprovalPolicy, CodexClient, ReasoningEffort, SandboxMode
     from codex_adapter.codex_types import McpServerConfig
     from codex_adapter.events import CodexEvent
+    from codex_adapter.models import TurnStatusValue
 
 
 logger = get_logger(__name__)
@@ -353,7 +355,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Stream events from Codex turn execution."""
         from agentpool.agents.events import PlanUpdateEvent
         from agentpool.messaging.messages import TokenCost
-        from codex_adapter.events import ThreadTokenUsageUpdatedEvent, TurnStartedEvent
+        from codex_adapter.events import (
+            ThreadTokenUsageUpdatedEvent,
+            TurnCompletedEvent,
+            TurnStartedEvent,
+        )
 
         if not self._client or not self._sdk_session_id:
             raise AgentNotInitializedError
@@ -373,17 +379,20 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Stream turn events with bridge context set
         accumulated_text: list[str] = []
         self._token_usage_data = None
+        self._turn_status: TurnStatusValue | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
         output_schema = None if self._output_type is str else self._output_type
 
         async def capture_metadata(
             raw_events: AsyncIterator[CodexEvent],
         ) -> AsyncIterator[CodexEvent]:
-            """Wrapper to capture token usage and turn_id before event conversion."""
+            """Wrapper to capture token usage, turn_id, and turn status before event conversion."""
             async for event in raw_events:
                 match event:
                     case TurnStartedEvent(data=data):
                         self._current_turn_id = data.turn.id
+                    case TurnCompletedEvent(data=data):
+                        self._turn_status = data.turn.status
                     case ThreadTokenUsageUpdatedEvent(data=data):
                         usage = data.token_usage.last
                         self._token_usage_data = {
@@ -471,6 +480,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         else:
             final_content = final_text  # type: ignore[assignment]
 
+        finish_reason = (
+            codex_turn_status_to_finish_reason(self._turn_status) if self._turn_status else None
+        )
         complete_msg: ChatMessage[OutputDataT] = ChatMessage(
             content=final_content,
             role="assistant",
@@ -480,6 +492,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             cost_info=cost_info,
             usage=request_usage,
             model_name=self.model_name,
+            finish_reason=finish_reason,
         )
 
         yield StreamCompleteEvent[OutputDataT](message=complete_msg)

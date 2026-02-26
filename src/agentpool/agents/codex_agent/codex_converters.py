@@ -34,7 +34,7 @@ from agentpool.sessions import SessionData
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from pydantic_ai import UserContent
+    from pydantic_ai import FinishReason, UserContent
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     from agentpool.agents.events import RichAgentStreamEvent
@@ -47,7 +47,20 @@ if TYPE_CHECKING:
     from codex_adapter import ModelData, ThreadData
     from codex_adapter.codex_types import HttpMcpServer, McpServerConfig, StdioMcpServer
     from codex_adapter.events import CodexEvent
-    from codex_adapter.models import ThreadItem, Turn, TurnInputItem, UserInput
+    from codex_adapter.models import ThreadItem, Turn, TurnInputItem, TurnStatusValue, UserInput
+
+
+def codex_turn_status_to_finish_reason(status: TurnStatusValue) -> FinishReason:
+    """Convert Codex TurnStatusValue to pydantic-ai FinishReason."""
+    match status:
+        case "completed":
+            return "stop"
+        case "interrupted":
+            return "stop"
+        case "failed":
+            return "error"
+        case "inProgress":
+            return "stop"
 
 
 @overload

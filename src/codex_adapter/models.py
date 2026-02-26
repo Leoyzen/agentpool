@@ -45,7 +45,7 @@ from codex_adapter.codex_types import (
 IS_DEV = "pytest" in sys.modules
 
 LoginType = Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
-
+TurnStatusValue = Literal["completed", "interrupted", "failed", "inProgress"]
 # ============================================================================
 # Base classes with shared configuration
 # ============================================================================
@@ -539,7 +539,7 @@ class TurnStatus(CodexBaseModel):
     """Turn status enumeration."""
 
     # This is actually an enum in Rust but sent as string
-    status: Literal["completed", "interrupted", "failed", "inProgress"]
+    status: TurnStatusValue
 
 
 class TurnError(CodexBaseModel):
@@ -949,7 +949,7 @@ class Turn(CodexBaseModel):
 
     id: str
     items: list[ThreadItem] = Field(default_factory=list)
-    status: Literal["completed", "interrupted", "failed", "inProgress"] = "inProgress"
+    status: TurnStatusValue = "inProgress"
     error: TurnError | None = None
 
 
