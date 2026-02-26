@@ -130,6 +130,7 @@ if TYPE_CHECKING:
         ToolUseBlock,
     )
     from clawd_code_sdk.models import ReasoningEffort, ToolInput
+    from clawd_code_sdk.models.input_types import AskUserQuestionInput
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
@@ -502,9 +503,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from clawd_code_sdk.models.options import NewSession, ResumeSession
 
         sys_prompt = to_claude_system_prompt(system_prompt) if system_prompt else None
-        # Determine can_use_tool callback
+        # Determine permission and elicitation callbacks
         bypass = self._permission_mode == "bypassPermissions"
         can_use_tool = self._can_use_tool if not bypass else None
+        on_user_question = self._on_user_question
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []
         # Build environment variables
@@ -542,6 +544,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
             can_use_tool=can_use_tool,
+            on_user_question=on_user_question,
             max_buffer_size=10 * 1024 * 1024,
             output_schema=self._output_type if self._output_type is not str else None,
             mcp_servers=self._mcp_servers or {},
@@ -561,12 +564,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
     ) -> PermissionResult:
         """Handle tool permission requests.
 
-        This callback fires in two cases:
-        1. Tool needs approval: Claude wants to use a tool that isn't auto-approved
-        2. Claude asks a question: Claude calls the AskUserQuestion tool for clarification
-
         Args:
-            tool_name: Name of the tool being called (e.g., "Bash", "Write", "AskUserQuestion")
+            tool_name: Name of the tool being called (e.g., "Bash", "Write")
             input_data: Tool input arguments
             context: Permission context with suggestions
 
@@ -575,13 +574,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """
         from clawd_code_sdk import PermissionResultAllow, PermissionResultDeny
 
-        from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
-
         input_dict = cast(dict[str, Any], input_data)
-        # Handle AskUserQuestion specially - this is Claude asking for clarification
-        if tool_name == "AskUserQuestion":
-            agent_ctx = self.get_context()
-            return await handle_clarifying_questions(agent_ctx, input_dict, context)
         # Auto-grant if bypassPermissions mode is active
         match self._permission_mode:
             case "bypassPermissions":
@@ -597,8 +590,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # For "default" mode and non-edit tools in "acceptEdits" mode:
         # Ask for confirmation via input provider
         if self._input_provider:
-            # Get tool_use_id from SDK context if available (requires SDK >= 0.1.19)
-            # TODO: Remove fallback once claude-agent-sdk with tool_use_id is released
             tool_call_id = context.tool_use_id
             display_name = _strip_mcp_prefix(tool_name)
             self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
@@ -614,6 +605,27 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             return confirmation_result_to_native(result)
         # Default: deny if no input provider
         return PermissionResultDeny(message="No input provider configured")
+
+    async def _on_user_question(
+        self,
+        input_data: AskUserQuestionInput,
+        context: ToolPermissionContext,
+    ) -> PermissionResult:
+        """Handle AskUserQuestion elicitation requests.
+
+        Called when Claude asks the user a clarifying question.
+
+        Args:
+            input_data: Input containing 'questions' array
+            context: Permission context with tool_use_id
+
+        Returns:
+            PermissionResult with answers or denial
+        """
+        from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
+
+        agent_ctx = self.get_context()
+        return await handle_clarifying_questions(agent_ctx, input_data, context)
 
     async def __aenter__(self) -> Self:
         """Connect to Claude Code with deferred client connection."""
