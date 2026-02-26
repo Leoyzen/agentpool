@@ -86,6 +86,7 @@ from agentpool.agents.claude_code_agent.converters import (
     convert_mcp_servers_to_sdk_format,
     convert_to_opencode_metadata,
     to_claude_system_prompt,
+    to_finish_reason,
     to_request_usage,
     to_run_usage,
     to_thinking_config,
@@ -129,7 +130,7 @@ if TYPE_CHECKING:
         ToolPermissionContext,
         ToolUseBlock,
     )
-    from clawd_code_sdk.models import ReasoningEffort, ToolInput
+    from clawd_code_sdk.models import ReasoningEffort, StopReason, ToolInput
     from clawd_code_sdk.models.input_types import AskUserQuestionInput
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
@@ -1130,16 +1131,20 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Build cost_info and usage from ResultMessage if available
         cost_info: TokenCost | None = None
         request_usage: RequestUsage | None = None
+        stop_reason: StopReason | None = "end_turn"
         if result_message:
             run_usage = to_run_usage(result_message.usage)
             total_cost = Decimal(str(result_message.total_cost_usd))
             cost_info = TokenCost(token_usage=run_usage, total_cost=total_cost)
             request_usage = to_request_usage(result_message.usage)
+            stop_reason = result_message.stop_reason
         # Build metadata with SDK session ID
         msg_metadata = {}
         if self._sdk_session_id:
             msg_metadata["sdk_session_id"] = self._sdk_session_id
-
+        finish_reason = (
+            "stop" if self._cancelled or not stop_reason else to_finish_reason(stop_reason)
+        )
         chat_message = ChatMessage[TResult](
             content=final_content,
             role="assistant",
@@ -1152,7 +1157,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,
-            finish_reason="stop" if self._cancelled else None,
+            finish_reason=finish_reason,
             metadata=msg_metadata,
         )
 

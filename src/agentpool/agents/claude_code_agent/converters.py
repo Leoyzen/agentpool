@@ -35,8 +35,9 @@ from agentpool_server.opencode_server.models.tool_metadata import (
 
 if TYPE_CHECKING:
     from clawd_code_sdk import PermissionResult, ThinkingConfig
-    from clawd_code_sdk.models import SystemPromptPreset, ToolInput, Usage
+    from clawd_code_sdk.models import StopReason, SystemPromptPreset, ToolInput, Usage
     from clawd_code_sdk.models.output_types import StructuredPatchHunk
+    from pydantic_ai import FinishReason
 
     from agentpool.agents.context import ConfirmationResult
     from agentpool_config.mcp_server import MCPServerConfig as NativeMCPServerConfig
@@ -98,6 +99,21 @@ def to_claude_system_prompt(
         # Use SystemPromptPreset to append to builtin prompt
         return SystemPromptPreset(type="preset", preset="claude_code", append=system_prompt)
     return system_prompt
+
+
+def to_finish_reason(reason: StopReason) -> FinishReason:
+
+    match reason:
+        case "end_turn":
+            return "stop"
+        case "max_tokens" | "model_context_window_exceeded":
+            return "length"
+        case "stop_sequence" | "pause_turn" | "refusal":
+            return "stop"
+        case "tool_use":
+            return "tool_call"
+        case _ as unreachable:
+            raise assert_never(unreachable)
 
 
 def convert_mcp_servers_to_sdk_format(
