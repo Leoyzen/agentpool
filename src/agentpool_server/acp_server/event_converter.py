@@ -71,6 +71,7 @@ if TYPE_CHECKING:
 
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import SubAgentType
 
 logger = get_logger(__name__)
 
@@ -455,7 +456,7 @@ class ACPEventConverter:
     async def _convert_subagent_inline(
         self,
         source_name: str,
-        source_type: Literal["agent", "team_parallel", "team_sequential"],
+        source_type: SubAgentType,
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> AsyncIterator[ACPSessionUpdate]:
@@ -529,7 +530,7 @@ class ACPEventConverter:
     async def _convert_subagent_tool_box(
         self,
         source_name: str,
-        source_type: Literal["agent", "team_parallel", "team_sequential"],
+        source_type: SubAgentType,
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> AsyncIterator[ACPSessionUpdate]:

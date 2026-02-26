@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
 
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import SubAgentType
 
 
 logger = get_logger(__name__)
@@ -51,7 +52,7 @@ def _generate_task_id(description: str) -> str:
 async def _stream_task(
     ctx: AgentContext,
     source_name: str,
-    source_type: Literal["agent", "team_parallel", "team_sequential"],
+    source_type: SubAgentType,
     stream: AsyncIterator[RichAgentStreamEvent[Any]],
     *,
     batch_deltas: bool = False,
@@ -264,7 +265,7 @@ class SubagentTools(StaticResourceProvider):
         node = ctx.pool.nodes[agent_or_team]
         match node:
             case Team():
-                source_type: Literal["team_parallel", "team_sequential", "agent"] = "team_parallel"
+                source_type: SubAgentType = "team_parallel"
             case TeamRun():
                 source_type = "team_sequential"
             case BaseAgent():
