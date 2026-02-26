@@ -389,11 +389,6 @@ def build_sdk_hooks_from_agent_hooks(
     from clawd_code_sdk.models import HookMatcher
 
     result: dict[HookEvent, list[Any]] = {}
-
-    if not hooks:
-        return result
-
-    # Check if we have pre_tool_use hooks
     if hooks.pre_tool_use:
 
         async def on_pre_tool_use(
@@ -437,7 +432,6 @@ def build_sdk_hooks_from_agent_hooks(
 
         result["PreToolUse"] = [HookMatcher(matcher="*", hooks=[on_pre_tool_use])]  # type: ignore[list-item]
 
-    # Check if we have post_tool_use hooks
     if hooks.post_tool_use:
 
         async def on_post_tool_use(
