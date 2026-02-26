@@ -552,8 +552,6 @@ class FSSpecTools(ResourceProvider):
             if mode == "a" and file_exists:
                 try:
                     existing_content = await self._read(agent_ctx, path)
-                    if isinstance(existing_content, bytes):
-                        existing_content = existing_content.decode("utf-8")
                     content = existing_content + content
                 except Exception:  # noqa: BLE001
                     pass  # If we can't read, just write new content
@@ -732,9 +730,6 @@ class FSSpecTools(ResourceProvider):
 
         try:  # Read current file content
             original_content = await self._read(agent_ctx, path)
-            if isinstance(original_content, bytes):
-                original_content = original_content.decode("utf-8")
-
             # Apply all replacements sequentially
             new_content = original_content
             # line_hint only makes sense for single replacements
@@ -825,28 +820,23 @@ class FSSpecTools(ResourceProvider):
         try:
             # Read original content
             original_content = await self._read(agent_ctx, path)
-            if isinstance(original_content, bytes):
-                original_content = original_content.decode("utf-8")
-
             lines = original_content.splitlines(keepends=True)
             total_lines = len(lines)
-            # Resolve start position
-            if isinstance(start, int):
-                if start < 1:
+            match start:
+                case int() if start < 1:
                     raise ValueError(f"start line must be >= 1, got {start}")  # noqa: TRY301
-                start_line = start
-            else:
-                # Find unique occurrence of start string (raises ValueError if not found/unique)
-                start_line = self._find_unique_line(lines, start, "start")
+                case int():
+                    start_line = start
+                case _:  # Find unique occurrence of string (raises ValueError if not found/unique)
+                    start_line = self._find_unique_line(lines, start, "start")
 
-            # Resolve end position
-            if isinstance(end, int):
-                if end < start_line:
+            match end:
+                case int() if end < start_line:
                     raise ValueError(f"end line {end} must be >= start line {start_line}")  # noqa: TRY301
-                end_line = end
-            else:
-                # Find first occurrence of end string after start (raises ValueError if not found)
-                end_line = self._find_first_after(lines, end, start_line, "end")
+                case int():
+                    end_line = end
+                case _:  # Find unique occurrence of string (raises ValueError if not found/unique)
+                    end_line = self._find_first_after(lines, end, start_line, "end")
 
             # Validate range
             if end_line > total_lines:
@@ -982,6 +972,7 @@ class FSSpecTools(ResourceProvider):
         Returns:
             Grep results as formatted text
         """
+        from agentpool.agents.events import TextContentItem
         from agentpool_toolsets.fsspec_toolset.grep import (
             DEFAULT_EXCLUDE_PATTERNS,
             detect_grep_backend,
@@ -1046,10 +1037,7 @@ class FSSpecTools(ResourceProvider):
                 output = f"Found {match_count} matches:\n\n{matches}"
                 if was_truncated:
                     output += "\n\n[Results truncated]"
-
             # Emit formatted content for UI display
-            from agentpool.agents.events import TextContentItem
-
             await agent_ctx.events.tool_call_progress(
                 title=f"Found {match_count} matches",
                 items=[TextContentItem(text=output)],
@@ -1063,7 +1051,8 @@ class FSSpecTools(ResourceProvider):
     async def _read(self, agent_ctx: AgentContext, path: str, encoding: str = "utf-8") -> str:
         # with self.fs.open(path, "r", encoding="utf-8") as f:
         #     return f.read()
-        return await self._get_fs(agent_ctx)._cat(path)  # type: ignore[no-any-return]
+        val = await self._get_fs(agent_ctx)._cat(path)
+        return val.decode() if isinstance(val, bytes) else val  # type: ignore[no-any-return]
 
     async def _write(self, agent_ctx: AgentContext, path: str, content: str | bytes) -> None:
         if isinstance(content, str):
@@ -1107,11 +1096,7 @@ class FSSpecTools(ResourceProvider):
                 client.stream("GET", url, timeout=30.0) as response,
             ):
                 response.raise_for_status()
-                total = (
-                    int(response.headers["Content-Length"])
-                    if "Content-Length" in response.headers
-                    else None
-                )
+                total = int(i) if (i := response.headers["Content-Length"]) else None
                 # Collect all data
                 data = bytearray()
                 async for chunk in response.aiter_bytes(chunk_size):
@@ -1196,66 +1181,57 @@ class FSSpecTools(ResourceProvider):
         await agent_ctx.events.tool_call_start(title=title, kind="edit", locations=[path])
         await agent_ctx.events.file_operation("edit", path=path, success=True)
 
-        try:
-            # Read original content for diff purposes
-            if mode == "create":
+        match mode:
+            case "create":
                 original_content = ""
-            else:
-                original_content = await self._read(agent_ctx, path)
-                if isinstance(original_content, bytes):
-                    original_content = original_content.decode()
-
-            # Build the edit prompt based on mode
-            if mode == "create":
                 prompt = _build_create_prompt(path, display_description)
-            elif mode == "overwrite":
+            case "overwrite":
+                original_content = await self._read(agent_ctx, path)
                 prompt = _build_overwrite_prompt(path, display_description, original_content)
-            else:
+            case "edit":
+                original_content = await self._read(agent_ctx, path)
                 prompt = _build_edit_prompt(path, display_description, original_content)
 
-            # Get the current agent and its conversation history
-            agent = agent_ctx.native_agent
+        agent = agent_ctx.native_agent
+        # Create forked message history from current conversation
+        # This preserves full context while isolating the edit's messages
+        # We need BOTH:
+        # 1. Stored history (previous runs) from agent.conversation
+        # 2. Current run messages from run_ctx.messages (not yet stored)
+        stored_history = agent.conversation.get_history()
+        # Build complete message list. Add stored history from previous runs
+        all_messages: list[ModelRequest | ModelResponse] = []
+        for chat_msg in stored_history:
+            all_messages.extend(chat_msg.to_pydantic_ai())
 
-            # Create forked message history from current conversation
-            # This preserves full context while isolating the edit's messages
-            # We need BOTH:
-            # 1. Stored history (previous runs) from agent.conversation
-            # 2. Current run messages from run_ctx.messages (not yet stored)
-            stored_history = agent.conversation.get_history()
-            # Build complete message list
-            all_messages: list[ModelRequest | ModelResponse] = []
-            # Add stored history from previous runs
-            for chat_msg in stored_history:
-                all_messages.extend(chat_msg.to_pydantic_ai())
+        # Add current run's messages (not yet in stored history)
+        # But exclude the last message if it contains the current agentic_edit tool call
+        # to avoid the sub-agent seeing "I'm calling agentic_edit" in its context
 
-            # Add current run's messages (not yet in stored history)
-            # But exclude the last message if it contains the current agentic_edit tool call
-            # to avoid the sub-agent seeing "I'm calling agentic_edit" in its context
+        for msg in run_ctx.messages:
+            if isinstance(msg, ModelResponse):
+                # Filter out the agentic_edit tool call from the last response
+                filtered_parts = [
+                    p
+                    for p in msg.parts
+                    if not (isinstance(p, ToolCallPart) and p.tool_name == "agentic_edit")
+                ]
+                if filtered_parts:
+                    all_messages.append(ModelResponse(parts=filtered_parts))
+            else:
+                all_messages.append(msg)
 
-            for msg in run_ctx.messages:
-                if isinstance(msg, ModelResponse):
-                    # Filter out the agentic_edit tool call from the last response
-                    filtered_parts = [
-                        p
-                        for p in msg.parts
-                        if not (isinstance(p, ToolCallPart) and p.tool_name == "agentic_edit")
-                    ]
-                    if filtered_parts:
-                        all_messages.append(ModelResponse(parts=filtered_parts))
-                else:
-                    all_messages.append(msg)
+            # Inject CachePoint to cache everything up to this point
+            # if all_messages:
+            #     cache_request: ModelRequest = ModelRequest(parts=[CachePoint()])
+            #     all_messages.append(cache_request)
 
-                # Inject CachePoint to cache everything up to this point
-                # if all_messages:
-                #     cache_request: ModelRequest = ModelRequest(parts=[CachePoint()])
-                #     all_messages.append(cache_request)
-
-                # Wrap in a single ChatMessage for the forked history
-                fork_history = MessageHistory(
-                    messages=[ChatMessage(messages=all_messages, role="user", content="")]
-                )
-            fork_history = MessageHistory()
-
+            # Wrap in a single ChatMessage for the forked history
+            fork_history = MessageHistory(
+                messages=[ChatMessage(messages=all_messages, role="user", content="")]
+            )
+        fork_history = MessageHistory()
+        try:
             # Stream the edit using the same agent but with forked history
             if mode == "edit" and matcher == "zed":
                 # TRUE STREAMING with Zed-style DP fuzzy matcher
@@ -1275,17 +1251,14 @@ class FSSpecTools(ResourceProvider):
 
             # Write the new content to file
             await self._write(agent_ctx, path, new_content)
-
             # Build success message
             original_lines = len(original_content.splitlines()) if original_content else 0
             new_lines = len(new_content.splitlines())
-
             if mode == "create":
                 success_msg = f"Successfully created {Path(path).name} ({new_lines} lines)"
             else:
                 success_msg = f"Successfully edited {Path(path).name} using AI agent"
                 success_msg += f" ({original_lines} → {new_lines} lines)"
-
             # Send final completion update
             await agent_ctx.events.file_edit_progress(
                 path=path,
@@ -1293,7 +1266,6 @@ class FSSpecTools(ResourceProvider):
                 new_text=new_content,
                 status="completed",
             )
-
         except Exception as e:  # noqa: BLE001
             error_msg = f"Error during agentic edit: {e}"
             await agent_ctx.events.file_operation("edit", path=path, success=False, error=error_msg)
@@ -1338,26 +1310,22 @@ class FSSpecTools(ResourceProvider):
                 ):
                     # Parse diff chunk and process events
                     for event in parser.push(chunk):
-                        if isinstance(event, OldTextChunk):
-                            if not event.done:
+                        match event:
+                            case OldTextChunk(chunk=chunk, line_hint=line_hint) if not event.done:
                                 # Track old text for later prefix/suffix calculation
-                                pending_old_text.append(event.chunk)
+                                pending_old_text.append(chunk)
                                 # Push to matcher for location resolution
-                                match_result = matcher.push(event.chunk, line_hint=event.line_hint)
-                                if match_result:
+                                if match_result := matcher.push(chunk, line_hint=line_hint):
                                     current_match_range = match_result
-                            else:
+                            case OldTextChunk():
                                 # Old text done - finalize location
-                                matches = matcher.finish()
-                                if matches:
+                                if matches := matcher.finish():
                                     current_match_range = matches[0]
                                 # Reset matcher for next hunk
                                 matcher = StreamingFuzzyMatcher(edited_content)
-
-                        elif isinstance(event, NewTextChunk):
-                            if not event.done:
-                                pending_new_text.append(event.chunk)
-                            else:
+                            case NewTextChunk(chunk=chunk) if not event.done:
+                                pending_new_text.append(chunk)
+                            case NewTextChunk():
                                 # New text done - apply the edit if we have a location
                                 if current_match_range and pending_new_text:
                                     new_text = "".join(pending_new_text)
@@ -1410,9 +1378,8 @@ class FSSpecTools(ResourceProvider):
                 case OldTextChunk(chunk=chunk) if not event.done:
                     pending_old_text.append(chunk)
                     matcher.push(chunk, line_hint=event.line_hint)
-                case OldTextChunk():
-                    if matches := matcher.finish():
-                        current_match_range = matches[0]
+                case OldTextChunk() if matches := matcher.finish():
+                    current_match_range = matches[0]
                 case NewTextChunk(chunk=chunk) if not event.done:
                     pending_new_text.append(chunk)
                 case NewTextChunk() if current_match_range and pending_new_text:
@@ -1471,42 +1438,40 @@ class FSSpecTools(ResourceProvider):
                 ):
                     # Parse diff chunk and process events
                     for event in parser.push(chunk):
-                        if isinstance(event, OldTextChunk) and not event.done:
-                            pending_old_text.append(event.chunk)
+                        match event:
+                            case OldTextChunk(chunk=chunk) if not event.done:
+                                pending_old_text.append(chunk)
                             # When old_text is done, we just wait for new_text
-
-                        elif isinstance(event, NewTextChunk):
-                            if not event.done:
-                                pending_new_text.append(event.chunk)
-                            else:
+                            case NewTextChunk(chunk=chunk) if not event.done:
+                                pending_new_text.append(chunk)
+                            case NewTextChunk() if pending_old_text and pending_new_text:
                                 # Hunk complete - apply using replace_content
-                                if pending_old_text and pending_new_text:
-                                    old_text = "".join(pending_old_text)
-                                    new_text = "".join(pending_new_text)
+                                old_text = "".join(pending_old_text)
+                                new_text = "".join(pending_new_text)
+                                try:
+                                    result = replace_content(
+                                        edited_content,
+                                        old_text,
+                                        new_text,
+                                        replace_all=False,
+                                    )
+                                    await agent_ctx.events.file_edit_progress(
+                                        path=path,
+                                        old_text=original_content,
+                                        new_text=result.content,
+                                        status="in_progress",
+                                    )
+                                except ValueError as e:
+                                    # Log but continue - some hunks may fail
+                                    logger.warning(
+                                        "Streaming hunk failed",
+                                        error=str(e),
+                                        old_text=old_text[:50],
+                                    )
+                                pending_old_text = []
+                                pending_new_text = []
 
-                                    try:
-                                        result = replace_content(
-                                            edited_content,
-                                            old_text,
-                                            new_text,
-                                            replace_all=False,
-                                        )
-                                        edited_content = result.content
-                                        # Emit progress update
-                                        await agent_ctx.events.file_edit_progress(
-                                            path=path,
-                                            old_text=original_content,
-                                            new_text=edited_content,
-                                            status="in_progress",
-                                        )
-                                    except ValueError as e:
-                                        # Log but continue - some hunks may fail
-                                        logger.warning(
-                                            "Streaming hunk failed",
-                                            error=str(e),
-                                            old_text=old_text[:50],
-                                        )
-
+                            case NewTextChunk():
                                 # Reset for next hunk
                                 pending_old_text = []
                                 pending_new_text = []

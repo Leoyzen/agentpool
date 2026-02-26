@@ -405,22 +405,21 @@ async def dispatch_elicitation[T](
 def _parse_enum_options(schema: dict[str, Any]) -> list[ChoiceOption]:
     """Parse enum options from JSON schema."""
     # Simple enum: {"enum": ["a", "b", "c"]}
-    if "enum" in schema:
-        return [ChoiceOption(value=str(val), title=str(val)) for val in schema["enum"]]
-
-    # oneOf with const/title: {"oneOf": [{"const": "a", "title": "Option A"}, ...]}
-    if "oneOf" in schema:
-        return [
-            ChoiceOption(
-                value=str(item["const"]),
-                title=item.get("title", str(item["const"])),
-                description=item.get("description", ""),
-            )
-            for item in schema["oneOf"]
-            if "const" in item
-        ]
-
-    return []
+    match schema:
+        case {"enum": enum}:
+            return [ChoiceOption(value=str(val), title=str(val)) for val in enum]
+        case {"oneOf": one_of}:  #  {"oneOf": [{"const": "a", "title": "Option A"}, ...]}
+            return [
+                ChoiceOption(
+                    value=str(item["const"]),
+                    title=item.get("title", str(item["const"])),
+                    description=item.get("description", ""),
+                )
+                for item in one_of
+                if "const" in item
+            ]
+        case _:
+            return []
 
 
 def _parse_array_enum_options(items_schema: dict[str, Any]) -> list[ChoiceOption]:
@@ -649,13 +648,9 @@ def to_mcp_schema(request: ElicitRequest) -> dict[str, Any]:
             return _choice_to_schema(request)
         case ElicitUrl():
             raise ValueError("ElicitUrl doesn't have a JSON schema representation")
-        case ElicitForm():
-            properties = {name: to_mcp_schema(f) for name, f in request.fields.items()}
-            return {
-                "type": "object",
-                "properties": properties,
-                "required": request.required_fields,
-            }
+        case ElicitForm(fields=fields, required_fields=required_fields):
+            properties = {name: to_mcp_schema(f) for name, f in fields.items()}
+            return {"type": "object", "properties": properties, "required": required_fields}
 
     raise ValueError(f"Unknown elicitation type: {type(request)}")
 
@@ -694,12 +689,8 @@ def from_claude_question(question: dict[str, Any]) -> ElicitChoice:
     header = question.get("header", "")
     question_text = question.get("question", "")
     title = f"{header}: {question_text}" if header else question_text
-
-    return ElicitChoice(
-        title=title,
-        options=options,
-        multi=question.get("multiSelect", False),
-    )
+    multi = question.get("multiSelect", False)
+    return ElicitChoice(title=title, options=options, multi=multi)
 
 
 def from_claude_questions(questions: list[dict[str, Any]]) -> ElicitForm:
@@ -715,8 +706,7 @@ def from_claude_questions(questions: list[dict[str, Any]]) -> ElicitForm:
 
     for q in questions:
         question_text = q.get("question", "")
-        choice = from_claude_question(q)
-        fields[question_text] = choice
+        fields[question_text] = from_claude_question(q)
 
     return ElicitForm(
         message="Please answer the following questions",
@@ -757,7 +747,4 @@ def to_claude_answers(
                 else:
                     answers[question_text] = str(value)
 
-    return {
-        "questions": questions,
-        "answers": answers,
-    }
+    return {"questions": questions, "answers": answers}

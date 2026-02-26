@@ -171,6 +171,8 @@ async def grep_with_subprocess(
     Returns:
         Dictionary with matches, match_count, and was_truncated flag
     """
+    import shlex
+
     if backend is None:
         backend = await detect_grep_backend(env)
 
@@ -181,7 +183,6 @@ async def grep_with_subprocess(
     base_exclude = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
     # Filter out patterns that the user is explicitly searching inside
     exclude = _filter_exclude_patterns(path, base_exclude)
-
     # Disable gitignore if explicitly searching inside an ignored directory
     # (e.g., searching .venv/ when .venv is in .gitignore)
     effective_use_gitignore = use_gitignore and not _is_path_inside_ignored_dir(path)
@@ -200,15 +201,10 @@ async def grep_with_subprocess(
         cmd_list = _build_gnu_grep_command(
             pattern, path, case_sensitive, max_matches, exclude, context_lines
         )
-
     # Convert list to shell command string
-    import shlex
-
     command = " ".join(shlex.quote(arg) for arg in cmd_list)
-
     try:
         result = await env.execute_command(command)
-
         # Exit code 0 = matches found, 1 = no matches, 2+ = error
         if result.exit_code not in {0, 1, None}:
             error_msg = result.stderr or f"Process exited with code {result.exit_code}"
@@ -394,17 +390,12 @@ def _parse_gnu_grep_output(stdout: str, max_output_bytes: int) -> dict[str, Any]
     line_pattern = re.compile(r"^(.+?):(\d+):(.*)$")
 
     for line in stdout.splitlines():
-        if not line.strip() or line == "--":
-            continue
-        match = line_pattern.match(line)
-        if match:
+        if line.strip() and line != "--" and (match := line_pattern.match(line)):
             path, line_num, content = match.groups()
             entry_size = len(path) + len(line_num) + len(content) + 10
-
             if total_bytes + entry_size > max_output_bytes:
                 was_truncated = True
                 break
-
             matches.append({"path": path, "line": int(line_num), "content": content})
             total_bytes += entry_size
 
@@ -464,14 +455,12 @@ async def grep_with_fsspec(
     except re.error as e:
         return {"error": f"Invalid regex pattern: {e}"}
 
+    glob_path = f"{path.rstrip('/')}/{file_pattern}"
+    matches: list[dict[str, Any]] = []
+    total_bytes = 0
+    was_truncated = False
     try:
-        glob_path = f"{path.rstrip('/')}/{file_pattern}"
         file_paths = await fs._glob(glob_path)
-
-        matches: list[dict[str, Any]] = []
-        total_bytes = 0
-        was_truncated = False
-
         for file_path in file_paths:
             if len(matches) >= max_matches or total_bytes >= max_output_bytes:
                 was_truncated = True
@@ -482,12 +471,12 @@ async def grep_with_fsspec(
                 continue
 
             try:
-                content = await fs._cat_file(file_path)
+                file_content = await fs._cat(file_path)
                 # Skip binary files
-                if b"\x00" in content[:8192]:
+                if b"\x00" in file_content[:8192]:
                     continue
 
-                text = content.decode("utf-8", errors="replace")
+                text = file_content.decode("utf-8", errors="replace")
                 lines = text.splitlines()
 
                 for line_num, line in enumerate(lines, 1):
@@ -495,20 +484,15 @@ async def grep_with_fsspec(
                         was_truncated = True
                         break
 
-                    if regex.search(line):
-                        line_content = line.rstrip()
-                        entry_size = len(file_path) + len(str(line_num)) + len(line_content) + 10
-
-                        if total_bytes + entry_size > max_output_bytes:
-                            was_truncated = True
-                            break
-
-                        matches.append({
-                            "path": file_path,
-                            "line": line_num,
-                            "content": line_content,
-                        })
-                        total_bytes += entry_size
+                    if not regex.search(line):
+                        continue
+                    content = line.rstrip()
+                    entry_size = len(file_path) + len(str(line_num)) + len(content) + 10
+                    if total_bytes + entry_size > max_output_bytes:
+                        was_truncated = True
+                        break
+                    matches.append({"path": file_path, "line": line_num, "content": content})
+                    total_bytes += entry_size
 
             except Exception as e:  # noqa: BLE001
                 logger.debug("Error reading file during grep", file=file_path, error=str(e))

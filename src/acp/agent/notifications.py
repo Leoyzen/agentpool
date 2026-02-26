@@ -16,6 +16,7 @@ from acp.schema import (
     AvailableCommand,
     AvailableCommandsUpdate,
     BlobResourceContents,
+    ConfigOptionUpdate,
     ContentToolCallContent,
     CurrentModeUpdate,
     EmbeddedResourceContentBlock,
@@ -311,20 +312,12 @@ class ACPNotifications:
         )
 
     async def update_plan(self, entries: Sequence[PlanEntry]) -> None:
-        """Send a plan notification.
-
-        Args:
-            entries: List of plan entries to send
-        """
+        """Send a plan notification."""
         plan = AgentPlanUpdate(entries=entries)
         await self.send_update(plan)
 
     async def update_commands(self, commands: list[AvailableCommand]) -> None:
-        """Send a command update notification.
-
-        Args:
-            commands: List of available commands to send
-        """
+        """Send a command update notification."""
         update = AvailableCommandsUpdate(available_commands=commands)
         await self.send_update(update)
 
@@ -336,14 +329,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a text message notification.
-
-        Args:
-            message: Text message to send
-            audience: Audience to send the message to
-            last_modified: Last modified timestamp
-            priority: Priority of the message
-        """
+        """Send a text message notification."""
         update = AgentMessageChunk.text(
             text=message,
             audience=audience,
@@ -360,14 +346,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a text message notification.
-
-        Args:
-            message: Text message to send
-            audience: Audience to send the message to
-            last_modified: Last modified date of the message
-            priority: Priority of the message
-        """
+        """Send a text message notification."""
         update = AgentThoughtChunk.text(
             text=message,
             audience=audience,
@@ -384,14 +363,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a user message notification.
-
-        Args:
-            message: Text message to send
-            audience: Audience to send the message to
-            last_modified: Last modified date of the message
-            priority: Priority of the message
-        """
+        """Send a user message notification."""
         update = UserMessageChunk.text(
             text=message,
             audience=audience,
@@ -410,16 +382,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a user image notification.
-
-        Args:
-            data: Base64-encoded image data
-            mime_type: MIME type of the image
-            uri: Optional URI of the image
-            audience: Optional audience for the content block
-            last_modified: Optional last modified timestamp for the content block
-            priority: Optional priority for the content block
-        """
+        """Send a user image notification."""
         update = UserMessageChunk.image(
             data=data,
             mime_type=mime_type,
@@ -439,16 +402,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a user audio notification.
-
-        Args:
-            data: Base64-encoded audio data
-            mime_type: MIME type of the audio
-            uri: Optional URI for the audio
-            audience: Optional audience for the content block
-            last_modified: Optional last modified timestamp for the content block
-            priority: Optional priority for the content block
-        """
+        """Send a user audio notification."""
         update = UserMessageChunk.audio(
             data=data,
             mime_type=mime_type,
@@ -471,19 +425,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a user resource link notification.
-
-        Args:
-            uri: URI of the resource
-            name: Name of the resource
-            description: Optional description of the resource
-            mime_type: Optional MIME type of the resource
-            size: Optional size of the resource in bytes
-            title: Optional title of the resource
-            audience: Optional audience for the content block
-            last_modified: Optional last modified timestamp for the content block
-            priority: Optional priority for the content block
-        """
+        """Send a user resource link notification."""
         update = UserMessageChunk.resource(
             uri=uri,
             name=name,
@@ -498,11 +440,7 @@ class ACPNotifications:
         await self.send_update(update)
 
     async def replay(self, messages: Sequence[ModelRequest | ModelResponse]) -> None:
-        """Replay a sequence of model messages as notifications.
-
-        Args:
-            messages: Sequence of ModelRequest and ModelResponse objects to replay
-        """
+        """Replay a sequence of model messages as notifications."""
         for message in messages:
             try:
                 match message:
@@ -519,64 +457,62 @@ class ACPNotifications:
         """Replay a ModelRequest by converting it to appropriate ACP notifications."""
         for part in request.parts:
             match part:
-                case UserPromptPart(content=content):
+                case UserPromptPart(content=content) if isinstance(content, str):
                     # Handle both str and Sequence[UserContent] types
-                    if isinstance(content, str):
-                        await self.send_user_message(content)
-                    else:
-                        # Convert multi-modal content to appropriate ACP content blocks
-
-                        converted_content = to_acp_content_blocks(content)
-                        # Send each content block as separate notifications
-                        for block in converted_content:
-                            match block:
-                                case TextContentBlock(text=text):
-                                    await self.send_user_message(text)
-                                case ImageContentBlock(annotations=annots) as img_block:
-                                    await self.send_user_image(
-                                        data=img_block.data,
-                                        mime_type=img_block.mime_type,
-                                        uri=img_block.uri,
-                                        audience=annots.audience if annots else None,
-                                        last_modified=annots.last_modified if annots else None,
-                                        priority=annots.priority if annots else None,
-                                    )
-                                case AudioContentBlock(annotations=annots) as audio_block:
-                                    await self.send_user_audio(
-                                        data=audio_block.data,
-                                        mime_type=audio_block.mime_type,
-                                        audience=annots.audience if annots else None,
-                                        last_modified=annots.last_modified if annots else None,
-                                        priority=annots.priority if annots else None,
-                                    )
-                                case ResourceContentBlock(annotations=annots) as resource_block:
-                                    await self.send_user_resource(
-                                        uri=resource_block.uri,
-                                        name=resource_block.name,
-                                        description=resource_block.description,
-                                        mime_type=resource_block.mime_type,
-                                        size=resource_block.size,
-                                        title=resource_block.title,
-                                        audience=annots.audience if annots else None,
-                                        last_modified=annots.last_modified if annots else None,
-                                        priority=annots.priority if annots else None,
-                                    )
-                                case EmbeddedResourceContentBlock() as embedded_block:
-                                    # Handle embedded resources with proper
-                                    # pattern matching
-                                    match embedded_block.resource:
-                                        case TextResourceContents(text=text):
-                                            await self.send_user_message(text)
-                                        case BlobResourceContents() as blob_resource:
-                                            blob_size = len(blob_resource.blob) * 3 // 4
-                                            size_mb = blob_size / (1024 * 1024)
-                                            mime = blob_resource.mime_type or "unknown"
-                                            msg = f"Embedded resource: {mime} ({size_mb:.2f} MB)"
-                                            await self.send_user_message(msg)
-                                        case _ as unreachable:
-                                            assert_never(unreachable)  # ty: ignore[type-assertion-failure]
-                                case _ as unreachable:
-                                    assert_never(unreachable)
+                    await self.send_user_message(content)
+                case UserPromptPart(content=content):
+                    # Convert multi-modal content to appropriate ACP content blocks
+                    converted_content = to_acp_content_blocks(content)
+                    # Send each content block as separate notifications
+                    for block in converted_content:
+                        match block:
+                            case TextContentBlock(text=text):
+                                await self.send_user_message(text)
+                            case ImageContentBlock(annotations=annots) as img_block:
+                                await self.send_user_image(
+                                    data=img_block.data,
+                                    mime_type=img_block.mime_type,
+                                    uri=img_block.uri,
+                                    audience=annots.audience if annots else None,
+                                    last_modified=annots.last_modified if annots else None,
+                                    priority=annots.priority if annots else None,
+                                )
+                            case AudioContentBlock(annotations=annots) as audio_block:
+                                await self.send_user_audio(
+                                    data=audio_block.data,
+                                    mime_type=audio_block.mime_type,
+                                    audience=annots.audience if annots else None,
+                                    last_modified=annots.last_modified if annots else None,
+                                    priority=annots.priority if annots else None,
+                                )
+                            case ResourceContentBlock(annotations=annots) as resource_block:
+                                await self.send_user_resource(
+                                    uri=resource_block.uri,
+                                    name=resource_block.name,
+                                    description=resource_block.description,
+                                    mime_type=resource_block.mime_type,
+                                    size=resource_block.size,
+                                    title=resource_block.title,
+                                    audience=annots.audience if annots else None,
+                                    last_modified=annots.last_modified if annots else None,
+                                    priority=annots.priority if annots else None,
+                                )
+                            case EmbeddedResourceContentBlock() as embedded_block:
+                                # Handle embedded resources with proper
+                                # pattern matching
+                                match embedded_block.resource:
+                                    case TextResourceContents(text=text):
+                                        await self.send_user_message(text)
+                                    case BlobResourceContents() as blob_resource:
+                                        blob_size = len(blob_resource.blob) * 3 // 4
+                                        size_mb = blob_size / (1024 * 1024)
+                                        mime = blob_resource.mime_type or "unknown"
+                                        msg = f"Embedded resource: {mime} ({size_mb:.2f} MB)"
+                                        await self.send_user_message(msg)
+                                    case _ as unreachable:
+                                        assert_never(unreachable)  # ty: ignore[type-assertion-failure]
+                            case _ as unreachable:
+                                assert_never(unreachable)
 
                 case ToolReturnPart(
                     content=content, tool_name=tool_name, tool_call_id=tool_call_id
@@ -642,16 +578,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send an image message notification.
-
-        Args:
-            data: Base64-encoded image data
-            mime_type: MIME type of the image (e.g., 'image/png')
-            uri: Optional URI reference for the image
-            audience: Optional audience for the image
-            last_modified: Optional last modified timestamp for the image
-            priority: Optional priority for the image
-        """
+        """Send an image message notification."""
         update = AgentMessageChunk.image(
             data=data,
             mime_type=mime_type,
@@ -663,11 +590,7 @@ class ACPNotifications:
         await self.send_update(update)
 
     async def update_session_mode(self, mode_id: str) -> None:
-        """Send a session mode update notification.
-
-        Args:
-            mode_id: Unique identifier for the session mode
-        """
+        """Send a session mode update notification."""
         update = CurrentModeUpdate(current_mode_id=mode_id)
         await self.send_update(update)
 
@@ -677,15 +600,7 @@ class ACPNotifications:
         value_id: str,
         config_options: Sequence[SessionConfigOption],
     ) -> None:
-        """Send a config option update notification.
-
-        Args:
-            config_id: The ID of the configuration option that changed
-            value_id: The new value ID for this configuration option
-            config_options: The full list of config options with updated values
-        """
-        from acp.schema import ConfigOptionUpdate
-
+        """Send a config option update notification for a full config options update."""
         update = ConfigOptionUpdate(
             config_id=config_id,
             value_id=value_id,
@@ -702,15 +617,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send an audio message notification.
-
-        Args:
-            data: Base64-encoded audio data
-            mime_type: MIME type of the audio (e.g., 'audio/wav')
-            audience: Optional audience for the audio
-            last_modified: Optional last modified timestamp for the audio
-            priority: Optional priority for the audio
-        """
+        """Send an audio message notification."""
         update = AgentMessageChunk.audio(
             data=data,
             mime_type=mime_type,
@@ -733,19 +640,7 @@ class ACPNotifications:
         last_modified: datetime | str | None = None,
         priority: float | None = None,
     ) -> None:
-        """Send a resource reference message notification.
-
-        Args:
-            name: Name of the resource
-            uri: URI of the resource
-            title: Optional title for the resource
-            description: Optional description of the resource
-            mime_type: Optional MIME type of the resource
-            size: Optional size of the resource in bytes
-            audience: Optional audience for the resource
-            last_modified: Optional last modified timestamp for the resource
-            priority: Optional priority for the resource
-        """
+        """Send a resource reference message notification."""
         update = AgentMessageChunk.resource(
             name=name,
             uri=uri,
