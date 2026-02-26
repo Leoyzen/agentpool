@@ -9,7 +9,7 @@ from pydantic import ConfigDict, Field
 from agentpool.models.agents import AnyToolConfig  # noqa: TC001
 from agentpool.models.fields import OutputTypeField  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
-from codex_adapter import ApprovalPolicy, ReasoningEffort, SandboxMode  # noqa: TC001
+from codex_adapter import ApprovalPolicy, Personality, ReasoningEffort, SandboxMode  # noqa: TC001
 
 
 if TYPE_CHECKING:
@@ -82,6 +82,18 @@ class CodexAgentConfig(BaseAgentConfig):
     - "externalSandbox": Use external sandbox environment
 
     If not specified, Codex uses its default sandbox policy.
+    """
+
+    personality: Personality | None = Field(
+        default=None,
+        title="Personality",
+        examples=["none", "friendly", "pragmatic"],
+    )
+    """Personality preset for the Codex session.
+
+    - "none": No personality preset
+    - "friendly": Warm and approachable tone
+    - "pragmatic": Direct and efficient communication
     """
 
     base_instructions: str | None = Field(default=None, title="Base Instructions")

@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from agentpool.sessions.models import SessionData
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
-    from codex_adapter import ApprovalPolicy, CodexClient, ReasoningEffort, SandboxMode
+    from codex_adapter import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
     from codex_adapter.codex_types import McpServerConfig
     from codex_adapter.events import CodexEvent
     from codex_adapter.models import TurnStatusValue
@@ -62,6 +62,7 @@ logger = get_logger(__name__)
 VALID_POLICIES = ["never", "on-request", "on-failure", "untrusted"]
 VALID_EFFORTS = ["low", "medium", "high", "xhigh"]
 VALID_SANDBOXES = ["read-only", "workspace-write", "danger-full-access", "external-sandbox"]
+VALID_PERSONALITIES = ["none", "friendly", "pragmatic"]
 
 
 class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
@@ -93,6 +94,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         toolsets: list[ResourceProvider] | None = None,
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
+        personality: Personality | None = None,
     ) -> None:
         """Initialize Codex agent.
 
@@ -118,6 +120,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             toolsets: Resource providers for tools to expose via MCP bridge
             approval_policy: Approval policy for tool execution
             sandbox: Sandbox mode for execution
+            personality: Personality preset (none, friendly, pragmatic)
         """
         from agentpool.mcp_server.tool_bridge import ToolManagerBridge
         from agentpool_config.mcp_server import BaseMCPServerConfig
@@ -137,12 +140,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         )
 
         # Codex settings
-        self._model = model
-        self._reasoning_effort = reasoning_effort
         self._base_instructions = base_instructions
         self._developer_instructions = developer_instructions
         self._approval_policy: ApprovalPolicy = approval_policy or "never"
-        self._sandbox = sandbox
         self._toolsets = toolsets or []
         self._env_vars = env_vars or {}
         # Client state
@@ -163,10 +163,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
         # Extra MCP servers in Codex format (e.g., tool bridge)
         self._extra_mcp_servers: list[tuple[str, McpServerConfig]] = []
-        # Track current settings (for when they change mid-session)
+        # Mutable settings (can change mid-session via _set_mode)
         self._current_model: str | None = model
         self._current_effort: ReasoningEffort | None = reasoning_effort
         self._current_sandbox: SandboxMode | None = sandbox
+        self._current_personality: Personality | None = personality
         self._current_turn_id: str | None = None
         # Populated by capture_metadata during streaming, read after stream completes
         self._token_usage_data: dict[str, int] | None = None
@@ -214,6 +215,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             developer_instructions=config.developer_instructions,
             approval_policy=config.approval_policy,
             sandbox=config.sandbox,
+            personality=config.personality,
             # MCP and toolsets
             mcp_servers=config.get_mcp_servers(),
             toolsets=config.get_tool_providers(),
@@ -276,11 +278,12 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             # Start a new thread
             response = await self._client.thread_start(
                 cwd=cwd,
-                model=self._model,
+                model=self._current_model,
                 base_instructions=self._base_instructions,
                 developer_instructions=self._developer_instructions,
                 sandbox=self._current_sandbox,
                 approval_policy=self._approval_policy,
+                personality=self._current_personality,
             )
             self._sdk_session_id = response.thread.id
             self.log.info("Codex thread started", sdk_session_id=self._sdk_session_id, cwd=cwd)
@@ -417,6 +420,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     approval_policy=self._approval_policy,
                     sandbox_policy=self._current_sandbox,
                     output_schema=output_schema,
+                    personality=self._current_personality,
                 )
                 # Wrap to capture metadata (turn_id, token usage), then convert
                 async for native_event in convert_codex_stream(capture_metadata(raw_stream)):
@@ -500,7 +504,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
     @property
     def model_name(self) -> str:
         """Get current model name."""
-        return self._model or "unknown"
+        return self._current_model or "unknown"
 
     def to_structured[NewOutputDataT](
         self,
@@ -572,6 +576,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Get available mode categories for Codex agent (approval poliy, effort, model)."""
         from agentpool.agents.codex_agent.static_info import (
             EFFORT_MODES,
+            PERSONALITY_MODES,
             POLICY_MODES,
             SANDBOX_MODES,
         )
@@ -599,6 +604,13 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 current_mode_id=self._current_sandbox or "workspace-write",
                 category="other",
             ),
+            ModeCategory(
+                id="personality",
+                name="Personality",
+                available_modes=PERSONALITY_MODES,
+                current_mode_id=self._current_personality or "none",
+                category="other",
+            ),
         ]
         if models := await self.get_available_models():
             model_modes = [
@@ -615,7 +627,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     id="model",
                     name="Model",
                     available_modes=model_modes,
-                    current_mode_id=self._current_model or self._model or "",
+                    current_mode_id=self._current_model or "",
                     category="model",
                 )
             )
@@ -637,6 +649,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             if mode_id not in VALID_SANDBOXES:
                 raise UnknownModeError(mode_id, VALID_SANDBOXES)
             self._current_sandbox = mode_id  # type: ignore[assignment]
+        elif category_id == "personality":
+            if mode_id not in VALID_PERSONALITIES:
+                raise UnknownModeError(mode_id, VALID_PERSONALITIES)
+            self._current_personality = mode_id  # type: ignore[assignment]
         else:
             raise UnknownCategoryError(category_id)
         await self.update_state(config_id=category_id, value_id=mode_id)
