@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
     from fastmcp import Context, FastMCP
-    from fastmcp.tools.tool import ToolResult
+    from fastmcp.tools.tool import ToolResult as FastMCPToolResult
     from pydantic_ai.messages import UserContent
     from uvicorn import Server
 
@@ -121,7 +121,7 @@ def _create_stub_run_context(
     )
 
 
-def _convert_to_tool_result(result: Any) -> ToolResult:
+def _convert_to_tool_result(result: Any) -> FastMCPToolResult:
     """Convert a tool's return value to a FastMCP ToolResult.
 
     Handles different result types appropriately:
@@ -135,25 +135,21 @@ def _convert_to_tool_result(result: Any) -> ToolResult:
 
     from agentpool.tools.base import ToolResult as AgentPoolToolResult
 
-    # Already a FastMCP ToolResult - pass through
-    if isinstance(result, FastMCPToolResult):
-        return result
-    # AgentPool ToolResult - convert to FastMCP format
-    if isinstance(result, AgentPoolToolResult):
-        return FastMCPToolResult(
-            content=result.content,
-            structured_content=result.structured_content,
-            meta=result.metadata,
-        )
-    # Dict - use as structured_content (FastMCP auto-populates content as JSON)
-    if isinstance(result, dict):
-        return FastMCPToolResult(structured_content=result)
-    # Pydantic model - serialize to dict for structured_content
-    if isinstance(result, BaseModel):
-        return FastMCPToolResult(structured_content=result.model_dump(mode="json"))
-    # All other types (str, list, ContentBlock, Image, None, primitives, etc.)
-    # ToolResult's internal _convert_to_content handles these correctly
-    return FastMCPToolResult(content=result if result is not None else "")
+    match result:
+        case FastMCPToolResult():
+            return result
+        case AgentPoolToolResult():
+            return FastMCPToolResult(
+                content=result.content,
+                structured_content=result.structured_content,
+                meta=result.metadata,
+            )
+        case dict():
+            return FastMCPToolResult(structured_content=result)
+        case BaseModel():
+            return FastMCPToolResult(structured_content=result.model_dump(mode="json"))
+        case _:
+            return FastMCPToolResult(content=result if result is not None else "")
 
 
 def _append_injection_to_result(result: Any, injection: str) -> Any:
@@ -433,7 +429,7 @@ class ToolManagerBridge:
                 self._tool = tool
                 self._bridge = bridge
 
-            async def run(self, arguments: dict[str, Any]) -> ToolResult:
+            async def run(self, arguments: dict[str, Any]) -> FastMCPToolResult:
                 """Execute the wrapped tool with context bridging."""
                 from fastmcp.server.dependencies import get_context
 

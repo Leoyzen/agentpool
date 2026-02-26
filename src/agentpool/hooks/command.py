@@ -142,17 +142,17 @@ def _normalize_result(data: dict[str, Any]) -> HookResult:
     Returns:
         Normalized hook result.
     """
-    result: HookResult = {}
-
     # Handle decision field (support various naming conventions)
     match data.get("decision") or data.get("permissionDecision"):
         # Normalize decision values
         case "approve" | "allow":
-            result["decision"] = "allow"
+            result = HookResult(decision="allow")
         case "block" | "deny":
-            result["decision"] = "deny"
+            result = HookResult(decision="deny")
         case "ask":
-            result["decision"] = "ask"
+            result = HookResult(decision="ask")
+        case _ as decision:
+            raise ValueError(f"Invalid decision: {decision}")
 
     # Handle reason field
     reason = data.get("reason") or data.get("permissionDecisionReason")
