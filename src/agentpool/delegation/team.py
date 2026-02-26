@@ -10,8 +10,8 @@ from uuid import uuid4
 from anyenv.async_run import as_generated
 import anyio
 
+from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import SubAgentEvent
-from agentpool.common_types import SupportsRunStream
 from agentpool.delegation.base_team import BaseTeam
 from agentpool.delegation.teamrun import TeamRun
 from agentpool.log import get_logger
@@ -186,8 +186,16 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             node: MessageNode[Any, Any],
         ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
             """Wrap a node's stream events in SubAgentEvent."""
-            if not isinstance(node, SupportsRunStream):
-                return
+            match node:
+                case Team():
+                    source_type: SubAgentType = "team_parallel"
+                case TeamRun():
+                    source_type = "team_sequential"
+                case BaseAgent():
+                    source_type = "agent"
+                case _:
+                    raise ValueError(f"Unexpected node type: {type(node)}")
+
             async for event in node.run_stream(*prompts, **kwargs):
                 # Handle already-wrapped SubAgentEvents (nested teams)
                 if isinstance(event, SubAgentEvent):
@@ -198,14 +206,6 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                         depth=event.depth + 1,
                     )
                 else:
-                    match node:
-                        case TeamRun():
-                            source_type: SubAgentType = "team_sequential"
-                        case BaseTeam():
-                            source_type = "team_parallel"
-                        case _:
-                            source_type = "agent"
-
                     yield SubAgentEvent(
                         source_name=node.name,
                         source_type=source_type,
