@@ -622,6 +622,8 @@ class CompactionEvent:
     """What triggered the compaction (auto = context overflow, manual = slash command)."""
     phase: CompactionPhase = "starting"
     """Current phase of compaction."""
+    pre_tokens: int | None = None
+    """Token count before compaction (available on completed phase from Claude Code)."""
     event_kind: Literal["compaction"] = "compaction"
     """Event type identifier."""
 

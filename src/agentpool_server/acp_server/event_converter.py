@@ -428,7 +428,7 @@ class ACPEventConverter:
                 ]
                 yield AgentPlanUpdate(entries=acp_entries)
 
-            case CompactionEvent(trigger=trigger, phase=phase) if phase == "starting":
+            case CompactionEvent(trigger=trigger, phase="starting"):
                 text = get_compaction_text(trigger)
                 yield AgentMessageChunk.text(text)
 

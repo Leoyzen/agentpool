@@ -34,10 +34,7 @@ from agentpool_server.opencode_server.models.tool_metadata import (
 
 
 if TYPE_CHECKING:
-    from clawd_code_sdk import (
-        PermissionResult,
-        ThinkingConfig,
-    )
+    from clawd_code_sdk import PermissionResult, ThinkingConfig
     from clawd_code_sdk.models import SystemPromptPreset, ToolInput, Usage
     from clawd_code_sdk.models.output_types import StructuredPatchHunk
 

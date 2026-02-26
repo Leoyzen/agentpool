@@ -345,8 +345,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._hook_manager = ClaudeCodeHookManager(
             agent_name=self.name,
             agent_hooks=hooks,
-            event_queue=self._event_queue,
-            get_session_id=lambda: self.session_id,
             injection_manager=self._injection_manager,
             set_mode=self._set_mode,
         )
@@ -795,7 +793,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             UserMessage,
         )
         from clawd_code_sdk.models import StreamEvent
-        from clawd_code_sdk.models.messages import RateLimitMessage
+        from clawd_code_sdk.models.messages import (
+            CompactBoundarySystemMessage,
+            RateLimitMessage,
+            StatusSystemMessage,
+        )
 
         await self.ensure_initialized()
         # Initialize session_id on first run and log to storage
@@ -944,7 +946,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                         # Convert Claude Code SDK's tool_use_result to OpenCode fmt
                                         metadata = convert_to_opencode_metadata(
                                             tool_use.name,
-                                            result,
+                                            result,  # pyright: ignore[reportArgumentType]
                                             tool_input,
                                         )  # type: ignore[assignment]
 
@@ -1028,6 +1030,27 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                         case StreamEvent(event=RawContentBlockStopEvent(index=index)):
                             # Emit with empty part - content was accumulated via deltas
                             yield PartEndEvent(index=index, part=TextPart(content=""))
+
+                        case StatusSystemMessage(status="compacting"):
+                            from agentpool.agents.events import CompactionEvent
+
+                            yield CompactionEvent(
+                                session_id=self.session_id or "unknown",
+                                trigger="auto",
+                                phase="starting",
+                            )
+                            continue
+
+                        case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
+                            from agentpool.agents.events import CompactionEvent
+
+                            yield CompactionEvent(
+                                session_id=self.session_id or "unknown",
+                                trigger=compact_metadata["trigger"],
+                                phase="completed",
+                                pre_tokens=compact_metadata["pre_tokens"],
+                            )
+                            continue
 
                         case StreamEvent():
                             # Ignore other StreamEvent types (message_start, etc.)
