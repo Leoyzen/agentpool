@@ -657,7 +657,7 @@ class FSSpecTools(ResourceProvider):
             path: File path (absolute or relative to session cwd)
             old_string: Text content to find and replace
             new_string: Text content to replace it with
-            description: Human-readable description of what the edit accomplishes
+            description: Short Human-readable description of what the edit accomplishes
             replace_all: Whether to replace all occurrences (default: False)
             line_hint: Line number hint to disambiguate when multiple matches exist.
                 If the pattern matches multiple locations, the match closest to this
@@ -702,7 +702,7 @@ class FSSpecTools(ResourceProvider):
 
                 Each old_string should include enough context to uniquely identify
                 the target location. For multi-line edits, include the full block.
-            description: Human-readable description of what the edit accomplishes
+            description: Short Human-readable description of what the edit accomplishes
             replace_all: Whether to replace all occurrences of each pattern (default: False)
             line_hint: Line number hint to disambiguate when multiple matches exist.
                 Only applies when there is a single replacement. If the pattern matches
@@ -720,7 +720,7 @@ class FSSpecTools(ResourceProvider):
         from agentpool.tools.base import ToolResult
 
         path = self._resolve_path(path, agent_ctx)
-        msg = f"Editing file: {path}"
+        msg = f"Editing file: {path} ({description})"
         await agent_ctx.events.tool_call_start(title=msg, kind="edit", locations=[path])
 
         if not replacements:
