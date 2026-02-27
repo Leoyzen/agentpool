@@ -459,7 +459,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             latest = None
             while (max_count is None or count < max_count) and not self._cancelled:
                 try:
-                    agent_ctx = self.get_context()
+                    agent_ctx = self.get_context(input_provider=kwargs.get("input_provider"))
                     current_prompts = [
                         call_with_context(p, agent_ctx, **kwargs) if callable(p) else p
                         for p in prompt
