@@ -122,11 +122,10 @@ class ACPInputProvider(InputProvider):
         """
         from acp.utils import generate_tool_title
 
-        decision = self._tool_approvals[tool_name]
-        logger.debug("Get tool confirmation", tool_name=tool_name, reason=decision)
         try:
             # Check if we have a standing approval/rejection for this tool
-            if tool_name in self._tool_approvals:
+            if decision := self._tool_approvals.get(tool_name):
+                logger.debug("Get tool confirmation", tool_name=tool_name, reason=decision)
                 match decision:
                     case "allow_always":
                         return "allow"
