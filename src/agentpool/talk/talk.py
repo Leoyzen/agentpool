@@ -258,7 +258,7 @@ class Talk[TTransmittedData = Any]:
         if self.transform_fn:
             processed_message = await execute(self.transform_fn, message)
         # 6. First pass: Determine target list
-        target_list: list[MessageNode[Any, Any]] = [
+        target_list = [
             target
             for target in self.targets
             if await self._evaluate_condition(

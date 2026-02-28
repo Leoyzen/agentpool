@@ -527,10 +527,7 @@ class StorageManager:
         )
 
     @method_spawner
-    async def delete_session_messages(
-        self,
-        session_id: str,
-    ) -> int:
+    async def delete_session_messages(self, session_id: str) -> int:
         """Delete all messages for a session in all providers.
 
         Used for compaction - removes existing messages so they can be
@@ -620,8 +617,6 @@ class StorageManager:
         Returns:
             SessionMetadata with title, emoji, and icon, or None if generation fails.
         """
-        from llmling_models.models.helpers import infer_model
-
         from agentpool import Agent
 
         logger.info("_generate_title_core called", session_id=session_id)
@@ -630,9 +625,8 @@ class StorageManager:
             return None
 
         try:
-            model = infer_model(self.config.title_generation_model)
             agent = Agent(
-                model=model,
+                model=self.config.title_generation_model,
                 system_prompt=self.config.title_generation_prompt,
                 output_type=SessionMetadata,
             )
@@ -705,16 +699,12 @@ class StorageManager:
             The generated title, or None if title generation is disabled.
         """
         # Check if title already exists
-        existing = await self.get_session_title(session_id)
-        if existing:
+        if existing := await self.get_session_title(session_id):
             return existing
-
         # Format messages for the prompt
         formatted = "\n".join(f"{i.role}: {i.content[:500]}" for i in messages[:4])
-
         # Generate using core logic
         metadata = await self._generate_title_core(session_id, formatted)
-
         return metadata.title if metadata else None
 
     # Project methods
@@ -926,11 +916,7 @@ class StorageManager:
         provider = self.get_project_provider()
         return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
 
-    async def update_sdk_session_id(
-        self,
-        session_id: str,
-        sdk_session_id: str,
-    ) -> None:
+    async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
         """Update the external SDK session ID for a session.
 
         Args:

@@ -357,11 +357,7 @@ class CodeTools(ResourceProvider):
             items = []
             if command:
                 items.append(f"```bash\n{command}\n```")
-            await agent_ctx.events.tool_call_progress(
-                message,
-                status="in_progress",
-                items=items or None,
-            )
+            await agent_ctx.events.tool_call_progress(message, items=items or None)
 
         # Check if path is directory or file
         try:
