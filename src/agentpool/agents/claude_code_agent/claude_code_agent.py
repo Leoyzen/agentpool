@@ -64,7 +64,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast
 import uuid
 
 import anyio
-from clawd_code_sdk import ResultSuccessMessage
 from pydantic import TypeAdapter
 from pydantic_ai import (
     FunctionToolResultEvent,
@@ -787,9 +786,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         )
         from clawd_code_sdk import (
             AssistantMessage,
-            InitSystemMessage,
             Message,
             ResultMessage,
+            ResultSuccessMessage,
             TextBlock,
             ThinkingBlock,
             ToolResultBlock,
@@ -799,7 +798,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from clawd_code_sdk.models import StreamEvent
         from clawd_code_sdk.models.messages import (
             CompactBoundarySystemMessage,
-            RateLimitMessage,
             StatusSystemMessage,
         )
 
@@ -851,7 +849,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Capture SDK session ID from init message
             stream = client.receive_response()
             first_msg = await anext(stream)
-            assert isinstance(first_msg, InitSystemMessage | RateLimitMessage), (
+            assert not isinstance(first_msg, AssistantMessage), (
                 f"invalid message type {type(first_msg)}"
             )
             self._sdk_session_id = first_msg.session_id
