@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 import re
@@ -132,6 +133,7 @@ if TYPE_CHECKING:
     )
     from clawd_code_sdk.models import ReasoningEffort, StopReason, ToolInput
     from clawd_code_sdk.models.input_types import AskUserQuestionInput
+    from clawd_code_sdk.models.permissions import ElicitationRequest, ElicitationResult
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
@@ -506,6 +508,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         bypass = self._permission_mode == "bypassPermissions"
         can_use_tool = self._can_use_tool if not bypass else None
         on_user_question = self._on_user_question
+        on_elicitation = self._on_elicitation
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []
         # Build environment variables
@@ -543,6 +546,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             fallback_model=self._fallback_model,
             can_use_tool=can_use_tool,
             on_user_question=on_user_question,
+            on_elicitation=on_elicitation,
             output_schema=self._output_type if self._output_type is not str else None,
             mcp_servers=self._mcp_servers or {},
             hooks=self._hook_manager.build_hooks(),
@@ -586,25 +590,25 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # For "default" mode and non-edit tools in "acceptEdits" mode:
         # Ask for confirmation via input provider
-        if input_provider := self._tool_bridge._current_input_provider:
-            tool_call_id = context.tool_use_id
-            display_name = _strip_mcp_prefix(tool_name)
-            self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
-            ctx = self.get_context(
-                tool_call_id=tool_call_id,
-                tool_input=input_dict,
-                tool_name=tool_name,
-                input_provider=input_provider,
-            )
-            result = await input_provider.get_tool_confirmation(
-                context=ctx,
-                tool_name=display_name,
-                tool_description=f"Claude Code tool: {tool_name}",
-                args=input_dict,
-            )
-            return confirmation_result_to_native(result)
-        # Default: deny if no input provider
-        return PermissionResultDeny(message="No input provider configured")
+        tool_call_id = context.tool_use_id
+        display_name = _strip_mcp_prefix(tool_name)
+        self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("Permission callback invoked outside of an active run")
+        ctx = replace(
+            self._tool_bridge._current_context,
+            tool_call_id=tool_call_id,
+            tool_input=input_dict,
+            tool_name=tool_name,
+        )
+        input_provider = ctx.get_input_provider()
+        result = await input_provider.get_tool_confirmation(
+            context=ctx,
+            tool_name=display_name,
+            tool_description=f"Claude Code tool: {tool_name}",
+            args=input_dict,
+        )
+        return confirmation_result_to_native(result)
 
     async def _on_user_question(
         self,
@@ -624,8 +628,60 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """
         from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
 
-        agent_ctx = self.get_context()
-        return await handle_clarifying_questions(agent_ctx, input_data, context)
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("User question callback invoked outside of an active run")
+        return await handle_clarifying_questions(
+            self._tool_bridge._current_context,
+            input_data,
+            context,
+        )
+
+    async def _on_elicitation(
+        self,
+        request: ElicitationRequest,
+    ) -> ElicitationResult:
+        """Handle MCP elicitation requests.
+
+        Converts from Claude SDK's ElicitationRequest to MCP's ElicitRequestParams,
+        delegates to the input provider, and converts back.
+
+        Args:
+            request: Elicitation request from an MCP server
+
+        Returns:
+            ElicitationResult with user's response
+        """
+        from clawd_code_sdk.models.permissions import ElicitationResult
+        from mcp.types import ElicitRequestFormParams, ElicitRequestURLParams, ElicitResult
+
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("Elicitation callback invoked outside of an active run")
+        input_provider = self._tool_bridge._current_context.get_input_provider()
+
+        # Convert SDK ElicitationRequest to MCP ElicitRequestParams
+        mcp_params: ElicitRequestURLParams | ElicitRequestFormParams
+        if request.mode == "url":
+            mcp_params = ElicitRequestURLParams(
+                message=request.message,
+                url=request.url or "",
+                elicitationId=request.elicitation_id or "",
+            )
+        else:
+            mcp_params = ElicitRequestFormParams(
+                message=request.message,
+                requestedSchema=request.requested_schema or {},
+            )
+
+        result = await input_provider.get_elicitation(params=mcp_params)
+
+        # Convert MCP ElicitResult back to SDK ElicitationResult
+        if isinstance(result, ElicitResult):
+            return ElicitationResult(
+                action=result.action,
+                content=dict(result.content) if result.content else None,
+            )
+        # ErrorData case - treat as decline
+        return ElicitationResult(action="decline")
 
     async def __aenter__(self) -> Self:
         """Connect to Claude Code with deferred client connection."""
@@ -814,6 +870,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # Resolve input provider: explicit parameter overrides agent default
         effective_input_provider = input_provider or self._input_provider
+        run_context = self.get_context(data=deps, input_provider=effective_input_provider)
         if not self._client:
             raise AgentNotInitializedError
         # Get pending parts from conversation (staged content)
@@ -842,7 +899,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             await fork_client.connect()
             client = fork_client
 
-        # Set deps/input_provider on tool bridge (ContextVar doesn't work - separate task)
+        # Set run context on tool bridge (ContextVar doesn't work - separate task)
         try:
             claude_prompts = [*to_prompt_input(prompts)]
             await client.query(*claude_prompts)
@@ -857,7 +914,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             if self.storage and self.session_id:
                 await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
             async with (
-                self._tool_bridge.set_run_context(deps, effective_input_provider, prompt=prompts),
+                self._tool_bridge.set_run_context(run_context, prompt=prompts),
                 merge_queue_into_iterator(stream, self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
             ):
                 async for event_or_message in merged_events:

@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.prompt_injection import PromptInjectionManager
     from agentpool.tools.base import Tool
-    from agentpool.ui.base import InputProvider
 _ = ResourceChangeEvent  # Used at runtime in method signature
 
 
@@ -225,16 +224,13 @@ class ToolManagerBridge:
     server_name: str | None = None
     """Name for the MCP server."""
 
-    _current_deps: Any = field(default=None, init=False, repr=False)
-    """Current dependencies for tool invocations (set by run_stream)."""
-
-    _current_input_provider: InputProvider | None = field(default=None, init=False, repr=False)
-    """Current input provider for tool invocations (set by run_stream)."""
+    _current_context: AgentContext[Any] | None = field(default=None, init=False, repr=False)
+    """Current run-scoped context (set by set_run_context, read by WrappedTool.run)."""
 
     _current_prompt: str | Sequence[UserContent] | None = field(
         default=None, init=False, repr=False
     )
-    """Current prompt for tool invocations (set by run_stream)."""
+    """Current prompt for tool invocations (needed for stub RunContext)."""
 
     _mcp: FastMCP | None = field(default=None, init=False, repr=False)
     """FastMCP server instance."""
@@ -450,15 +446,10 @@ class ToolManagerBridge:
                     mcp_context = None
                 # Try to get Claude's original tool_call_id from request metadata
                 tc_id = _extract_tool_call_id(mcp_context)
-                # Get deps and input_provider from bridge (set by run_stream on the agent)
-                # Create context with tool-specific metadata from node's context.
-                ctx = self._bridge.node.get_context(
-                    data=self._bridge._current_deps,
-                    input_provider=self._bridge._current_input_provider,
-                )
-                ctx = replace(
-                    ctx, tool_name=self._tool.name, tool_call_id=tc_id, tool_input=args.copy()
-                )
+                # Derive per-call context from the run-scoped base context
+                base = self._bridge._current_context or self._bridge.node.get_context()
+                args = args.copy()
+                ctx = replace(base, tool_name=self._tool.name, tool_call_id=tc_id, tool_input=args_)
                 # Invoke with context - copy args since invoke_tool_with_context
                 # modifies kwargs in-place to inject context parameters
                 result = await self._bridge.invoke_tool_with_context(self._tool, ctx, args)
@@ -483,29 +474,25 @@ class ToolManagerBridge:
     @asynccontextmanager
     async def set_run_context(
         self,
-        deps: Any = None,
-        input_provider: InputProvider | None = None,
+        context: AgentContext[Any],
         prompt: str | Sequence[UserContent] | None = None,
     ) -> AsyncIterator[Self]:
         """Context manager for setting run-scoped state.
 
-        Ensures _current_deps, _current_input_provider, and _current_prompt are
-        properly set for the duration of the run and cleaned up afterwards.
+        Stores the AgentContext for the duration of the run so that
+        WrappedTool.run() can derive per-call contexts via replace().
 
         Args:
-            deps: Dependencies to set for tool invocations
-            input_provider: Input provider to set for tool invocations
-            prompt: Current prompt being processed
+            context: Base AgentContext for this run (deps, input_provider, pool, etc.)
+            prompt: Current prompt being processed (needed for stub RunContext)
         """
-        self._current_deps = deps
-        self._current_input_provider = input_provider
+        self._current_context = context
         self._current_prompt = prompt
         self.tool_metadata.clear()
         try:
             yield self
         finally:
-            self._current_deps = None
-            self._current_input_provider = None
+            self._current_context = None
             self._current_prompt = None
 
     async def invoke_tool_with_context(
@@ -593,5 +580,4 @@ class ToolManagerBridge:
         name = f"mcp-bridge-{self.resolved_server_name}"
         self._server_task = asyncio.create_task(self._server.serve(), name=name)
         await anyio.sleep(0.1)  # Wait briefly for server to start
-        msg = "ToolManagerBridge started"
-        logger.info(msg, url=self.url)
+        logger.info("ToolManagerBridge started", url=self.url)

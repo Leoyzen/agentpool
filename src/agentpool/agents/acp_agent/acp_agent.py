@@ -443,6 +443,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         # Resolve input provider: explicit parameter overrides agent default
         effective_input_provider = input_provider or self._input_provider
+        run_context = self.get_context(data=deps, input_provider=effective_input_provider)
         if self._client_handler:
             self._client_handler._input_provider = effective_input_provider
         if not self._api or not self._sdk_session_id or not self._state:
@@ -493,7 +494,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         try:
             async with (
-                self._tool_bridge.set_run_context(deps, effective_input_provider, prompt=prompts),
+                self._tool_bridge.set_run_context(run_context, prompt=prompts),
                 merge_queue_into_iterator(poll_acp_events(), self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
             ):
                 async for event in merged_events:

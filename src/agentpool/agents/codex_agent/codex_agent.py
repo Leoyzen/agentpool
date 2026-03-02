@@ -409,9 +409,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         try:
             # Resolve input provider: explicit parameter overrides agent default
             effective_input_provider = input_provider or self._input_provider
-            async with self._tool_bridge.set_run_context(
-                deps, effective_input_provider, prompt=prompts
-            ):
+            run_context = self.get_context(data=deps, input_provider=effective_input_provider)
+            async with self._tool_bridge.set_run_context(run_context, prompt=prompts):
                 raw_stream = self._client.turn_stream(
                     self._sdk_session_id,
                     input_items,
