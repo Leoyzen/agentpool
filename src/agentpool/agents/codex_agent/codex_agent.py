@@ -54,7 +54,12 @@ if TYPE_CHECKING:
     from codex_adapter import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
     from codex_adapter.codex_types import McpServerConfig
     from codex_adapter.events import CodexEvent
-    from codex_adapter.models import TurnStatusValue
+    from codex_adapter.models import (
+        ToolRequestUserInputParams,
+        ToolRequestUserInputQuestion,
+        ToolRequestUserInputResponse,
+        TurnStatusValue,
+    )
 
 
 logger = get_logger(__name__)
@@ -65,10 +70,113 @@ VALID_SANDBOXES = ["read-only", "workspace-write", "danger-full-access", "extern
 VALID_PERSONALITIES = ["none", "friendly", "pragmatic"]
 
 
+def _question_to_schema_property(question: ToolRequestUserInputQuestion) -> dict[str, Any]:
+    """Convert a Codex user input question to a JSON Schema property.
+
+    Maps question options to enum values, and handles secret/free-text questions.
+
+    Args:
+        question: Codex question with optional options list
+
+    Returns:
+        JSON Schema property definition
+    """
+    prop: dict[str, Any] = {"title": question.header or question.id}
+    if question.question:
+        prop["description"] = question.question
+
+    if question.options and not question.is_other:
+        # Question with fixed options -> enum
+        prop["type"] = "string"
+        prop["enum"] = [opt.label for opt in question.options]
+    elif question.options and question.is_other:
+        # Options with an "other" free-text fallback -> enum + freeform
+        prop["type"] = "string"
+        prop["enum"] = [opt.label for opt in question.options]
+    else:
+        # Free-text question
+        prop["type"] = "string"
+
+    if question.is_secret:
+        prop["writeOnly"] = True
+
+    return prop
+
+
 class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     """MessageNode that wraps a Codex app-server instance."""
 
     AGENT_TYPE: ClassVar = "codex"
+
+    async def _on_user_input(
+        self,
+        params: ToolRequestUserInputParams,
+    ) -> ToolRequestUserInputResponse:
+        """Handle user input requests from Codex server.
+
+        Converts Codex's ToolRequestUserInputParams to MCP ElicitRequestFormParams,
+        delegates to the input provider's get_elicitation(), and converts back.
+
+        Args:
+            params: User input request with questions
+
+        Returns:
+            ToolRequestUserInputResponse with answers
+        """
+        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
+
+        from codex_adapter.models import (
+            ToolRequestUserInputAnswer as _Answer,
+            ToolRequestUserInputResponse as _Response,
+        )
+
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("User input callback invoked outside of an active run")
+
+        input_provider = self._tool_bridge._current_context.get_input_provider()
+        answers: dict[str, _Answer] = {}
+
+        for question in params.questions:
+            # Build a JSON schema property for this question
+            schema: dict[str, Any] = {
+                "type": "object",
+                "properties": {
+                    question.id: _question_to_schema_property(question),
+                },
+                "required": [question.id],
+            }
+
+            # Build display message from header + question
+            message = (
+                f"{question.header}: {question.question}" if question.header else question.question
+            )
+
+            mcp_params = ElicitRequestFormParams(
+                message=message,
+                requestedSchema=schema,
+            )
+
+            result = await input_provider.get_elicitation(params=mcp_params)
+
+            if isinstance(result, ErrorData):
+                # Error - return empty answers for remaining questions
+                answers[question.id] = _Answer(answers=[])
+                continue
+
+            if isinstance(result, ElicitResult):
+                if result.action == "accept" and result.content:
+                    raw_value = result.content.get(question.id)
+                    if isinstance(raw_value, list):
+                        answers[question.id] = _Answer(answers=raw_value)
+                    elif raw_value is not None:
+                        answers[question.id] = _Answer(answers=[str(raw_value)])
+                    else:
+                        answers[question.id] = _Answer(answers=[])
+                else:
+                    # User declined or cancelled
+                    answers[question.id] = _Answer(answers=[])
+
+        return _Response(answers=answers)
 
     def __init__(
         self,
@@ -148,19 +256,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Client state
         self._client: CodexClient | None = None
         self._sdk_session_id: str | None = session_id
-
-        # Process MCP servers
-        if mcp_servers:
-            processed: list[MCPServerConfig] = []
-            for server in mcp_servers:
-                if isinstance(server, str):
-                    processed.append(BaseMCPServerConfig.from_string(server))
-                else:
-                    processed.append(server)
-            self._external_mcp_servers = processed
-        else:
-            self._external_mcp_servers = []
-
+        self._external_mcp_servers = [
+            BaseMCPServerConfig.from_string(s) if isinstance(s, str) else s
+            for s in mcp_servers or []
+        ]
         # Extra MCP servers in Codex format (e.g., tool bridge)
         self._extra_mcp_servers: list[tuple[str, McpServerConfig]] = []
         # Mutable settings (can change mid-session via _set_mode)
@@ -256,8 +355,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         mcp_servers_dict = dict(self._extra_mcp_servers) | dict(
             mcp_config_to_codex(c) for c in self._external_mcp_servers
         )
-        # Create and connect client with MCP servers
-        self._client = CodexClient(mcp_servers=mcp_servers_dict)
+        # Create and connect client with MCP servers and elicitation callback
+        self._client = CodexClient(
+            mcp_servers=mcp_servers_dict,
+            on_user_input=self._on_user_input,
+        )
         await self._client.__aenter__()
         cwd = str(self.env.cwd or Path.cwd())
 
