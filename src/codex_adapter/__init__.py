@@ -11,7 +11,7 @@ Example:
 """
 
 from codex_adapter.client import CodexClient
-from codex_adapter.codex_types import (
+from codex_adapter.models.codex_types import (
     ApprovalPolicy,
     CodexTurn,
     CollabAgentStatus,
@@ -46,7 +46,7 @@ from codex_adapter.codex_types import (
     ThreadSourceKind,
     TurnStatus,
 )
-from codex_adapter.events import (
+from codex_adapter.models.events import (
     AgentMessageDeltaEvent,
     AppListUpdatedEvent,
     CodexEvent,

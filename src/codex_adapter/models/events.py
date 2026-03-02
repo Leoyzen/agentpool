@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
-from pydantic.alias_generators import to_camel
+from pydantic import Field, TypeAdapter
 
-from codex_adapter.models import (
+from codex_adapter.models.base import CodexBaseModel
+from codex_adapter.models.event_data import (  # noqa: TC001
     AccountLoginCompletedData,
     AccountRateLimitsUpdatedData,
     AccountUpdatedData,
@@ -54,30 +54,7 @@ from codex_adapter.models import (
 )
 
 
-# ============================================================================
-# Base event class
-# ============================================================================
-
-
-class CodexEventBase(BaseModel):
-    """Base class for all Codex events.
-
-    Each event has an event_type discriminator that maps to the JSON-RPC method.
-    The data field contains the typed payload specific to that event type.
-    """
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel,
-    )
-
-
-# ============================================================================
-# Error events
-# ============================================================================
-
-
-class ErrorEvent(CodexEventBase):
+class ErrorEvent(CodexBaseModel):
     """Error event from the Codex server."""
 
     event_type: Literal["error"] = "error"
@@ -89,49 +66,49 @@ class ErrorEvent(CodexEventBase):
 # ============================================================================
 
 
-class ThreadStartedEvent(CodexEventBase):
+class ThreadStartedEvent(CodexBaseModel):
     """Thread started event."""
 
     event_type: Literal["thread/started"] = "thread/started"
     data: ThreadStartedData
 
 
-class ThreadStatusChangedEvent(CodexEventBase):
+class ThreadStatusChangedEvent(CodexBaseModel):
     """Thread status changed event."""
 
     event_type: Literal["thread/status/changed"] = "thread/status/changed"
     data: ThreadStatusChangedData
 
 
-class ThreadArchivedEvent(CodexEventBase):
+class ThreadArchivedEvent(CodexBaseModel):
     """Thread archived event."""
 
     event_type: Literal["thread/archived"] = "thread/archived"
     data: ThreadArchivedData
 
 
-class ThreadUnarchivedEvent(CodexEventBase):
+class ThreadUnarchivedEvent(CodexBaseModel):
     """Thread unarchived event."""
 
     event_type: Literal["thread/unarchived"] = "thread/unarchived"
     data: ThreadUnarchivedData
 
 
-class ThreadNameUpdatedEvent(CodexEventBase):
+class ThreadNameUpdatedEvent(CodexBaseModel):
     """Thread name updated event."""
 
     event_type: Literal["thread/name/updated"] = "thread/name/updated"
     data: ThreadNameUpdatedData
 
 
-class ThreadTokenUsageUpdatedEvent(CodexEventBase):
+class ThreadTokenUsageUpdatedEvent(CodexBaseModel):
     """Thread token usage updated event."""
 
     event_type: Literal["thread/tokenUsage/updated"] = "thread/tokenUsage/updated"
     data: ThreadTokenUsageUpdatedData
 
 
-class ThreadCompactedEvent(CodexEventBase):
+class ThreadCompactedEvent(CodexBaseModel):
     """Thread compacted event."""
 
     event_type: Literal["thread/compacted"] = "thread/compacted"
@@ -143,35 +120,35 @@ class ThreadCompactedEvent(CodexEventBase):
 # ============================================================================
 
 
-class TurnStartedEvent(CodexEventBase):
+class TurnStartedEvent(CodexBaseModel):
     """Turn started event."""
 
     event_type: Literal["turn/started"] = "turn/started"
     data: TurnStartedData
 
 
-class TurnCompletedEvent(CodexEventBase):
+class TurnCompletedEvent(CodexBaseModel):
     """Turn completed event."""
 
     event_type: Literal["turn/completed"] = "turn/completed"
     data: TurnCompletedData
 
 
-class TurnErrorEvent(CodexEventBase):
+class TurnErrorEvent(CodexBaseModel):
     """Turn error event."""
 
     event_type: Literal["turn/error"] = "turn/error"
     data: TurnErrorData
 
 
-class TurnDiffUpdatedEvent(CodexEventBase):
+class TurnDiffUpdatedEvent(CodexBaseModel):
     """Turn diff updated event."""
 
     event_type: Literal["turn/diff/updated"] = "turn/diff/updated"
     data: TurnDiffUpdatedData
 
 
-class TurnPlanUpdatedEvent(CodexEventBase):
+class TurnPlanUpdatedEvent(CodexBaseModel):
     """Turn plan updated event."""
 
     event_type: Literal["turn/plan/updated"] = "turn/plan/updated"
@@ -183,21 +160,21 @@ class TurnPlanUpdatedEvent(CodexEventBase):
 # ============================================================================
 
 
-class ItemStartedEvent(CodexEventBase):
+class ItemStartedEvent(CodexBaseModel):
     """Item started event."""
 
     event_type: Literal["item/started"] = "item/started"
     data: ItemStartedData
 
 
-class ItemCompletedEvent(CodexEventBase):
+class ItemCompletedEvent(CodexBaseModel):
     """Item completed event."""
 
     event_type: Literal["item/completed"] = "item/completed"
     data: ItemCompletedData
 
 
-class RawResponseItemCompletedEvent(CodexEventBase):
+class RawResponseItemCompletedEvent(CodexBaseModel):
     """Raw response item completed event."""
 
     event_type: Literal["rawResponseItem/completed"] = "rawResponseItem/completed"
@@ -209,7 +186,7 @@ class RawResponseItemCompletedEvent(CodexEventBase):
 # ============================================================================
 
 
-class AgentMessageDeltaEvent(CodexEventBase):
+class AgentMessageDeltaEvent(CodexBaseModel):
     """Agent message delta event (streaming text)."""
 
     event_type: Literal["item/agentMessage/delta"] = "item/agentMessage/delta"
@@ -221,7 +198,7 @@ class AgentMessageDeltaEvent(CodexEventBase):
 # ============================================================================
 
 
-class PlanDeltaEvent(CodexEventBase):
+class PlanDeltaEvent(CodexBaseModel):
     """Plan delta event (streaming plan text)."""
 
     event_type: Literal["item/plan/delta"] = "item/plan/delta"
@@ -233,21 +210,21 @@ class PlanDeltaEvent(CodexEventBase):
 # ============================================================================
 
 
-class ReasoningSummaryTextDeltaEvent(CodexEventBase):
+class ReasoningSummaryTextDeltaEvent(CodexBaseModel):
     """Reasoning summary text delta event."""
 
     event_type: Literal["item/reasoning/summaryTextDelta"] = "item/reasoning/summaryTextDelta"
     data: ReasoningSummaryTextDeltaData
 
 
-class ReasoningSummaryPartAddedEvent(CodexEventBase):
+class ReasoningSummaryPartAddedEvent(CodexBaseModel):
     """Reasoning summary part added event."""
 
     event_type: Literal["item/reasoning/summaryPartAdded"] = "item/reasoning/summaryPartAdded"
     data: ReasoningSummaryPartAddedData
 
 
-class ReasoningTextDeltaEvent(CodexEventBase):
+class ReasoningTextDeltaEvent(CodexBaseModel):
     """Reasoning text delta event."""
 
     event_type: Literal["item/reasoning/textDelta"] = "item/reasoning/textDelta"
@@ -259,14 +236,14 @@ class ReasoningTextDeltaEvent(CodexEventBase):
 # ============================================================================
 
 
-class CommandExecutionOutputDeltaEvent(CodexEventBase):
+class CommandExecutionOutputDeltaEvent(CodexBaseModel):
     """Command execution output delta event."""
 
     event_type: Literal["item/commandExecution/outputDelta"] = "item/commandExecution/outputDelta"
     data: CommandExecutionOutputDeltaData
 
 
-class CommandExecutionTerminalInteractionEvent(CodexEventBase):
+class CommandExecutionTerminalInteractionEvent(CodexBaseModel):
     """Command execution terminal interaction event."""
 
     event_type: Literal["item/commandExecution/terminalInteraction"] = (
@@ -280,7 +257,7 @@ class CommandExecutionTerminalInteractionEvent(CodexEventBase):
 # ============================================================================
 
 
-class FileChangeOutputDeltaEvent(CodexEventBase):
+class FileChangeOutputDeltaEvent(CodexBaseModel):
     """File change output delta event."""
 
     event_type: Literal["item/fileChange/outputDelta"] = "item/fileChange/outputDelta"
@@ -292,7 +269,7 @@ class FileChangeOutputDeltaEvent(CodexEventBase):
 # ============================================================================
 
 
-class McpToolCallProgressEvent(CodexEventBase):
+class McpToolCallProgressEvent(CodexBaseModel):
     """MCP tool call progress event."""
 
     event_type: Literal["item/mcpToolCall/progress"] = "item/mcpToolCall/progress"
@@ -304,7 +281,7 @@ class McpToolCallProgressEvent(CodexEventBase):
 # ============================================================================
 
 
-class McpServerOAuthLoginCompletedEvent(CodexEventBase):
+class McpServerOAuthLoginCompletedEvent(CodexBaseModel):
     """MCP server OAuth login completed event."""
 
     event_type: Literal["mcpServer/oauthLogin/completed"] = "mcpServer/oauthLogin/completed"
@@ -316,35 +293,35 @@ class McpServerOAuthLoginCompletedEvent(CodexEventBase):
 # ============================================================================
 
 
-class AccountUpdatedEvent(CodexEventBase):
+class AccountUpdatedEvent(CodexBaseModel):
     """Account updated event."""
 
     event_type: Literal["account/updated"] = "account/updated"
     data: AccountUpdatedData
 
 
-class AccountRateLimitsUpdatedEvent(CodexEventBase):
+class AccountRateLimitsUpdatedEvent(CodexBaseModel):
     """Account rate limits updated event."""
 
     event_type: Literal["account/rateLimits/updated"] = "account/rateLimits/updated"
     data: AccountRateLimitsUpdatedData
 
 
-class AccountLoginCompletedEvent(CodexEventBase):
+class AccountLoginCompletedEvent(CodexBaseModel):
     """Account login completed event."""
 
     event_type: Literal["account/login/completed"] = "account/login/completed"
     data: AccountLoginCompletedData
 
 
-class AuthStatusChangeEvent(CodexEventBase):
+class AuthStatusChangeEvent(CodexBaseModel):
     """Auth status change event (legacy v1)."""
 
     event_type: Literal["authStatusChange"] = "authStatusChange"
     data: AuthStatusChangeData
 
 
-class LoginChatGptCompleteEvent(CodexEventBase):
+class LoginChatGptCompleteEvent(CodexBaseModel):
     """Login ChatGPT complete event (legacy v1)."""
 
     event_type: Literal["loginChatGptComplete"] = "loginChatGptComplete"
@@ -356,21 +333,21 @@ class LoginChatGptCompleteEvent(CodexEventBase):
 # ============================================================================
 
 
-class SessionConfiguredEvent(CodexEventBase):
+class SessionConfiguredEvent(CodexBaseModel):
     """Session configured event."""
 
     event_type: Literal["sessionConfigured"] = "sessionConfigured"
     data: SessionConfiguredData
 
 
-class DeprecationNoticeEvent(CodexEventBase):
+class DeprecationNoticeEvent(CodexBaseModel):
     """Deprecation notice event."""
 
     event_type: Literal["deprecationNotice"] = "deprecationNotice"
     data: DeprecationNoticeData
 
 
-class WindowsWorldWritableWarningEvent(CodexEventBase):
+class WindowsWorldWritableWarningEvent(CodexBaseModel):
     """Windows world writable warning event."""
 
     event_type: Literal["windows/worldWritableWarning"] = "windows/worldWritableWarning"
@@ -382,35 +359,35 @@ class WindowsWorldWritableWarningEvent(CodexEventBase):
 # ============================================================================
 
 
-class ModelReroutedEvent(CodexEventBase):
+class ModelReroutedEvent(CodexBaseModel):
     """Model rerouted event."""
 
     event_type: Literal["model/rerouted"] = "model/rerouted"
     data: ModelReroutedData
 
 
-class ConfigWarningEvent(CodexEventBase):
+class ConfigWarningEvent(CodexBaseModel):
     """Config warning event."""
 
     event_type: Literal["configWarning"] = "configWarning"
     data: ConfigWarningData
 
 
-class AppListUpdatedEvent(CodexEventBase):
+class AppListUpdatedEvent(CodexBaseModel):
     """App list updated event."""
 
     event_type: Literal["app/list/updated"] = "app/list/updated"
     data: AppListUpdatedData
 
 
-class ContextCompactedEvent(CodexEventBase):
+class ContextCompactedEvent(CodexBaseModel):
     """Context compacted event (alias for ThreadCompactedEvent with turnId)."""
 
     event_type: Literal["thread/compacted/v2"] = "thread/compacted/v2"
     data: ContextCompactedData
 
 
-class ServerRequestResolvedEvent(CodexEventBase):
+class ServerRequestResolvedEvent(CodexBaseModel):
     """Server request resolved event."""
 
     event_type: Literal["serverRequest/resolved"] = "serverRequest/resolved"

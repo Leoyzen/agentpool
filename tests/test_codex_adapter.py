@@ -9,14 +9,14 @@ import pytest
 
 from codex_adapter import CodexClient, HttpMcpServer, StdioMcpServer
 from codex_adapter.client import _mcp_config_to_toml_inline
-from codex_adapter.events import (
+from codex_adapter.exceptions import CodexProcessError, CodexRequestError
+from codex_adapter.models.events import (
     AgentMessageDeltaEvent,
     get_text_delta,
     is_completed_event,
     is_delta_event,
     parse_codex_event,
 )
-from codex_adapter.exceptions import CodexProcessError, CodexRequestError
 
 
 def test_parse_codex_event_camel_to_snake():

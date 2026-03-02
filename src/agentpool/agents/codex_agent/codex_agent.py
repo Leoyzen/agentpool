@@ -52,13 +52,13 @@ if TYPE_CHECKING:
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
     from codex_adapter import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
-    from codex_adapter.codex_types import McpServerConfig
-    from codex_adapter.events import CodexEvent
     from codex_adapter.models import (
+        CodexEvent,
+        McpServerConfig,
+        MiscTurnStatusValue,
         ToolRequestUserInputParams,
         ToolRequestUserInputQuestion,
         ToolRequestUserInputResponse,
-        TurnStatusValue,
     )
 
 
@@ -324,7 +324,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _setup_toolsets(self) -> None:
         """Setup toolsets and start the tool bridge."""
-        from codex_adapter.codex_types import HttpMcpServer as CodexHttpMcpServer
+        from codex_adapter.models.codex_types import HttpMcpServer as CodexHttpMcpServer
 
         if not self._toolsets:
             return
@@ -452,7 +452,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Stream events from Codex turn execution."""
         from agentpool.agents.events import PlanUpdateEvent
         from agentpool.messaging.messages import TokenCost
-        from codex_adapter.events import (
+        from codex_adapter.models.events import (
             ThreadTokenUsageUpdatedEvent,
             TurnCompletedEvent,
             TurnStartedEvent,
@@ -476,7 +476,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Stream turn events with bridge context set
         accumulated_text: list[str] = []
         self._token_usage_data = None
-        self._turn_status: TurnStatusValue | None = None
+        self._turn_status: MiscTurnStatusValue | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
         output_schema = None if self._output_type is str else self._output_type
 

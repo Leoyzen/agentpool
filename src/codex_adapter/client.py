@@ -13,83 +13,83 @@ from typing import TYPE_CHECKING, Any, TypeVar, assert_never
 import anyenv
 from pydantic import BaseModel, TypeAdapter
 
-from codex_adapter.codex_types import HttpMcpServer, StdioMcpServer
-from codex_adapter.events import (
+from codex_adapter.exceptions import CodexProcessError, CodexRequestError
+from codex_adapter.models.base import JsonRpcRequest, JsonRpcResponse
+from codex_adapter.models.codex_types import HttpMcpServer, StdioMcpServer
+from codex_adapter.models.event_data import AgentMessageDeltaData, TurnErrorData
+from codex_adapter.models.events import (
     AgentMessageDeltaEvent,
     TurnCompletedEvent,
     TurnErrorEvent,
     parse_codex_event,
 )
-from codex_adapter.exceptions import CodexProcessError, CodexRequestError
-from codex_adapter.models import (
-    AgentMessageDeltaData,
+from codex_adapter.models.input_item import TextInputItem
+from codex_adapter.models.request_params import (
     AppsListParams,
-    AppsListResponse,
     CancelLoginAccountParams,
-    CancelLoginAccountResponse,
     CommandExecParams,
-    CommandExecResponse,
     CommandExecutionRequestApprovalParams,
-    CommandExecutionRequestApprovalResponse,
     ConfigBatchWriteParams,
     ConfigReadParams,
-    ConfigReadResponse,
-    ConfigRequirementsReadResponse,
     ConfigValueWriteParams,
-    ConfigWriteResponse,
     DynamicToolCallParams,
-    DynamicToolCallResponse,
     ExperimentalFeatureListParams,
-    ExperimentalFeatureListResponse,
     ExternalAgentConfigDetectParams,
-    ExternalAgentConfigDetectResponse,
     ExternalAgentConfigImportParams,
     FeedbackUploadParams,
-    FeedbackUploadResponse,
     FileChangeRequestApprovalParams,
-    FileChangeRequestApprovalResponse,
     GetAccountParams,
-    GetAccountRateLimitsResponse,
-    GetAccountResponse,
     InitializeParams,
-    JsonRpcRequest,
-    JsonRpcResponse,
     ListMcpServerStatusParams,
-    ListMcpServerStatusResponse,
     LoginAccountParams,
-    LoginAccountResponse,
     McpServerOauthLoginParams,
-    McpServerOauthLoginResponse,
     ModelListParams,
-    ModelListResponse,
     ReviewStartParams,
-    ReviewStartResponse,
     SkillsConfigWriteParams,
     SkillsListParams,
-    SkillsListResponse,
-    TextInputItem,
     ThreadArchiveParams,
     ThreadCompactStartParams,
     ThreadForkParams,
     ThreadListParams,
-    ThreadListResponse,
-    ThreadLoadedListResponse,
     ThreadReadParams,
-    ThreadResponse,
     ThreadResumeParams,
     ThreadRollbackParams,
-    ThreadRollbackResponse,
     ThreadSetNameParams,
     ThreadStartParams,
     ThreadUnarchiveParams,
-    ThreadUnarchiveResponse,
     ToolRequestUserInputParams,
-    ToolRequestUserInputResponse,
-    TurnErrorData,
     TurnInterruptParams,
     TurnStartParams,
-    TurnStartResponse,
     TurnSteerParams,
+)
+from codex_adapter.models.responses import (
+    AppsListResponse,
+    CancelLoginAccountResponse,
+    CommandExecResponse,
+    CommandExecutionRequestApprovalResponse,
+    ConfigReadResponse,
+    ConfigRequirementsReadResponse,
+    ConfigWriteResponse,
+    DynamicToolCallResponse,
+    ExperimentalFeatureListResponse,
+    ExternalAgentConfigDetectResponse,
+    FeedbackUploadResponse,
+    FileChangeRequestApprovalResponse,
+    GetAccountRateLimitsResponse,
+    GetAccountResponse,
+    ListMcpServerStatusResponse,
+    LoginAccountResponse,
+    McpServerOauthLoginResponse,
+    ModelListResponse,
+    ReviewStartResponse,
+    SkillsListResponse,
+    ThreadListResponse,
+    ThreadLoadedListResponse,
+    ThreadResponse,
+    ThreadRollbackResponse,
+    ThreadUnarchiveResponse,
+    ToolRequestUserInputResponse,
+    TurnStartResponse,
     TurnSteerResponse,
 )
 
@@ -164,7 +164,7 @@ _SERVER_REQUEST_TYPES: dict[
 if TYPE_CHECKING:
     from typing import Self
 
-    from codex_adapter.codex_types import (
+    from codex_adapter.models.codex_types import (
         ApprovalPolicy,
         McpServerConfig,
         MergeStrategy,
@@ -176,16 +176,17 @@ if TYPE_CHECKING:
         ThreadSortKey,
         ThreadSourceKind,
     )
-    from codex_adapter.events import CodexEvent
-    from codex_adapter.models import (
+    from codex_adapter.models.events import CodexEvent
+    from codex_adapter.models.input_item import TurnInputItem
+    from codex_adapter.models.misc import (
         AppInfo,
+        ConfigEdit,
         ExperimentalFeature,
-        LoginType,
+        ExternalAgentConfigMigrationItem,
         ModelData,
         SkillData,
-        TurnInputItem,
     )
-
+    from codex_adapter.models.request_params import LoginType
 
 ResultType = TypeVar("ResultType", bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -1121,7 +1122,7 @@ class CodexClient:
 
     async def config_batch_write(
         self,
-        edits: list[dict[str, Any]],
+        edits: list[ConfigEdit],
         *,
         file_path: str | None = None,
         expected_version: str | None = None,
@@ -1270,7 +1271,7 @@ class CodexClient:
 
     async def external_agent_config_import(
         self,
-        migration_items: list[dict[str, Any]],
+        migration_items: list[ExternalAgentConfigMigrationItem],
     ) -> None:
         """Import external agent configurations.
 

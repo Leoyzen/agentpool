@@ -52,12 +52,12 @@ if TYPE_CHECKING:
         StreamableHTTPMCPServerConfig,
     )
     from codex_adapter import ModelData, ThreadData
-    from codex_adapter.codex_types import HttpMcpServer, McpServerConfig, StdioMcpServer
-    from codex_adapter.events import CodexEvent
-    from codex_adapter.models import ThreadItem, Turn, TurnInputItem, TurnStatusValue, UserInput
+    from codex_adapter.models import MiscTurnStatusValue, ThreadItem, Turn, TurnInputItem, UserInput
+    from codex_adapter.models.codex_types import HttpMcpServer, McpServerConfig, StdioMcpServer
+    from codex_adapter.models.events import CodexEvent
 
 
-def codex_turn_status_to_finish_reason(status: TurnStatusValue) -> FinishReason:
+def codex_turn_status_to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
     """Convert Codex TurnStatusValue to pydantic-ai FinishReason."""
     match status:
         case "completed":
@@ -102,7 +102,7 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
         StdioMCPServerConfig,
         StreamableHTTPMCPServerConfig,
     )
-    from codex_adapter.codex_types import HttpMcpServer, StdioMcpServer
+    from codex_adapter.models.codex_types import HttpMcpServer, StdioMcpServer
 
     # Name should not be None by the time we use it
     server_name = config.name or f"server_{id(config)}"
@@ -338,7 +338,12 @@ async def convert_codex_stream(  # noqa: PLR0915
         ToolCallStartEvent,
     )
     from agentpool.resource_providers.plan_provider import PlanEntry
-    from codex_adapter.events import (
+    from codex_adapter.models import (
+        ThreadItemCommandExecution,
+        ThreadItemFileChange,
+        ThreadItemMcpToolCall,
+    )
+    from codex_adapter.models.events import (
         AgentMessageDeltaEvent,
         CommandExecutionOutputDeltaEvent,
         FileChangeOutputDeltaEvent,
@@ -348,11 +353,6 @@ async def convert_codex_stream(  # noqa: PLR0915
         ReasoningTextDeltaEvent,
         ThreadCompactedEvent,
         TurnPlanUpdatedEvent,
-    )
-    from codex_adapter.models import (
-        ThreadItemCommandExecution,
-        ThreadItemFileChange,
-        ThreadItemMcpToolCall,
     )
 
     # Accumulation state for streaming tool outputs
@@ -491,7 +491,7 @@ def event_to_part(
     Returns:
         Part or None
     """
-    from codex_adapter.events import (
+    from codex_adapter.models.events import (
         AgentMessageDeltaEvent,
         ItemCompletedEvent,
         ItemStartedEvent,
