@@ -810,9 +810,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         cmd_ctx = self._command_store.create_context(data=self.get_context())
         command_str = f"{cmd_name} {args}".strip()
         try:
-            execute_task = asyncio.create_task(
-                self._command_store.execute_command(command_str, cmd_ctx)
-            )
+            coro = self._command_store.execute_command(command_str, cmd_ctx)
+            execute_task = asyncio.create_task(coro)
             success = True
             # Yield events from queue as command runs
             while not execute_task.done():

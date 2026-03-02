@@ -49,6 +49,7 @@ IS_DEV = "pytest" in sys.modules
 
 LoginType = Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
 TurnStatusValue = Literal["completed", "interrupted", "failed", "inProgress"]
+PlanStepStatus = Literal["pending", "inProgress", "completed"]
 # ============================================================================
 # Base classes with shared configuration
 # ============================================================================
@@ -1615,7 +1616,7 @@ class TurnPlanStep(CodexBaseModel):
     """A single step in a turn plan."""
 
     step: str
-    status: Literal["pending", "inProgress", "completed"]
+    status: PlanStepStatus
 
 
 class TurnPlanUpdatedData(CodexBaseModel):
