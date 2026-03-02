@@ -1035,7 +1035,7 @@ wheels = [
 
 [[package]]
 name = "clawd-code-sdk"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -1044,9 +1044,9 @@ dependencies = [
     { name = "mcp" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/79/81/58eaf09ddeb9d1ee1f975962a6967fb6feed855041c6dc23f886343161ba/clawd_code_sdk-0.5.0.tar.gz", hash = "sha256:30a806a25d3829707a84b48b0d80a90ae6da8bf261892928e8bac95f7dd15e5a", size = 131753, upload-time = "2026-03-02T16:51:22.78Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/7c/e93f2f5a4d7f66ec7edacc3df557c110cfd23707babef97bd6285cd94036/clawd_code_sdk-0.5.1.tar.gz", hash = "sha256:428ac18c5050ff77b19bf1800bd6ba0f9451abec4a19e166b271c9bd7b2b3daa", size = 131998, upload-time = "2026-03-02T23:02:18.747Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/33/fc0358b8b7d533e65081b0792279f6575d1e52cdc5f96a10b66bcead9fba/clawd_code_sdk-0.5.0-py3-none-any.whl", hash = "sha256:bd0cbb575b97c632468df4f9abf71ee9f50dbb2d59caa1cf1631e598baf4fd26", size = 101628, upload-time = "2026-03-02T16:51:20.838Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/1c/fd689aa4153689620edeed15ca96f4041a76dff8c55651be7d714e191935/clawd_code_sdk-0.5.1-py3-none-any.whl", hash = "sha256:ff381131ab0657bf7bbc1ce7c16d104f8718d11c46591f33fbe99516aaffb440", size = 101810, upload-time = "2026-03-02T23:02:22.102Z" },
 ]
 
 [[package]]
@@ -2909,11 +2909,11 @@ wheels = [
 
 [[package]]
 name = "markdown2"
-version = "2.5.4"
+version = "2.5.5"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/42/f8/b2ae8bf5f28f9b510ae097415e6e4cb63226bb28d7ee01aec03a755ba03b/markdown2-2.5.4.tar.gz", hash = "sha256:a09873f0b3c23dbfae589b0080587df52ad75bb09a5fa6559147554736676889", size = 145652, upload-time = "2025-07-27T16:16:24.307Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/ae/07d4a5fcaa5509221287d289323d75ac8eda5a5a4ac9de2accf7bbcc2b88/markdown2-2.5.5.tar.gz", hash = "sha256:001547e68f6e7fcf0f1cb83f7e82f48aa7d48b2c6a321f0cd20a853a8a2d1664", size = 157249, upload-time = "2026-03-02T20:46:53.411Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/06/2697b5043c3ecb720ce0d243fc7cf5024c0b5b1e450506e9b21939019963/markdown2-2.5.4-py3-none-any.whl", hash = "sha256:3c4b2934e677be7fec0e6f2de4410e116681f4ad50ec8e5ba7557be506d3f439", size = 49954, upload-time = "2025-07-27T16:16:23.026Z" },
+    { url = "https://files.pythonhosted.org/packages/43/af/4b3891eb0a49d6cfd5cbf3e9bf514c943afc2b0f13e2c57cc57cd88ecc21/markdown2-2.5.5-py3-none-any.whl", hash = "sha256:be798587e09d1f52d2e4d96a649c4b82a778c75f9929aad52a2c95747fa26941", size = 56250, upload-time = "2026-03-02T20:46:52.032Z" },
 ]
 
 [[package]]

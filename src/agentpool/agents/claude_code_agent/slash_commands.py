@@ -21,6 +21,7 @@ def create_claude_code_command(cmd_info: ClaudeCodeCommandInfo) -> Command:
     """
     from clawd_code_sdk.models import (
         AssistantMessage,
+        LocalCommandOutputMessage,
         ResultErrorMessage,
         ResultSuccessMessage,
         TextBlock,
@@ -60,6 +61,10 @@ def create_claude_code_command(cmd_info: ClaudeCodeCommandInfo) -> Command:
                     for block in msg.content:
                         if isinstance(block, TextBlock):
                             await ctx.print(block.text)
+                case LocalCommandOutputMessage(content=content):
+                    await ctx.print(content)
+                # Some commands (e.g. /compact) still use legacy XML-tagged
+                # output in UserMessage instead of LocalCommandOutputMessage.
                 case UserMessage() if parsed := msg.parse_command_output():
                     await ctx.print(parsed)
                 case ResultSuccessMessage(result=result) if result:
