@@ -4,9 +4,12 @@ from typing import Any, Literal
 
 from codex_adapter.models.base import CodexBaseModel
 from codex_adapter.models.codex_types import (  # noqa: TC001
+    AskForApproval,
     CommandExecutionApprovalDecision,
     FileChangeApprovalDecision,
     ModelProvider,
+    ReasoningEffort,
+    SandboxPolicy,
     WriteStatus,
 )
 from codex_adapter.models.misc import (  # noqa: TC001
@@ -24,9 +27,7 @@ from codex_adapter.models.misc import (  # noqa: TC001
     Turn,
     TurnData,
 )
-from codex_adapter.models.thread_item import (  # noqa: TC001
-    DynamicToolCallOutputContentItem,
-)
+from codex_adapter.models.thread_item import DynamicToolCallOutputContentItem  # noqa: TC001
 
 
 class CommandExecutionRequestApprovalResponse(CodexBaseModel):
@@ -61,9 +62,9 @@ class ThreadResponse(CodexBaseModel):
     model: str | None = None
     model_provider: ModelProvider | None = None
     cwd: str | None = None
-    approval_policy: str | None = None
-    sandbox: dict[str, Any] | None = None  # Sandbox config - flexible structure
-    reasoning_effort: str | None = None
+    approval_policy: AskForApproval | None = None
+    sandbox: SandboxPolicy | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
 
 class TurnStartResponse(CodexBaseModel):
