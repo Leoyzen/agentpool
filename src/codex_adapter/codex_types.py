@@ -63,6 +63,10 @@ ModelRerouteReason = Literal["rateLimited", "contextWindowExceeded", "other"]
 WriteStatus = Literal["ok", "conflict"]
 MergeStrategy = Literal["replace", "merge"]
 ExperimentalFeatureStage = Literal["alpha", "beta"]
+ElicitationAction = Literal["accept", "decline", "cancel"]
+NetworkApprovalProtocol = Literal["http", "https", "socks5Tcp", "socks5Udp"]
+NetworkPolicyRuleAction = Literal["allow", "deny"]
+PlanType = Literal["free", "go", "plus", "pro", "team", "business", "enterprise", "edu", "unknown"]
 
 
 @dataclass

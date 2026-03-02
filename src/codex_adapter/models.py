@@ -25,8 +25,11 @@ from codex_adapter.codex_types import (
     MessagePhase,
     ModelProvider,
     ModelRerouteReason,
+    NetworkApprovalProtocol,
+    NetworkPolicyRuleAction,
     PatchApplyStatus,
     Personality,
+    PlanType,
     ReasoningEffort,
     ReasoningSummary,
     ReviewDelivery,
@@ -422,6 +425,26 @@ class ExternalAgentConfigImportParams(CodexBaseModel):
 # ============================================================================
 
 
+class NetworkApprovalContext(CodexBaseModel):
+    """Network approval context for command approvals."""
+
+    host: str
+    protocol: NetworkApprovalProtocol
+
+
+class NetworkPolicyAmendment(CodexBaseModel):
+    """Proposed network policy amendment."""
+
+    host: str
+    action: NetworkPolicyRuleAction
+
+
+class ExecPolicyAmendment(CodexBaseModel):
+    """Proposed execpolicy amendment (prefix rule)."""
+
+    command: list[str]
+
+
 class CommandExecutionRequestApprovalParams(CodexBaseModel):
     """Parameters for item/commandExecution/requestApproval server request."""
 
@@ -430,13 +453,14 @@ class CommandExecutionRequestApprovalParams(CodexBaseModel):
     item_id: str
     approval_id: str | None = None
     reason: str | None = None
-    network_approval_context: dict[str, Any] | None = None
+    network_approval_context: NetworkApprovalContext | None = None
     command: str | None = None
     cwd: str | None = None
-    command_actions: list[dict[str, Any]] | None = None
+    command_actions: list[CommandAction] | None = None
     additional_permissions: dict[str, Any] | None = None
-    proposed_execpolicy_amendment: dict[str, Any] | None = None
-    proposed_network_policy_amendments: list[dict[str, Any]] | None = None
+    proposed_execpolicy_amendment: ExecPolicyAmendment | None = None
+    proposed_network_policy_amendments: list[NetworkPolicyAmendment] | None = None
+    available_decisions: list[CommandExecutionApprovalDecision] | None = None
 
 
 class CommandExecutionRequestApprovalResponse(CodexBaseModel):
@@ -461,12 +485,22 @@ class FileChangeRequestApprovalResponse(CodexBaseModel):
     decision: FileChangeApprovalDecision
 
 
+class ToolRequestUserInputOption(CodexBaseModel):
+    """A selectable option for a user input question."""
+
+    label: str
+    description: str
+
+
 class ToolRequestUserInputQuestion(CodexBaseModel):
     """A question in a tool request for user input."""
 
     id: str
-    text: str
-    options: list[dict[str, Any]] | None = None
+    header: str
+    question: str
+    is_other: bool = False
+    is_secret: bool = False
+    options: list[ToolRequestUserInputOption] | None = None
 
 
 class ToolRequestUserInputParams(CodexBaseModel):
@@ -478,10 +512,16 @@ class ToolRequestUserInputParams(CodexBaseModel):
     questions: list[ToolRequestUserInputQuestion]
 
 
+class ToolRequestUserInputAnswer(CodexBaseModel):
+    """A user's answer to a request_user_input question."""
+
+    answers: list[str]
+
+
 class ToolRequestUserInputResponse(CodexBaseModel):
     """Response for item/tool/requestUserInput server request."""
 
-    answers: dict[str, Any]
+    answers: dict[str, ToolRequestUserInputAnswer]
 
 
 class SkillRequestApprovalParams(CodexBaseModel):
@@ -958,6 +998,7 @@ class Thread(CodexBaseModel):
 
     id: str
     preview: str = ""
+    ephemeral: bool = False
     model_provider: str = "openai"
     created_at: int = 0
     updated_at: int = 0
@@ -978,6 +1019,7 @@ class ThreadData(CodexBaseModel):
 
     id: str
     preview: str = ""
+    ephemeral: bool = False
     model_provider: ModelProvider = "openai"
     created_at: int = 0
     updated_at: int = 0
@@ -1009,7 +1051,7 @@ class TurnData(CodexBaseModel):
     """Turn data in responses."""
 
     id: str
-    status: Literal["pending", "inProgress", "completed", "error", "interrupted"] = "pending"
+    status: TurnStatusValue  # always provided by the server
     thread_id: str | None = None
     items: list[ThreadItem] = Field(default_factory=list)
     error: str | None = None
@@ -1735,10 +1777,12 @@ class CreditsSnapshot(CodexBaseModel):
 class RateLimitSnapshot(CodexBaseModel):
     """Rate limit snapshot."""
 
+    limit_id: str | None = None
+    limit_name: str | None = None
     primary: RateLimitWindow | None = None
     secondary: RateLimitWindow | None = None
     credits: CreditsSnapshot | None = None
-    plan_type: str | None = None
+    plan_type: PlanType | None = None
 
 
 class AccountRateLimitsUpdatedData(CodexBaseModel):
@@ -1823,10 +1867,17 @@ class AppListUpdatedData(CodexBaseModel):
 
 
 class ContextCompactedData(CodexBaseModel):
-    """Payload for thread/compacted notification (updated to include turnId)."""
+    """Payload for thread/compacted/v2 notification."""
 
     thread_id: str
     turn_id: str | None = None
+
+
+class ServerRequestResolvedData(CodexBaseModel):
+    """Payload for serverRequest/resolved notification."""
+
+    thread_id: str
+    request_id: int | str
 
 
 # Union type of all event data
@@ -1883,4 +1934,5 @@ EventData = (
     | ConfigWarningData
     | AppListUpdatedData
     | ContextCompactedData
+    | ServerRequestResolvedData
 )

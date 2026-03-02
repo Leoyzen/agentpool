@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping  # noqa: TC003
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping  # noqa: TC003
 import contextlib
 import json
 import logging
@@ -29,12 +29,16 @@ from codex_adapter.models import (
     CancelLoginAccountResponse,
     CommandExecParams,
     CommandExecResponse,
+    CommandExecutionRequestApprovalParams,
+    CommandExecutionRequestApprovalResponse,
     ConfigBatchWriteParams,
     ConfigReadParams,
     ConfigReadResponse,
     ConfigRequirementsReadResponse,
     ConfigValueWriteParams,
     ConfigWriteResponse,
+    DynamicToolCallParams,
+    DynamicToolCallResponse,
     ExperimentalFeatureListParams,
     ExperimentalFeatureListResponse,
     ExternalAgentConfigDetectParams,
@@ -42,6 +46,8 @@ from codex_adapter.models import (
     ExternalAgentConfigImportParams,
     FeedbackUploadParams,
     FeedbackUploadResponse,
+    FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
@@ -77,6 +83,8 @@ from codex_adapter.models import (
     ThreadStartParams,
     ThreadUnarchiveParams,
     ThreadUnarchiveResponse,
+    ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
     TurnErrorData,
     TurnInterruptParams,
     TurnStartParams,
@@ -84,6 +92,73 @@ from codex_adapter.models import (
     TurnSteerParams,
     TurnSteerResponse,
 )
+
+
+# Server request method constants
+SERVER_REQUEST_COMMAND_APPROVAL = "item/commandExecution/requestApproval"
+SERVER_REQUEST_FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval"
+SERVER_REQUEST_USER_INPUT = "item/tool/requestUserInput"
+SERVER_REQUEST_DYNAMIC_TOOL_CALL = "item/tool/call"
+
+# Type for server request parameter models
+ServerRequestParams = (
+    CommandExecutionRequestApprovalParams
+    | FileChangeRequestApprovalParams
+    | ToolRequestUserInputParams
+    | DynamicToolCallParams
+)
+
+# Type for server request response models
+ServerRequestResponse = (
+    CommandExecutionRequestApprovalResponse
+    | FileChangeRequestApprovalResponse
+    | ToolRequestUserInputResponse
+    | DynamicToolCallResponse
+)
+
+# Server request handler callback type
+ServerRequestHandler = Callable[[ServerRequestParams], Awaitable[ServerRequestResponse]]
+
+# Typed handler callbacks for each server request kind
+CommandApprovalHandler = Callable[
+    [CommandExecutionRequestApprovalParams],
+    Awaitable[CommandExecutionRequestApprovalResponse],
+]
+FileChangeApprovalHandler = Callable[
+    [FileChangeRequestApprovalParams],
+    Awaitable[FileChangeRequestApprovalResponse],
+]
+UserInputHandler = Callable[
+    [ToolRequestUserInputParams],
+    Awaitable[ToolRequestUserInputResponse],
+]
+DynamicToolCallHandler = Callable[
+    [DynamicToolCallParams],
+    Awaitable[DynamicToolCallResponse],
+]
+
+# Map from wire method names to param/response model types
+_SERVER_REQUEST_TYPES: dict[
+    str,
+    tuple[type[ServerRequestParams], type[ServerRequestResponse]],
+] = {
+    SERVER_REQUEST_COMMAND_APPROVAL: (
+        CommandExecutionRequestApprovalParams,
+        CommandExecutionRequestApprovalResponse,
+    ),
+    SERVER_REQUEST_FILE_CHANGE_APPROVAL: (
+        FileChangeRequestApprovalParams,
+        FileChangeRequestApprovalResponse,
+    ),
+    SERVER_REQUEST_USER_INPUT: (
+        ToolRequestUserInputParams,
+        ToolRequestUserInputResponse,
+    ),
+    SERVER_REQUEST_DYNAMIC_TOOL_CALL: (
+        DynamicToolCallParams,
+        DynamicToolCallResponse,
+    ),
+}
 
 
 if TYPE_CHECKING:
@@ -175,6 +250,10 @@ class CodexClient:
         profile: str | None = None,
         env_vars: dict[str, str] | None = None,
         mcp_servers: Mapping[str, McpServerConfig] | None = None,
+        on_command_approval: CommandApprovalHandler | None = None,
+        on_file_change_approval: FileChangeApprovalHandler | None = None,
+        on_user_input: UserInputHandler | None = None,
+        on_dynamic_tool_call: DynamicToolCallHandler | None = None,
     ) -> None:
         """Initialize the Codex app-server client.
 
@@ -184,6 +263,10 @@ class CodexClient:
             env_vars: Optional environment variables to set for the Codex process.
             mcp_servers: Optional MCP servers to inject programmatically.
                 Keys are server names, values are server configurations.
+            on_command_approval: Handler for command execution approval requests.
+            on_file_change_approval: Handler for file change approval requests.
+            on_user_input: Handler for tool user input requests.
+            on_dynamic_tool_call: Handler for dynamic tool call requests.
         """
         self._codex_command = codex_command
         self._profile = profile
@@ -197,7 +280,15 @@ class CodexClient:
         self._reader_task: asyncio.Task[None] | None = None
         self._writer_lock = asyncio.Lock()
         self._active_threads: set[str] = set()
-        self._global_event_handlers: list[Any] = []  # For global events
+        self._server_request_handlers: dict[str, ServerRequestHandler] = {}
+        if on_command_approval:
+            self.on_server_request(SERVER_REQUEST_COMMAND_APPROVAL, on_command_approval)  # type: ignore[arg-type]
+        if on_file_change_approval:
+            self.on_server_request(SERVER_REQUEST_FILE_CHANGE_APPROVAL, on_file_change_approval)  # type: ignore[arg-type]
+        if on_user_input:
+            self.on_server_request(SERVER_REQUEST_USER_INPUT, on_user_input)  # type: ignore[arg-type]
+        if on_dynamic_tool_call:
+            self.on_server_request(SERVER_REQUEST_DYNAMIC_TOOL_CALL, on_dynamic_tool_call)  # type: ignore[arg-type]
 
     async def __aenter__(self) -> Self:
         """Async context manager entry - starts the app-server."""
@@ -1215,16 +1306,15 @@ class CodexClient:
         if params is not None:
             params_dict = params.model_dump(by_alias=True, exclude_none=True)
 
-        # Build JSON-RPC request
         request = JsonRpcRequest(id=request_id, method=method, params=params_dict)
-        async with self._writer_lock:
-            try:
-                line = request.model_dump_json(by_alias=True, exclude_none=True) + "\n"
-                self._process.stdin.write(line.encode())
-                await self._process.stdin.drain()
-            except Exception as exc:
-                del self._pending_requests[request_id]
-                raise CodexProcessError(f"Failed to send request: {exc}") from exc
+        try:
+            message = anyenv.load_json(
+                request.model_dump_json(by_alias=True, exclude_none=True), return_type=dict
+            )
+            await self._write_message(message)
+        except Exception as exc:
+            del self._pending_requests[request_id]
+            raise CodexProcessError(f"Failed to send request: {exc}") from exc
 
         return await future
 
@@ -1261,54 +1351,206 @@ class CodexClient:
     async def _process_message(self, message: dict[str, Any]) -> None:
         """Process a message from the app-server.
 
-        Args:
-            message: Raw JSON-RPC message (response or notification)
-        """
-        match message:
-            # Response (has "id" field)
-            case {"id": msg_id}:
-                try:
-                    response = JsonRpcResponse.model_validate(message)
-                    future = self._pending_requests.pop(response.id, None)
-                    if future and not future.done():
-                        if err := response.error:
-                            future.set_exception(CodexRequestError(err.code, err.message, err.data))
-                        else:
-                            future.set_result(response.result)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to parse response: %s", exc)
-                    # Fallback to old behavior for unrecognized responses
-                    if isinstance(msg_id, int):
-                        future = self._pending_requests.pop(msg_id, None)
-                        if future and not future.done():
-                            future.set_result(message.get("result"))
-                return
-            # Notification (has "method" field, no "id")
-            case {"method": method}:
-                params = message.get("params") or {}
-                event = parse_codex_event(method, params)
-                # Skip legacy V1 events (parse_codex_event returns None for these)
-                if event is None:
-                    return
-                # Route event to appropriate turn queue
-                thread_id = params.get("threadId")
-                turn_id = params.get("turnId")
-                # Also check nested turn object (some events have it there)
-                if not turn_id and "turn" in params:
-                    turn_data = params.get("turn", {})
-                    turn_id = turn_data.get("id")
+        Messages are one of:
+        - Server request: has both "method" and "id" -> needs a response
+        - Response to our request: has "id" but no "method" -> resolves pending future
+        - Notification: has "method" but no "id" -> routed as event
 
-                if thread_id and turn_id:
-                    # Turn-specific event - route to turn queue
-                    turn_key = f"{thread_id}:{turn_id}"
-                    if turn_key in self._turn_queues:
-                        await self._turn_queues[turn_key].put(event)
-                    else:
-                        # Turn queue not found (might be old event) - put in global queue
-                        await self._event_queue.put(event)
+        Args:
+            message: Raw JSON-RPC message
+        """
+        has_method = "method" in message
+        has_id = "id" in message
+
+        if has_method and has_id:
+            # Server request - the server is asking us to do something
+            await self._handle_server_request(message)
+        elif has_id:
+            # Response to one of our requests
+            self._handle_response(message)
+        elif has_method:
+            # Notification - one-way event
+            await self._handle_notification(message)
+
+    def _handle_response(self, message: dict[str, Any]) -> None:
+        """Handle a JSON-RPC response to one of our pending requests."""
+        msg_id = message["id"]
+        try:
+            response = JsonRpcResponse.model_validate(message)
+            future = self._pending_requests.pop(response.id, None)
+            if future and not future.done():
+                if err := response.error:
+                    future.set_exception(CodexRequestError(err.code, err.message, err.data))
                 else:
-                    # Global event (account, MCP, etc.) - put in global queue
-                    await self._event_queue.put(event)
+                    future.set_result(response.result)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to parse response: %s", exc)
+            if isinstance(msg_id, int):
+                future = self._pending_requests.pop(msg_id, None)
+                if future and not future.done():
+                    future.set_result(message.get("result"))
+
+    async def _handle_notification(self, message: dict[str, Any]) -> None:
+        """Handle a JSON-RPC notification (one-way event)."""
+        method = message["method"]
+        params = message.get("params") or {}
+        event = parse_codex_event(method, params)
+        # Skip legacy V1 events (parse_codex_event returns None for these)
+        if event is None:
+            return
+        # Route event to appropriate turn queue
+        thread_id = params.get("threadId")
+        turn_id = params.get("turnId")
+        # Also check nested turn object (some events have it there)
+        if not turn_id and "turn" in params:
+            turn_data = params.get("turn", {})
+            turn_id = turn_data.get("id")
+
+        if thread_id and turn_id:
+            # Turn-specific event - route to turn queue
+            turn_key = f"{thread_id}:{turn_id}"
+            if turn_key in self._turn_queues:
+                await self._turn_queues[turn_key].put(event)
+            else:
+                # Turn queue not found (might be old event) - put in global queue
+                await self._event_queue.put(event)
+        else:
+            # Global event (account, MCP, etc.) - put in global queue
+            await self._event_queue.put(event)
+
+    async def _handle_server_request(self, message: dict[str, Any]) -> None:
+        """Handle a JSON-RPC request from the server that expects a response.
+
+        Server requests include:
+        - item/commandExecution/requestApproval
+        - item/fileChange/requestApproval
+        - item/tool/requestUserInput
+        - item/tool/call (dynamic tool calls)
+        - account/chatgptAuthTokens/refresh
+        """
+        method: str = message["method"]
+        request_id = message["id"]
+        params = message.get("params") or {}
+
+        type_entry = _SERVER_REQUEST_TYPES.get(method)
+        if type_entry is None:
+            logger.warning("Unhandled server request method: %s (id=%s)", method, request_id)
+            await self._send_server_request_error(request_id, -32601, f"Method not found: {method}")
+            return
+
+        params_type, _ = type_entry
+        handler = self._server_request_handlers.get(method)
+
+        if handler is None:
+            logger.warning(
+                "No handler registered for server request: %s (id=%s)", method, request_id
+            )
+            await self._send_server_request_error(request_id, -32603, f"No handler for: {method}")
+            return
+
+        try:
+            parsed_params = params_type.model_validate(params)
+            response_model = await handler(parsed_params)
+            await self._send_server_request_response(request_id, response_model)
+        except Exception:
+            logger.exception("Error handling server request %s (id=%s)", method, request_id)
+            await self._send_server_request_error(
+                request_id, -32603, f"Internal error handling {method}"
+            )
+
+    async def _send_server_request_response(self, request_id: int | str, result: BaseModel) -> None:
+        """Send a JSON-RPC response to a server request."""
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": result.model_dump(by_alias=True, exclude_none=True),
+        }
+        await self._write_message(response)
+
+    async def _send_server_request_error(
+        self, request_id: int | str, code: int, message: str
+    ) -> None:
+        """Send a JSON-RPC error response to a server request."""
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": code, "message": message},
+        }
+        await self._write_message(response)
+
+    async def _write_message(self, message: dict[str, Any]) -> None:
+        """Write a JSON message to the app-server stdin."""
+        if self._process is None or self._process.stdin is None:
+            raise CodexProcessError("Not connected to Codex app-server")
+        async with self._writer_lock:
+            line = json.dumps(message) + "\n"
+            self._process.stdin.write(line.encode())
+            await self._process.stdin.drain()
+
+    # ========================================================================
+    # Server request handler registration
+    # ========================================================================
+
+    def on_server_request(self, method: str, handler: ServerRequestHandler) -> None:
+        """Register a handler for a server request method.
+
+        The handler receives the parsed params model and must return
+        the appropriate response model.
+
+        Args:
+            method: Server request method name (use SERVER_REQUEST_* constants)
+            handler: Async callback that processes the request and returns a response
+
+        Example::
+
+            async def handle_approval(
+                params: CommandExecutionRequestApprovalParams,
+            ) -> CommandExecutionRequestApprovalResponse:
+                return CommandExecutionRequestApprovalResponse(decision="allow")
+
+            client.on_server_request(SERVER_REQUEST_COMMAND_APPROVAL, handle_approval)
+        """
+        if method not in _SERVER_REQUEST_TYPES:
+            msg = (
+                f"Unknown server request method: {method}. "
+                f"Valid methods: {list(_SERVER_REQUEST_TYPES)}"
+            )
+            raise ValueError(msg)
+        self._server_request_handlers[method] = handler
+
+    def set_auto_approve(self) -> None:
+        """Register default handlers that auto-approve all server requests.
+
+        Convenience method for non-interactive use cases where all approvals
+        should be automatically granted and tool calls return empty results.
+        """
+
+        async def auto_approve_command(
+            _params: ServerRequestParams,
+        ) -> ServerRequestResponse:
+            return CommandExecutionRequestApprovalResponse(decision="allow")
+
+        async def auto_approve_file_change(
+            _params: ServerRequestParams,
+        ) -> ServerRequestResponse:
+            return FileChangeRequestApprovalResponse(decision="allow")
+
+        async def auto_approve_user_input(
+            _params: ServerRequestParams,
+        ) -> ServerRequestResponse:
+            return ToolRequestUserInputResponse(answers={})
+
+        async def auto_approve_dynamic_tool(
+            _params: ServerRequestParams,
+        ) -> ServerRequestResponse:
+            return DynamicToolCallResponse(content_items=[], success=False)
+
+        self._server_request_handlers[SERVER_REQUEST_COMMAND_APPROVAL] = auto_approve_command
+        self._server_request_handlers[SERVER_REQUEST_FILE_CHANGE_APPROVAL] = (
+            auto_approve_file_change
+        )
+        self._server_request_handlers[SERVER_REQUEST_USER_INPUT] = auto_approve_user_input
+        self._server_request_handlers[SERVER_REQUEST_DYNAMIC_TOOL_CALL] = auto_approve_dynamic_tool
 
 
 if __name__ == "__main__":

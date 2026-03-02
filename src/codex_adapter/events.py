@@ -36,6 +36,7 @@ from codex_adapter.models import (
     ReasoningSummaryPartAddedData,
     ReasoningSummaryTextDeltaData,
     ReasoningTextDeltaData,
+    ServerRequestResolvedData,
     SessionConfiguredData,
     ThreadArchivedData,
     ThreadCompactedData,
@@ -409,6 +410,13 @@ class ContextCompactedEvent(CodexEventBase):
     data: ContextCompactedData
 
 
+class ServerRequestResolvedEvent(CodexEventBase):
+    """Server request resolved event."""
+
+    event_type: Literal["serverRequest/resolved"] = "serverRequest/resolved"
+    data: ServerRequestResolvedData
+
+
 # ============================================================================
 # Discriminated union of all event types
 # ============================================================================
@@ -465,7 +473,9 @@ CodexEvent = Annotated[
     # New events
     | ModelReroutedEvent
     | ConfigWarningEvent
-    | AppListUpdatedEvent,
+    | AppListUpdatedEvent
+    | ContextCompactedEvent
+    | ServerRequestResolvedEvent,
     Field(discriminator="event_type"),
 ]
 
@@ -531,6 +541,8 @@ EventType = Literal[
     "model/rerouted",
     "configWarning",
     "app/list/updated",
+    "thread/compacted/v2",
+    "serverRequest/resolved",
 ]
 
 
