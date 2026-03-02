@@ -291,11 +291,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
         # Resolve output type from config
         responses = agent_pool.manifest.responses if agent_pool is not None else None
-        agent_output_type = config.output_type or str
-        if isinstance(agent_output_type, str) and agent_output_type != "str":
-            resolved_output_type = to_type(agent_output_type, responses)
-        else:
-            resolved_output_type = to_type(agent_output_type)
+        resolved_output_type = to_type(config.output_type or str, responses)
         # Merge config-level handlers with provided handlers
         config_handlers = config.get_event_handlers()
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
@@ -356,13 +352,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             mcp_config_to_codex(c) for c in self._external_mcp_servers
         )
         # Create and connect client with MCP servers and elicitation callback
-        self._client = CodexClient(
-            mcp_servers=mcp_servers_dict,
-            on_user_input=self._on_user_input,
-        )
+        self._client = CodexClient(mcp_servers=mcp_servers_dict, on_user_input=self._on_user_input)
         await self._client.__aenter__()
         cwd = str(self.env.cwd or Path.cwd())
-
         # Resume existing session or start new thread
         if self._sdk_session_id:
             # Resume the specified thread
