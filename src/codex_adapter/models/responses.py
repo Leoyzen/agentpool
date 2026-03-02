@@ -7,7 +7,6 @@ from codex_adapter.models.codex_types import (  # noqa: TC001
     AskForApproval,
     CommandExecutionApprovalDecision,
     FileChangeApprovalDecision,
-    ModelProvider,
     ReasoningEffort,
     SandboxPolicy,
     WriteStatus,
@@ -55,15 +54,21 @@ class DynamicToolCallResponse(CodexBaseModel):
     success: bool
 
 
-class ThreadResponse(CodexBaseModel):
-    """Response for thread operations."""
+class ThreadReadResponse(CodexBaseModel):
+    """Response for thread/read request."""
 
     thread: ThreadData
-    model: str | None = None
-    model_provider: ModelProvider | None = None
-    cwd: str | None = None
-    approval_policy: AskForApproval | None = None
-    sandbox: SandboxPolicy | None = None
+
+
+class ThreadResponse(CodexBaseModel):
+    """Response for thread/start, thread/resume, and thread/fork."""
+
+    thread: ThreadData
+    model: str
+    model_provider: str
+    cwd: str
+    approval_policy: AskForApproval
+    sandbox: SandboxPolicy
     reasoning_effort: ReasoningEffort | None = None
 
 
@@ -174,10 +179,13 @@ class LoginAccountResponse(CodexBaseModel):
     auth_url: str | None = None
 
 
+CancelLoginAccountStatus = Literal["canceled", "notFound"]
+
+
 class CancelLoginAccountResponse(CodexBaseModel):
     """Response for account/login/cancel request."""
 
-    status: str
+    status: CancelLoginAccountStatus
 
 
 class GetAccountRateLimitsResponse(CodexBaseModel):

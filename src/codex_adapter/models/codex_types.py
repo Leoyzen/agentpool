@@ -131,21 +131,6 @@ _READ_ONLY_ACCESS_TYPE_ALIASES: dict[str, str] = {
 }
 
 
-def _normalize_sandbox_type(v: Any) -> Any:
-    """Normalize camelCase type values to kebab-case for sandbox policies."""
-    if isinstance(v, dict) and "type" in v:
-        v = dict(v)  # shallow copy to avoid mutating input
-        v["type"] = _SANDBOX_TYPE_ALIASES.get(v["type"], v["type"])
-        # Also normalize nested read_only_access / readOnlyAccess
-        for key in ("read_only_access", "readOnlyAccess", "access"):
-            nested = v.get(key)
-            if isinstance(nested, dict) and "type" in nested:
-                nested = dict(nested)
-                nested["type"] = _READ_ONLY_ACCESS_TYPE_ALIASES.get(nested["type"], nested["type"])
-                v[key] = nested
-    return v
-
-
 def _sandbox_policy_discriminator(v: Any) -> str:
     if isinstance(v, dict):
         raw_type = v.get("type", "")
