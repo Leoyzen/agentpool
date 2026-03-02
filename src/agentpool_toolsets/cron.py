@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING, Self
 
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
+from agentpool.utils.time_utils import datetime_to_ms
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from types import TracebackType
 
     from agentpool.tools.base import Tool
     from agentpool_bot.cron.cron_types import CronSchedule
@@ -46,7 +48,12 @@ class CronTools(ResourceProvider):
         await self.service.start()
         return self
 
-    async def __aexit__(self, *args: object) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Stop the cron service."""
         self.service.stop()
 
@@ -111,7 +118,7 @@ class CronTools(ResourceProvider):
                 dt = datetime.fromisoformat(at)
             except ValueError:
                 return f"Error: invalid ISO datetime {at!r}"
-            schedule = CronSchedule(kind="at", at_ms=int(dt.timestamp() * 1000))
+            schedule = CronSchedule(kind="at", at_ms=datetime_to_ms(dt))
             delete_after = True
         else:
             return "Error: provide one of every_seconds, cron_expr, or at"

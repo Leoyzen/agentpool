@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from duty import duty  # pyright: ignore[reportMissingImports]
+from duty import duty  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 
 # Read configuration from copier-answers.yml
