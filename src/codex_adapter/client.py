@@ -14,83 +14,82 @@ import anyenv
 from pydantic import BaseModel, TypeAdapter
 
 from codex_adapter.exceptions import CodexProcessError, CodexRequestError
-from codex_adapter.models.base import JsonRpcRequest, JsonRpcResponse
-from codex_adapter.models.codex_types import HttpMcpServer, StdioMcpServer
-from codex_adapter.models.event_data import AgentMessageDeltaData, TurnErrorData
-from codex_adapter.models.events import (
+from codex_adapter.models import (
+    AgentMessageDeltaData,
     AgentMessageDeltaEvent,
-    TurnCompletedEvent,
-    TurnErrorEvent,
-    parse_codex_event,
-)
-from codex_adapter.models.input_item import TextInputItem
-from codex_adapter.models.request_params import (
     AppsListParams,
+    AppsListResponse,
     CancelLoginAccountParams,
+    CancelLoginAccountResponse,
     CommandExecParams,
+    CommandExecResponse,
     CommandExecutionRequestApprovalParams,
+    CommandExecutionRequestApprovalResponse,
     ConfigBatchWriteParams,
     ConfigReadParams,
+    ConfigReadResponse,
+    ConfigRequirementsReadResponse,
     ConfigValueWriteParams,
+    ConfigWriteResponse,
     DynamicToolCallParams,
+    DynamicToolCallResponse,
     ExperimentalFeatureListParams,
+    ExperimentalFeatureListResponse,
     ExternalAgentConfigDetectParams,
+    ExternalAgentConfigDetectResponse,
     ExternalAgentConfigImportParams,
     FeedbackUploadParams,
+    FeedbackUploadResponse,
     FileChangeRequestApprovalParams,
+    FileChangeRequestApprovalResponse,
     GetAccountParams,
+    GetAccountRateLimitsResponse,
+    GetAccountResponse,
+    HttpMcpServer,
     InitializeParams,
+    JsonRpcRequest,
+    JsonRpcResponse,
     ListMcpServerStatusParams,
+    ListMcpServerStatusResponse,
     LoginAccountParams,
+    LoginAccountResponse,
     McpServerOauthLoginParams,
+    McpServerOauthLoginResponse,
     ModelListParams,
+    ModelListResponse,
     ReviewStartParams,
+    ReviewStartResponse,
     SkillsConfigWriteParams,
     SkillsListParams,
+    SkillsListResponse,
+    StdioMcpServer,
+    TextInputItem,
     ThreadArchiveParams,
     ThreadCompactStartParams,
     ThreadForkParams,
     ThreadListParams,
+    ThreadListResponse,
+    ThreadLoadedListResponse,
     ThreadReadParams,
+    ThreadResponse,
     ThreadResumeParams,
     ThreadRollbackParams,
+    ThreadRollbackResponse,
     ThreadSetNameParams,
     ThreadStartParams,
     ThreadUnarchiveParams,
+    ThreadUnarchiveResponse,
     ToolRequestUserInputParams,
+    ToolRequestUserInputResponse,
+    TurnCompletedEvent,
+    TurnErrorData,
+    TurnErrorEvent,
     TurnInterruptParams,
     TurnStartParams,
-    TurnSteerParams,
-)
-from codex_adapter.models.responses import (
-    AppsListResponse,
-    CancelLoginAccountResponse,
-    CommandExecResponse,
-    CommandExecutionRequestApprovalResponse,
-    ConfigReadResponse,
-    ConfigRequirementsReadResponse,
-    ConfigWriteResponse,
-    DynamicToolCallResponse,
-    ExperimentalFeatureListResponse,
-    ExternalAgentConfigDetectResponse,
-    FeedbackUploadResponse,
-    FileChangeRequestApprovalResponse,
-    GetAccountRateLimitsResponse,
-    GetAccountResponse,
-    ListMcpServerStatusResponse,
-    LoginAccountResponse,
-    McpServerOauthLoginResponse,
-    ModelListResponse,
-    ReviewStartResponse,
-    SkillsListResponse,
-    ThreadListResponse,
-    ThreadLoadedListResponse,
-    ThreadResponse,
-    ThreadRollbackResponse,
-    ThreadUnarchiveResponse,
-    ToolRequestUserInputResponse,
     TurnStartResponse,
+    TurnSteerParams,
     TurnSteerResponse,
+    parse_codex_event,
 )
 
 
@@ -128,20 +127,11 @@ FileChangeApprovalHandler = Callable[
     [FileChangeRequestApprovalParams],
     Awaitable[FileChangeRequestApprovalResponse],
 ]
-UserInputHandler = Callable[
-    [ToolRequestUserInputParams],
-    Awaitable[ToolRequestUserInputResponse],
-]
-DynamicToolCallHandler = Callable[
-    [DynamicToolCallParams],
-    Awaitable[DynamicToolCallResponse],
-]
+UserInputHandler = Callable[[ToolRequestUserInputParams], Awaitable[ToolRequestUserInputResponse]]
+DynamicToolCallHandler = Callable[[DynamicToolCallParams], Awaitable[DynamicToolCallResponse]]
 
 # Map from wire method names to param/response model types
-_SERVER_REQUEST_TYPES: dict[
-    str,
-    tuple[type[ServerRequestParams], type[ServerRequestResponse]],
-] = {
+_SERVER_REQUEST_TYPES: dict[str, tuple[type[ServerRequestParams], type[ServerRequestResponse]]] = {
     SERVER_REQUEST_COMMAND_APPROVAL: (
         CommandExecutionRequestApprovalParams,
         CommandExecutionRequestApprovalResponse,
@@ -150,41 +140,33 @@ _SERVER_REQUEST_TYPES: dict[
         FileChangeRequestApprovalParams,
         FileChangeRequestApprovalResponse,
     ),
-    SERVER_REQUEST_USER_INPUT: (
-        ToolRequestUserInputParams,
-        ToolRequestUserInputResponse,
-    ),
-    SERVER_REQUEST_DYNAMIC_TOOL_CALL: (
-        DynamicToolCallParams,
-        DynamicToolCallResponse,
-    ),
+    SERVER_REQUEST_USER_INPUT: (ToolRequestUserInputParams, ToolRequestUserInputResponse),
+    SERVER_REQUEST_DYNAMIC_TOOL_CALL: (DynamicToolCallParams, DynamicToolCallResponse),
 }
 
 
 if TYPE_CHECKING:
     from typing import Self
 
-    from codex_adapter.models.codex_types import (
+    from codex_adapter.models import (
+        AppInfo,
         ApprovalPolicy,
+        CodexEvent,
+        ConfigEdit,
+        ExperimentalFeature,
+        ExternalAgentConfigMigrationItem,
         McpServerConfig,
         MergeStrategy,
+        ModelData,
         Personality,
         ReasoningEffort,
         ReasoningSummary,
         ReviewDelivery,
         SandboxMode,
+        SkillData,
         ThreadSortKey,
         ThreadSourceKind,
-    )
-    from codex_adapter.models.events import CodexEvent
-    from codex_adapter.models.input_item import TurnInputItem
-    from codex_adapter.models.misc import (
-        AppInfo,
-        ConfigEdit,
-        ExperimentalFeature,
-        ExternalAgentConfigMigrationItem,
-        ModelData,
-        SkillData,
+        TurnInputItem,
     )
     from codex_adapter.models.request_params import LoginType
 
@@ -335,10 +317,8 @@ class CodexClient:
         # Start reader task
         self._reader_task = asyncio.create_task(self._read_loop())
         # Initialize connection
-        init_params = InitializeParams.create(
-            name="agentpool-codex-adapter",
-            version=agentpool.__version__,
-        )
+        version = agentpool.__version__
+        init_params = InitializeParams.create(name="agentpool-codex-adapter", version=version)
         await self._send_request("initialize", init_params)
 
     async def stop(self) -> None:

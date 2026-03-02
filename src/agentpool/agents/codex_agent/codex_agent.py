@@ -17,6 +17,7 @@ from agentpool.agents.codex_agent.codex_converters import (
     codex_turn_status_to_finish_reason,
     convert_codex_stream,
     mcp_config_to_codex,
+    question_to_schema_property,
     to_model_info,
     to_session_data,
     turns_to_chat_messages,
@@ -57,7 +58,6 @@ if TYPE_CHECKING:
         McpServerConfig,
         MiscTurnStatusValue,
         ToolRequestUserInputParams,
-        ToolRequestUserInputQuestion,
         ToolRequestUserInputResponse,
     )
 
@@ -68,39 +68,6 @@ VALID_POLICIES = ["never", "on-request", "on-failure", "untrusted"]
 VALID_EFFORTS = ["low", "medium", "high", "xhigh"]
 VALID_SANDBOXES = ["read-only", "workspace-write", "danger-full-access", "external-sandbox"]
 VALID_PERSONALITIES = ["none", "friendly", "pragmatic"]
-
-
-def _question_to_schema_property(question: ToolRequestUserInputQuestion) -> dict[str, Any]:
-    """Convert a Codex user input question to a JSON Schema property.
-
-    Maps question options to enum values, and handles secret/free-text questions.
-
-    Args:
-        question: Codex question with optional options list
-
-    Returns:
-        JSON Schema property definition
-    """
-    prop: dict[str, Any] = {"title": question.header or question.id}
-    if question.question:
-        prop["description"] = question.question
-
-    if question.options and not question.is_other:
-        # Question with fixed options -> enum
-        prop["type"] = "string"
-        prop["enum"] = [opt.label for opt in question.options]
-    elif question.options and question.is_other:
-        # Options with an "other" free-text fallback -> enum + freeform
-        prop["type"] = "string"
-        prop["enum"] = [opt.label for opt in question.options]
-    else:
-        # Free-text question
-        prop["type"] = "string"
-
-    if question.is_secret:
-        prop["writeOnly"] = True
-
-    return prop
 
 
 class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
@@ -140,9 +107,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             # Build a JSON schema property for this question
             schema: dict[str, Any] = {
                 "type": "object",
-                "properties": {
-                    question.id: _question_to_schema_property(question),
-                },
+                "properties": {question.id: question_to_schema_property(question)},
                 "required": [question.id],
             }
 
@@ -150,12 +115,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             message = (
                 f"{question.header}: {question.question}" if question.header else question.question
             )
-
-            mcp_params = ElicitRequestFormParams(
-                message=message,
-                requestedSchema=schema,
-            )
-
+            mcp_params = ElicitRequestFormParams(message=message, requestedSchema=schema)
             result = await input_provider.get_elicitation(params=mcp_params)
 
             if isinstance(result, ErrorData):
