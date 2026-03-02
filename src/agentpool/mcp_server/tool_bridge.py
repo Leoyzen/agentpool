@@ -165,23 +165,19 @@ def _append_injection_to_result(result: Any, injection: str) -> Any:
     """
     from agentpool.tools.base import ToolResult as AgentPoolToolResult
 
-    if isinstance(result, str):
-        return f"{result}\n\n{injection}"
-
-    if isinstance(result, AgentPoolToolResult):
-        existing = result.content
-        if existing is None:
+    match result:
+        case str():
+            return f"{result}\n\n{injection}"
+        case AgentPoolToolResult(content=None):
             return replace(result, content=injection)
-        if isinstance(existing, str):
+        case AgentPoolToolResult(content=str() as existing):
             return replace(result, content=f"{existing}\n\n{injection}")
-        # existing is a list
-        return replace(result, content=[*existing, f"\n\n{injection}"])
-
-    if isinstance(result, dict):
-        return {**result, "injected_context": injection}
-
-    # For other types, return tuple with original and injection
-    return (result, {"injected_context": injection})
+        case AgentPoolToolResult(content=list() as existing):
+            return replace(result, content=[*existing, f"\n\n{injection}"])
+        case dict():
+            return {**result, "injected_context": injection}
+        case _:
+            return (result, {"injected_context": injection})
 
 
 def _extract_tool_call_id(context: Context | None) -> str:
