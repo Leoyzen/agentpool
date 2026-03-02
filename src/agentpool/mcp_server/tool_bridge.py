@@ -448,7 +448,7 @@ class ToolManagerBridge:
                 tc_id = _extract_tool_call_id(mcp_context)
                 # Derive per-call context from the run-scoped base context
                 base = self._bridge._current_context or self._bridge.node.get_context()
-                args = args.copy()
+                args_ = args.copy()
                 ctx = replace(base, tool_name=self._tool.name, tool_call_id=tc_id, tool_input=args_)
                 # Invoke with context - copy args since invoke_tool_with_context
                 # modifies kwargs in-place to inject context parameters
