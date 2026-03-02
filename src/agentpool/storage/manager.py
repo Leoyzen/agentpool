@@ -675,10 +675,9 @@ class StorageManager:
             return existing
         # Generate using core logic
         if metadata := await self._generate_title_core(session_id, f"user: {prompt[:500]}"):
-            title = metadata.title
             if on_title_generated:
-                on_title_generated(title)
-            return title
+                on_title_generated(metadata.title)
+            return metadata.title
         return None
 
     async def generate_session_title(
