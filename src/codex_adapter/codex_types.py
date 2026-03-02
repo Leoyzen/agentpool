@@ -66,6 +66,7 @@ ExperimentalFeatureStage = Literal["alpha", "beta"]
 ElicitationAction = Literal["accept", "decline", "cancel"]
 NetworkApprovalProtocol = Literal["http", "https", "socks5Tcp", "socks5Udp"]
 NetworkPolicyRuleAction = Literal["allow", "deny"]
+ExternalAgentConfigMigrationItemType = Literal["AGENTS_MD", "CONFIG", "SKILLS", "MCP_SERVER_CONFIG"]
 PlanType = Literal["free", "go", "plus", "pro", "team", "business", "enterprise", "edu", "unknown"]
 
 

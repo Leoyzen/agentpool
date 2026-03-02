@@ -17,6 +17,7 @@ from codex_adapter.codex_types import (
     CommandExecutionStatus,
     DynamicToolCallStatus,
     ExperimentalFeatureStage,
+    ExternalAgentConfigMigrationItemType,
     FileChangeApprovalDecision,
     InputModality,
     McpAuthStatusValue,
@@ -375,10 +376,18 @@ class ConfigValueWriteParams(CodexBaseModel):
     expected_version: str | None = None
 
 
+class ConfigEdit(CodexBaseModel):
+    """A single config edit operation."""
+
+    key_path: str
+    value: Any
+    merge_strategy: MergeStrategy
+
+
 class ConfigBatchWriteParams(CodexBaseModel):
     """Parameters for config/batchWrite request."""
 
-    edits: list[dict[str, Any]]  # ConfigEdit objects
+    edits: list[ConfigEdit]
     file_path: str | None = None
     expected_version: str | None = None
 
@@ -418,7 +427,7 @@ class ExternalAgentConfigDetectParams(CodexBaseModel):
 class ExternalAgentConfigImportParams(CodexBaseModel):
     """Parameters for externalAgentConfig/import request."""
 
-    migration_items: list[dict[str, Any]]
+    migration_items: list[ExternalAgentConfigMigrationItem]
 
 
 # ============================================================================
@@ -1349,10 +1358,36 @@ class ConfigWriteResponse(CodexBaseModel):
     overridden_metadata: dict[str, Any] | None = None
 
 
+class NetworkRequirements(CodexBaseModel):
+    """Network requirements configuration."""
+
+    enabled: bool | None = None
+    http_port: int | None = None
+    socks_port: int | None = None
+    allow_upstream_proxy: bool | None = None
+    dangerously_allow_non_loopback_proxy: bool | None = None
+    dangerously_allow_non_loopback_admin: bool | None = None
+    dangerously_allow_all_unix_sockets: bool | None = None
+    allowed_domains: list[str] | None = None
+    denied_domains: list[str] | None = None
+    allow_unix_sockets: list[str] | None = None
+    allow_local_binding: bool | None = None
+
+
+class ConfigRequirements(CodexBaseModel):
+    """Configuration requirements (from requirements.toml / MDM)."""
+
+    allowed_approval_policies: list[Any] | None = None  # AskForApproval tagged union
+    allowed_sandbox_modes: list[SandboxMode] | None = None
+    allowed_web_search_modes: list[str] | None = None
+    enforce_residency: str | None = None
+    network: NetworkRequirements | None = None
+
+
 class ConfigRequirementsReadResponse(CodexBaseModel):
     """Response for configRequirements/read request."""
 
-    requirements: dict[str, Any] | None = None
+    requirements: ConfigRequirements | None = None
 
 
 # ============================================================================
@@ -1367,14 +1402,28 @@ class AppBranding(CodexBaseModel):
     icon: str | None = None
 
 
+class AppReview(CodexBaseModel):
+    """App review status."""
+
+    status: str
+
+
+class AppScreenshot(CodexBaseModel):
+    """App screenshot information."""
+
+    url: str | None = None
+    file_id: str | None = None
+    user_prompt: str
+
+
 class AppMetadata(CodexBaseModel):
     """App metadata information."""
 
-    review: dict[str, Any] | None = None
+    review: AppReview | None = None
     categories: list[str] | None = None
     sub_categories: list[str] | None = None
     seo_description: str | None = None
-    screenshots: list[dict[str, Any]] | None = None
+    screenshots: list[AppScreenshot] | None = None
     developer: str | None = None
     version: str | None = None
     version_id: str | None = None
@@ -1447,9 +1496,9 @@ class FeedbackUploadResponse(CodexBaseModel):
 class ExternalAgentConfigMigrationItem(CodexBaseModel):
     """External agent config migration item."""
 
-    type: str
-    source_path: str
-    dest_path: str | None = None
+    item_type: ExternalAgentConfigMigrationItemType
+    description: str
+    cwd: str | None = None
 
 
 class ExternalAgentConfigDetectResponse(CodexBaseModel):
