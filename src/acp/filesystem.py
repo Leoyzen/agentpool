@@ -150,21 +150,22 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
 
     cat_file = sync_wrapper(_cat_file)  # pyright: ignore[reportAssignmentType]
 
-    async def _put_file(self, path: str, content: str | bytes, **kwargs: Any) -> None:
-        """Write file content via ACP session.
+    async def _put_file(
+        self, lpath: str, rpath: str, mode: str = "overwrite", **kwargs: Any
+    ) -> None:
+        """Upload a local file to the remote ACP filesystem.
 
         Args:
-            path: File path to write
-            content: Content to write (string or bytes)
+            lpath: Local filesystem path to read from
+            rpath: Remote path to write to (protocol prefix already stripped)
+            mode: Write mode
             **kwargs: Additional options
         """
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-
+        content = Path(lpath).read_bytes()
         try:
-            await self.requests.write_text_file(path, content)
+            await self.requests.write_text_file(rpath, content.decode("utf-8"))
         except Exception as e:
-            raise OSError(f"Could not write file {path}: {e}") from e
+            raise OSError(f"Could not write {lpath} to {rpath}: {e}") from e
 
     put_file = sync_wrapper(_put_file)
 
@@ -481,7 +482,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
             # Fall back to default fsspec implementation (walks tree with _ls)
             return await super()._find(path, maxdepth=maxdepth, withdirs=withdirs, **kwargs)  # type: ignore[no-any-return]
 
-        detail = kwargs.pop("detail", False)
+        detail = kwargs.get("detail", False)
         stripped = self._strip_protocol(path)
         search_path = stripped if isinstance(stripped, str) else stripped[0]
 

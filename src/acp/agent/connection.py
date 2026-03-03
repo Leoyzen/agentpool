@@ -101,7 +101,7 @@ class AgentSideConnection(Client):
             observers: list of StreamObserver instances to observe the connection
             debug_file: path to a file to write debug information to
         """
-        agent = to_agent(self) if callable(to_agent) else to_agent
+        agent = to_agent(self) if callable(to_agent) else to_agent  # ty: ignore[call-top-callable]
         handler = partial(_agent_handler, agent)
         store = DebuggingMessageStateStore(debug_file=debug_file) if debug_file else None
         self._conn = Connection(

@@ -7,7 +7,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from codex_adapter import CodexClient
-from codex_adapter.events import (
+from codex_adapter.models.events import (
     AgentMessageDeltaEvent,
     CommandExecutionOutputDeltaEvent,
     ItemCompletedEvent,

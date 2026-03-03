@@ -1,6 +1,7 @@
 # OpenCode API Compatibility Checklist
 
 This document tracks the implementation status of OpenCode-compatible API endpoints.
+Last audited against OpenCode source: **2026-02-24**
 
 ## Status Legend
 - [ ] Not implemented
@@ -16,6 +17,9 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 |--------|--------|------|-------------|
 | [x] | GET | `/global/health` | Get server health and version |
 | [x] | GET | `/global/event` | Get global events (SSE stream) |
+| [x] | GET | `/global/config` | Get global configuration |
+| [x] | PATCH | `/global/config` | Update global configuration |
+| [x] | POST | `/global/dispose` | Dispose all instances |
 
 ---
 
@@ -25,6 +29,7 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 |--------|--------|------|-------------|
 | [x] | GET | `/project` | List all projects |
 | [x] | GET | `/project/current` | Get the current project |
+| [x] | PATCH | `/project/{projectID}` | Update project (name, icon, commands) |
 | [x] | GET | `/path` | Get the current path |
 | [x] | GET | `/vcs` | Get VCS info for current project |
 
@@ -34,7 +39,7 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
-| [ ] | POST | `/instance/dispose` | Dispose the current instance |
+| [x] | POST | `/instance/dispose` | Dispose the current instance |
 
 ---
 
@@ -52,10 +57,19 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
-| [~] | GET | `/provider` | List all providers |
+| [~] | GET | `/provider` | List all providers (with all, default, connected) |
 | [x] | GET | `/provider/auth` | Get provider authentication methods |
 | [x] | POST | `/provider/{id}/oauth/authorize` | Authorize provider via OAuth |
 | [x] | POST | `/provider/{id}/oauth/callback` | Handle OAuth callback |
+
+---
+
+## Auth
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
+| [x] | PUT | `/auth/{providerID}` | Set authentication credentials |
+| [x] | DELETE | `/auth/{providerID}` | Remove authentication credentials |
 
 ---
 
@@ -63,13 +77,13 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
-| [x] | GET | `/session` | List all sessions |
+| [x] | GET | `/session` | List all sessions (supports `roots`, `start`, `search`, `limit` query params) |
 | [x] | POST | `/session` | Create a new session |
 | [x] | GET | `/session/status` | Get session status for all sessions |
 | [x] | GET | `/session/{id}` | Get session details |
 | [x] | DELETE | `/session/{id}` | Delete a session |
-| [x] | PATCH | `/session/{id}` | Update session properties |
-| [ ] | GET | `/session/{id}/children` | Get child sessions |
+| [x] | PATCH | `/session/{id}` | Update session properties (title, time.archived) |
+| [x] | GET | `/session/{id}/children` | Get child sessions |
 | [x] | GET | `/session/{id}/todo` | Get todo list for session |
 | [x] | POST | `/session/{id}/init` | Analyze app, create AGENTS.md |
 | [x] | POST | `/session/{id}/fork` | Fork session at message |
@@ -80,8 +94,8 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 | [x] | POST | `/session/{id}/summarize` | Summarize the session |
 | [x] | POST | `/session/{id}/revert` | Revert a message |
 | [x] | POST | `/session/{id}/unrevert` | Restore reverted messages |
-| [x] | GET | `/session/{id}/permissions` | Get pending permission requests |
-| [x] | POST | `/session/{id}/permissions/{permissionID}` | Respond to permission request |
+| [x] | GET | `/session/{id}/permissions` | Get pending permission requests (deprecated) |
+| [x] | POST | `/session/{id}/permissions/{permissionID}` | Respond to permission request (deprecated) |
 
 ---
 
@@ -89,12 +103,33 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
-| [x] | GET | `/session/{id}/message` | List messages in session |
+| [x] | GET | `/session/{id}/message` | List messages in session (supports `limit` query) |
 | [x] | POST | `/session/{id}/message` | Send message (wait for response) |
 | [x] | GET | `/session/{id}/message/{messageID}` | Get message details |
+| [x] | DELETE | `/session/{id}/message/{messageID}/part/{partID}` | Delete a message part |
+| [x] | PATCH | `/session/{id}/message/{messageID}/part/{partID}` | Update a message part |
 | [x] | POST | `/session/{id}/prompt_async` | Send message async (no wait) |
 | [x] | POST | `/session/{id}/command` | Execute slash command (MCP prompts) |
 | [x] | POST | `/session/{id}/shell` | Run shell command |
+
+---
+
+## Permissions
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
+| [x] | GET | `/permission` | List all pending permission requests |
+| [x] | POST | `/permission/{requestID}/reply` | Reply to permission (with `reply` + `message` fields) |
+
+---
+
+## Questions
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
+| [x] | GET | `/question` | List all pending question requests |
+| [x] | POST | `/question/{requestID}/reply` | Reply to question request |
+| [x] | POST | `/question/{requestID}/reject` | Reject question request |
 
 ---
 
@@ -106,12 +141,20 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 
 ---
 
+## Skills
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
+| [x] | GET | `/skill` | List all available skills |
+
+---
+
 ## Files
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
 | [x] | GET | `/find?pattern=` | Search for text in files |
-| [x] | GET | `/find/file?query=` | Find files by name |
+| [x] | GET | `/find/file?query=` | Find files by name (supports `dirs`, `type`, `limit`) |
 | [~] | GET | `/find/symbol?query=` | Find workspace symbols |
 | [x] | GET | `/file?path=` | List files and directories |
 | [x] | GET | `/file/content?path=` | Read a file |
@@ -125,10 +168,23 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 |--------|--------|------|-------------|
 | [x] | GET | `/experimental/tool/ids` | List all tool IDs |
 | [x] | GET | `/experimental/tool?provider=&model=` | List tools with schemas |
+| [x] | GET | `/experimental/resource` | List MCP resources from connected servers |
+| [x] | GET | `/experimental/session` | List sessions globally (cross-project, paginated) |
 
 ---
 
-## LSP, Formatters & MCP
+## Worktrees (Experimental)
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
+| [-] | POST | `/experimental/worktree` | Create git worktree (not needed) |
+| [-] | GET | `/experimental/worktree` | List worktrees (not needed) |
+| [-] | DELETE | `/experimental/worktree` | Remove worktree (not needed) |
+| [-] | POST | `/experimental/worktree/reset` | Reset worktree (not needed) |
+
+---
+
+## LSP & Formatters
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
@@ -138,9 +194,21 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 | [x] | GET | `/lsp/servers` | List available LSP servers |
 | [x] | GET | `/lsp/diagnostics` | Get LSP diagnostics (CLI-based) |
 | [x] | GET | `/formatter` | Get formatter status (stub) |
+
+---
+
+## MCP
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
 | [~] | GET | `/mcp` | Get MCP server status |
 | [x] | POST | `/mcp` | Add MCP server dynamically |
-| [x] | GET | `/experimental/resource` | List MCP resources from connected servers |
+| [x] | POST | `/mcp/{name}/connect` | Connect an MCP server |
+| [x] | POST | `/mcp/{name}/disconnect` | Disconnect an MCP server |
+| [x] | POST | `/mcp/{name}/auth` | Start MCP OAuth flow |
+| [x] | POST | `/mcp/{name}/auth/callback` | Complete MCP OAuth callback |
+| [x] | POST | `/mcp/{name}/auth/authenticate` | Full MCP OAuth (opens browser) |
+| [x] | DELETE | `/mcp/{name}/auth` | Remove MCP OAuth credentials |
 
 ---
 
@@ -175,7 +243,7 @@ This document tracks the implementation status of OpenCode-compatible API endpoi
 | [x] | GET | `/pty` | List all PTY sessions |
 | [x] | POST | `/pty` | Create a new PTY session |
 | [x] | GET | `/pty/{ptyID}` | Get PTY session details |
-| [x] | PATCH | `/pty/{ptyID}` | Update PTY session (resize, etc.) |
+| [x] | PUT | `/pty/{ptyID}` | Update PTY session (resize, etc.) |
 | [x] | DELETE | `/pty/{ptyID}` | Remove/kill PTY session |
 | [x] | WS | `/pty/{ptyID}/connect` | Connect to PTY (WebSocket) |
 
@@ -206,16 +274,10 @@ by broadcasting events via SSE.
 | [x] | POST | `/tui/clear-prompt` | Clear the prompt |
 | [x] | POST | `/tui/execute-command` | Execute a command |
 | [x] | POST | `/tui/show-toast` | Show toast notification |
+| [x] | POST | `/tui/publish` | Publish arbitrary TUI event |
+| [x] | POST | `/tui/select-session` | Navigate TUI to session |
 | [-] | GET | `/tui/control/next` | Wait for next control request (not needed) |
 | [-] | POST | `/tui/control/response` | Respond to control request (not needed) |
-
----
-
-## Auth
-
-| Status | Method | Path | Description |
-|--------|--------|------|-------------|
-| [ ] | PUT | `/auth/{id}` | Set authentication credentials |
 
 ---
 
@@ -232,8 +294,9 @@ All event types supported by the OpenCode protocol:
 | Status | Event Type | Description |
 |--------|------------|-------------|
 | [x] | `server.connected` | Server connected (sent on SSE connect) |
+| [x] | `server.heartbeat` | Heartbeat every 10s (keeps proxies alive) |
 | [-] | `global.disposed` | Global instance disposed (multi-project, not needed) |
-| [-] | `installation.updated` | Installation updated (auto-upgrade complete, not needed) |
+| [-] | `installation.updated` | Installation updated (auto-upgrade, not needed) |
 | [x] | `installation.update-available` | Update available (via `tui.toast.show` workaround) |
 | [x] | `project.updated` | Project metadata updated |
 | [-] | `server.instance.disposed` | Server instance disposed (multi-project, not needed) |
@@ -245,23 +308,29 @@ All event types supported by the OpenCode protocol:
 | [x] | `session.status` | Session status changed (running/idle/error) |
 | [x] | `session.idle` | Session became idle (deprecated but used by TUI) |
 | [x] | `session.compacted` | Session context was compacted/summarized |
-| [ ] | `session.diff` | Session file diff updated |
+| [x] | `session.diff` | Session file diff updated |
 | [x] | `session.error` | Session encountered an error |
 | [x] | `message.updated` | Message created or updated |
 | [x] | `message.removed` | Message removed (during revert) |
 | [x] | `message.part.updated` | Message part (text, tool, etc.) updated |
+| [x] | `message.part.delta` | Streaming text delta for a part |
 | [x] | `message.part.removed` | Message part removed (during revert) |
 | [x] | `permission.asked` | Tool permission requested (awaiting user response) |
+| [x] | `permission.updated` | Permission status updated |
 | [x] | `permission.replied` | Permission request resolved (user responded) |
+| [x] | `question.asked` | Question asked |
+| [x] | `question.replied` | Question answered |
+| [x] | `question.rejected` | Question rejected |
 | [x] | `todo.updated` | Todo list item updated |
-| [ ] | `file.edited` | File was edited |
+| [x] | `file.edited` | File was edited |
 | [x] | `file.watcher.updated` | File watcher detects project file changes |
 | [x] | `vcs.branch.updated` | VCS branch changed (polling-based) |
 | [ ] | `mcp.tools.changed` | MCP server tools changed |
-| [ ] | `command.executed` | Slash command executed |
+| [x] | `command.executed` | Slash command executed |
 | [x] | `tui.prompt.append` | Append text to TUI prompt input |
 | [x] | `tui.command.execute` | Execute a TUI command |
 | [x] | `tui.toast.show` | Show toast notification in TUI |
+| [x] | `tui.session.select` | Navigate TUI to session |
 | [x] | `pty.created` | PTY session created |
 | [x] | `pty.updated` | PTY session updated |
 | [x] | `pty.exited` | PTY process exited |
@@ -274,42 +343,6 @@ All event types supported by the OpenCode protocol:
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
 | [x] | GET | `/doc` | OpenAPI 3.1 specification |
-
----
-
-## Implementation Summary
-
-### Completed (TUI can connect!)
-- Health check and SSE events
-- Session CRUD operations
-- File listing and reading
-- Path/Project/VCS info
-- Config endpoint
-- All stubs needed for TUI to render
-
-### Next Steps
-1. **Agent Integration** - Wire up actual LLM calls for `/session/{id}/message`
-2. **Provider Discovery** - Populate `/config/providers` with real models
-3. **File Search** - Implement `/find` endpoints
-
----
-
-## Testing
-
-**Terminal 1:** Start server
-```bash
-duty opencode-server
-```
-
-**Terminal 2:** Attach TUI
-```bash
-duty opencode-tui
-```
-
-Or combined (less reliable for interactive use):
-```bash
-duty opencode
-```
 
 ---
 
@@ -330,24 +363,6 @@ duty opencode
 | 9 | `write` | ⚠️ **PARTIAL** | `filePath`, `content`, (TODO: `diagnostics`) | Code viewer, LSP errors |
 | 10 | `todowrite` | ✅ **DONE** | `todos` | **Interactive checkboxes** |
 | 11 | `question` | ✅ **DONE** | `answers` | **Q&A display** |
-
-### Summary
-- **Total:** 11 OpenCode UI tools
-- **Implemented:** 6/11 (✅)
-- **Partial:** 1/11 (⚠️)
-- **Missing:** 4/11 (❌)
-
-### Missing Tools for 100% Coverage
-1. **`glob`** - File pattern matching (HIGH priority - complements grep)
-2. **`task`** - Sub-agent execution tracking (HIGH priority - delegation)
-3. **`webfetch`** - Web content fetching (LOW priority - external)
-4. **`write` diagnostics** - LSP integration (MEDIUM priority)
-
-### Other OpenCode Tools (Not UI-Rendered)
-These exist in OpenCode but don't have special UI treatment:
-- `plan`, `batch`, `multiedit`, `patch`, `lsp`, `skill`, `codesearch`, `websearch`
-
-See [`OPENCODE_UI_TOOLS_COMPLETE.md`](file:///home/phil65/dev/oss/agentpool/OPENCODE_UI_TOOLS_COMPLETE.md) for detailed metadata specs.
 
 ---
 
@@ -397,5 +412,3 @@ _PARAM_NAME_MAP = {
     "line_hint": "lineHint",
 }
 ```
-
-

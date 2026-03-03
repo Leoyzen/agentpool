@@ -94,8 +94,7 @@ async def generate_directory_context(
     from agentpool.repomap.utils import is_important
 
     logger.info("Generating directory context", path=str(path))
-    if fs is None:
-        fs = AsyncLocalFileSystem()
+    fs = fs or AsyncLocalFileSystem()
     repo_map = RepoMap(fs, root_path=str(path), max_tokens=4096)
     try:
         # Find all source files in the directory (non-recursive for now)

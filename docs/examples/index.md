@@ -29,10 +29,6 @@ PyTest-style example patterns - demonstrates testing patterns and function-based
 
 Round-robin message passing between agents - shows how to implement circular communication patterns.
 
-### [Expert Selection](pick_experts/)
-
-Using `pick()` for expert selection - demonstrates dynamic agent selection based on expertise.
-
 ## Downloads & Workers
 
 ### [Download Agents](download_agents/)

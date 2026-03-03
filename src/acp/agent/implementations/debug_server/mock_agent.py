@@ -43,6 +43,7 @@ if TYPE_CHECKING:
         PromptRequest,
         ReadTextFileRequest,
         ResumeSessionRequest,
+        SetSessionConfigOptionRequest,
         WriteTextFileRequest,
     )
 
@@ -128,7 +129,7 @@ class MockAgent(Agent):
         """Mock session model change."""
         logger.info("Mock session model change")
 
-    async def set_session_config_option(self, params: Any) -> None:
+    async def set_session_config_option(self, params: SetSessionConfigOptionRequest) -> None:
         """Mock session config option change."""
         logger.info("Mock session config option change")
 

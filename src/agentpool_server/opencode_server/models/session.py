@@ -63,10 +63,18 @@ class SessionCreateRequest(OpenCodeBaseModel):
     title: str | None = None
 
 
+class SessionTimeUpdate(OpenCodeBaseModel):
+    """Time fields that can be updated on a session."""
+
+    archived: int | None = None
+    """Timestamp when session was archived (ms since epoch), or None to unarchive."""
+
+
 class SessionUpdateRequest(OpenCodeBaseModel):
     """Request body for updating a session."""
 
     title: str | None = None
+    time: SessionTimeUpdate | None = None
 
 
 class SessionForkRequest(OpenCodeBaseModel):

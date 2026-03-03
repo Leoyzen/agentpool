@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-import httpx
-from llmling_models.auth.anthropic_auth import (
-    AnthropicTokenStore,
-    build_authorization_url,
-    exchange_code_for_token,
-    generate_pkce,
-)
 from pydantic import BaseModel, HttpUrl
 
+from agentpool.log import get_logger
 from agentpool.mcp_server.manager import MCPManager
 from agentpool.resource_providers import AggregatingResourceProvider
 from agentpool_config.mcp_server import (
@@ -21,24 +15,59 @@ from agentpool_config.mcp_server import (
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
 )
+from agentpool_server.opencode_server.converters import to_mcp_status
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
     Agent,
+    AuthInfo,
     Command,
     LogRequest,
+    McpAuthorizationResponse,
     McpResource,
     MCPStatus,
+    ProviderAuthAuthorization,
+    ProviderAuthMethod,
+    Session,
+    SkillInfo,
+    WorktreeCreateRequest,
+    WorktreeInfo,
+    WorktreeRemoveRequest,
+    WorktreeResetRequest,
 )
-
-
-if TYPE_CHECKING:
-    from agentpool.common_types import MCPConnectionStatus
-    from agentpool_server.opencode_server.models.mcp import (
-        MCPConnectionStatus as OpenCodeMCPConnectionStatus,
-    )
+from agentpool_server.opencode_server.models.diagnostics import FormatterStatus
+from agentpool_server.opencode_server.models.events import ConnectionStatus, LspStatus
 
 
 router = APIRouter(tags=["agent"])
+
+
+class AddMCPServerRequest(BaseModel):
+    """Request to add an MCP server dynamically."""
+
+    command: str | None = None
+    """Command to run (for stdio servers)."""
+
+    args: list[str] | None = None
+    """Arguments for the command."""
+
+    url: str | None = None
+    """URL for HTTP/SSE servers."""
+
+    env: dict[str, str] | None = None
+    """Environment variables for the server."""
+
+
+def _find_mcp_manager(state: Any) -> MCPManager | None:
+    """Find the MCPManager from the agent's tool providers."""
+    for provider in state.agent.tools.external_providers:
+        match provider:
+            case MCPManager():
+                return provider
+            case AggregatingResourceProvider():
+                for nested in provider.providers:
+                    if isinstance(nested, MCPManager):
+                        return nested
+    return None
 
 
 @router.get("/agent")
@@ -68,6 +97,17 @@ async def list_agents(state: StateDep) -> list[Agent]:
     )
 
 
+@router.get("/skill")
+async def list_skills(state: StateDep) -> list[SkillInfo]:
+    """List all available skills.
+
+    Skills are specialized capabilities available to agents.
+    Currently returns an empty list as AgentPool doesn't have a skills system.
+    """
+    _ = state
+    return []
+
+
 @router.get("/command")
 async def list_commands(state: StateDep) -> list[Command]:
     """List available slash commands.
@@ -83,51 +123,9 @@ async def list_commands(state: StateDep) -> list[Command]:
 
 @router.get("/mcp")
 async def get_mcp_status(state: StateDep) -> dict[str, MCPStatus]:
-    """Get MCP server status.
-
-    Returns status for each connected MCP server.
-    """
-    # Use agent's get_mcp_server_info method which handles different agent types
+    """Get MCP server status."""
     server_info = await state.agent.get_mcp_server_info()
-
-    # Convert MCPServerStatus dataclass to MCPStatus response model
-    return {
-        name: MCPStatus(
-            name=status.name,
-            status=to_opencode_mcp_status(status.status),
-            error=status.error,
-        )
-        for name, status in server_info.items()
-    }
-
-
-def to_opencode_mcp_status(status: MCPConnectionStatus) -> OpenCodeMCPConnectionStatus:
-    mapping: dict[MCPConnectionStatus, OpenCodeMCPConnectionStatus] = {
-        "connected": "connected",
-        "disconnected": "disconnected",
-        "error": "error",
-        "pending": "disconnected",
-        "failed": "error",
-        "needs-auth": "disconnected",
-        "disabled": "disconnected",
-    }
-    return mapping[status]
-
-
-class AddMCPServerRequest(BaseModel):
-    """Request to add an MCP server dynamically."""
-
-    command: str | None = None
-    """Command to run (for stdio servers)."""
-
-    args: list[str] | None = None
-    """Arguments for the command."""
-
-    url: str | None = None
-    """URL for HTTP/SSE servers."""
-
-    env: dict[str, str] | None = None
-    """Environment variables for the server."""
+    return {name: to_mcp_status(status) for name, status in server_info.items()}
 
 
 @router.post("/mcp")
@@ -153,17 +151,14 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
         raise HTTPException(status_code=400, detail=detail)
 
     # Find the MCPManager and add the server
-    manager: MCPManager | None = None
     for provider in state.agent.tools.external_providers:
-        if isinstance(provider, MCPManager):
-            manager = provider
-            break
-        if isinstance(provider, AggregatingResourceProvider):
-            for nested in provider.providers:
-                if isinstance(nested, MCPManager):
-                    manager = nested
-                    break
-
+        match provider:
+            case AggregatingResourceProvider():
+                manager = next((i for i in provider.providers if isinstance(i, MCPManager)), None)
+            case MCPManager():
+                manager = provider
+            case _:
+                manager = None
     if manager is None:
         raise HTTPException(status_code=400, detail="No MCP manager available")
 
@@ -174,14 +169,101 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
         raise HTTPException(status_code=500, detail=f"Failed to add MCP server: {e}") from e
 
 
+@router.post("/mcp/{name}/connect")
+async def connect_mcp_server(name: str, state: StateDep) -> bool:
+    """Connect (start) an MCP server by name.
+
+    Finds the server config and sets up the connection via MCPManager.
+    """
+    manager = _find_mcp_manager(state)
+    if manager is None:
+        raise HTTPException(status_code=400, detail="No MCP manager available")
+    # Find matching server config
+    config = next((s for s in manager.servers if s.client_id == name), None)
+    if config is None:
+        raise HTTPException(status_code=404, detail=f"MCP server not found: {name}")
+    try:
+        await manager.setup_server(config)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect: {e}") from e
+    else:
+        return True
+
+
+@router.post("/mcp/{name}/disconnect")
+async def disconnect_mcp_server(name: str, state: StateDep) -> bool:
+    """Disconnect (stop) an MCP server by name.
+
+    Removes the provider from the manager's active providers.
+    """
+    manager = _find_mcp_manager(state)
+    if manager is None:
+        raise HTTPException(status_code=400, detail="No MCP manager available")
+    # Find and remove the matching provider
+    provider = next((p for p in manager.providers if p.name.endswith(f"_{name}")), None)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"MCP server not found: {name}")
+    try:
+        await provider.__aexit__(None, None, None)
+        manager.providers.remove(provider)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to disconnect: {e}") from e
+    else:
+        return True
+
+
+@router.post("/mcp/{name}/auth")
+async def start_mcp_auth(name: str, state: StateDep) -> McpAuthorizationResponse:
+    """Start OAuth authentication flow for an MCP server.
+
+    Returns the authorization URL to open in a browser.
+    """
+    _ = state
+    # MCP OAuth is not yet supported in AgentPool's MCP implementation
+    raise HTTPException(status_code=501, detail=f"MCP OAuth not yet supported for: {name}")
+
+
+@router.post("/mcp/{name}/auth/callback")
+async def mcp_auth_callback(
+    name: str,
+    state: StateDep,
+    code: str | None = None,
+) -> MCPStatus:
+    """Complete OAuth authentication for an MCP server."""
+    _ = state, code
+    raise HTTPException(status_code=501, detail=f"MCP OAuth not yet supported for: {name}")
+
+
+@router.post("/mcp/{name}/auth/authenticate")
+async def mcp_auth_authenticate(name: str, state: StateDep) -> MCPStatus:
+    """Start OAuth flow and wait for callback (opens browser)."""
+    _ = state
+    raise HTTPException(status_code=501, detail=f"MCP OAuth not yet supported for: {name}")
+
+
+@router.delete("/mcp/{name}/auth")
+async def remove_mcp_auth(name: str, state: StateDep) -> dict[str, bool]:
+    """Remove OAuth credentials for an MCP server."""
+    _ = state
+    # Stub - no MCP OAuth credential storage yet
+    return {"success": True}
+
+
 @router.post("/log")
 async def log(request: LogRequest, state: StateDep) -> bool:
-    """Write a log entry.
-
-    TODO: Integrate with proper logging.
-    """
+    """Write a log entry."""
     _ = state  # unused for now
-    print(f"[{request.level}] {request.service}: {request.message}")
+    logger = get_logger(request.service)
+    extra = request.extra or {}
+    match request.level:
+        case "debug":
+            logger.debug(request.message, **extra)
+        case "info":
+            logger.info(request.message, **extra)
+        case "warn":
+            logger.warning(request.message, **extra)
+        case "error":
+            logger.error(request.message, **extra)
     return True
 
 
@@ -209,6 +291,91 @@ async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
         return {}
     else:
         return result
+
+
+@router.post("/experimental/worktree")
+async def create_worktree(request: WorktreeCreateRequest, state: StateDep) -> WorktreeInfo:
+    """Create a new git worktree for isolated agent work."""
+    from agentpool.utils.worktree import create_worktree
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    try:
+        name, branch, directory = await create_worktree(repo_dir, request.name)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return WorktreeInfo(name=name, branch=branch, directory=directory)
+
+
+@router.get("/experimental/worktree")
+async def list_worktrees(state: StateDep) -> list[str]:
+    """List all sandbox worktree directories."""
+    from agentpool.utils.worktree import list_worktrees
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    return await list_worktrees(repo_dir)
+
+
+@router.delete("/experimental/worktree")
+async def remove_worktree(request: WorktreeRemoveRequest, state: StateDep) -> bool:
+    """Remove a git worktree and delete its branch."""
+    from agentpool.utils.worktree import remove_worktree
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    try:
+        await remove_worktree(repo_dir, request.directory)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return True
+
+
+@router.post("/experimental/worktree/reset")
+async def reset_worktree(request: WorktreeResetRequest, state: StateDep) -> bool:
+    """Reset a worktree branch to the primary default branch."""
+    from agentpool.utils.worktree import reset_worktree
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    try:
+        await reset_worktree(repo_dir, request.directory)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return True
+
+
+@router.get("/experimental/session")
+async def list_sessions_global(
+    state: StateDep,
+    directory: str | None = None,
+    roots: bool | None = None,
+    start: int | None = None,
+    cursor: int | None = None,
+    search: str | None = None,
+    limit: int | None = None,
+    archived: bool | None = None,
+) -> list[Session]:
+    """List sessions globally across all projects.
+
+    Supports pagination via cursor (timestamp-based).
+    """
+    from agentpool_server.opencode_server.converters import session_data_to_opencode
+
+    effective_limit = limit or 100
+    sessions: list[Session] = []
+    for data in await state.agent.list_sessions(
+        cwd=directory or state.agent.env.cwd, limit=effective_limit
+    ):
+        session = session_data_to_opencode(data)
+        sessions.append(session)
+    # Apply filters
+    if roots:
+        sessions = [s for s in sessions if s.parent_id is None]
+    if start is not None:
+        sessions = [s for s in sessions if s.time.updated >= start]
+    if cursor is not None:
+        sessions = [s for s in sessions if s.time.updated < cursor]
+    if search:
+        lower_search = search.lower()
+        sessions = [s for s in sessions if lower_search in s.title.lower()]
+    return sessions
 
 
 @router.get("/experimental/tool/ids")
@@ -256,8 +423,7 @@ async def list_tools_with_schemas(  # noqa: D417
         result = []
         for tool in await state.agent.tools.get_tools():
             # Extract parameters schema from the OpenAI function schema
-            schema = tool.schema
-            params = schema.get("function", {}).get("parameters", {})
+            params = tool.schema["function"]["parameters"]
             item = ToolListItem(id=tool.name, description=tool.description or "", parameters=params)
             result.append(item)
     except Exception:  # noqa: BLE001
@@ -267,27 +433,22 @@ async def list_tools_with_schemas(  # noqa: D417
 
 
 @router.get("/lsp")
-async def get_lsp_status(state: StateDep) -> list[dict[str, Any]]:
+async def get_lsp_status(state: StateDep) -> list[LspStatus]:
     """Get LSP server status.
 
     Returns status of all running LSP servers.
     """
-    servers = []
+    servers: list[LspStatus] = []
     for server_id, server_state in state.lsp_manager._servers.items():
-        # OpenCode TUI expects "connected" or "error" for status colors
-        status = "connected" if server_state.initialized else "error"
-        servers.append({
-            "id": server_id,
-            "name": server_id,
-            "status": status,
-            "language": server_state.language,
-            "root": server_state.root_uri,  # TUI uses "root" not "rootUri"
-        })
+        status: ConnectionStatus = "connected" if server_state.initialized else "error"
+        servers.append(
+            LspStatus(id=server_id, name=server_id, status=status, root=server_state.root_uri or "")
+        )
     return servers
 
 
 @router.get("/formatter")
-async def get_formatter_status(state: StateDep) -> list[dict[str, Any]]:
+async def get_formatter_status(state: StateDep) -> list[FormatterStatus]:
     """Get formatter status.
 
     Returns empty list - formatters not supported yet.
@@ -297,85 +458,24 @@ async def get_formatter_status(state: StateDep) -> list[dict[str, Any]]:
 
 
 @router.get("/provider/auth")
-async def get_provider_auth(state: StateDep) -> dict[str, list[dict[str, Any]]]:
+async def get_provider_auth(state: StateDep) -> dict[str, list[ProviderAuthMethod]]:
     """Get provider authentication methods.
 
     Returns available OAuth providers with their auth methods.
     """
-    _ = state
-    return {
-        "anthropic": [
-            {
-                "type": "oauth",
-                "label": "Connect Claude Max/Pro",
-                "method": "code",
-            }
-        ],
-        "copilot": [
-            {
-                "type": "oauth",
-                "label": "Connect GitHub Copilot",
-                "method": "device_code",
-            }
-        ],
-    }
-
-
-# Store for active OAuth flows (in production, use Redis or similar)
-_oauth_flows: dict[str, dict[str, Any]] = {}
+    return state.auth_service.methods()
 
 
 @router.post("/provider/{provider_id}/oauth/authorize")
-async def oauth_authorize(provider_id: str, state: StateDep) -> dict[str, Any]:
+async def oauth_authorize(provider_id: str, state: StateDep) -> ProviderAuthAuthorization:
     """Start OAuth authorization flow for a provider.
 
     Returns URL and instructions for the user to complete authorization.
     """
-    _ = state
-
-    if provider_id == "anthropic":
-        verifier, challenge = generate_pkce()
-        auth_url = build_authorization_url(verifier, challenge)
-        # Store verifier for callback
-        _oauth_flows[f"anthropic:{verifier}"] = {"verifier": verifier}
-        return {
-            "url": auth_url,
-            "instructions": "Sign in with your Anthropic account and copy the authorization code",
-            "method": "code",
-            "state": verifier,
-        }
-
-    if provider_id == "copilot":
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://github.com/login/device/code",
-                headers={
-                    "accept": "application/json",
-                    "editor-version": "Neovim/0.6.1",
-                    "editor-plugin-version": "copilot.vim/1.16.0",
-                    "content-type": "application/json",
-                    "user-agent": "GithubCopilot/1.155.0",
-                },
-                json={"client_id": "Iv1.b507a08c87ecfe98", "scope": "read:user"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        device_code = data["device_code"]
-        user_code = data["user_code"]
-        verification_uri = data["verification_uri"]
-        # Store device_code for callback
-        _oauth_flows[f"copilot:{device_code}"] = {"device_code": device_code}
-
-        return {
-            "url": verification_uri,
-            "instructions": f"Enter code: {user_code}",
-            "method": "device_code",
-            "user_code": user_code,
-            "device_code": device_code,
-        }
-
-    raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id}")
+    try:
+        return await state.auth_service.authorize(provider_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post("/provider/{provider_id}/oauth/callback")
@@ -385,72 +485,31 @@ async def oauth_callback(
     code: str | None = None,
     device_code: str | None = None,
     verifier: str | None = None,
-) -> dict[str, Any]:
-    """Handle OAuth callback/code exchange.
+) -> bool:
+    """Handle OAuth callback/code exchange."""
+    try:
+        return await state.auth_service.callback(
+            provider_id, code=code, device_code=device_code, verifier=verifier
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
-    For Anthropic: exchanges authorization code for tokens.
-    For Copilot: polls for token using device code.
-    """
-    _ = state
 
-    if provider_id == "anthropic":
-        if not code or not verifier:
-            raise HTTPException(
-                status_code=400, detail="Missing code or verifier for Anthropic OAuth"
-            )
+@router.put("/auth/{provider_id}")
+async def set_auth(provider_id: str, info: AuthInfo, state: StateDep) -> bool:
+    """Set authentication credentials for a provider."""
+    try:
+        return await state.auth_service.set_credentials(provider_id, info)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
-        try:
-            token = exchange_code_for_token(code, verifier)
-            store = AnthropicTokenStore()
-            store.save(token)
-            # Clean up flow state
-            _oauth_flows.pop(f"anthropic:{verifier}", None)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        else:
-            return {
-                "type": "success",
-                "access": token.access_token,
-                "refresh": token.refresh_token,
-                "expires": token.expires_at,
-            }
 
-    if provider_id == "copilot":
-        if not device_code:
-            raise HTTPException(status_code=400, detail="Missing device_code for Copilot OAuth")
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://github.com/login/oauth/access_token",
-                headers={
-                    "accept": "application/json",
-                    "editor-version": "Neovim/0.6.1",
-                    "editor-plugin-version": "copilot.vim/1.16.0",
-                    "content-type": "application/json",
-                    "user-agent": "GithubCopilot/1.155.0",
-                },
-                json={
-                    "client_id": "Iv1.b507a08c87ecfe98",
-                    "device_code": device_code,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                },
-            )
-            data = resp.json()
-
-        if "error" in data:
-            if data["error"] == "authorization_pending":
-                return {"type": "pending", "message": "Waiting for user authorization"}
-            detail = data.get("error_description", data["error"])
-            raise HTTPException(status_code=400, detail=detail)
-
-        if access_token := data.get("access_token"):
-            # Clean up flow state
-            _oauth_flows.pop(f"copilot:{device_code}", None)
-            return {
-                "type": "success",
-                "access": access_token,
-                "refresh": data.get("refresh_token"),
-                "expires": None,  # Copilot tokens don't expire the same way
-            }
-
-        return {"type": "pending", "message": "No token received yet"}
-    raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id}")
+@router.delete("/auth/{provider_id}")
+async def remove_auth(provider_id: str, state: StateDep) -> bool:
+    """Remove authentication credentials for a provider."""
+    try:
+        return await state.auth_service.remove_credentials(provider_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e

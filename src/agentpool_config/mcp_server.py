@@ -378,6 +378,10 @@ def parse_mcp_servers_json(data: dict[str, object]) -> list[MCPServerConfig]:
                     "url": "https://...",
                     "transport": "sse" | "http"  # optional, defaults to http
                 },
+                "stdio_server": {
+                    "command": "python",
+                    "args": ["-m", "my_server"]
+                },
                 ...
             }
         }
@@ -392,28 +396,31 @@ def parse_mcp_servers_json(data: dict[str, object]) -> list[MCPServerConfig]:
         ValueError: If data format is invalid or transport type unsupported
     """
     if "mcpServers" not in data:
-        msg = "MCP config must contain 'mcpServers' key"
-        raise ValueError(msg)
+        raise ValueError("MCP config must contain 'mcpServers' key")
 
     servers: list[MCPServerConfig] = []
     mcp_servers = data["mcpServers"]
     if not isinstance(mcp_servers, dict):
-        msg = "'mcpServers' must be an object"
-        raise TypeError(msg)
-
+        raise TypeError("'mcpServers' must be an object")
     for server_name, server_cfg in mcp_servers.items():
         assert isinstance(server_name, str)
+        assert isinstance(server_cfg, dict)
         match server_cfg:
+            case {"command": str(command), **rest}:
+                server: MCPServerConfig = StdioMCPServerConfig(
+                    name=server_name,
+                    command=command,
+                    args=rest.get("args", []),
+                    env=rest.get("env"),
+                )
             case {"transport": "sse", "url": url}:
-                server: MCPServerConfig = SSEMCPServerConfig(name=server_name, url=url)
+                server = SSEMCPServerConfig(name=server_name, url=url)
             case {"transport": "http", "url": url} | {"url": url}:  # Default to HTTP
                 server = StreamableHTTPMCPServerConfig(name=server_name, url=url)
             case {"transport": unknown}:
-                msg = f"Unsupported transport type for '{server_name}': {unknown}"
-                raise ValueError(msg)
+                raise ValueError(f"Unsupported transport type for '{server_name}': {unknown}")
             case _:
-                msg = f"Invalid config for MCP server '{server_name}': {server_cfg}"
-                raise ValueError(msg)
+                raise ValueError(f"Invalid config for MCP server '{server_name}': {server_cfg}")
 
         servers.append(server)
 

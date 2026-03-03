@@ -41,17 +41,7 @@ _pty_sessions: dict[str, PtySession] = {}
 
 
 def _get_pty_manager(state: StateDep) -> PtyManagerProtocol:
-    """Get PTY manager from agent's execution environment.
-
-    Args:
-        state: Server state with agent
-
-    Returns:
-        PTY manager from the agent's execution environment
-
-    Raises:
-        HTTPException: If PTY is not supported
-    """
+    """Get PTY manager from agent's execution environment."""
     try:
         return state.agent.env.get_pty_manager()
     except NotImplementedError as e:
@@ -95,11 +85,11 @@ async def create_pty(request: PtyCreateRequest, state: StateDep) -> PtyInfo:
     pty_id = info.id
     title = request.title or f"Terminal {pty_id[-4:]}"
     # Create session tracker for WebSocket subscribers
-    session = PtySession(pty_id=pty_id)
+    task = asyncio.create_task(_read_pty_output(manager, pty_id, state))
+    session = PtySession(pty_id=pty_id, read_task=task)
     _pty_sessions[pty_id] = session
     logger.info("PTY session registered", pty_id=pty_id, total_sessions=len(_pty_sessions))
     # Start background task to read output and distribute to subscribers
-    session.read_task = asyncio.create_task(_read_pty_output(manager, pty_id, state))
     pty_info = PtyInfo.from_exxec(info, title=title)
     # Broadcast PTY created event
     event = PtyCreatedEvent.create(info=pty_info)

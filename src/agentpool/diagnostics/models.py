@@ -319,8 +319,7 @@ class MarkupContent(TypedDict):
 
 
 # Union type for hover contents
-type MarkedString = str | MarkedStringDict
-type HoverContents = str | MarkupContent | MarkedStringDict | list[MarkedString]
+type HoverContents = str | MarkupContent | MarkedStringDict | list[str | MarkedStringDict]
 
 
 # Symbol kind mapping from LSP numeric values

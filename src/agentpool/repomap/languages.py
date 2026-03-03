@@ -18,7 +18,7 @@ def get_scm_fname(lang: str) -> Path | None:
     from importlib import resources
 
     fname = f"{lang}-tags.scm"
-    ref = resources.files("agentpool") / "queries" / "tree-sitter-language-pack" / fname
+    ref = resources.files("agentpool") / "repomap" / "queries" / "tree-sitter-language-pack" / fname
 
     # Try to get the path
     if isinstance(ref, os.PathLike):
@@ -45,8 +45,7 @@ def get_supported_languages() -> set[str]:
 
     supported = set()
     for lang in set(PARSERS.values()):
-        scm = get_scm_fname(lang)
-        if scm and scm.exists():
+        if (scm := get_scm_fname(lang)) and scm.exists():
             supported.add(lang)
     return supported
 

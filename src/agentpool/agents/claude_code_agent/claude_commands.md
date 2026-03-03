@@ -8,10 +8,10 @@ Compacts conversation history into a summary to free up context window.
 
 | Order | Event Type | Subtype | Key Data |
 |-------|-----------|---------|----------|
-| 1 | `SystemMessage` | `status` | `{'status': 'compacting'}` |
-| 2 | `SystemMessage` | `status` | `{'status': None}` (cleared) |
-| 3 | `SystemMessage` | `init` | Full session re-initialization |
-| 4 | `SystemMessage` | `compact_boundary` | `{'compact_metadata': {'trigger': 'manual'|'auto', 'pre_tokens': int}}` |
+| 1 | `InitSystemMessage` | `status` | `{'status': 'compacting'}` |
+| 2 | `InitSystemMessage` | `status` | `{'status': None}` (cleared) |
+| 3 | `InitSystemMessage` | `init` | Full session re-initialization |
+| 4 | `InitSystemMessage` | `compact_boundary` | `{'compact_metadata': {'trigger': 'manual'|'auto', 'pre_tokens': int}}` |
 | 5 | `UserMessage` | - | Full compacted summary text |
 | 6 | `UserMessage` | - | `<local-command-stdout>Compacted </local-command-stdout>` |
 | 7 | `ResultMessage` | `success` | Cost/usage info |
@@ -20,7 +20,7 @@ Compacts conversation history into a summary to free up context window.
 
 **`compact_boundary`** - Signals compaction occurred:
 ```python
-SystemMessage(subtype='compact_boundary', data={
+InitSystemMessage(subtype='compact_boundary', data={
     'compact_metadata': {
         'trigger': 'manual',  # 'manual' for /compact, 'auto' for automatic
         'pre_tokens': 15398   # token count before compaction
@@ -52,7 +52,7 @@ Returns current context window usage statistics.
 
 | Order | Event Type | Subtype | Key Data |
 |-------|-----------|---------|----------|
-| 1 | `SystemMessage` | `init` | Session initialization |
+| 1 | `InitSystemMessage` | `init` | Session initialization |
 | 2 | `UserMessage` | - | Markdown-formatted context stats |
 | 3 | `ResultMessage` | `success` | Completion info |
 

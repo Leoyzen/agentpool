@@ -67,7 +67,7 @@ Add this configuration to your Zed `settings.json`:
         "3.13",
         "agentpool[coding]@latest",
         "serve-acp",
-        "https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/docs/examples/pick_experts/config.yml"
+        "https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/docs/examples/create_docs/config.yml"
       ],
       "env": {
         "OPENAI_API_KEY": "your-api-key-here"

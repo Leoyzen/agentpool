@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+import webbrowser
 
 from pydantic import ConfigDict, Field, ImportString
 from schemez import Schema
@@ -83,21 +84,8 @@ class Job[TDeps, TResult = str](Schema):
     tools: list[ImportString[Callable[..., Any]] | ImportToolConfig] = Field(
         default_factory=list,
         examples=[
-            [
-                {
-                    "type": "import",
-                    "import_path": "webbrowser:open",
-                    "name": "web_browser",
-                }
-            ],
+            [ImportToolConfig(import_path=webbrowser.open, name="web_browser")],
             ["builtins:print"],
-            [
-                {
-                    "type": "import",
-                    "import_path": "builtins:print",
-                    "requires_confirmation": True,
-                }
-            ],
         ],
         title="Task tools",
     )

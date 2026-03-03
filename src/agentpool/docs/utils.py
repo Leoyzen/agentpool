@@ -172,11 +172,6 @@ def get_discriminator_values(union_type: Any) -> dict[str, type]:
 
 def discriminator_to_filename(discriminator: str) -> str:
     """Convert discriminator value to expected doc filename.
-
-    Examples:
-        "file_access" -> "file-access"
-        "vfs" -> "vfs"
-        "agent_management" -> "agent-management"
     """
     return discriminator.replace("_", "-")
 
@@ -209,25 +204,16 @@ def check_docs_for_union(
         ```
     """
     docs_dir = Path(docs_dir)
-
-    # Get discriminator values from union
     discriminators = get_discriminator_values(union_type)
-
-    # Get doc files (filename without .md, excluding index)
     doc_files = {f.stem for f in docs_dir.glob("*.md") if f.stem != index_filename}
-
-    # Convert discriminators to expected filenames
     expected_files = {discriminator_to_filename(d): d for d in discriminators}
-
     # Find mismatches
     missing_docs = {
         orig_discriminator: discriminators[orig_discriminator]
         for filename, orig_discriminator in expected_files.items()
         if filename not in doc_files
     }
-
     extra_docs = doc_files - set(expected_files.keys())
-
     return missing_docs, extra_docs
 
 
@@ -279,18 +265,15 @@ def tool_to_markdown(tool: Tool) -> str:
 
     if tool.description:
         # Strip Args/Returns sections since we have a parameters table
-        desc = _strip_docstring_sections(tool.description)
-        if desc:
+        if desc := _strip_docstring_sections(tool.description):
             lines.append(desc)
             lines.append("")
 
     # Get parameters from schema
     schema = tool.schema["function"]
     params_schema = schema.get("parameters", {})
-    properties = params_schema.get("properties", {})
     required = params_schema.get("required", [])
-
-    if properties:
+    if properties := params_schema.get("properties", {}):
         lines.append("**Parameters:**")
         lines.append("")
         lines.append("| Name | Type | Required | Description |")

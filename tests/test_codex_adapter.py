@@ -9,22 +9,20 @@ import pytest
 
 from codex_adapter import CodexClient, HttpMcpServer, StdioMcpServer
 from codex_adapter.client import _mcp_config_to_toml_inline
-from codex_adapter.events import (
+from codex_adapter.exceptions import CodexProcessError, CodexRequestError
+from codex_adapter.models.events import (
     AgentMessageDeltaEvent,
     get_text_delta,
     is_completed_event,
     is_delta_event,
     parse_codex_event,
 )
-from codex_adapter.exceptions import CodexProcessError, CodexRequestError
 
 
 def test_parse_codex_event_camel_to_snake():
     """Test camelCase JSON is converted to snake_case fields."""
-    event = parse_codex_event(
-        "item/agentMessage/delta",
-        {"delta": "Hello", "itemId": "123", "threadId": "t1", "turnId": "u1"},
-    )
+    params = {"delta": "Hello", "itemId": "123", "threadId": "t1", "turnId": "u1"}
+    event = parse_codex_event("item/agentMessage/delta", params)
     assert isinstance(event, AgentMessageDeltaEvent)
     assert event.data.item_id == "123"  # camelCase -> snake_case
     assert event.data.thread_id == "t1"
@@ -43,61 +41,42 @@ def test_parse_codex_event_legacy_v1_returns_none():
 
 def test_event_helper_functions():
     """Test is_delta_event, is_completed_event, get_text_delta."""
-    delta = parse_codex_event(
-        "item/agentMessage/delta",
-        {"delta": "text", "itemId": "1", "threadId": "t", "turnId": "u"},
-    )
-    completed = parse_codex_event(
-        "turn/completed",
-        {"threadId": "t", "turn": {"id": "u", "status": "completed", "items": []}},
-    )
+    params = {"delta": "text", "itemId": "1", "threadId": "t", "turnId": "u"}
+    delta = parse_codex_event("item/agentMessage/delta", params)
+    params = {"threadId": "t", "turn": {"id": "u", "status": "completed", "items": []}}
+    completed = parse_codex_event("turn/completed", params)
     assert delta
     assert completed
-
     assert is_delta_event(delta) is True
     assert is_completed_event(delta) is False
     assert get_text_delta(delta) == "text"
-
     assert is_delta_event(completed) is False
     assert is_completed_event(completed) is True
     assert get_text_delta(completed) == ""
 
 
-@pytest.mark.asyncio
 async def test_process_message_routes_response_to_future():
     """JSON-RPC responses are routed to pending request futures."""
     client = CodexClient()
     future: asyncio.Future[dict] = asyncio.Future()
     client._pending_requests[1] = future
-
-    await client._process_message({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": {"threadId": "thread-123"},
-    })
-
+    result = {"threadId": "thread-123"}
+    await client._process_message({"jsonrpc": "2.0", "id": 1, "result": result})
     assert future.result() == {"threadId": "thread-123"}
 
 
-@pytest.mark.asyncio
 async def test_process_message_error_raises():
     """JSON-RPC error responses set exception on future."""
     client = CodexClient()
     future: asyncio.Future[dict] = asyncio.Future()
     client._pending_requests[1] = future
-
-    await client._process_message({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "error": {"code": -32602, "message": "Invalid params"},
-    })
-
+    error = {"code": -32602, "message": "Invalid params"}
+    await client._process_message({"jsonrpc": "2.0", "id": 1, "error": error})
     with pytest.raises(CodexRequestError) as exc:
         future.result()
     assert exc.value.code == -32602
 
 
-@pytest.mark.asyncio
 async def test_process_message_notification_queued():
     """JSON-RPC notifications are parsed and queued."""
     client = CodexClient()
@@ -113,7 +92,6 @@ async def test_process_message_notification_queued():
     assert event.data.delta == "Hello"
 
 
-@pytest.mark.asyncio
 async def test_send_request_not_connected_raises():
     """Sending request before connecting raises CodexProcessError."""
     client = CodexClient()
@@ -134,3 +112,7 @@ def test_mcp_config_to_toml_http():
     result = _mcp_config_to_toml_inline("api", config)
     assert 'url = "http://localhost:8000"' in result
     assert 'bearer_token_env_var = "TOKEN"' in result
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-vv"])

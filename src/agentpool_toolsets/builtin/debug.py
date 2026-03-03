@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-import json
 import logging
 from typing import Any, Literal
 
+import anyenv
 from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
@@ -185,7 +185,6 @@ async def get_logs(
     """
     handler = get_memory_handler()
     records = handler.get_records(level=level, logger_filter=logger_filter, limit=limit)
-
     if not records:
         return "No log entries found matching criteria"
 
@@ -247,7 +246,6 @@ class DebugTools(StaticResourceProvider):
         """
         super().__init__(name=name)
         self._namespace_storage: dict[str, Any] = {}  # Stateful storage for introspection
-
         desc = (self.execute_introspection.__doc__ or "") + "\n\n" + INTROSPECTION_USAGE
         self._tools = [
             self.create_tool(
@@ -283,20 +281,17 @@ class DebugTools(StaticResourceProvider):
             """Save a value to persist between introspection calls."""
             self._namespace_storage[key] = value
 
-        state = self._namespace_storage.copy()
-
         namespace: dict[str, Any] = {
             "ctx": ctx,
             "run_ctx": run_ctx,
             "me": ctx.agent,
             "save": save,
-            "state": state,
+            "state": self._namespace_storage.copy(),
         }
         start_time = datetime.now(UTC)
         exit_code = 0
         error_msg = None
         result_str = None
-
         try:
             exec(code, namespace)
             if "main" not in namespace:
@@ -319,10 +314,7 @@ class DebugTools(StaticResourceProvider):
             result_str = error_msg
         finally:
             # Save to agent's internal filesystem
-            end_time = datetime.now(UTC)
-            duration = (end_time - start_time).total_seconds()
             timestamp = start_time.strftime("%Y%m%d_%H%M%S")
-
             # Write script file
             script_path = f"debug/scripts/{timestamp}_{title}.py"
             ctx.internal_fs.pipe(script_path, code.encode())
@@ -331,11 +323,11 @@ class DebugTools(StaticResourceProvider):
                 "title": title,
                 "timestamp": start_time.isoformat(),
                 "exit_code": exit_code,
-                "duration": duration,
+                "duration": (datetime.now(UTC) - start_time).total_seconds(),
                 "result": result_str,
                 "error": error_msg,
             }
             metadata_path = f"debug/scripts/{timestamp}_{title}.json"
-            ctx.internal_fs.pipe(metadata_path, json.dumps(metadata, indent=2).encode())
+            ctx.internal_fs.pipe(metadata_path, anyenv.dump_json(metadata, indent=True).encode())
         assert result_str
         return result_str

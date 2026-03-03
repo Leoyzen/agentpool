@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         NewSessionRequest,
         PromptRequest,
         ResumeSessionRequest,
+        SetSessionConfigOptionRequest,
         SetSessionModelRequest,
     )
 
@@ -73,6 +74,10 @@ class TestAgent(Agent):
 
     async def set_session_model(self, params: SetSessionModelRequest) -> None:
         return None
+
+    async def set_session_config_option(self, params: SetSessionConfigOptionRequest) -> None:
+        """Mock session config option change."""
+        return
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self.ext_calls.append((method, params))

@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
-    from agentpool.utils.streams import TodoTracker
+    from agentpool.utils.todos import TodoTracker
 
 
 VERSION = "0.1.0"
@@ -153,15 +153,15 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
                 agent_name=state.agent.name,
                 pool_id=state.pool.manifest.config_file_path,
             )
-            await state.pool.sessions.store.save(session_data)
+            await state.storage.save_session(session_data)
             # Broadcast session update to UI
             await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
         else:
             logger.warning("Session not found in state.sessions", session_id=session_id)
 
     # Connect to storage manager's metadata_generated signal
-    if state.pool.storage:
-        state.pool.storage.metadata_generated.connect(on_title_generated)
+    if state.storage:
+        state.storage.metadata_generated.connect(on_title_generated)
 
     # Watchers for VCS and file events
     branch_watcher: Any = None

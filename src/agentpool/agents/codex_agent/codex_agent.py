@@ -16,6 +16,7 @@ from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
     convert_codex_stream,
     mcp_config_to_codex,
+    to_finish_reason,
     to_model_info,
     to_session_data,
     turns_to_chat_messages,
@@ -50,9 +51,15 @@ if TYPE_CHECKING:
     from agentpool.sessions.models import SessionData
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
-    from codex_adapter import ApprovalPolicy, CodexClient, ReasoningEffort, SandboxMode
-    from codex_adapter.codex_types import McpServerConfig
-    from codex_adapter.events import CodexEvent
+    from codex_adapter import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
+    from codex_adapter.models import (
+        CodexEvent,
+        McpServerConfig,
+        MiscTurnStatusValue,
+        TokenUsageBreakdown,
+        ToolRequestUserInputParams,
+        ToolRequestUserInputResponse,
+    )
 
 
 logger = get_logger(__name__)
@@ -60,12 +67,76 @@ logger = get_logger(__name__)
 VALID_POLICIES = ["never", "on-request", "on-failure", "untrusted"]
 VALID_EFFORTS = ["low", "medium", "high", "xhigh"]
 VALID_SANDBOXES = ["read-only", "workspace-write", "danger-full-access", "external-sandbox"]
+VALID_PERSONALITIES = ["none", "friendly", "pragmatic"]
 
 
 class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     """MessageNode that wraps a Codex app-server instance."""
 
     AGENT_TYPE: ClassVar = "codex"
+
+    async def _on_user_input(
+        self,
+        params: ToolRequestUserInputParams,
+    ) -> ToolRequestUserInputResponse:
+        """Handle user input requests from Codex server.
+
+        Converts Codex's ToolRequestUserInputParams to MCP ElicitRequestFormParams,
+        delegates to the input provider's get_elicitation(), and converts back.
+
+        Args:
+            params: User input request with questions
+
+        Returns:
+            ToolRequestUserInputResponse with answers
+        """
+        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
+
+        from codex_adapter.models import (
+            ToolRequestUserInputAnswer as _Answer,
+            ToolRequestUserInputResponse as _Response,
+        )
+
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("User input callback invoked outside of an active run")
+
+        input_provider = self._tool_bridge._current_context.get_input_provider()
+        answers: dict[str, _Answer] = {}
+
+        for question in params.questions:
+            # Build a JSON schema property for this question
+            schema: dict[str, Any] = {
+                "type": "object",
+                "properties": {question.id: question.to_schema_property()},
+                "required": [question.id],
+            }
+
+            # Build display message from header + question
+            message = (
+                f"{question.header}: {question.question}" if question.header else question.question
+            )
+            mcp_params = ElicitRequestFormParams(message=message, requestedSchema=schema)
+            result = await input_provider.get_elicitation(params=mcp_params)
+
+            if isinstance(result, ErrorData):
+                # Error - return empty answers for remaining questions
+                answers[question.id] = _Answer(answers=[])
+                continue
+
+            if isinstance(result, ElicitResult):
+                if result.action == "accept" and result.content:
+                    raw_value = result.content.get(question.id)
+                    if isinstance(raw_value, list):
+                        answers[question.id] = _Answer(answers=raw_value)
+                    elif raw_value is not None:
+                        answers[question.id] = _Answer(answers=[str(raw_value)])
+                    else:
+                        answers[question.id] = _Answer(answers=[])
+                else:
+                    # User declined or cancelled
+                    answers[question.id] = _Answer(answers=[])
+
+        return _Response(answers=answers)
 
     def __init__(
         self,
@@ -91,6 +162,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         toolsets: list[ResourceProvider] | None = None,
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
+        personality: Personality | None = None,
     ) -> None:
         """Initialize Codex agent.
 
@@ -116,6 +188,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             toolsets: Resource providers for tools to expose via MCP bridge
             approval_policy: Approval policy for tool execution
             sandbox: Sandbox mode for execution
+            personality: Personality preset (none, friendly, pragmatic)
         """
         from agentpool.mcp_server.tool_bridge import ToolManagerBridge
         from agentpool_config.mcp_server import BaseMCPServerConfig
@@ -135,39 +208,28 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         )
 
         # Codex settings
-        self._model = model
-        self._reasoning_effort = reasoning_effort
         self._base_instructions = base_instructions
         self._developer_instructions = developer_instructions
         self._approval_policy: ApprovalPolicy = approval_policy or "never"
-        self._sandbox = sandbox
         self._toolsets = toolsets or []
         self._env_vars = env_vars or {}
         # Client state
         self._client: CodexClient | None = None
         self._sdk_session_id: str | None = session_id
-
-        # Process MCP servers
-        if mcp_servers:
-            processed: list[MCPServerConfig] = []
-            for server in mcp_servers:
-                if isinstance(server, str):
-                    processed.append(BaseMCPServerConfig.from_string(server))
-                else:
-                    processed.append(server)
-            self._external_mcp_servers = processed
-        else:
-            self._external_mcp_servers = []
-
+        self._external_mcp_servers = [
+            BaseMCPServerConfig.from_string(s) if isinstance(s, str) else s
+            for s in mcp_servers or []
+        ]
         # Extra MCP servers in Codex format (e.g., tool bridge)
         self._extra_mcp_servers: list[tuple[str, McpServerConfig]] = []
-        # Track current settings (for when they change mid-session)
+        # Mutable settings (can change mid-session via _set_mode)
         self._current_model: str | None = model
         self._current_effort: ReasoningEffort | None = reasoning_effort
         self._current_sandbox: SandboxMode | None = sandbox
+        self._current_personality: Personality | None = personality
         self._current_turn_id: str | None = None
         # Populated by capture_metadata during streaming, read after stream completes
-        self._token_usage_data: dict[str, int] | None = None
+        self._token_usage_data: TokenUsageBreakdown | None = None
         # Pass injection_manager for mid-run injection support
         self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
 
@@ -189,11 +251,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
         # Resolve output type from config
         responses = agent_pool.manifest.responses if agent_pool is not None else None
-        agent_output_type = config.output_type or str
-        if isinstance(agent_output_type, str) and agent_output_type != "str":
-            resolved_output_type = to_type(agent_output_type, responses)
-        else:
-            resolved_output_type = to_type(agent_output_type)
+        resolved_output_type = to_type(config.output_type or str, responses)
         # Merge config-level handlers with provided handlers
         config_handlers = config.get_event_handlers()
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
@@ -212,6 +270,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             developer_instructions=config.developer_instructions,
             approval_policy=config.approval_policy,
             sandbox=config.sandbox,
+            personality=config.personality,
             # MCP and toolsets
             mcp_servers=config.get_mcp_servers(),
             toolsets=config.get_tool_providers(),
@@ -225,7 +284,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _setup_toolsets(self) -> None:
         """Setup toolsets and start the tool bridge."""
-        from codex_adapter.codex_types import HttpMcpServer as CodexHttpMcpServer
+        from codex_adapter.models.codex_types import HttpMcpServer as CodexHttpMcpServer
 
         if not self._toolsets:
             return
@@ -237,7 +296,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Add bridge's MCP server config to extra servers
         if self._tool_bridge._actual_port is None:
             raise RuntimeError("Bridge not started - call start() first")
-        url = f"http://127.0.0.1:{self._tool_bridge.port}/mcp"
+        url = self._tool_bridge.url
         bridge_config = (self._tool_bridge.resolved_server_name, CodexHttpMcpServer(url=url))
         self._extra_mcp_servers.append(bridge_config)
 
@@ -252,11 +311,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         mcp_servers_dict = dict(self._extra_mcp_servers) | dict(
             mcp_config_to_codex(c) for c in self._external_mcp_servers
         )
-        # Create and connect client with MCP servers
-        self._client = CodexClient(mcp_servers=mcp_servers_dict)
+        # Create and connect client with MCP servers and elicitation callback
+        self._client = CodexClient(mcp_servers=mcp_servers_dict, on_user_input=self._on_user_input)
         await self._client.__aenter__()
         cwd = str(self.env.cwd or Path.cwd())
-
         # Resume existing session or start new thread
         if self._sdk_session_id:
             # Resume the specified thread
@@ -265,20 +323,20 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             self._sdk_session_id = thread.id
             self.log.info("Codex thread resumed", sdk_session_id=self._sdk_session_id, cwd=cwd)
             # Restore conversation history from resumed thread
-            if thread.turns:
-                chat_messages = turns_to_chat_messages(thread.turns)
-                self.conversation.chat_messages.clear()
-                self.conversation.chat_messages.extend(chat_messages)
-                self.log.info("Restored conversation history", turn_count=len(thread.turns))
+            chat_messages = turns_to_chat_messages(thread.turns)
+            self.conversation.chat_messages.clear()
+            self.conversation.chat_messages.extend(chat_messages)
+            self.log.info("Restored conversation history", turn_count=len(thread.turns))
         else:
             # Start a new thread
             response = await self._client.thread_start(
                 cwd=cwd,
-                model=self._model,
+                model=self._current_model,
                 base_instructions=self._base_instructions,
                 developer_instructions=self._developer_instructions,
                 sandbox=self._current_sandbox,
                 approval_policy=self._approval_policy,
+                personality=self._current_personality,
             )
             self._sdk_session_id = response.thread.id
             self.log.info("Codex thread started", sdk_session_id=self._sdk_session_id, cwd=cwd)
@@ -353,8 +411,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Stream events from Codex turn execution."""
         from agentpool.agents.events import PlanUpdateEvent
         from agentpool.messaging.messages import TokenCost
-        from codex_adapter.events import (
+        from codex_adapter.models.events import (
             ThreadTokenUsageUpdatedEvent,
+            TurnCompletedEvent,
             TurnStartedEvent,
         )
 
@@ -370,32 +429,35 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         if final_session_id is None:
             raise ValueError("session_id must be set")
         yield RunStartedEvent(session_id=final_session_id, run_id=run_id)
+        # Persist SDK session ID to storage for cross-referencing
+        if self.storage and self.session_id and self._sdk_session_id:
+            await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
         # Stream turn events with bridge context set
         accumulated_text: list[str] = []
         self._token_usage_data = None
+        self._turn_status: MiscTurnStatusValue | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
         output_schema = None if self._output_type is str else self._output_type
 
         async def capture_metadata(
             raw_events: AsyncIterator[CodexEvent],
         ) -> AsyncIterator[CodexEvent]:
-            """Wrapper to capture token usage and turn_id before event conversion."""
+            """Wrapper to capture token usage, turn_id, and turn status before event conversion."""
             async for event in raw_events:
                 match event:
                     case TurnStartedEvent(data=data):
                         self._current_turn_id = data.turn.id
+                    case TurnCompletedEvent(data=data):
+                        self._turn_status = data.turn.status
                     case ThreadTokenUsageUpdatedEvent(data=data):
-                        usage = data.token_usage.last
-                        self._token_usage_data = {
-                            "input_tokens": usage.input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "cache_read_tokens": usage.cached_input_tokens,
-                            "reasoning_tokens": usage.reasoning_output_tokens,
-                        }
+                        self._token_usage_data = data.token_usage.last
                 yield event
 
         try:
-            async with self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts):
+            # Resolve input provider: explicit parameter overrides agent default
+            effective_input_provider = input_provider or self._input_provider
+            run_context = self.get_context(data=deps, input_provider=effective_input_provider)
+            async with self._tool_bridge.set_run_context(run_context, prompt=prompts):
                 raw_stream = self._client.turn_stream(
                     self._sdk_session_id,
                     input_items,
@@ -404,21 +466,16 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     approval_policy=self._approval_policy,
                     sandbox_policy=self._current_sandbox,
                     output_schema=output_schema,
+                    personality=self._current_personality,
                 )
                 # Wrap to capture metadata (turn_id, token usage), then convert
                 async for native_event in convert_codex_stream(capture_metadata(raw_stream)):
                     yield native_event
 
                     # Handle plan updates - sync to pool.todos
-                    if (
-                        isinstance(native_event, PlanUpdateEvent)
-                        and self.agent_pool
-                        and self.agent_pool.todos
-                    ):
+                    if isinstance(native_event, PlanUpdateEvent) and self.agent_pool:
                         # Replace all entries in pool.todos with Codex plan
-                        self.agent_pool.todos.replace_all([
-                            (e.content, e.priority, e.status) for e in native_event.entries
-                        ])
+                        self.agent_pool.todos.replace_all(native_event.entries)
 
                     # Accumulate text for final message
                     if isinstance(native_event, PartDeltaEvent) and isinstance(
@@ -438,19 +495,19 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         cost_info: TokenCost | None = None
         request_usage = RequestUsage()
 
-        if self._token_usage_data:
+        if usage := self._token_usage_data:
             run_usage = RunUsage(
-                input_tokens=self._token_usage_data.get("input_tokens", 0),
-                output_tokens=self._token_usage_data.get("output_tokens", 0),
-                cache_read_tokens=self._token_usage_data.get("cache_read_tokens", 0),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_read_tokens=usage.cached_input_tokens,
                 cache_write_tokens=0,  # Codex doesn't provide cache write tokens
             )
             # TODO: Calculate actual cost - for now set to 0
             cost_info = TokenCost(token_usage=run_usage, total_cost=Decimal(0))
             request_usage = RequestUsage(
-                input_tokens=self._token_usage_data.get("input_tokens", 0),
-                output_tokens=self._token_usage_data.get("output_tokens", 0),
-                cache_read_tokens=self._token_usage_data.get("cache_read_tokens", 0),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_read_tokens=usage.cached_input_tokens,
                 cache_write_tokens=0,
             )
 
@@ -476,6 +533,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             cost_info=cost_info,
             usage=request_usage,
             model_name=self.model_name,
+            finish_reason=to_finish_reason(self._turn_status) if self._turn_status else None,
         )
 
         yield StreamCompleteEvent[OutputDataT](message=complete_msg)
@@ -483,7 +541,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
     @property
     def model_name(self) -> str:
         """Get current model name."""
-        return self._model or "unknown"
+        return self._current_model or "unknown"
 
     def to_structured[NewOutputDataT](
         self,
@@ -517,8 +575,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         Args:
             policy: Approval policy - "never", "on-request", "on-failure", or "untrusted"
         """
-        self._approval_policy = policy
-        self.log.info("Approval policy updated", policy=policy)
+        await self._set_mode(policy, "mode")
 
     async def _interrupt(self) -> None:
         """Call Codex turn_interrupt if there's an active turn."""
@@ -555,6 +612,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Get available mode categories for Codex agent (approval poliy, effort, model)."""
         from agentpool.agents.codex_agent.static_info import (
             EFFORT_MODES,
+            PERSONALITY_MODES,
             POLICY_MODES,
             SANDBOX_MODES,
         )
@@ -582,6 +640,13 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 current_mode_id=self._current_sandbox or "workspace-write",
                 category="other",
             ),
+            ModeCategory(
+                id="personality",
+                name="Personality",
+                available_modes=PERSONALITY_MODES,
+                current_mode_id=self._current_personality or "none",
+                category="other",
+            ),
         ]
         if models := await self.get_available_models():
             model_modes = [
@@ -598,7 +663,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     id="model",
                     name="Model",
                     available_modes=model_modes,
-                    current_mode_id=self._current_model or self._model or "",
+                    current_mode_id=self._current_model or "",
                     category="model",
                 )
             )
@@ -606,22 +671,27 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _set_mode(self, mode_id: str, category_id: str) -> None:
         """Handle approval_policy, reasoning_effort, and model mode switching."""
-        if category_id == "mode":
-            if mode_id not in VALID_POLICIES:
+        match category_id:
+            case "mode" if mode_id in VALID_POLICIES:
+                self._approval_policy = mode_id  # type: ignore[assignment]
+            case "mode":
                 raise UnknownModeError(mode_id, VALID_POLICIES)
-            self._approval_policy = mode_id  # type: ignore[assignment]
-        elif category_id == "thought_level":
-            if mode_id not in VALID_EFFORTS:
+            case "thought_level" if mode_id in VALID_EFFORTS:
+                self._current_effort = mode_id  # type: ignore[assignment]
+            case "thought_level":
                 raise UnknownModeError(mode_id, VALID_EFFORTS)
-            self._current_effort = mode_id  # type: ignore[assignment]
-        elif category_id == "model":
-            self._current_model = mode_id
-        elif category_id == "sandbox":
-            if mode_id not in VALID_SANDBOXES:
+            case "model":
+                self._current_model = mode_id
+            case "sandbox" if mode_id in VALID_SANDBOXES:
+                self._current_sandbox = mode_id  # type: ignore[assignment]
+            case "sandbox":
                 raise UnknownModeError(mode_id, VALID_SANDBOXES)
-            self._current_sandbox = mode_id  # type: ignore[assignment]
-        else:
-            raise UnknownCategoryError(category_id)
+            case "personality" if mode_id in VALID_PERSONALITIES:
+                self._current_personality = mode_id  # type: ignore[assignment]
+            case "personality":
+                raise UnknownModeError(mode_id, VALID_PERSONALITIES)
+            case _:
+                raise UnknownCategoryError(category_id)
         await self.update_state(config_id=category_id, value_id=mode_id)
 
     async def list_sessions(

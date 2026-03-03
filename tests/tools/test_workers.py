@@ -52,8 +52,9 @@ agents:
     display_name: Main Agent
     workers:
       - name: worker
+        type: agent
         pass_message_history: true
-      - name: specialist
+      - specialist
 
   worker:
     type: native

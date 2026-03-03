@@ -213,20 +213,6 @@ def convert_acp_content(content: Sequence[ToolCallContent] | None) -> list[ToolC
     return result
 
 
-def event_to_part(
-    event: RichAgentStreamEvent[Any],
-) -> TextPart | ThinkingPart | ToolCallPart | None:
-    match event:
-        case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
-            return TextPart(content=delta)
-        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)) if delta:
-            return ThinkingPart(content=delta)
-        case ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc_name, raw_input=tc_input):
-            return ToolCallPart(tool_name=tc_name, args=tc_input, tool_call_id=tc_id)
-        case _:
-            return None
-
-
 def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]:
     """Convert pydantic-ai UserContent to ACP ContentBlock format.
 

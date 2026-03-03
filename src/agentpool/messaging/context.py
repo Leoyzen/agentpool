@@ -56,6 +56,5 @@ class NodeContext[TDeps = object]:
     def prompt_manager(self) -> PromptManager:
         """Get prompt manager from pool."""
         if self.pool is None:
-            msg = "Cannot access prompt_manager: no agent pool available"
-            raise RuntimeError(msg)
+            raise RuntimeError("Cannot access prompt_manager: no agent pool available")
         return self.pool.prompt_manager

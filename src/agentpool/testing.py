@@ -28,7 +28,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import re
 import subprocess
+import time
 from typing import TYPE_CHECKING, Any, Literal
 
 
@@ -265,24 +267,15 @@ class CITestResult:
 
 def _run_gh(*args: str) -> str:
     """Run a gh CLI command and return output."""
-    result = subprocess.run(
-        ["gh", *args],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
 def _resolve_commit(commit: str) -> str:
     """Resolve a commit reference to a full SHA."""
     if commit.upper() == "HEAD":
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        cmd = ["git", "rev-parse", "HEAD"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return result.stdout.strip()
     return commit
 
@@ -346,14 +339,10 @@ async def run_ci_tests(
             print(result.summary())
         ```
     """
-    import time
-
     commit_sha = _resolve_commit(commit)
     start_time = time.monotonic()
-
     # Build repo flag if specified
     repo_args = ["-R", repo] if repo else []
-
     # Trigger the workflow with parameters
     workflow_args = [
         "workflow",
@@ -375,35 +364,16 @@ async def run_ci_tests(
         f"test_command={test_command or ''}",
         *repo_args,
     ]
-    _run_gh(*workflow_args)
-
-    # Wait a moment for the run to be created
-    await asyncio.sleep(2)
-
-    # Find the run ID
-    runs_json = _run_gh(
-        "run",
-        "list",
-        "--workflow=test-commit.yml",
-        "--json=databaseId,headSha,status,url",
-        "--limit=5",
-        *repo_args,
-    )
-    runs = json.loads(runs_json)
-
-    # Find the run for our commit
-    run_id: int | None = None
-    run_url = ""
-    for run in runs:
-        # Match by commit SHA (workflow dispatch uses the branch HEAD, but we can match)
-        if run["status"] in ("queued", "in_progress", "pending"):
-            run_id = run["databaseId"]
-            run_url = run["url"]
-            break
-
-    if run_id is None:
-        msg = f"Could not find workflow run for commit {commit_sha}"
+    output = _run_gh(*workflow_args)
+    # gh 2.87+ prints the run URL directly, e.g.:
+    #   https://github.com/owner/repo/actions/runs/12345
+    url_match = re.search(r"(https://github\.com/\S+/actions/runs/(\d+))", output)
+    if url_match is None:
+        msg = f"Could not parse workflow run URL from gh output: {output}"
         raise RuntimeError(msg)
+
+    run_url = url_match.group(1)
+    run_id = int(url_match.group(2))
 
     # Poll for completion
     while True:
@@ -420,18 +390,14 @@ async def run_ci_tests(
             *repo_args,
         )
         run_data = json.loads(run_json)
-
         if run_data["status"] == "completed":
             break
-
         await asyncio.sleep(poll_interval)
 
     # Parse job results
     duration = time.monotonic() - start_time
     jobs = run_data.get("jobs", [])
-
     run_test = test_command is not None and test_command != ""
-
     result = CITestResult(
         commit=commit_sha,
         run_id=run_id,
@@ -452,7 +418,6 @@ async def run_ci_tests(
     for job in jobs:
         name = job.get("name", "").lower()
         conclusion = job.get("conclusion", "pending")
-
         # Normalize conclusion to our type
         if conclusion not in ("success", "failure", "skipped", "cancelled"):
             conclusion = "pending"
@@ -508,12 +473,8 @@ class BisectResult:
 
 def _get_commits_between(good: str, bad: str) -> list[str]:
     """Get list of commits between good and bad (exclusive of good, inclusive of bad)."""
-    result = subprocess.run(
-        ["git", "rev-list", "--ancestry-path", f"{good}..{bad}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    cmd = ["git", "rev-list", "--ancestry-path", f"{good}..{bad}"]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     # Returns newest first, we want oldest first for bisection
     commits = result.stdout.strip().split("\n")
     return list(reversed(commits)) if commits[0] else []
@@ -571,7 +532,6 @@ async def bisect_ci(
     """
     good_sha = _resolve_commit(good_commit)
     bad_sha = _resolve_commit(bad_commit)
-
     # Get all commits in range
     commits = _get_commits_between(good_sha, bad_sha)
     if not commits:
@@ -602,7 +562,6 @@ async def bisect_ci(
             test_command=test_command,
         )
         tested.append(result)
-
         if result.all_passed:
             # This commit is good, search in upper half
             left = mid + 1
@@ -611,7 +570,6 @@ async def bisect_ci(
             right = mid
 
     first_bad_sha = commits[right]
-
     # Determine last good commit
     last_good_sha = good_sha if right == 0 else commits[right - 1]
 

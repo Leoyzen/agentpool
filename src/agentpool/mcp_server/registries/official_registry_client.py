@@ -119,6 +119,9 @@ class RegistryIcon(Schema):
     mime_type: str | None = Field(None, alias="mimeType")
     """MIME type of the icon (e.g., image/png)."""
 
+    sizes: list[str] = Field(default_factory=list)
+    """Icon size descriptors (e.g., '200x200')."""
+
 
 class RegistryServer(Schema):
     """MCP server entry from the registry."""

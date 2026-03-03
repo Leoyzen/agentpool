@@ -7,8 +7,6 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Protocol
 
-from acp.task import RpcTaskKind
-
 
 if TYPE_CHECKING:
     from acp.task.queue import MessageQueue
@@ -56,7 +54,7 @@ class DefaultMessageDispatcher(MessageDispatcher):
         try:
             async for task in self._queue:
                 try:
-                    if task.kind is RpcTaskKind.REQUEST:
+                    if task.kind == "request":
                         await self._dispatch_request(task.message)
                     else:
                         await self._dispatch_notification(task.message)

@@ -14,6 +14,7 @@ from agentpool.resource_providers.resource_info import ResourceInfo
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from types import TracebackType
     from typing import Literal
 
     from fastmcp.client.sampling import SamplingHandler
@@ -97,7 +98,12 @@ class MCPResourceProvider(ResourceProvider):
 
         return self
 
-    async def __aexit__(self, *args: object) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         try:
             try:
                 # Clean up exit stack (which includes MCP clients)

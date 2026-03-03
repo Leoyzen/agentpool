@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple, cast
+from typing import Any, Literal, NamedTuple, cast
 
 
 class Tag(NamedTuple):
@@ -12,7 +12,7 @@ class Tag(NamedTuple):
     fname: str
     line: int
     name: str
-    kind: str
+    kind: Literal["def", "ref"]
     end_line: int = -1
     signature_end_line: int = -1
 
@@ -20,7 +20,7 @@ class Tag(NamedTuple):
 type RankedTag = Tag | tuple[str]
 
 
-def get_tags_from_content(content: str, filename: str) -> list[Tag]:
+def get_tags_from_content(content: str, filename: str) -> list[Tag]:  # noqa: PLR0915
     """Extract tags from content without filesystem IO.
 
     Uses tree-sitter to parse the file and extract definitions and references.
@@ -43,10 +43,10 @@ def get_tags_from_content(content: str, filename: str) -> list[Tag]:
 
     from agentpool.repomap.languages import get_scm_fname
 
-    lang = cast(SupportedLanguage, filename_to_lang(filename))
-    if not lang:
+    val = filename_to_lang(filename)
+    if not val:
         return []
-
+    lang = cast(SupportedLanguage, val)
     try:
         language = get_language(lang)
         parser = get_parser(lang)
@@ -72,7 +72,7 @@ def get_tags_from_content(content: str, filename: str) -> list[Tag]:
 
     for node, tag in all_nodes:
         if tag.startswith("name.definition."):
-            kind = "def"
+            kind: Literal["def", "ref"] = "def"
         elif tag.startswith("name.reference."):
             kind = "ref"
         else:
@@ -91,18 +91,16 @@ def get_tags_from_content(content: str, filename: str) -> list[Tag]:
                     signature_end_line = child.start_point[0] - 1
                     break
             signature_end_line = max(signature_end_line, line)
-
-        tags.append(
-            Tag(
-                rel_fname=filename,
-                fname=filename,
-                name=name,
-                kind=kind,
-                line=line,
-                end_line=end_line,
-                signature_end_line=signature_end_line,
-            )
+        tag_obj = Tag(
+            rel_fname=filename,
+            fname=filename,
+            name=name,
+            kind=kind,
+            line=line,
+            end_line=end_line,
+            signature_end_line=signature_end_line,
         )
+        tags.append(tag_obj)
 
     if "ref" in saw or "def" in saw:
         return tags

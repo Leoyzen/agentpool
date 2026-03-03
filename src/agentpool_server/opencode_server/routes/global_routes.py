@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import anyenv
 from fastapi import APIRouter
-from sse_starlette.sse import EventSourceResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (  # noqa: TC001
+    Config,
     Event,
     HealthResponse,
     ServerConnectedEvent,
+    ServerHeartbeatEvent,
 )
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -46,7 +47,7 @@ def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
 
 async def _event_generator(
     state: ServerState, *, wrap_payload: bool = False
-) -> AsyncGenerator[dict[str, Any]]:
+) -> AsyncGenerator[ServerSentEvent]:
     """Generate SSE events."""
     queue: asyncio.Queue[Event] = asyncio.Queue()
     state.event_subscribers.append(queue)
@@ -67,25 +68,61 @@ async def _event_generator(
         connected = ServerConnectedEvent()
         data = _serialize_event(connected, wrap_payload=wrap_payload)
         logger.info("SSE: Sending connected event", data=data)
-        yield {"data": data}
-        # Stream events
+        yield ServerSentEvent(raw_data=data)
+        # Stream events with heartbeat
+        heartbeat = ServerHeartbeatEvent()
         while True:
-            event = await queue.get()
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=10.0)
+            except TimeoutError:
+                # Send heartbeat every 10s to prevent stalled proxy streams
+                data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
+                yield ServerSentEvent(raw_data=data)
+                continue
             data = _serialize_event(event, wrap_payload=wrap_payload)
             logger.info("SSE: Sending event", event_type=event.type)
-            yield {"data": data}
+            yield ServerSentEvent(raw_data=data)
     finally:
         state.event_subscribers.remove(queue)
         logger.info("SSE: Client disconnected", remaining_subscribers=len(state.event_subscribers))
 
 
-@router.get("/global/event")
-async def get_global_events(state: StateDep) -> EventSourceResponse:
+@router.get("/global/event", response_class=EventSourceResponse)
+async def get_global_events(state: StateDep) -> AsyncGenerator[ServerSentEvent]:
     """Get global events as SSE stream (uses payload wrapper)."""
-    return EventSourceResponse(_event_generator(state, wrap_payload=True), sep="\n")
+    async for event in _event_generator(state, wrap_payload=True):
+        yield event
 
 
-@router.get("/event")
-async def get_events(state: StateDep) -> EventSourceResponse:
+@router.get("/global/config")
+async def get_global_config(state: StateDep) -> Config:
+    """Get global configuration."""
+    return state.config
+
+
+@router.patch("/global/config")
+async def update_global_config(state: StateDep, config: Config) -> Config:
+    """Update global configuration."""
+    state.config = config
+    return state.config
+
+
+@router.post("/global/dispose")
+async def global_dispose(state: StateDep) -> bool:
+    """Dispose all instances and release resources."""
+    await state.cleanup_tasks()
+    return True
+
+
+@router.post("/instance/dispose")
+async def instance_dispose(state: StateDep) -> bool:
+    """Dispose the current instance."""
+    await state.cleanup_tasks()
+    return True
+
+
+@router.get("/event", response_class=EventSourceResponse)
+async def get_events(state: StateDep) -> AsyncGenerator[ServerSentEvent]:
     """Get events as SSE stream (no payload wrapper)."""
-    return EventSourceResponse(_event_generator(state, wrap_payload=False), sep="\n")
+    async for event in _event_generator(state, wrap_payload=False):
+        yield event

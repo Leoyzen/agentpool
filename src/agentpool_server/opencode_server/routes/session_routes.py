@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
 from fastapi import APIRouter, HTTPException
@@ -24,6 +24,7 @@ from agentpool_server.opencode_server.input_provider import OpenCodeInputProvide
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
     CommandRequest,
+    FileDiff,
     MessagePath,
     MessageTime,
     MessageUpdatedEvent,
@@ -48,11 +49,16 @@ from agentpool_server.opencode_server.models import (
     TextPart,
     TimeCreatedUpdated,
     Todo,
-    TokenCache,
     Tokens,
 )
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.events import PermissionResolvedEvent
+from agentpool_server.opencode_server.models.events import (
+    CommandExecutedEvent,
+    PermissionAskedProperties,
+    PermissionReplyRequest,
+    PermissionResolvedEvent,
+    SessionDiffEvent,
+)
 
 
 if TYPE_CHECKING:
@@ -101,24 +107,41 @@ router = APIRouter(prefix="/session", tags=["session"])
 
 
 @router.get("")
-async def list_sessions(state: StateDep) -> list[Session]:
+async def list_sessions(
+    state: StateDep,
+    roots: bool | None = None,
+    start: int | None = None,
+    search: str | None = None,
+    limit: int | None = None,
+) -> list[Session]:
     """List all sessions from the agent.
 
     Delegates to agent.list_sessions() which handles fetching sessions
     from the appropriate storage (pool storage, Claude storage, ACP server, etc.).
-    """
-    # Get sessions from the agent - filter by agent's cwd if available
-    cwd = state.agent.env.cwd
-    session_data_list = await state.agent.list_sessions(cwd=cwd)
 
+    Query params:
+        roots: Only return root sessions (no parentID)
+        start: Filter sessions updated on or after this timestamp (ms since epoch)
+        search: Filter sessions by title (case-insensitive)
+        limit: Maximum number of sessions to return
+    """
     # Convert to OpenCode Session format and cache
     sessions: list[Session] = []
-    for data in session_data_list:
+    for data in await state.agent.list_sessions(cwd=state.agent.env.cwd):
         session = session_data_to_opencode(data)
         # Cache in state for later use
         state.sessions[data.session_id] = session
         sessions.append(session)
-
+    # Apply filters
+    if roots:
+        sessions = [s for s in sessions if s.parent_id is None]
+    if start is not None:
+        sessions = [s for s in sessions if s.time.updated >= start]
+    if search:
+        lower_search = search.lower()
+        sessions = [s for s in sessions if lower_search in s.title.lower()]
+    if limit is not None:
+        sessions = sessions[:limit]
     return sessions
 
 
@@ -140,7 +163,7 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # Persist to storage
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    await state.pool.sessions.store.save(session_data)
+    await state.storage.save_session(session_data)
     # Cache in memory
     state.sessions[session_id] = session
     state.messages[session_id] = []
@@ -182,18 +205,24 @@ async def update_session(
     request: SessionUpdateRequest,
     state: StateDep,
 ) -> Session:
-    """Update session properties and persist changes."""
+    """Update session properties and persist changes.
+
+    Supports updating title and archiving via time.archived.
+    """
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    updates: dict[str, Any] = {}
     if request.title is not None:
-        time_ = TimeCreatedUpdated(created=session.time.created, updated=now_ms())
-        session = session.model_copy(update={"title": request.title, "time": time_})
+        updates["title"] = request.title
+    # Always update the 'updated' timestamp
+    updates["time"] = TimeCreatedUpdated(created=session.time.created, updated=now_ms())
+    session = session.model_copy(update=updates)
     state.sessions[session_id] = session  # Update cache
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    await state.pool.sessions.store.save(session_data)
+    await state.storage.save_session(session_data)
     await state.broadcast_event(SessionUpdatedEvent.create(session))
     return session
 
@@ -216,9 +245,19 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     state.session_status.pop(session_id, None)
     state.todos.pop(session_id, None)
     # Delete from storage
-    await state.pool.sessions.store.delete(session_id)
+    await state.storage.delete_session(session_id)
     await state.broadcast_event(SessionDeletedEvent.create(session_id))
     return True
+
+
+@router.get("/{session_id}/children")
+async def get_session_children(session_id: str, state: StateDep) -> list[Session]:
+    """Get all child sessions that were forked from the specified parent session."""
+    session = await get_or_load_session(state, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    # Search all cached sessions for children
+    return [sess for sess in state.sessions.values() if sess.parent_id == session_id]
 
 
 @router.post("/{session_id}/abort")
@@ -239,7 +278,6 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     # Update and broadcast session status to notify clients
     state.session_status[session_id] = SessionStatus(type="idle")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
-
     return True
 
 
@@ -309,7 +347,7 @@ async def fork_session(  # noqa: D417
         agent_name=state.agent.name,
         pool_id=state.pool.manifest.config_file_path,
     )
-    await state.pool.sessions.store.save(session_data)
+    await state.storage.save_session(session_data)
     # Cache in memory
     state.sessions[new_session_id] = forked_session
     state.session_status[new_session_id] = SessionStatus(type="idle")
@@ -453,7 +491,7 @@ async def get_session_diff(
     session_id: str,
     state: StateDep,
     message_id: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[FileDiff]:
     """Get file diffs for a session.
 
     Returns a list of file changes with unified diffs.
@@ -467,19 +505,8 @@ async def get_session_diff(
     if not file_ops.changes:
         return []
     # Optionally filter by message_id
-    changes = file_ops.get_changes_since_message(message_id) if message_id else file_ops.changes
-    # Format as list of diffs
-    return [
-        {
-            "path": change.path,
-            "operation": change.operation,
-            "diff": change.to_unified_diff(),
-            "timestamp": change.timestamp,
-            "agent_name": change.agent_name,
-            "message_id": change.message_id,
-        }
-        for change in changes
-    ]
+    changes = file_ops.get_changes_since(message_id) if message_id else file_ops.changes
+    return [FileDiff.from_file_change(change) for change in changes]
 
 
 @router.post("/{session_id}/shell")
@@ -507,9 +534,7 @@ async def run_shell_command(
         mode="shell",
         agent=request.agent,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
-        tokens=Tokens(cache=TokenCache(read=0, write=0), input=0, output=0, reasoning=0),
-        cost=0.0,
+        time=MessageTime(created=now),
     )
 
     # Initialize message with empty parts
@@ -521,11 +546,8 @@ async def run_shell_command(
     state.session_status[session_id] = SessionStatus(type="busy")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
     # Add step-start part
-    step_start = StepStartPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-    )
+    part_id = identifier.ascending("part")
+    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
     assistant_msg_with_parts.parts.append(step_start)
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # Execute the command
@@ -551,12 +573,8 @@ async def run_shell_command(
     )
     assistant_msg_with_parts.parts.append(text_part)
     await state.broadcast_event(PartUpdatedEvent.create(text_part))
-    step_finish = StepFinishPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-        tokens=Tokens(cache=TokenCache(read=0, write=0)),
-    )
+    part_id = identifier.ascending("part")
+    step_finish = StepFinishPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
     assistant_msg_with_parts.parts.append(step_finish)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time
@@ -570,14 +588,10 @@ async def run_shell_command(
     return assistant_msg_with_parts
 
 
-class PermissionResponse(OpenCodeBaseModel):
-    """Request body for responding to a permission request."""
-
-    reply: Literal["once", "always", "reject"]
-
-
 @router.get("/{session_id}/permissions")
-async def get_pending_permissions(session_id: str, state: StateDep) -> list[dict[str, Any]]:
+async def get_pending_permissions(
+    session_id: str, state: StateDep
+) -> list[PermissionAskedProperties]:
     """Get all pending permission requests for a session.
 
     Returns a list of pending permissions awaiting user response.
@@ -598,7 +612,7 @@ async def get_pending_permissions(session_id: str, state: StateDep) -> list[dict
 async def respond_to_permission(
     session_id: str,
     permission_id: str,
-    body: PermissionResponse,
+    body: PermissionReplyRequest,
     state: StateDep,
 ) -> bool:
     """Respond to a pending permission request.
@@ -621,15 +635,12 @@ async def respond_to_permission(
     resolved = input_provider.resolve_permission(permission_id, body.reply)
     if not resolved:
         raise HTTPException(status_code=404, detail="Permission not found or already resolved")
-
-    await state.broadcast_event(
-        PermissionResolvedEvent.create(
-            session_id=session_id,
-            request_id=permission_id,
-            reply=body.reply,
-        )
+    event = PermissionResolvedEvent.create(
+        session_id=session_id,
+        request_id=permission_id,
+        reply=body.reply,
     )
-
+    await state.broadcast_event(event)
     return True
 
 
@@ -657,12 +668,12 @@ async def summarize_session(  # noqa: PLR0915
     )
 
     from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging.compaction import compact_conversation, summarizing_context
 
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = state.messages.get(session_id, [])
-    if not messages:
+    if not state.messages.get(session_id):
         raise HTTPException(status_code=400, detail="No messages to summarize")
 
     # Determine model to use
@@ -681,9 +692,7 @@ async def summarize_session(  # noqa: PLR0915
         mode="summarize",
         agent="summarizer",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
-        tokens=Tokens(cache=TokenCache(read=0, write=0), input=0, output=0, reasoning=0),
-        cost=0.0,
+        time=MessageTime(created=now),
         summary=True,  # Mark as summary message
     )
 
@@ -695,26 +704,20 @@ async def summarize_session(  # noqa: PLR0915
     state.session_status[session_id] = SessionStatus(type="busy")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
     # Add step-start part
-    step_start = StepStartPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-    )
+    part_id = identifier.ascending("part")
+    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
     assistant_msg_with_parts.parts.append(step_start)
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
-
     # Step 1: Stream LLM summary generation FIRST (while we have full history)
     # The LLM sees the complete conversation and generates a continuation prompt.
     response_text = ""
-    input_tokens = 0
-    output_tokens = 0
+    usage = None
+    cost = 0.0
     text_part: TextPart | None = None
-
     try:
-        agent = state.agent
         # Stream events from the agent with the summarization prompt
         # This runs with FULL history - the summary is based on complete context
-        async for event in agent.run_stream(SUMMARIZE_PROMPT):
+        async for event in state.agent.run_stream(SUMMARIZE_PROMPT):
             match event:
                 # Text streaming start
                 case PartStartEvent(part=PydanticTextPart(content=delta)):
@@ -747,14 +750,13 @@ async def summarize_session(  # noqa: PLR0915
 
                 # Stream complete - extract token usage
                 case StreamCompleteEvent(message=msg) if msg and msg.usage:
-                    input_tokens = msg.usage.input_tokens or 0
-                    output_tokens = msg.usage.output_tokens or 0
+                    usage = msg.usage
+                    cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
 
     except Exception as e:  # noqa: BLE001
         response_text = f"Error generating summary: {e}"
 
     response_time = now_ms()
-
     # Create/update text part with final response
     if text_part is None:
         text_part = TextPart(
@@ -771,28 +773,20 @@ async def summarize_session(  # noqa: PLR0915
     # Final state will be: [compacted history] + [summary message]
     # The compacted history becomes the cached prefix for future LLM calls.
     try:
-        from agentpool.messaging.compaction import compact_conversation, summarizing_context
-
         # Get the compaction pipeline from the agent pool configuration
         pipeline = None
         if state.agent.agent_pool is not None:
             pipeline = state.agent.agent_pool.compaction_pipeline
-
         if pipeline is None:
             # Fall back to a default summarizing pipeline
             pipeline = summarizing_context()
 
         # Apply the compaction pipeline (modifies agent.conversation in place)
         await compact_conversation(pipeline, state.agent.conversation)
-
         # Persist compacted messages to storage, replacing the old ones
-        if state.pool.storage is not None:
+        if state.storage is not None:
             compacted_history = state.agent.conversation.get_history()
-            await state.pool.storage.replace_conversation_messages(
-                session_id,
-                compacted_history,
-            )
-
+            await state.storage.replace_conversation_messages(session_id, compacted_history)
         # Update in-memory OpenCode messages list with compacted versions
         # Keep only the summary message we just created
         state.messages[session_id] = [assistant_msg_with_parts]
@@ -800,38 +794,32 @@ async def summarize_session(  # noqa: PLR0915
     except Exception:  # noqa: BLE001
         # Compaction failure is not fatal - we still have the summary
         pass
-
+    tokens = Tokens.from_pydantic_ai(usage) if usage else Tokens()
     # Add step-finish part
     step_finish = StepFinishPart(
         id=identifier.ascending("part"),
         message_id=assistant_msg_id,
         session_id=session_id,
-        tokens=Tokens(
-            cache=TokenCache(read=0, write=0),
-            input=input_tokens,
-            output=output_tokens,
-            reasoning=0,
-        ),
+        tokens=tokens,
+        cost=cost,
     )
     assistant_msg_with_parts.parts.append(step_finish)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time and tokens
-    updated_assistant = assistant_message.model_copy(
-        update={
-            "time": MessageTime(created=now, completed=response_time),
-            "tokens": Tokens(
-                cache=TokenCache(read=0, write=0),
-                input=input_tokens,
-                output=output_tokens,
-                reasoning=0,
-            ),
-        }
-    )
+    msg_time = MessageTime(created=now, completed=response_time)
+    update = {"time": msg_time, "tokens": tokens, "cost": cost}
+    updated_assistant = assistant_message.model_copy(update=update)
     assistant_msg_with_parts.info = updated_assistant
     await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
     # Mark session as idle
     state.session_status[session_id] = SessionStatus(type="idle")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
+
+    # Broadcast session.diff event after summarization
+    file_ops = state.pool.file_ops
+    diffs = [FileDiff.from_file_change(change) for change in file_ops.changes]
+    await state.broadcast_event(SessionDiffEvent.create(session_id, diffs))
+
     return assistant_msg_with_parts
 
 
@@ -862,16 +850,6 @@ async def share_session(
     # Convert our messages to OpenCode Message format
     opencode_messages: list[Message] = []
     for msg_with_parts in messages:
-        info = msg_with_parts.info
-        # Map role to OpenCode sharing roles
-        role = info.role
-        if role == "model":  # type: ignore[comparison-overlap]
-            mapped_role: Literal["user", "assistant", "system"] = "assistant"
-        elif role in ("user", "assistant", "system"):
-            mapped_role = role
-        else:
-            mapped_role = "user"
-
         # Extract text parts
         parts = [
             MessagePart(type="text", text=part.text)
@@ -879,7 +857,7 @@ async def share_session(
             if isinstance(part, TextPart) and part.text
         ]
         if parts:
-            opencode_messages.append(Message(role=mapped_role, parts=parts))
+            opencode_messages.append(Message(role=msg_with_parts.info.role, parts=parts))
     if not opencode_messages:
         raise HTTPException(status_code=400, detail="No content to share")
 
@@ -940,10 +918,8 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
     # Store removed messages for unrevert
     state.reverted_messages[session_id] = messages_to_remove
-
     # Update message list - keep only messages before revert point
     state.messages[session_id] = messages_to_keep
-
     # Emit message.removed and part.removed events for all removed messages
     for msg in messages_to_remove:
         # Emit message.removed event
@@ -955,21 +931,20 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
     # Also revert file changes if any
     file_ops = state.pool.file_ops
-    if file_ops.changes:
-        revert_ops = file_ops.get_revert_operations(since_message_id=request.message_id)
-        if revert_ops:
-            fs = state.fs
-            for path, content in revert_ops:
-                try:
-                    if content is None:
-                        await fs._rm_file(path)
-                    else:
-                        content_bytes = content.encode("utf-8")
-                        await fs._pipe_file(path, content_bytes)
-                except Exception as e:
-                    detail = f"Failed to revert {path}: {e}"
-                    raise HTTPException(status_code=500, detail=detail) from e
-            file_ops.remove_changes_since_message(request.message_id)
+    if file_ops.changes and (
+        revert_ops := file_ops.get_revert_operations(since_message_id=request.message_id)
+    ):
+        for path, content in revert_ops:
+            try:
+                if content is None:
+                    await state.fs._rm_file(path)
+                else:
+                    content_bytes = content.encode("utf-8")
+                    await state.fs._pipe_file(path, content_bytes)
+            except Exception as e:
+                detail = f"Failed to revert {path}: {e}"
+                raise HTTPException(status_code=500, detail=detail) from e
+        file_ops.remove_changes_since(request.message_id)
 
     # Update session with revert info
     session = state.sessions[session_id]
@@ -979,6 +954,12 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
     # Broadcast session update
     await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
+
+    # Broadcast session.diff event with current file diffs
+    file_ops = state.pool.file_ops
+    diffs = [FileDiff.from_file_change(change) for change in file_ops.changes]
+    await state.broadcast_event(SessionDiffEvent.create(session_id, diffs))
+
     return updated_session
 
 
@@ -1008,7 +989,6 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
     for msg in reverted_messages:
         # Emit message.updated event
         await state.broadcast_event(MessageUpdatedEvent.create(msg.info))
-
         # Emit part.updated events for all parts
         for part in msg.parts:
             await state.broadcast_event(PartUpdatedEvent.create(part))
@@ -1020,14 +1000,13 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
     file_ops = state.pool.file_ops
     if file_ops.reverted_changes:
         unrevert_ops = file_ops.get_unrevert_operations()
-        fs = state.fs
         for path, content in unrevert_ops:
             try:
                 if content is None:
-                    await fs._rm_file(path)
+                    await state.fs._rm_file(path)
                 else:
                     content_bytes = content.encode("utf-8")
-                    await fs._pipe_file(path, content_bytes)
+                    await state.fs._pipe_file(path, content_bytes)
             except Exception as e:
                 detail = f"Failed to unrevert {path}: {e}"
                 raise HTTPException(status_code=500, detail=detail) from e
@@ -1105,9 +1084,7 @@ async def execute_command(  # noqa: PLR0915
         mode="command",
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
-        tokens=Tokens(cache=TokenCache(read=0, write=0), input=0, output=0, reasoning=0),
-        cost=0.0,
+        time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
@@ -1160,8 +1137,6 @@ async def execute_command(  # noqa: PLR0915
         id=identifier.ascending("part"),
         message_id=assistant_msg_id,
         session_id=session_id,
-        tokens=Tokens(cache=TokenCache()),
-        cost=0.0,
     )
     assistant_msg_with_parts.parts.append(step_finish)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
@@ -1173,4 +1148,15 @@ async def execute_command(  # noqa: PLR0915
     # Mark session as idle
     state.session_status[session_id] = SessionStatus(type="idle")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
+
+    # Broadcast command.executed event
+    await state.broadcast_event(
+        CommandExecutedEvent.create(
+            name=request.command,
+            session_id=session_id,
+            arguments=request.arguments or "",
+            message_id=assistant_msg_id,
+        )
+    )
+
     return assistant_msg_with_parts

@@ -57,23 +57,20 @@ MCPConnectionStatus = Literal[
 
 @dataclass(frozen=True, slots=True)
 class MCPServerStatus:
-    """Status information for an MCP server.
-
-    Attributes:
-        name: Server name/identifier
-        status: Connection status
-        server_type: Transport type (stdio, sse, http)
-        error: Error message if status is "error"
-        server_name: Self-reported server name
-        server_version: Self-reported server version
-    """
+    """Status information for an MCP server."""
 
     name: str
+    """Server name/identifier."""
     status: MCPConnectionStatus
+    """Connection status."""
     server_type: str = "unknown"
+    """Transport type (stdio, sse, http)."""
     error: str | None = None
+    """Error message if status is "error"."""
     server_name: str | None = None
+    """Self-reported server name."""
     server_version: str | None = None
+    """Self-reported server version."""
 
 
 NodeName = str
@@ -103,18 +100,16 @@ class PathReference:
     Used to defer file/directory context resolution to the prompt conversion layer.
     The ACP layer (and other protocol adapters) emit these instead of eagerly
     reading files. Resolution happens in convert_prompts().
-
-    Attributes:
-        path: Filesystem path string
-        fs: Optional async filesystem for reading (None = local filesystem)
-        mime_type: Optional MIME type hint from the protocol layer
-        display_name: Optional display name (e.g. "@converters.py")
     """
 
     path: str
+    """Filesystem path string."""
     fs: AsyncFileSystem | None = None
+    """Optional async filesystem for reading (None = local filesystem)."""
     mime_type: str | None = None
+    """Optional MIME type hint from the protocol layer."""
     display_name: str | None = None
+    """Optional display name (e.g. "@converters.py")."""
 
 
 PromptCompatible = AnyPromptType | JoinablePathLike | PathReference

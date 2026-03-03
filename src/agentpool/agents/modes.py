@@ -23,6 +23,7 @@ ModeCategoryId = Literal[
     "mode",  # Session mode / permissions / approval policy
     "model",  # Model selection
     "thought_level",  # Thinking/reasoning effort level
+    "personality",  # Personality preset
 ]
 
 

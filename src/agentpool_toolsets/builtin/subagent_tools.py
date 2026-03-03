@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai import ModelRetry
 from pydantic_ai.messages import TextPartDelta, ThinkingPartDelta
+from upathtools.filesystems.base import WrapperFileSystem
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import PartDeltaEvent, StreamCompleteEvent, SubAgentEvent
@@ -21,9 +22,10 @@ from agentpool.tools.exceptions import ToolError
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from fsspec.implementations.memory import MemoryFileSystem
+    from fsspec.asyn import AsyncFileSystem
 
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import SubAgentType
 
 
 logger = get_logger(__name__)
@@ -50,11 +52,12 @@ def _generate_task_id(description: str) -> str:
 async def _stream_task(
     ctx: AgentContext,
     source_name: str,
-    source_type: Literal["agent", "team_parallel", "team_sequential"],
+    source_type: SubAgentType,
     stream: AsyncIterator[RichAgentStreamEvent[Any]],
     *,
     batch_deltas: bool = False,
     depth: int = 1,
+    parent_tool_call_id: str | None = None,
 ) -> str:
     """Stream a task's execution, emitting SubAgentEvents into parent stream.
 
@@ -65,6 +68,7 @@ async def _stream_task(
         stream: Async iterator of stream events from agent.run_stream()
         batch_deltas: If True, batch consecutive text/thinking deltas for fewer UI updates
         depth: Nesting depth for nested task delegation
+        parent_tool_call_id: Tool call ID of the parent task that spawned this subagent
 
     Returns:
         Final text content from the stream
@@ -81,6 +85,7 @@ async def _stream_task(
                 source_type=event.source_type,
                 event=event.event,
                 depth=event.depth + depth,
+                parent_tool_call_id=event.parent_tool_call_id,
             )
             await ctx.events.emit_event(nested_event)
         else:
@@ -90,6 +95,7 @@ async def _stream_task(
                 source_type=source_type,
                 event=event,
                 depth=depth,
+                parent_tool_call_id=parent_tool_call_id,
             )
             await ctx.events.emit_event(subagent_event)
 
@@ -102,7 +108,7 @@ async def _stream_task(
 
 
 async def _stream_task_to_fs(
-    fs: MemoryFileSystem,
+    fs: AsyncFileSystem,
     task_id: str,
     source_name: str,
     stream: AsyncIterator[RichAgentStreamEvent[Any]],
@@ -126,20 +132,16 @@ async def _stream_task_to_fs(
             # Handle nested SubAgentEvents - unwrap inner event
             inner_event = event.event if isinstance(event, SubAgentEvent) else event
 
-            # Collect text deltas
-            if isinstance(inner_event, PartDeltaEvent) and inner_event.delta:
-                delta = inner_event.delta
-                if isinstance(delta, (TextPartDelta, ThinkingPartDelta)) and delta.content_delta:
-                    content_parts.append(delta.content_delta)
-                # Write incrementally (overwrite with accumulated content)
-                fs.pipe(output_path, "".join(content_parts).encode("utf-8"))
-
-            # Final content from StreamCompleteEvent
-            elif isinstance(inner_event, StreamCompleteEvent):
-                content = inner_event.message.content
-                if content:
-                    final_content = str(content)
-                    fs.pipe(output_path, final_content.encode("utf-8"))
+            match inner_event:
+                case (
+                    PartDeltaEvent(delta=TextPartDelta(content_delta=str(text)))
+                    | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=str(text)))
+                ) if text:
+                    content_parts.append(text)
+                    # Write incrementally (overwrite with accumulated content)
+                    await fs._pipe(output_path, "".join(content_parts).encode("utf-8"))
+                case StreamCompleteEvent(message=msg) if msg.content:
+                    await fs._pipe(output_path, str(msg.content).encode("utf-8"))
 
         logger.info(
             "Async task completed",
@@ -267,11 +269,13 @@ class SubagentTools(StaticResourceProvider):
         node = ctx.pool.nodes[agent_or_team]
         match node:
             case Team():
-                source_type: Literal["team_parallel", "team_sequential", "agent"] = "team_parallel"
+                source_type: SubAgentType = "team_parallel"
             case TeamRun():
                 source_type = "team_sequential"
             case BaseAgent():
                 source_type = "agent"
+            case _:
+                raise ValueError(f"Unexpected node type: {type(node)}")
 
         if not isinstance(node, SupportsRunStream):
             msg = f"Node {agent_or_team} does not support streaming"
@@ -292,7 +296,7 @@ class SubagentTools(StaticResourceProvider):
             # Create the task directory
             fs = ctx.internal_fs
             fs.mkdirs(f"/tasks/{task_id}", exist_ok=True)
-
+            fs = WrapperFileSystem(fs)
             # Start streaming to filesystem in background
             # Store task reference to prevent garbage collection
             task = asyncio.create_task(
@@ -322,4 +326,5 @@ class SubagentTools(StaticResourceProvider):
             source_type=source_type,
             stream=node.run_stream(prompt),
             batch_deltas=self._batch_stream_deltas,
+            parent_tool_call_id=ctx.tool_call_id,
         )

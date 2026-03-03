@@ -157,7 +157,7 @@ class Talk[TTransmittedData = Any]:
         from agentpool.talk import TeamTalk
 
         match other:
-            case Callable():
+            case Callable():  # ty: ignore[invalid-match-pattern]
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 if pool := self.source.agent_pool:
                     other.agent_pool = pool
@@ -258,7 +258,7 @@ class Talk[TTransmittedData = Any]:
         if self.transform_fn:
             processed_message = await execute(self.transform_fn, message)
         # 6. First pass: Determine target list
-        target_list: list[MessageNode[Any, Any]] = [
+        target_list = [
             target
             for target in self.targets
             if await self._evaluate_condition(
@@ -502,7 +502,7 @@ class TeamTalk[TTransmittedData = Any](list["Talk | TeamTalk"]):
         from agentpool.talk import TeamTalk
 
         match other:
-            case Callable():
+            case Callable():  # ty: ignore[invalid-match-pattern]
                 other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 for talk_ in self.iter_talks():
                     if pool := talk_.source.agent_pool:

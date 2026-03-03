@@ -9,6 +9,8 @@ from agentpool.agents.events import DiffContentItem, LocationContentItem
 
 
 if TYPE_CHECKING:
+    from clawd_code_sdk.models import ToolInput
+
     from agentpool.agents.events import ToolCallContentItem
     from agentpool.tools.base import ToolKind
 
@@ -27,7 +29,7 @@ class RichToolInfo:
     """Rich content items (diffs, text, etc.)."""
 
 
-def derive_rich_tool_info(name: str, input_data: dict[str, Any]) -> RichToolInfo:  # noqa: PLR0911, PLR0915
+def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> RichToolInfo:  # noqa: PLR0911, PLR0915
     """Derive rich display info from tool name and input arguments.
 
     Maps MCP tool names and their inputs to human-readable titles, kinds,
@@ -55,17 +57,15 @@ def derive_rich_tool_info(name: str, input_data: dict[str, Any]) -> RichToolInfo
     if tool_lower in ("read", "read_file"):
         path = input_data.get("file_path") or input_data.get("path", "")
         offset = input_data.get("offset") or input_data.get("line")
-        limit = input_data.get("limit")
-
         suffix = ""
-        if limit:
-            start = (offset or 0) + 1
-            end = (offset or 0) + limit
+        if limit := input_data.get("limit"):
+            start = (offset or 0) + 1  # type: ignore[operator]
+            end = (offset or 0) + limit  # type: ignore[operator]
             suffix = f" ({start}-{end})"
         elif offset:
-            suffix = f" (from line {offset + 1})"
+            suffix = f" (from line {offset + 1})"  # type: ignore[operator]
         title = f"Read {path}{suffix}" if path else "Read File"
-        locations = [LocationContentItem(path=path, line=offset or 0)] if path else []
+        locations = [LocationContentItem(path=path, line=offset or 0)] if path else []  # type: ignore[arg-type]
         return RichToolInfo(title=title, kind="read", locations=locations)
 
     # Write operations
@@ -75,8 +75,8 @@ def derive_rich_tool_info(name: str, input_data: dict[str, Any]) -> RichToolInfo
         return RichToolInfo(
             title=f"Write {path}" if path else "Write File",
             kind="edit",
-            locations=[LocationContentItem(path=path)] if path else [],
-            content=[DiffContentItem(path=path, old_text=None, new_text=content)] if path else [],
+            locations=[LocationContentItem(path=path)] if path else [],  # type: ignore[arg-type]
+            content=[DiffContentItem(path=path, old_text=None, new_text=content)] if path else [],  # type: ignore[arg-type]
         )
     # Edit operations
     if tool_lower in ("edit", "edit_file"):
@@ -86,22 +86,22 @@ def derive_rich_tool_info(name: str, input_data: dict[str, Any]) -> RichToolInfo
         return RichToolInfo(
             title=f"Edit {path}" if path else "Edit File",
             kind="edit",
-            locations=[LocationContentItem(path=path)] if path else [],
-            content=[DiffContentItem(path=path, old_text=old_string, new_text=new_string)]
+            locations=[LocationContentItem(path=path)] if path else [],  # type: ignore[arg-type]
+            content=[DiffContentItem(path=path, old_text=old_string, new_text=new_string)]  # type: ignore[arg-type]
             if path
             else [],
         )
     # Delete operations
     if tool_lower in ("delete", "delete_path", "delete_file"):
         path = input_data.get("file_path") or input_data.get("path", "")
-        locations = [LocationContentItem(path=path)] if path else []
+        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
         title = f"Delete {path}" if path else "Delete"
         return RichToolInfo(title=title, kind="delete", locations=locations)
     # Bash/terminal operations
     if tool_lower in ("bash", "execute", "run_command", "execute_command", "execute_code"):
         command = input_data.get("command") or input_data.get("code", "")
         # Escape backticks in command
-        escaped_cmd = command.replace("`", "\\`") if command else ""
+        escaped_cmd = command.replace("`", "\\`") if command else ""  # type: ignore[union-attr]
         title = f"`{escaped_cmd}`" if escaped_cmd else "Terminal"
         return RichToolInfo(title=title, kind="execute")
     # Search operations
@@ -111,13 +111,13 @@ def derive_rich_tool_info(name: str, input_data: dict[str, Any]) -> RichToolInfo
         title = f"Search for '{pattern}'" if pattern else "Search"
         if path:
             title += f" in {path}"
-        locations = [LocationContentItem(path=path)] if path else []
+        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
         return RichToolInfo(title=title, kind="search", locations=locations)
     # List directory
     if tool_lower in ("ls", "list", "list_directory"):
         path = input_data.get("path", ".")
         title = f"List {path}" if path != "." else "List current directory"
-        locations = [LocationContentItem(path=path)] if path else []
+        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
         return RichToolInfo(title=title, kind="search", locations=locations)
     # Web operations
     if tool_lower in ("webfetch", "web_fetch", "fetch"):
@@ -129,17 +129,17 @@ def derive_rich_tool_info(name: str, input_data: dict[str, Any]) -> RichToolInfo
     # Task/subagent operations
     if tool_lower == "task":
         description = input_data.get("description", "")
-        return RichToolInfo(title=description if description else "Task", kind="think")
+        return RichToolInfo(title=description if description else "Task", kind="think")  # type: ignore[arg-type]
     # Notebook operations
     if tool_lower in ("notebookread", "notebook_read"):
         path = input_data.get("notebook_path", "")
         title = f"Read Notebook {path}" if path else "Read Notebook"
-        locations = [LocationContentItem(path=path)] if path else []
+        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
         return RichToolInfo(title=title, kind="read", locations=locations)
     if tool_lower in ("notebookedit", "notebook_edit"):
         path = input_data.get("notebook_path", "")
         title = f"Edit Notebook {path}" if path else "Edit Notebook"
-        locations = [LocationContentItem(path=path)] if path else []
+        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
         return RichToolInfo(title=title, kind="edit", locations=locations)
     # Default: use the tool name as title
     return RichToolInfo(title=actual_name, kind="other")

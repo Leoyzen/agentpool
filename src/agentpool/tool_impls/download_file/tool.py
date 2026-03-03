@@ -58,14 +58,7 @@ class DownloadFileTool(Tool[dict[str, Any]]):
 
     def _get_fs(self, ctx: AgentContext) -> AsyncFileSystem:
         """Get filesystem from env, falling back to agent's env if not set."""
-        from fsspec.asyn import AsyncFileSystem
-        from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
-
-        if self.env is not None:
-            fs = self.env.get_fs()
-            return fs if isinstance(fs, AsyncFileSystem) else AsyncFileSystemWrapper(fs)
-        fs = ctx.agent.env.get_fs()
-        return fs if isinstance(fs, AsyncFileSystem) else AsyncFileSystemWrapper(fs)
+        return ctx.agent.env.get_fs() if self.env is None else self.env.get_fs()
 
     def _resolve_path(self, path: str, ctx: AgentContext) -> str:
         """Resolve a potentially relative path to an absolute path."""

@@ -15,7 +15,7 @@ import pytest
 
 from agentpool import AgentPool
 from agentpool.agents.acp_agent import ACPAgent
-from agentpool.models.acp_agents.non_mcp import ClaudeACPAgentConfig
+from agentpool.models.acp_agents.base import ACPAgentConfig
 from agentpool.models.manifest import AgentsManifest
 from agentpool_config.toolsets import SubagentToolsetConfig
 
@@ -27,17 +27,18 @@ pytestmark = [pytest.mark.integration]
 
 
 @pytest.fixture
-def claude_config_with_subagent() -> ClaudeACPAgentConfig:
+def claude_config_with_subagent() -> ACPAgentConfig:
     """Create Claude ACP config with Subagent toolset."""
-    return ClaudeACPAgentConfig(
+    return ACPAgentConfig(
         name="claude_orchestrator",
+        command="claude-code-acp",
         tools=[SubagentToolsetConfig()],
         env_vars={"ANTHROPIC_API_KEY": ""},  # Use subscription, not direct API key
     )
 
 
 @pytest.fixture
-def manifest_with_claude(claude_config_with_subagent: ClaudeACPAgentConfig) -> AgentsManifest:
+def manifest_with_claude(claude_config_with_subagent: ACPAgentConfig) -> AgentsManifest:
     """Create manifest with Claude ACP agent."""
     return AgentsManifest(agents={"claude_orchestrator": claude_config_with_subagent})
 
@@ -77,7 +78,7 @@ async def test_claude_acp_subagent_invocation(manifest_with_claude: AgentsManife
         assert result.content is not None
 
 
-async def test_claude_acp_tool_bridge_mcp_config(claude_config_with_subagent: ClaudeACPAgentConfig):
+async def test_claude_acp_tool_bridge_mcp_config(claude_config_with_subagent: ACPAgentConfig):
     """Test that tool bridge MCP config is properly passed to session."""
     async with AgentPool() as pool:  # noqa: SIM117
         async with ACPAgent.from_config(claude_config_with_subagent, agent_pool=pool) as agent:
@@ -96,7 +97,9 @@ async def test_claude_acp_multiple_toolsets():
     from agentpool_config.toolsets import DebugToolsetConfig
 
     tools = [SubagentToolsetConfig(), DebugToolsetConfig()]
-    config = ClaudeACPAgentConfig(name="claude_multi", cwd=str(Path.cwd()), tools=tools)
+    config = ACPAgentConfig(
+        name="claude_multi", command="claude-code-acp", cwd=str(Path.cwd()), tools=tools
+    )
     async with AgentPool() as pool, ACPAgent.from_config(config, agent_pool=pool) as agent:
         # All toolsets should be exposed via single bridge
         assert agent._tool_bridge is not None

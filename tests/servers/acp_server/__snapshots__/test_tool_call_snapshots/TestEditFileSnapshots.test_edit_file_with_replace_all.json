@@ -26,7 +26,7 @@
         }
       ],
       "sessionUpdate": "tool_call_update",
-      "title": "Editing file: /test/multi.py",
+      "title": "Editing file: /test/multi.py (Replace all func1 occurrences)",
       "toolCallId": "pyd_ai_tool_call_id__edit"
     },
     "type": "tool_call_update"

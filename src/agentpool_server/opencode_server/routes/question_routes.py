@@ -29,11 +29,7 @@ async def list_questions(state: StateDep) -> list[QuestionRequest]:
 
 
 @router.post("/{requestID}/reply")
-async def reply_to_question(
-    requestID: str,  # noqa: N803
-    reply: QuestionReply,
-    state: StateDep,
-) -> bool:
+async def reply_to_question(requestID: str, reply: QuestionReply, state: StateDep) -> bool:  # noqa: N803
     """Reply to a question request.
 
     The user provides answers to the questions. Answers must be provided
@@ -54,17 +50,13 @@ async def reply_to_question(
     pending = state.pending_questions.get(requestID)
     if not pending:
         raise HTTPException(status_code=404, detail="Question request not found")
-
     session_id = pending.session_id
     provider = state.input_providers.get(session_id)
-
     if not isinstance(provider, OpenCodeInputProvider):
         raise HTTPException(status_code=500, detail="Invalid provider for session")
-
     # Resolve via provider
     if not provider.resolve_question(requestID, reply.answers):
         raise HTTPException(status_code=404, detail="Question already resolved")
-
     # Broadcast replied event
     event = QuestionRepliedEvent.create(
         session_id=session_id,
@@ -72,7 +64,6 @@ async def reply_to_question(
         answers=reply.answers,
     )
     await state.broadcast_event(event)
-
     return True
 
 
@@ -95,15 +86,12 @@ async def reject_question(requestID: str, state: StateDep) -> bool:  # noqa: N80
     pending = state.pending_questions.get(requestID)
     if not pending:
         raise HTTPException(status_code=404, detail="Question request not found")
-
-    session_id = pending.session_id
-    future = pending.future
     # Cancel the future
-    if not future.done():
-        future.cancel()
+    if not pending.future.done():
+        pending.future.cancel()
     # Remove from pending
     del state.pending_questions[requestID]
     # Broadcast rejected event
-    event = QuestionRejectedEvent.create(session_id=session_id, request_id=requestID)
+    event = QuestionRejectedEvent.create(session_id=pending.session_id, request_id=requestID)
     await state.broadcast_event(event)
     return True

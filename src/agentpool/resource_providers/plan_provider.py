@@ -9,40 +9,24 @@ from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import TextContentItem
 from agentpool.resource_providers import ResourceProvider
 from agentpool.tools.base import ToolResult
-from agentpool.utils.streams import TodoPriority, TodoStatus  # noqa: TC001
+from agentpool.utils.todos import (
+    PRIORITY_LABELS,
+    STATUS_ICONS,
+    PlanEntryPriority,  # noqa: F401
+    PlanEntryStatus,  # noqa: F401
+    TodoPriority,  # noqa: TC001
+    TodoStatus,  # noqa: TC001
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentpool.tools.base import Tool
-    from agentpool.utils.streams import TodoTracker
+    from agentpool.utils.todos import PlanEntry, TodoTracker
 
 
-# Keep PlanEntry for backward compatibility with event emitting
-PlanEntryPriority = Literal["high", "medium", "low"]
-PlanEntryStatus = Literal["pending", "in_progress", "completed"]
 PlanToolMode = Literal["granular", "declarative"]
-STATUS_ICONS = {"pending": "⬚", "in_progress": "◐", "completed": "✓"}
-PRIORITY_LABELS = {"high": "🔴", "medium": "🟡", "low": "🟢"}
-
-
-@dataclass(kw_only=True)
-class PlanEntry:
-    """A single entry in the execution plan.
-
-    Represents a task or goal that the assistant intends to accomplish
-    as part of fulfilling the user's request.
-    """
-
-    content: str
-    """Human-readable description of what this task aims to accomplish."""
-
-    priority: PlanEntryPriority
-    """The relative importance of this task."""
-
-    status: PlanEntryStatus
-    """Current execution status of this task."""
 
 
 @dataclass(kw_only=True)
@@ -343,9 +327,4 @@ class PlanProvider(ResourceProvider):
         if tracker is None:
             return
 
-        # Convert TodoEntry to PlanEntry for event compatibility
-        entries = [
-            PlanEntry(content=e.content, priority=e.priority, status=e.status)
-            for e in tracker.entries
-        ]
-        await agent_ctx.events.plan_updated(entries)
+        await agent_ctx.events.plan_updated(tracker.entries)

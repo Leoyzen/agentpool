@@ -172,26 +172,19 @@ class LSPProxy:
     async def run(self) -> None:
         """Start proxy server."""
         await self.start()
-
         # Ensure parent directory exists
         self._port_file_path.parent.mkdir(parents=True, exist_ok=True)
-
         # Start TCP server on localhost with dynamic port
         server = await asyncio.start_server(self.handle_client, host="127.0.0.1", port=0)
-
         # Get the assigned port
         addr = server.sockets[0].getsockname()
         self.port = addr[1]
-
         # Write port to file so clients know where to connect
         self._port_file_path.write_text(str(self.port))
-
         # Signal ready by creating a marker file
         ready_path = Path(str(self.port_file) + ".ready")
         ready_path.touch()
-
         print(f"LSP Proxy listening on 127.0.0.1:{self.port}", file=sys.stderr, flush=True)
-
         async with server:
             await server.serve_forever()
 
@@ -218,9 +211,7 @@ def main() -> None:
     parser.add_argument("--command", required=True, help="LSP server command")
     parser.add_argument("--port-file", required=True, help="File to write port number to")
     args = parser.parse_args()
-
     proxy = LSPProxy(args.command.split(), args.port_file)
-
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(proxy.run())
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence  # noqa: TC003
+import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 from uuid import UUID
@@ -19,18 +21,22 @@ from agentpool.common_types import EndStrategy  # noqa: TC001
 from agentpool.models.fields import OutputTypeField, SystemPromptField  # noqa: TC001
 from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool.resource_providers import StaticResourceProvider
-from agentpool_config import BaseToolConfig, NativeAgentToolConfig
+from agentpool_config import NativeAgentToolConfig
+from agentpool_config.agentpool_tools import BashToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
 from agentpool_config.session import MemoryConfig, SessionQuery
+from agentpool_config.tools import BaseToolConfig, ImportToolConfig
 from agentpool_config.toolsets import BaseToolsetConfig, ToolsetConfig
-from agentpool_config.workers import WorkerConfig  # noqa: TC001
+from agentpool_config.workers import (  # noqa: TC001
+    AgentWorkerConfig,
+    TeamWorkerConfig,
+    WorkerConfig,
+)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
@@ -39,12 +45,42 @@ if TYPE_CHECKING:
     from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
 
+# Unified type for all tool configurations (single tools + toolsets)
+AnyToolConfig = Annotated[NativeAgentToolConfig | ToolsetConfig, Field(discriminator="type")]
 ToolMode = Literal["codemode"]
+
+_MAX_PROCESSOR_PARAMS = 2
 
 logger = log.get_logger(__name__)
 
-# Unified type for all tool configurations (single tools + toolsets)
-AnyToolConfig = Annotated[NativeAgentToolConfig | ToolsetConfig, Field(discriminator="type")]
+
+def _validate_processor_signature(processor: Callable[..., Any]) -> None:
+    """Validate that a history processor has a correct signature.
+
+    Valid signatures:
+    - sync: (messages) -> msgs
+    - sync with ctx: (ctx, messages) -> msgs
+    - async: async (messages) -> msgs
+    - async with ctx: async (ctx, messages) -> msgs
+
+    Raises:
+        ValueError: If signature is not valid.
+    """
+    sig = inspect.signature(processor)
+    params = list(sig.parameters.values())
+    if len(params) not in (1, _MAX_PROCESSOR_PARAMS):
+        msg = (
+            f"History processor must take 1 or {_MAX_PROCESSOR_PARAMS} arguments, got {len(params)}"
+        )
+        raise ValueError(msg)
+    if len(params) == _MAX_PROCESSOR_PARAMS:
+        last_param_name = params[1].name.lower()
+        if last_param_name not in ("messages", "msgs", "history"):
+            msg = (
+                f"Second parameter of history processor must be "
+                f"messages/msgs/history, got {params[1].name}"
+            )
+            raise ValueError(msg)
 
 
 class NativeAgentConfig(BaseAgentConfig):
@@ -85,15 +121,8 @@ class NativeAgentConfig(BaseAgentConfig):
         examples=[
             ["webbrowser:open", "builtins:print"],
             [
-                {
-                    "type": "import",
-                    "import_path": "webbrowser:open",
-                    "name": "web_browser",
-                },
-                {
-                    "type": "bash",
-                    "timeout": 30.0,
-                },
+                ImportToolConfig(import_path="webbrowser:open", name="web_browser"),  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+                BashToolConfig(timeout=30.0),
             ],
         ],
         title="Tool configurations",
@@ -165,11 +194,12 @@ class NativeAgentConfig(BaseAgentConfig):
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/knowledge_configuration/
     """
 
-    workers: list[WorkerConfig] = Field(
+    workers: list[WorkerConfig | str] = Field(
         default_factory=list,
         examples=[
-            [{"type": "agent", "name": "web_agent", "reset_history_on_run": True}],
-            [{"type": "team", "name": "analysis_team"}],
+            [AgentWorkerConfig(name="web_agent", reset_history_on_run=True)],
+            [TeamWorkerConfig(name="analysis_team")],
+            ["web_agent", "code_analyzer"],
         ],
         title="Worker agents",
         json_schema_extra={
@@ -177,6 +207,8 @@ class NativeAgentConfig(BaseAgentConfig):
         },
     )
     """Worker agents which will be available as tools.
+
+    Can be worker config objects or plain strings (agent names, resolved as AgentWorkerConfig).
 
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/worker_configuration/
     """
@@ -257,6 +289,14 @@ class NativeAgentConfig(BaseAgentConfig):
             deps_type=deps_type,
         )
 
+    def get_workers(self) -> list[WorkerConfig]:
+        """Resolve workers list, converting plain strings to AgentWorkerConfig."""
+        resolved: list[WorkerConfig] = []
+        for worker in self.workers:
+            cfg = AgentWorkerConfig(name=worker) if isinstance(worker, str) else worker
+            resolved.append(cfg)
+        return resolved
+
     def get_tool_providers(self) -> list[ResourceProvider]:
         """Get all resource providers for this agent's tools.
 
@@ -274,17 +314,15 @@ class NativeAgentConfig(BaseAgentConfig):
 
         for tool_config in self.tools:
             # Skip builtin tools - they're handled via get_builtin_tools()
-            if isinstance(tool_config, BaseBuiltinToolConfig):
-                continue
-            if isinstance(tool_config, BaseToolsetConfig):
-                # Toolset -> get its provider directly
-                providers.append(tool_config.get_provider())
-            elif isinstance(tool_config, str):
-                # String import path -> single tool
-                static_tools.append(Tool.from_callable(tool_config))
-            elif isinstance(tool_config, BaseToolConfig):
-                # Single tool config -> single tool
-                static_tools.append(tool_config.get_tool())
+            match tool_config:
+                case BaseBuiltinToolConfig():
+                    continue
+                case BaseToolsetConfig():
+                    providers.append(tool_config.get_provider())
+                case str():
+                    static_tools.append(Tool.from_callable(tool_config))
+                case BaseToolConfig():
+                    static_tools.append(tool_config.get_tool())
 
         # Wrap all single tools in one provider
         if static_tools:
@@ -303,10 +341,11 @@ class NativeAgentConfig(BaseAgentConfig):
 
     def get_tool_provider(self) -> ResourceProvider | None:
         """Get single tools provider. Deprecated: use get_tool_providers() instead."""
-        for p in self.get_tool_providers():
-            if isinstance(p, StaticResourceProvider) and p.name == "tools":
-                return p
-        return None
+        providers = self.get_tool_providers()
+        return next(
+            (p for p in providers if isinstance(p, StaticResourceProvider) and p.name == "tools"),
+            None,
+        )
 
     def get_builtin_tools(self) -> list[Any]:
         """Get pydantic-ai builtin tools from config.
@@ -314,14 +353,7 @@ class NativeAgentConfig(BaseAgentConfig):
         Returns:
             List of AbstractBuiltinTool instances (WebSearchTool, etc.)
         """
-        builtin_tools: list[Any] = []
-        for tool_config in self.tools:
-            if isinstance(tool_config, BaseBuiltinToolConfig):
-                try:
-                    builtin_tools.append(tool_config.get_builtin_tool())
-                except Exception:
-                    logger.exception("Failed to load builtin tool", config=tool_config)
-        return builtin_tools
+        return [i.get_builtin_tool() for i in self.tools if isinstance(i, BaseBuiltinToolConfig)]
 
     def get_session_config(self) -> MemoryConfig:
         """Get resolved memory configuration."""
@@ -336,6 +368,32 @@ class NativeAgentConfig(BaseAgentConfig):
                 return MemoryConfig()
             case _ as unreachable:
                 assert_never(unreachable)
+
+    def get_history_processors(self) -> list[Callable[..., Any]]:
+        """Resolve history processor import paths to callables.
+
+        Returns:
+            List of resolved and validated processor callables.
+
+        Raises:
+            ValueError: If a processor cannot be imported or has invalid signature.
+        """
+        from agentpool.utils.importing import import_callable
+
+        session_config = self.get_session_config()
+        processor_paths = session_config.history_processors
+        if not processor_paths:
+            return []
+        resolved: list[Callable[..., Any]] = []
+        for path in processor_paths:
+            try:
+                processor = import_callable(path)
+                _validate_processor_signature(processor)
+                resolved.append(processor)
+            except Exception as e:
+                msg = f"Failed to resolve history processor '{path}': {e}"
+                raise ValueError(msg) from e
+        return resolved
 
     def get_system_prompts(self) -> list[BasePrompt]:
         """Get all system prompts as BasePrompts."""

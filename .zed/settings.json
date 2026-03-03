@@ -1,0 +1,5 @@
+{
+	"languages": {
+		"Python": { "language_servers": ["ty", "ruff", "basedpyright"] }
+	}
+}

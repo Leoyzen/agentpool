@@ -116,19 +116,22 @@ async def test_cat_file_not_found(acp_fs: ACPFileSystem):
         await acp_fs._cat_file("nonexistent.txt")
 
 
-async def test_put_file(acp_fs: ACPFileSystem):
-    """Test writing file content."""
-    await acp_fs._put_file("new.txt", "new content")
-    # Verify it was written to mock
+async def test_put_file(acp_fs: ACPFileSystem, tmp_path):
+    """Test uploading a local file to remote."""
+    local_file = tmp_path / "local.txt"
+    local_file.write_text("new content")
+    await acp_fs._put_file(str(local_file), "new.txt")
     assert isinstance(acp_fs.client, MockClient)
     assert acp_fs.client.files["new.txt"] == "new content"
 
 
-async def test_put_file_bytes(acp_fs: ACPFileSystem):
-    """Test writing bytes content."""
-    await acp_fs._put_file("new.txt", b"new content")
+async def test_put_file_bytes(acp_fs: ACPFileSystem, tmp_path):
+    """Test uploading a local binary file to remote."""
+    local_file = tmp_path / "local.bin"
+    local_file.write_bytes(b"binary content")
+    await acp_fs._put_file(str(local_file), "new.txt")
     assert isinstance(acp_fs.client, MockClient)
-    assert acp_fs.client.files["new.txt"] == "new content"
+    assert acp_fs.client.files["new.txt"] == "binary content"
 
 
 async def test_ls_detail(acp_fs: ACPFileSystem):

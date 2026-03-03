@@ -88,11 +88,8 @@ def to_acp_content_blocks(  # noqa: PLR0911
 
         case BinaryContent(data=data, media_type=media_type):
             blob_data = base64.b64encode(data).decode()
-            blob_resource = BlobResourceContents(
-                blob=blob_data,
-                mime_type=media_type,
-                uri=f"data:{media_type};base64,{blob_data[:50]}...",
-            )
+            uri = f"data:{media_type};base64,{blob_data[:50]}..."
+            blob_resource = BlobResourceContents(blob=blob_data, mime_type=media_type, uri=uri)
             return [EmbeddedResourceContentBlock(resource=blob_resource)]
 
         case ImageUrl() | AudioUrl() | VideoUrl() | DocumentUrl() as file_url:

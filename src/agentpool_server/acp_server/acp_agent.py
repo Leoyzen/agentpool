@@ -124,7 +124,7 @@ async def get_session_mode_state(agent: BaseAgent) -> SessionModeState | None:
     if not mode_categories:
         return None
     # Find the permissions category (not model)
-    category = next((c for c in mode_categories if c.id != "model"), None)
+    category = next((c for c in mode_categories if c.id == "mode"), None)
     if not category:
         return None
     acp_modes = [  # Convert ModeInfo to ACP SessionMode
@@ -493,7 +493,7 @@ class AgentPoolACPAgent(ACPAgent):
             # Try to get cwd from stored session data
             cwd = "."
             try:
-                stored = await self.session_manager.session_manager.store.load(params.session_id)
+                stored = await self.session_manager.storage.load_session(params.session_id)
                 if stored and stored.cwd:
                     cwd = stored.cwd
             except Exception:  # noqa: BLE001

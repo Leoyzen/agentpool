@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from anyenv.async_run import as_generated
 import anyio
 
-from agentpool.common_types import SupportsRunStream
+from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.events import SubAgentEvent
 from agentpool.delegation.base_team import BaseTeam
+from agentpool.delegation.teamrun import TeamRun
 from agentpool.log import get_logger
 from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
 from agentpool.messaging.processing import finalize_message, prepare_prompts
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
 
     from agentpool import MessageNode
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import SubAgentType
     from agentpool.common_types import PromptCompatible
     from agentpool.talk import Talk
 
@@ -98,10 +101,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
 
         # Get nodes to run
         all_nodes = list(self.nodes)
-
         # Start all agents
         tasks = [asyncio.create_task(_run(n), name=f"run_{n.name}") for n in all_nodes]
-
         try:
             # Yield messages as they arrive
             for _ in all_nodes:
@@ -131,7 +132,6 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         # Prepare prompts and create user message
         user_msg, processed_prompts = await prepare_prompts(*prompts)
         await self.message_received.emit(user_msg)
-
         # Execute team logic
         result = await self.execute(*processed_prompts, **kwargs)
         message_id = str(uuid4())  # Always generate unique response ID
@@ -178,8 +178,6 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         Yields:
             RichAgentStreamEvent, with member events wrapped in SubAgentEvent
         """
-        from agentpool.agents.events import SubAgentEvent
-
         # Get nodes to run
         all_nodes = list(self.nodes)
 
@@ -188,8 +186,16 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             node: MessageNode[Any, Any],
         ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
             """Wrap a node's stream events in SubAgentEvent."""
-            if not isinstance(node, SupportsRunStream):
-                return
+            match node:
+                case Team():
+                    source_type: SubAgentType = "team_parallel"
+                case TeamRun():
+                    source_type = "team_sequential"
+                case BaseAgent():
+                    source_type = "agent"
+                case _:
+                    raise ValueError(f"Unexpected node type: {type(node)}")
+
             async for event in node.run_stream(*prompts, **kwargs):
                 # Handle already-wrapped SubAgentEvents (nested teams)
                 if isinstance(event, SubAgentEvent):
@@ -200,18 +206,6 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                         depth=event.depth + 1,
                     )
                 else:
-                    # Determine source type based on node type
-                    from agentpool.delegation.teamrun import TeamRun
-
-                    if isinstance(node, TeamRun):
-                        source_type: Literal["team_parallel", "team_sequential", "agent"] = (
-                            "team_sequential"
-                        )
-                    elif isinstance(node, BaseTeam):
-                        source_type = "team_parallel"
-                    else:
-                        source_type = "agent"
-
                     yield SubAgentEvent(
                         source_name=node.name,
                         source_type=source_type,

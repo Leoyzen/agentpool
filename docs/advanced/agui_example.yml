@@ -74,6 +74,7 @@ agents:
           - "mcp_server_sqlite"
   # Native agents for comparison/composition
   local_assistant:
+    type: native
     model: openai:gpt-4
     system_prompt: You are a helpful local assistant
     tools:
@@ -84,7 +85,7 @@ agents:
     model: anthropic:claude-sonnet-4
     system_prompt: You coordinate between local and remote agents
     tools:
-      - type: agent_management
+      - type: agent_cli
 
 # Teams mixing native and AG-UI agents
 teams:

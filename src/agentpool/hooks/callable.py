@@ -13,6 +13,8 @@ from agentpool.utils.importing import import_callable
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from exxec import ExecutionEnvironment
+
     from agentpool.hooks.base import HookEvent, HookInput
 
 
@@ -65,11 +67,16 @@ class CallableHook(Hook):
             self._callable = import_callable(self._import_path)
         return self._callable
 
-    async def execute(self, input_data: HookInput) -> HookResult:
+    async def execute(
+        self,
+        input_data: HookInput,
+        env: ExecutionEnvironment | None = None,
+    ) -> HookResult:
         """Execute the callable.
 
         Args:
             input_data: The hook input data.
+            env: Unused. Callable hooks always run in-process.
 
         Returns:
             Hook result from callable.
@@ -114,26 +121,23 @@ def _normalize_result(result: Any) -> HookResult:
     Returns:
         Normalized hook result.
     """
-    if isinstance(result, dict):
-        # Already a dict, ensure proper typing
-        normalized: HookResult = {}
-        if "decision" in result:
-            normalized["decision"] = result["decision"]
-        if "reason" in result:
-            normalized["reason"] = result["reason"]
-        if "modified_input" in result:
-            normalized["modified_input"] = result["modified_input"]
-        if "additional_context" in result:
-            normalized["additional_context"] = result["additional_context"]
-        if "continue_" in result:
-            normalized["continue_"] = result["continue_"]
-        return normalized
-
-    # String result treated as additional context
-    if isinstance(result, str):
-        return HookResult(decision="allow", additional_context=result)
-    # Bool result treated as allow/deny
-    if isinstance(result, bool):
-        return HookResult(decision="allow" if result else "deny")
-    # Unknown type, allow by default
-    return HookResult(decision="allow")
+    match result:
+        case dict():
+            normalized: HookResult = {}
+            if "decision" in result:
+                normalized["decision"] = result["decision"]
+            if "reason" in result:
+                normalized["reason"] = result["reason"]
+            if "modified_input" in result:
+                normalized["modified_input"] = result["modified_input"]
+            if "additional_context" in result:
+                normalized["additional_context"] = result["additional_context"]
+            if "continue_" in result:
+                normalized["continue_"] = result["continue_"]
+            return normalized
+        case str():
+            return HookResult(decision="allow", additional_context=result)
+        case bool():
+            return HookResult(decision="allow" if result else "deny")
+        case _:
+            return HookResult(decision="allow")

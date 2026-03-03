@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import base64
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
+import anyenv
 from pydantic_ai import (
     BinaryContent,
     FileUrl,
@@ -181,7 +183,7 @@ def agui_to_native_event(event: BaseEvent) -> RichAgentStreamEvent[Any] | None: 
             return CustomEvent(event_data=delta, event_type="state_delta", source="ag-ui")
 
         case MessagesSnapshotEvent(messages=messages):
-            data = [m.model_dump() if hasattr(m, "model_dump") else m for m in messages]
+            data = [m.model_dump() for m in messages]
             return CustomEvent(event_data=data, event_type="messages_snapshot", source="ag-ui")
 
         # === Special Events ===
@@ -270,8 +272,6 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
     Returns:
         List of AG-UI Message objects (UserMessage, AssistantMessage, etc.)
     """
-    from uuid import uuid4
-
     from ag_ui.core import (
         AssistantMessage,
         FunctionCall,
@@ -299,18 +299,16 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                 # ModelRequest can contain user prompts, system prompts, or tool returns
                 for req_part in request_parts:
                     match req_part:
-                        case UserPromptPart(content=content):
-                            # Convert content to string
-                            if isinstance(content, str):
-                                text = content
-                            elif isinstance(content, list):
-                                # Join text parts
-                                text = " ".join(
-                                    p if isinstance(p, str) else str(p) for p in content
-                                )
-                            else:
-                                text = str(content)
+                        case UserPromptPart(content=str() as content):
+                            result.append(UserMessage(id=str(uuid4()), content=content))
+
+                        case UserPromptPart(content=list() as content):
+                            # Join text parts
+                            text = " ".join(p if isinstance(p, str) else str(p) for p in content)
                             result.append(UserMessage(id=str(uuid4()), content=text))
+
+                        case UserPromptPart(content=content):
+                            result.append(UserMessage(id=str(uuid4()), content=str(content)))
 
                         case SystemPromptPart(content=content):
                             result.append(SystemMessage(id=str(uuid4()), content=content))
@@ -320,16 +318,13 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                             if isinstance(content, str):
                                 content_str = content
                             else:
-                                import json
-
-                                content_str = json.dumps(content)
-                            result.append(
-                                ToolMessage(
-                                    id=str(uuid4()),
-                                    tool_call_id=tool_call_id,
-                                    content=content_str,
-                                )
+                                content_str = anyenv.dump_json(content)
+                            tool_msg = ToolMessage(
+                                id=str(uuid4()),
+                                tool_call_id=tool_call_id,
+                                content=content_str,
                             )
+                            result.append(tool_msg)
 
             case ModelResponse(parts=response_parts):
                 # ModelResponse contains assistant content and/or tool calls
@@ -352,34 +347,23 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                             args=args,
                         ):
                             # Convert args to JSON string
-                            if isinstance(args, str):
-                                args_str = args
-                            elif isinstance(args, dict):
-                                import json
-
-                                args_str = json.dumps(args)
-                            else:
-                                args_str = str(args)
-
-                            tool_calls.append(
-                                ToolCall(
-                                    id=tool_call_id,
-                                    type="function",
-                                    function=FunctionCall(
-                                        name=tool_name,
-                                        arguments=args_str,
-                                    ),
-                                )
-                            )
+                            match args:
+                                case str():
+                                    args_str = args
+                                case dict():
+                                    args_str = anyenv.dump_json(args)
+                                case _:
+                                    args_str = str(args)
+                            call = FunctionCall(name=tool_name, arguments=args_str)
+                            tc = ToolCall(id=tool_call_id, type="function", function=call)
+                            tool_calls.append(tc)
 
                 # Create AssistantMessage with content and/or tool_calls
-                content = " ".join(text_parts) if text_parts else None
-                result.append(
-                    AssistantMessage(
-                        id=str(uuid4()),
-                        content=content,
-                        tool_calls=tool_calls if tool_calls else None,
-                    )
+                assistant_msg = AssistantMessage(
+                    id=str(uuid4()),
+                    content=" ".join(text_parts) if text_parts else None,
+                    tool_calls=tool_calls or None,
                 )
+                result.append(assistant_msg)
 
     return result

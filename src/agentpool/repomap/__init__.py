@@ -47,7 +47,6 @@ from agentpool.repomap.languages import (
     is_language_supported,
 )
 from agentpool.repomap.outline import generate_file_outline, get_file_map_from_content
-from agentpool.repomap.rendering import get_random_color
 from agentpool.repomap.tags import Tag, get_tags_from_content
 from agentpool.repomap.utils import find_src_files, is_important, truncate_with_notice
 
@@ -62,7 +61,6 @@ __all__ = [
     "generate_file_context",
     "generate_file_outline",
     "get_file_map_from_content",
-    "get_random_color",
     "get_resource_context",
     "get_supported_languages",
     "get_supported_languages_md",

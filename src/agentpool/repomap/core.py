@@ -58,10 +58,9 @@ class RepoMap:
             max_line_length: Maximum character length for output lines.
             token_counter: Callable to count tokens. Defaults to len(text) / 4.
         """
-        from fsspec.asyn import AsyncFileSystem
-        from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
+        from upathtools.async_ops import to_async_fs
 
-        self.fs = fs if isinstance(fs, AsyncFileSystem) else AsyncFileSystemWrapper(fs)
+        self.fs = to_async_fs(fs)
         self.root_path = root_path.rstrip("/") if root_path else self.fs.root_marker
         self.max_tokens = max_tokens
         self.max_line_length = max_line_length
@@ -97,7 +96,7 @@ class RepoMap:
         except (OSError, UnicodeDecodeError):
             return None
         else:
-            return content  # type: ignore[no-any-return]
+            return content
 
     async def _info(self, path: str) -> FileInfo | None:
         """Get file info."""
@@ -114,26 +113,18 @@ class RepoMap:
         except (OSError, FileNotFoundError):
             return None
 
-    async def _ls(self, path: str, detail: bool = True) -> list[dict[str, Any]]:
-        """List directory contents."""
-        try:
-            return await self.fs._ls(path, detail=detail)  # type: ignore[no-any-return]
-        except (OSError, FileNotFoundError):
-            return []
-
     async def find_files(self, path: str, pattern: str = "**/*.py") -> list[str]:
         """Find files matching pattern recursively."""
-        from agentpool.repomap.rendering import is_directory
+        from upathtools import is_directory
 
         results: list[str] = []
 
         async def _recurse(current_path: str) -> None:
-            entries = await self._ls(current_path, detail=True)
+            entries = await self.fs._ls(current_path, detail=True)
             for entry in entries:
                 entry_path = entry.get("name", "")
-                entry_type = entry.get("type", "")
 
-                if await is_directory(self.fs, entry_path, entry_type=entry_type):
+                if await is_directory(self.fs, entry):
                     await _recurse(entry_path)
                 # It's a file - process it
                 elif pattern == "**/*.py":
@@ -145,11 +136,7 @@ class RepoMap:
         await _recurse(path)
         return results
 
-    async def get_file_map(
-        self,
-        fname: str,
-        max_tokens: int = 2048,
-    ) -> str | None:
+    async def get_file_map(self, fname: str, max_tokens: int = 2048) -> str | None:
         """Generate a structure map for a single file.
 
         Unlike get_map which uses PageRank across multiple files, this method
@@ -163,18 +150,14 @@ class RepoMap:
             Formatted structure map or None if no tags found
         """
         rel_fname = get_rel_path(fname, self.root_path)
-
         # Get all definition tags for this file
         tags = await self._get_tags(fname, rel_fname)
         def_tags = [t for t in tags if t.kind == "def"]
-
         if not def_tags:
             return None
-
         # Build line ranges for rendering
         lois: list[int] = []
         line_ranges: dict[int, int] = {}
-
         for tag in def_tags:
             if tag.signature_end_line >= tag.line:
                 lois.extend(range(tag.line, tag.signature_end_line + 1))
@@ -191,14 +174,11 @@ class RepoMap:
         size_info = f", {info.size} bytes" if info else ""
         lines = (await self._cat_file(fname) or "").count("\n") + 1
         tokens = self.token_count(tree_output)
-
         header = (
             f"# File: {rel_fname} ({lines} lines{size_info})\n"
             f"# Structure map ({tokens} tokens). Use offset/limit to read sections.\n\n"
         )
-
         result = header + f"{rel_fname}:\n" + tree_output
-
         # Truncate if needed
         max_chars = max_tokens * 4
         if len(result) > max_chars:
@@ -317,15 +297,13 @@ class RepoMap:
             return []
 
         file_mtime = info.mtime
-        cache_key = fname
-
-        cached = self.TAGS_CACHE.get(cache_key)
+        cached = self.TAGS_CACHE.get(fname)
         if cached is not None and cached.get("mtime") == file_mtime:
             return cast(list[Tag], cached["data"])
 
         data = await self._get_tags_raw(fname, rel_fname)
 
-        self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
+        self.TAGS_CACHE[fname] = {"mtime": file_mtime, "data": data}
         return data
 
     async def _get_tags_raw(self, fname: str, rel_fname: str) -> list[Tag]:
@@ -386,12 +364,13 @@ class RepoMap:
 
             tags = await self._get_tags(fname, rel_fname)
             for tag in tags:
-                if tag.kind == "def":
-                    defines[tag.name].add(rel_fname)
-                    key = (rel_fname, tag.name)
-                    definitions[key].add(tag)
-                elif tag.kind == "ref":
-                    references[tag.name].append(rel_fname)
+                match tag.kind:
+                    case "def":
+                        defines[tag.name].add(rel_fname)
+                        key = (rel_fname, tag.name)
+                        definitions[key].add(tag)
+                    case "ref":
+                        references[tag.name].append(rel_fname)
 
         if not references:
             references = defaultdict(list, {k: list(v) for k, v in defines.items()})
@@ -615,32 +594,32 @@ class RepoMap:
         code = await self._cat_file(abs_fname) or ""
         code_lines = code.splitlines()
         lois_set = set(lois)
-
         def_pattern = re.compile(r"^(.*?)(class\s+\w+|def\s+\w+|async\s+def\s+\w+)")
-
         result_lines = []
         for output_line in res.splitlines():
             modified_line = output_line
             match = def_pattern.search(output_line)
-            if match:
-                stripped = output_line.lstrip("│ \t")
-                for line_num in lois_set:
-                    if line_num < len(code_lines):
-                        orig_line = code_lines[line_num].strip()
-                        if orig_line and stripped.startswith(orig_line.split("(")[0].split(":")[0]):
-                            name_match = re.search(
-                                r"(class\s+\w+|def\s+\w+|async\s+def\s+\w+)", output_line
-                            )
-                            if name_match:
-                                start_line_display = line_num + 1
-                                end_line = line_ranges.get(line_num, -1)
-                                if end_line >= 0 and end_line != line_num:
-                                    end_line_display = end_line + 1
-                                    line_info = f"  # [{start_line_display}-{end_line_display}]"
-                                else:
-                                    line_info = f"  # [{start_line_display}]"
-                                modified_line = f"{output_line}{line_info}"
-                            break
+            if not match:
+                continue
+            stripped = output_line.lstrip("│ \t")
+            for line_num in lois_set:
+                if line_num <= len(code_lines):
+                    continue
+                orig_line = code_lines[line_num].strip()
+                if orig_line and stripped.startswith(orig_line.split("(")[0].split(":")[0]):
+                    name_match = re.search(
+                        r"(class\s+\w+|def\s+\w+|async\s+def\s+\w+)", output_line
+                    )
+                    if name_match:
+                        start_line_display = line_num + 1
+                        end_line = line_ranges.get(line_num, -1)
+                        if end_line >= 0 and end_line != line_num:
+                            end_line_display = end_line + 1
+                            line_info = f"  # [{start_line_display}-{end_line_display}]"
+                        else:
+                            line_info = f"  # [{start_line_display}]"
+                        modified_line = f"{output_line}{line_info}"
+                    break
             result_lines.append(modified_line)
 
         res = "\n".join(result_lines)

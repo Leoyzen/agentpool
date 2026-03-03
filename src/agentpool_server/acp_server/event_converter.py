@@ -61,7 +61,6 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
-    ToolResultMetadataEvent,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -72,6 +71,7 @@ if TYPE_CHECKING:
 
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import SubAgentType
 
 logger = get_logger(__name__)
 
@@ -80,12 +80,6 @@ logger = get_logger(__name__)
 ACPSessionUpdate = (
     AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
 )
-
-
-def get_compaction_text(trigger: str) -> str:
-    if trigger == "auto":
-        return "\n\n---\n\n📦 **Context compaction** triggered. Summarizing...\n\n---\n\n"
-    return "\n\n---\n\n📦 **Manual compaction** requested. Summarizing...\n\n---\n\n"
 
 
 @dataclass
@@ -429,8 +423,8 @@ class ACPEventConverter:
                 ]
                 yield AgentPlanUpdate(entries=acp_entries)
 
-            case CompactionEvent(trigger=trigger, phase=phase) if phase == "starting":
-                text = get_compaction_text(trigger)
+            case CompactionEvent(phase="starting"):
+                text = event.format()
                 yield AgentMessageChunk.text(text)
 
             case SubAgentEvent(
@@ -462,7 +456,7 @@ class ACPEventConverter:
     async def _convert_subagent_inline(
         self,
         source_name: str,
-        source_type: Literal["agent", "team_parallel", "team_sequential"],
+        source_type: SubAgentType,
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> AsyncIterator[ACPSessionUpdate]:
@@ -526,7 +520,6 @@ class ACPEventConverter:
                 | ToolCallCompleteEvent()
                 | ToolCallProgressEvent()
                 | ToolCallStartEvent()
-                | ToolResultMetadataEvent()
                 | CustomEvent()
             ):
                 pass  # TODO
@@ -537,7 +530,7 @@ class ACPEventConverter:
     async def _convert_subagent_tool_box(
         self,
         source_name: str,
-        source_type: Literal["agent", "team_parallel", "team_sequential"],
+        source_type: SubAgentType,
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> AsyncIterator[ACPSessionUpdate]:
@@ -612,7 +605,6 @@ class ACPEventConverter:
                 | ToolCallCompleteEvent()
                 | ToolCallProgressEvent()
                 | ToolCallStartEvent()
-                | ToolResultMetadataEvent()
                 | CustomEvent()
             ):
                 pass  # TODO

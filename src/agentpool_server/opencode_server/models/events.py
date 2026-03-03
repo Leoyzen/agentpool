@@ -8,6 +8,7 @@ from pydantic import Field
 
 from agentpool_server.opencode_server.models.app import Project  # noqa: TC001
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from agentpool_server.opencode_server.models.common import FileDiff  # noqa: TC001
 from agentpool_server.opencode_server.models.message import MessageInfo  # noqa: TC001
 from agentpool_server.opencode_server.models.parts import Part  # noqa: TC001
 from agentpool_server.opencode_server.models.pty import PtyInfo  # noqa: TC001
@@ -22,8 +23,21 @@ from agentpool_server.opencode_server.models.session import (  # noqa: TC001
 )
 
 
+Variant = Literal["info", "success", "warning", "error"]
+TodoPriority = Literal["high", "medium", "low"]
+FileUpdateEvent = Literal["add", "change", "unlink"]
+ConnectionStatus = Literal["connected", "error"]
+
+
 class EmptyProperties(OpenCodeBaseModel):
     """Empty properties object."""
+
+
+class ServerHeartbeatEvent(OpenCodeBaseModel):
+    """Server heartbeat event - sent periodically to keep connections alive."""
+
+    type: Literal["server.heartbeat"] = Field(default="server.heartbeat", init=False)
+    properties: EmptyProperties = Field(default_factory=EmptyProperties)
 
 
 class ServerConnectedEvent(OpenCodeBaseModel):
@@ -211,6 +225,39 @@ class PartUpdatedEvent(OpenCodeBaseModel):
         return cls(properties=PartUpdatedEventProperties(part=part, delta=delta))
 
 
+class PartDeltaEventProperties(OpenCodeBaseModel):
+    """Properties for message part delta event."""
+
+    session_id: str
+    message_id: str
+    part_id: str
+    delta: str
+
+
+class PartDeltaEvent(OpenCodeBaseModel):
+    """Message part delta event - streaming text delta for a part."""
+
+    type: Literal["message.part.delta"] = Field(default="message.part.delta", init=False)
+    properties: PartDeltaEventProperties
+
+    @classmethod
+    def create(
+        cls,
+        session_id: str,
+        message_id: str,
+        part_id: str,
+        delta: str,
+    ) -> Self:
+        return cls(
+            properties=PartDeltaEventProperties(
+                session_id=session_id,
+                message_id=message_id,
+                part_id=part_id,
+                delta=delta,
+            )
+        )
+
+
 class MessageRemovedProperties(OpenCodeBaseModel):
     """Properties for message removed event."""
 
@@ -250,6 +297,20 @@ class PartRemovedEvent(OpenCodeBaseModel):
         """Create part removed event."""
         props = PartRemovedProperties(session_id=session_id, message_id=message_id, part_id=part_id)
         return cls(properties=props)
+
+
+PermissionReply = Literal["once", "always", "reject"]
+"""Permission reply type matching OpenCode's PermissionNext.Reply."""
+
+
+class PermissionReplyRequest(OpenCodeBaseModel):
+    """Request body for responding to a permission request."""
+
+    reply: PermissionReply
+    """Reply: 'once' | 'always' | 'reject'."""
+
+    message: str | None = None
+    """Optional message to include with the reply."""
 
 
 class PermissionToolInfo(OpenCodeBaseModel):
@@ -337,7 +398,7 @@ class PermissionRepliedProperties(OpenCodeBaseModel):
     request_id: str
     """Request/Permission ID."""
 
-    reply: Literal["once", "always", "reject"]
+    reply: PermissionReply
     """Reply: 'once' | 'always' | 'reject'."""
 
 
@@ -355,12 +416,66 @@ class PermissionResolvedEvent(OpenCodeBaseModel):
         cls,
         session_id: str,
         request_id: str,
-        reply: Literal["once", "always", "reject"],
+        reply: PermissionReply,
     ) -> Self:
         props = PermissionRepliedProperties(
             session_id=session_id,
             request_id=request_id,
             reply=reply,
+        )
+        return cls(properties=props)
+
+
+class PermissionUpdatedProperties(OpenCodeBaseModel):
+    """Properties for permission updated event."""
+
+    id: str
+    """Permission request ID."""
+
+    session_id: str
+    """Session ID."""
+
+    permission: str
+    """Tool/permission type name."""
+
+    patterns: list[str]
+    """Patterns for matching."""
+
+    metadata: dict[str, Any]
+    """Arbitrary metadata about the tool call."""
+
+    always: list[str]
+    """Patterns for 'always' approval."""
+
+    tool: PermissionToolInfo
+    """Tool call information."""
+
+
+class PermissionUpdatedEvent(OpenCodeBaseModel):
+    """Permission updated event - sent when permission status changes."""
+
+    type: Literal["permission.updated"] = Field(default="permission.updated", init=False)
+    properties: PermissionUpdatedProperties
+
+    @classmethod
+    def create(
+        cls,
+        session_id: str,
+        permission_id: str,
+        tool_name: str,
+        patterns: list[str],
+        metadata: dict[str, Any],
+        message_id: str = "",
+        call_id: str | None = None,
+    ) -> Self:
+        props = PermissionUpdatedProperties(
+            id=permission_id,
+            session_id=session_id,
+            permission=tool_name,
+            patterns=patterns,
+            metadata=metadata,
+            always=patterns,
+            tool=PermissionToolInfo(message_id=message_id, call_id=call_id),
         )
         return cls(properties=props)
 
@@ -417,7 +532,7 @@ class TuiToastShowProperties(OpenCodeBaseModel):
 
     title: str | None = None
     message: str
-    variant: Literal["info", "success", "warning", "error"] = "info"
+    variant: Variant = "info"
     duration: int = 5000  # Duration in milliseconds
 
 
@@ -431,7 +546,7 @@ class TuiToastShowEvent(OpenCodeBaseModel):
     def create(
         cls,
         message: str,
-        variant: Literal["info", "success", "warning", "error"] = "info",
+        variant: Variant = "info",
         title: str | None = None,
         duration: int = 5000,
     ) -> Self:
@@ -442,6 +557,23 @@ class TuiToastShowEvent(OpenCodeBaseModel):
             duration=duration,
         )
         return cls(properties=props)
+
+
+class TuiSessionSelectProperties(OpenCodeBaseModel):
+    """Properties for TUI session select event."""
+
+    session_id: str
+
+
+class TuiSessionSelectEvent(OpenCodeBaseModel):
+    """TUI session select event - navigates TUI to a specific session."""
+
+    type: Literal["tui.session.select"] = Field(default="tui.session.select", init=False)
+    properties: TuiSessionSelectProperties
+
+    @classmethod
+    def create(cls, session_id: str) -> Self:
+        return cls(properties=TuiSessionSelectProperties(session_id=session_id))
 
 
 # =============================================================================
@@ -458,10 +590,10 @@ class Todo(OpenCodeBaseModel):
     content: str
     """Brief description of the task."""
 
-    status: str
+    status: Literal["pending", "in_progress", "completed", "cancelled"]
     """Current status: pending, in_progress, completed, cancelled."""
 
-    priority: str
+    priority: TodoPriority
     """Priority level: high, medium, low."""
 
 
@@ -494,7 +626,7 @@ class FileWatcherUpdatedProperties(OpenCodeBaseModel):
     file: str
     """Absolute path to the file that changed."""
 
-    event: Literal["add", "change", "unlink"]
+    event: FileUpdateEvent
     """Type of change: add (created), change (modified), unlink (deleted)."""
 
 
@@ -505,7 +637,7 @@ class FileWatcherUpdatedEvent(OpenCodeBaseModel):
     properties: FileWatcherUpdatedProperties
 
     @classmethod
-    def create(cls, file: str, event: Literal["add", "change", "unlink"]) -> Self:
+    def create(cls, file: str, event: FileUpdateEvent) -> Self:
         return cls(properties=FileWatcherUpdatedProperties(file=file, event=event))
 
 
@@ -606,7 +738,7 @@ class LspStatus(OpenCodeBaseModel):
     root: str
     """Relative workspace root path."""
 
-    status: Literal["connected", "error"]
+    status: ConnectionStatus
     """Connection status."""
 
 
@@ -660,6 +792,124 @@ class VcsBranchUpdatedProperties(OpenCodeBaseModel):
 
     branch: str | None = None
     """Current branch name, or None if detached HEAD."""
+
+
+# =============================================================================
+# Session Diff Events
+# =============================================================================
+
+
+class SessionDiffProperties(OpenCodeBaseModel):
+    """Properties for session diff event."""
+
+    session_id: str
+    diff: list[FileDiff]
+
+
+class SessionDiffEvent(OpenCodeBaseModel):
+    """Session diff event - emitted when file diffs are computed (revert, summary)."""
+
+    type: Literal["session.diff"] = Field(default="session.diff", init=False)
+    properties: SessionDiffProperties
+
+    @classmethod
+    def create(cls, session_id: str, diff: list[FileDiff]) -> Self:
+        return cls(properties=SessionDiffProperties(session_id=session_id, diff=diff))
+
+
+# =============================================================================
+# File Events
+# =============================================================================
+
+
+class FileEditedProperties(OpenCodeBaseModel):
+    """Properties for file edited event."""
+
+    file: str
+    """Absolute path to the edited file."""
+
+
+class FileEditedEvent(OpenCodeBaseModel):
+    """File edited event - emitted when a tool edits/writes/patches a file."""
+
+    type: Literal["file.edited"] = Field(default="file.edited", init=False)
+    properties: FileEditedProperties
+
+    @classmethod
+    def create(cls, file: str) -> Self:
+        return cls(properties=FileEditedProperties(file=file))
+
+
+# =============================================================================
+# MCP Events
+# =============================================================================
+
+
+class McpToolsChangedProperties(OpenCodeBaseModel):
+    """Properties for MCP tools changed event."""
+
+    server: str
+    """Name of the MCP server whose tools changed."""
+
+
+class McpToolsChangedEvent(OpenCodeBaseModel):
+    """MCP tools changed event - emitted when an MCP server's tool list changes.
+
+    TODO: Hook into MCP SDK's ToolListChangedNotification to emit this event.
+    OpenCode only emits this from the notification handler, not on connect/disconnect.
+    """
+
+    type: Literal["mcp.tools.changed"] = Field(default="mcp.tools.changed", init=False)
+    properties: McpToolsChangedProperties
+
+    @classmethod
+    def create(cls, server: str) -> Self:
+        return cls(properties=McpToolsChangedProperties(server=server))
+
+
+# =============================================================================
+# Command Events
+# =============================================================================
+
+
+class CommandExecutedProperties(OpenCodeBaseModel):
+    """Properties for command executed event."""
+
+    name: str
+    """Command name."""
+
+    session_id: str
+    """Session ID."""
+
+    arguments: str
+    """Command arguments."""
+
+    message_id: str
+    """ID of the message that resulted from the command."""
+
+
+class CommandExecutedEvent(OpenCodeBaseModel):
+    """Command executed event - emitted after a slash command runs."""
+
+    type: Literal["command.executed"] = Field(default="command.executed", init=False)
+    properties: CommandExecutedProperties
+
+    @classmethod
+    def create(
+        cls,
+        name: str,
+        session_id: str,
+        arguments: str,
+        message_id: str,
+    ) -> Self:
+        return cls(
+            properties=CommandExecutedProperties(
+                name=name,
+                session_id=session_id,
+                arguments=arguments,
+                message_id=message_id,
+            )
+        )
 
 
 class VcsBranchUpdatedEvent(OpenCodeBaseModel):
@@ -759,24 +1009,31 @@ class QuestionRejectedEvent(OpenCodeBaseModel):
 
 Event = (
     ServerConnectedEvent
+    | ServerHeartbeatEvent
     | SessionCreatedEvent
     | SessionUpdatedEvent
     | SessionDeletedEvent
     | SessionStatusEvent
     | SessionErrorEvent
     | SessionIdleEvent
+    | SessionDiffEvent
+    | SessionCompactedEvent
     | MessageUpdatedEvent
     | MessageRemovedEvent
     | PartUpdatedEvent
+    | PartDeltaEvent
     | PartRemovedEvent
     | PermissionRequestEvent
     | PermissionResolvedEvent
+    | PermissionUpdatedEvent
     | QuestionAskedEvent
     | QuestionRepliedEvent
     | QuestionRejectedEvent
     | TodoUpdatedEvent
     | FileWatcherUpdatedEvent
-    | SessionCompactedEvent
+    | FileEditedEvent
+    | McpToolsChangedEvent
+    | CommandExecutedEvent
     | PtyCreatedEvent
     | PtyUpdatedEvent
     | PtyExitedEvent
@@ -788,4 +1045,5 @@ Event = (
     | TuiPromptAppendEvent
     | TuiCommandExecuteEvent
     | TuiToastShowEvent
+    | TuiSessionSelectEvent
 )

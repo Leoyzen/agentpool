@@ -11,17 +11,11 @@ Example:
             print(f"Event: {type(event).__name__}")
             yield event
 
-    # Class-based processor with state
-    tracker = FileTrackingProcessor()
-
     # Compose into pipeline
-    pipeline = StreamPipeline([tracker, log_events])
+    pipeline = StreamPipeline([log_events])
 
     async for event in pipeline(raw_events):
         yield event
-
-    # Access state directly
-    print(tracker.get_metadata())
     ```
 """
 
@@ -31,14 +25,23 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
-from pydantic_ai import PartDeltaEvent, TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
+from pydantic_ai import (
+    PartDeltaEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+    ToolCallPart,
+    ToolCallPartDelta,
+)
+
+from agentpool.agents.events import ToolCallStartEvent
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Coroutine
 
     from agentpool.agents.events.events import RichAgentStreamEvent
-    from agentpool.common_types import SimpleJsonType
 
 
 # Type alias for processor callables
@@ -122,106 +125,6 @@ class StreamPipeline:
         self.processors.append(processor)
 
 
-def extract_file_path_from_tool_call(tool_name: str, raw_input: dict[str, Any]) -> str | None:
-    """Extract file path from a tool call if it's a file-writing tool.
-
-    Uses simple heuristics:
-    - Tool name contains 'write' or 'edit' (case-insensitive)
-    - Input contains 'path' or 'file_path' key
-
-    Args:
-        tool_name: Name of the tool being called
-        raw_input: Tool call arguments
-
-    Returns:
-        File path if this is a file-writing tool, None otherwise
-    """
-    name_lower = tool_name.lower()
-    if "write" not in name_lower and "edit" not in name_lower:
-        return None
-
-    # Try common path argument names
-    for key in ("file_path", "path", "filepath", "filename", "file"):
-        if key in raw_input and isinstance(val := raw_input[key], str):
-            return val
-
-    return None
-
-
-@dataclass
-class FileTrackingProcessor:
-    """Tracks files modified during a stream of events.
-
-    Observes ToolCallStartEvent and extracts file paths from write/edit operations.
-    Does not modify events - just passes them through while collecting metadata.
-
-    Example:
-        ```python
-        tracker = FileTrackingProcessor()
-
-        async for event in tracker(events):
-            yield event
-
-        print(f"Modified files: {tracker.touched_files}")
-        print(f"Metadata: {tracker.get_metadata()}")
-        ```
-    """
-
-    touched_files: set[str] = field(default_factory=set)
-    """Set of file paths that were modified by tool calls."""
-
-    extractor: Callable[[str, dict[str, Any]], str | None] = extract_file_path_from_tool_call
-    """Function to extract file path from tool call. Can be customized."""
-
-    def process_event(self, event: RichAgentStreamEvent[Any]) -> None:
-        """Process an event and track any file modifications.
-
-        Args:
-            event: The event to process (checks for ToolCallStartEvent)
-        """
-        from agentpool.agents.events import ToolCallStartEvent
-
-        if isinstance(event, ToolCallStartEvent) and (
-            file_path := self.extractor(event.tool_name or "", event.raw_input or {})
-        ):
-            self.touched_files.add(file_path)
-
-    def __call__(
-        self, stream: AsyncIterator[RichAgentStreamEvent[Any]]
-    ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
-        """Wrap a stream to track file modifications.
-
-        Args:
-            stream: Input event stream
-
-        Returns:
-            Same events, unmodified
-        """
-        return self._process(stream)
-
-    async def _process(
-        self, stream: AsyncIterator[RichAgentStreamEvent[Any]]
-    ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
-        """Internal async generator for processing."""
-        async for event in stream:
-            self.process_event(event)
-            yield event
-
-    def get_metadata(self) -> SimpleJsonType:
-        """Get metadata dict with touched files (if any).
-
-        Returns:
-            Dict with 'touched_files' key if files were modified, else empty dict
-        """
-        if self.touched_files:
-            return {"touched_files": sorted(self.touched_files)}
-        return {}
-
-    def reset(self) -> None:
-        """Clear tracked files for reuse."""
-        self.touched_files.clear()
-
-
 def event_handler_processor(
     handler: Callable[[Any, RichAgentStreamEvent[Any]], Coroutine[Any, Any, None]],
 ) -> StreamProcessorCallable:
@@ -254,8 +157,18 @@ def event_handler_processor(
     return process
 
 
-# Convenience alias for backwards compatibility with existing FileTracker usage
-FileTracker = FileTrackingProcessor
+def event_to_part(
+    event: RichAgentStreamEvent[Any],
+) -> TextPart | ThinkingPart | ToolCallPart | None:
+    match event:
+        case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+            return TextPart(content=delta)
+        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)) if delta:
+            return ThinkingPart(content=delta)
+        case ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc_name, raw_input=tc_input):
+            return ToolCallPart(tool_name=tc_name, args=tc_input, tool_call_id=tc_id)
+        case _:
+            return None
 
 
 async def batch_stream_deltas(  # noqa: PLR0915
@@ -296,8 +209,7 @@ async def batch_stream_deltas(  # noqa: PLR0915
             case "tool_call":
                 delta = ToolCallPartDelta(args_delta=content)
             case _:
-                msg = f"Unexpected pending type: {pending_type}"
-                raise ValueError(msg)
+                raise ValueError(f"Unexpected pending type: {pending_type}")
         return PartDeltaEvent(index=pending_index, delta=delta)
 
     async for event in stream:

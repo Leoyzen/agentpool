@@ -48,13 +48,14 @@ def filter_servers_by_capabilities(
     unsupported_servers: list[tuple[McpServer, str]] = []
 
     for server in servers:
-        if isinstance(server, HttpMcpServer) and not supports_http:
-            unsupported_servers.append((server, "HTTP"))
-        elif isinstance(server, SseMcpServer) and not supports_sse:
-            unsupported_servers.append((server, "SSE"))
-        else:
-            # Stdio servers or supported transport types
-            supported_servers.append(server)
+        match server:
+            case HttpMcpServer() if not supports_http:
+                unsupported_servers.append((server, "HTTP"))
+            case SseMcpServer() if not supports_sse:
+                unsupported_servers.append((server, "SSE"))
+            case _:
+                # Stdio servers or supported transport types
+                supported_servers.append(server)
 
     # Log warning if some servers were filtered out
     if unsupported_servers and logger:

@@ -23,7 +23,7 @@ from upathtools_config.base import FileSystemConfig
 
 from agentpool_config.converters import ConversionConfig
 from agentpool_config.tools import ImportToolConfig
-from agentpool_config.workers import WorkerConfig
+from agentpool_config.workers import AgentWorkerConfig, WorkerConfig
 
 
 if TYPE_CHECKING:
@@ -227,14 +227,24 @@ class WorkersToolsetConfig(BaseToolsetConfig):
     type: Literal["workers"] = Field("workers", init=False)
     """Workers toolset (predefined agent/team tools)."""
 
-    workers: list[WorkerConfig] = Field(default_factory=list, title="Worker configurations")
-    """List of workers to register as tools."""
+    workers: list[WorkerConfig | str] = Field(default_factory=list, title="Worker configurations")
+    """List of workers to register as tools. Can be config objects or plain agent names."""
+
+    def get_workers(self) -> list[WorkerConfig]:
+        """Resolve workers list, converting plain strings to AgentWorkerConfig."""
+        resolved: list[WorkerConfig] = []
+        for worker in self.workers:
+            if isinstance(worker, str):
+                resolved.append(AgentWorkerConfig(name=worker))
+            else:
+                resolved.append(worker)
+        return resolved
 
     def get_provider(self) -> ResourceProvider:
         """Create workers tools provider."""
         from agentpool_toolsets.builtin.workers import WorkersTools
 
-        return WorkersTools(workers=self.workers, name="workers")
+        return WorkersTools(workers=self.get_workers(), name="workers")
 
 
 class ProcessManagementToolsetConfig(BaseToolsetConfig):
@@ -938,6 +948,44 @@ class MCPDiscoveryToolsetConfig(BaseToolsetConfig):
         )
 
 
+class CronToolsetConfig(BaseToolsetConfig):
+    """Configuration for cron scheduling toolset.
+
+    Gives agents the ability to schedule, list, and remove recurring or
+    one-shot jobs at runtime. Jobs are persisted to a JSON file.
+
+    Requires the ``bot`` extra: ``pip install agentpool[bot]``
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "x-icon": "octicon:clock-16",
+            "x-doc-title": "Cron Toolset",
+        }
+    )
+
+    type: Literal["cron"] = Field("cron", init=False)
+    """Cron scheduling toolset."""
+
+    store_path: str = Field(
+        default="~/.agentpool/cron_jobs.json",
+        title="Job store path",
+        examples=["~/.agentpool/cron_jobs.json", "/tmp/cron.json"],
+    )
+    """Path to the JSON file where scheduled jobs are persisted."""
+
+    def get_provider(self) -> ResourceProvider:
+        """Create cron tools provider."""
+        from pathlib import Path
+
+        from agentpool_bot.cron.service import CronService
+        from agentpool_toolsets.cron import CronTools
+
+        resolved = Path(self.store_path).expanduser()
+        service = CronService(store_path=resolved)
+        return CronTools(service=service, name=self.namespace or "cron")
+
+
 ToolsetConfig = Annotated[
     OpenAPIToolsetConfig
     | EntryPointToolsetConfig
@@ -959,6 +1007,7 @@ ToolsetConfig = Annotated[
     | PlanToolsetConfig
     | DebugToolsetConfig
     | MCPDiscoveryToolsetConfig
+    | CronToolsetConfig
     | CustomToolsetConfig,
     Field(discriminator="type"),
 ]

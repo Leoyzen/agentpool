@@ -23,13 +23,17 @@ from syrupy.extensions.json import JSONSnapshotExtension
 import yaml
 
 from agentpool.delegation import AgentPool
+from agentpool.models import ACPAgentConfig
 from agentpool_config.agentpool_tools import BashToolConfig
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syrupy.assertion import SnapshotAssertion
 
-    from agentpool_config.tools import BaseToolConfig
+    from agentpool.models.agents import AnyToolConfig
+
 
 # Skip on Windows due to temp file locking issues with subprocesses
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Windows temp file locking")
@@ -77,9 +81,7 @@ def create_server_config_file(temp_dir: Path, tool_name: str, tool_args: dict[st
 def create_client_config_file(
     temp_dir: Path,
     server_config_path: Path,
-    tool_name: str,
-    tool_args: dict[str, Any],
-    tools: list[BaseToolConfig],
+    tools: Sequence[AnyToolConfig | str],
     mock_env: MockExecutionEnvironmentConfig,
 ) -> Path:
     """Create client config that spawns ACP server with MCP bridge.
@@ -87,22 +89,22 @@ def create_client_config_file(
     Args:
         temp_dir: Directory to write config file to
         server_config_path: Path to the server config file
-        tool_name: Name of the tool to call
-        tool_args: Arguments for the tool
         tools: Tool configs with environment (will be provided via MCP bridge)
         mock_env: Mock execution environment for deterministic IDs
     """
-    agent_config: dict[str, Any] = {
-        "type": "acp",
-        "provider": "agentpool",
-        "config_path": str(server_config_path),
-        "agent": "test_agent",
-        "tools": [t.model_dump(mode="json") for t in tools],
-        "environment": mock_env.model_dump(mode="json"),
-    }
-
-    config = {"agents": {"test_client": agent_config}}
-
+    agent_config = ACPAgentConfig(
+        command="uv",
+        args=[
+            "run",
+            "agentpool",
+            "serve-acp",
+            str(server_config_path),
+            "--agent",
+            "test_agent",
+        ],
+        tools=tools,
+    )
+    config = {"agents": {"test_client": agent_config.model_dump()}}
     config_path = temp_dir / "client_config.yml"
     config_path.write_text(yaml.dump(config, default_flow_style=False))
     return config_path
@@ -123,7 +125,7 @@ class ACPViaACPHarness:
         self,
         tool_name: str,
         tool_args: dict[str, Any],
-        tools: list[BaseToolConfig],
+        tools: Sequence[AnyToolConfig | str],
     ) -> list[dict[str, Any]]:
         """Execute a tool via ACP subprocess with MCP bridge and capture events.
 
@@ -153,8 +155,6 @@ class ACPViaACPHarness:
         client_config_path = create_client_config_file(
             self.temp_dir,
             server_config_path,
-            tool_name,
-            tool_args,
             tools=tools,
             mock_env=mock_env,
         )
@@ -187,22 +187,16 @@ class TestExecuteCommandViaACP:
         json_snapshot: SnapshotAssertion,
     ):
         """Test simple command execution via ACP with mock environment."""
-        mock_env = MockExecutionEnvironmentConfig(
-            deterministic_ids=True,
-            command_results={
-                "echo hello": asdict(
-                    ExecutionResult(
-                        result=None,
-                        stdout="hello\n",
-                        stderr="",
-                        success=True,
-                        exit_code=0,
-                        duration=0.01,
-                    )
-                )
-            },
+        exec_result = ExecutionResult(
+            result=None,
+            stdout="hello\n",
+            stderr="",
+            success=True,
+            exit_code=0,
+            duration=0.01,
         )
-
+        results = {"echo hello": asdict(exec_result)}
+        mock_env = MockExecutionEnvironmentConfig(deterministic_ids=True, command_results=results)
         events = await harness.execute_tool(
             tool_name="bash",
             tool_args={"command": "echo hello"},

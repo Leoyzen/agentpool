@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
     from fastmcp import Context, FastMCP
-    from fastmcp.tools.tool import ToolResult
+    from fastmcp.tools.tool import ToolResult as FastMCPToolResult
     from pydantic_ai.messages import UserContent
     from uvicorn import Server
 
@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.prompt_injection import PromptInjectionManager
     from agentpool.tools.base import Tool
-    from agentpool.ui.base import InputProvider
 _ = ResourceChangeEvent  # Used at runtime in method signature
 
 
@@ -121,7 +120,7 @@ def _create_stub_run_context(
     )
 
 
-def _convert_to_tool_result(result: Any) -> ToolResult:
+def _convert_to_tool_result(result: Any) -> FastMCPToolResult:
     """Convert a tool's return value to a FastMCP ToolResult.
 
     Handles different result types appropriately:
@@ -135,25 +134,21 @@ def _convert_to_tool_result(result: Any) -> ToolResult:
 
     from agentpool.tools.base import ToolResult as AgentPoolToolResult
 
-    # Already a FastMCP ToolResult - pass through
-    if isinstance(result, FastMCPToolResult):
-        return result
-    # AgentPool ToolResult - convert to FastMCP format
-    if isinstance(result, AgentPoolToolResult):
-        return FastMCPToolResult(
-            content=result.content,
-            structured_content=result.structured_content,
-            meta=result.metadata,
-        )
-    # Dict - use as structured_content (FastMCP auto-populates content as JSON)
-    if isinstance(result, dict):
-        return FastMCPToolResult(structured_content=result)
-    # Pydantic model - serialize to dict for structured_content
-    if isinstance(result, BaseModel):
-        return FastMCPToolResult(structured_content=result.model_dump(mode="json"))
-    # All other types (str, list, ContentBlock, Image, None, primitives, etc.)
-    # ToolResult's internal _convert_to_content handles these correctly
-    return FastMCPToolResult(content=result if result is not None else "")
+    match result:
+        case FastMCPToolResult():
+            return result
+        case AgentPoolToolResult():
+            return FastMCPToolResult(
+                content=result.content,
+                structured_content=result.structured_content,
+                meta=result.metadata,
+            )
+        case dict():
+            return FastMCPToolResult(structured_content=result)
+        case BaseModel():
+            return FastMCPToolResult(structured_content=result.model_dump(mode="json"))
+        case _:
+            return FastMCPToolResult(content=result if result is not None else "")
 
 
 def _append_injection_to_result(result: Any, injection: str) -> Any:
@@ -169,23 +164,19 @@ def _append_injection_to_result(result: Any, injection: str) -> Any:
     """
     from agentpool.tools.base import ToolResult as AgentPoolToolResult
 
-    if isinstance(result, str):
-        return f"{result}\n\n{injection}"
-
-    if isinstance(result, AgentPoolToolResult):
-        existing = result.content
-        if existing is None:
+    match result:
+        case str():
+            return f"{result}\n\n{injection}"
+        case AgentPoolToolResult(content=None):
             return replace(result, content=injection)
-        if isinstance(existing, str):
+        case AgentPoolToolResult(content=str() as existing):
             return replace(result, content=f"{existing}\n\n{injection}")
-        # existing is a list
-        return replace(result, content=[*existing, f"\n\n{injection}"])
-
-    if isinstance(result, dict):
-        return {**result, "injected_context": injection}
-
-    # For other types, return tuple with original and injection
-    return (result, {"injected_context": injection})
+        case AgentPoolToolResult(content=list() as existing):
+            return replace(result, content=[*existing, f"\n\n{injection}"])
+        case dict():
+            return {**result, "injected_context": injection}
+        case _:
+            return (result, {"injected_context": injection})
 
 
 def _extract_tool_call_id(context: Context | None) -> str:
@@ -233,16 +224,13 @@ class ToolManagerBridge:
     server_name: str | None = None
     """Name for the MCP server."""
 
-    _current_deps: Any = field(default=None, init=False, repr=False)
-    """Current dependencies for tool invocations (set by run_stream)."""
-
-    _current_input_provider: InputProvider | None = field(default=None, init=False, repr=False)
-    """Current input provider for tool invocations (set by run_stream)."""
+    _current_context: AgentContext[Any] | None = field(default=None, init=False, repr=False)
+    """Current run-scoped context (set by set_run_context, read by WrappedTool.run)."""
 
     _current_prompt: str | Sequence[UserContent] | None = field(
         default=None, init=False, repr=False
     )
-    """Current prompt for tool invocations (set by run_stream)."""
+    """Current prompt for tool invocations (needed for stub RunContext)."""
 
     _mcp: FastMCP | None = field(default=None, init=False, repr=False)
     """FastMCP server instance."""
@@ -262,6 +250,15 @@ class ToolManagerBridge:
     When set, the bridge will consume pending injections after each tool call
     and append them to the tool result. This enables prompt injection for
     ACP agents (ACPAgent, ClaudeCodeAgent, CodexAgent) that use the bridge.
+    """
+
+    tool_metadata: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+    """Metadata from tool results, keyed by tool_call_id.
+
+    Populated by WrappedTool.run() when a tool returns metadata.
+    Agents read this to enrich ToolCallCompleteEvent with metadata that
+    the SDK would otherwise strip (e.g. MCP _meta fields).
+    Cleared at the start of each run via set_run_context().
     """
 
     async def __aenter__(self) -> Self:
@@ -340,24 +337,16 @@ class ToolManagerBridge:
 
         # Get current and new tool sets
         # Support both old and new FastMCP API
-        if hasattr(self._mcp, "_tool_manager"):
-            # Old API (<=2.12.4): direct access to _tool_manager
-            current_names = set(self._mcp._tool_manager._tools.keys())
-        elif hasattr(self._mcp, "_local_provider"):
-            # New API (git): tools stored in _local_provider._components
-            # Keys are prefixed with 'tool:', e.g., 'tool:bash'
-            current_names = {
-                key.removeprefix("tool:")
-                for key in self._mcp._local_provider._components  # pyright: ignore[reportAttributeAccessIssue]
-                if key.startswith("tool:")
-            }
-        else:
-            # Fallback: use async get_tools() method
-            current_tools = await self._mcp.get_tools()
-            current_names = {t.name for t in current_tools}  # type: ignore[attr-defined]
+
+        # New API (git): tools stored in _local_provider._components
+        # Keys are prefixed with 'tool:', e.g., 'tool:bash'
+        current_names = {
+            key.removeprefix("tool:")
+            for key in self._mcp.local_provider._components
+            if key.startswith("tool:")
+        }
         new_tools = await self.node.tools.get_tools(state="enabled")
         new_names = {t.name for t in new_tools}
-
         # Remove tools that are no longer present
         for name in current_names - new_names:
             with suppress(Exception):
@@ -432,11 +421,10 @@ class ToolManagerBridge:
                 self._tool = tool
                 self._bridge = bridge
 
-            async def run(self, arguments: dict[str, Any]) -> ToolResult:
+            async def run(self, arguments: dict[str, Any]) -> FastMCPToolResult:
                 """Execute the wrapped tool with context bridging."""
                 from fastmcp.server.dependencies import get_context
 
-                from agentpool.agents.events import ToolResultMetadataEvent
                 from agentpool.tools.base import ToolResult as AgentPoolToolResult
 
                 args = arguments.copy()
@@ -458,22 +446,18 @@ class ToolManagerBridge:
                     mcp_context = None
                 # Try to get Claude's original tool_call_id from request metadata
                 tc_id = _extract_tool_call_id(mcp_context)
-                # Get deps and input_provider from bridge (set by run_stream on the agent)
-                # Create context with tool-specific metadata from node's context.
-                ctx = self._bridge.node.get_context(
-                    data=self._bridge._current_deps,
-                    input_provider=self._bridge._current_input_provider,
-                )
-                ctx = replace(ctx, tool_name=self._tool.name, tool_call_id=tc_id, tool_input=args)
+                # Derive per-call context from the run-scoped base context
+                base = self._bridge._current_context or self._bridge.node.get_context()
+                args_ = args.copy()
+                ctx = replace(base, tool_name=self._tool.name, tool_call_id=tc_id, tool_input=args_)
                 # Invoke with context - copy args since invoke_tool_with_context
                 # modifies kwargs in-place to inject context parameters
                 result = await self._bridge.invoke_tool_with_context(self._tool, ctx, args)
-                # Emit metadata event for ClaudeCodeAgent to correlate
+                # Store metadata for agent to correlate with ToolCallCompleteEvent
                 # (works around Claude SDK stripping MCP _meta field)
                 if isinstance(result, AgentPoolToolResult) and result.metadata:
-                    logger.info("Emitting ToolResultMetadataEvent", tool_call_id=tc_id)
-                    event = ToolResultMetadataEvent(tool_call_id=tc_id, metadata=result.metadata)
-                    await ctx.events.emit_event(event)
+                    logger.info("Storing tool result metadata", tool_call_id=tc_id)
+                    self._bridge.tool_metadata[tc_id] = result.metadata
 
                 # Consume pending injection and append to result
                 if self._bridge.injection_manager and (
@@ -490,28 +474,25 @@ class ToolManagerBridge:
     @asynccontextmanager
     async def set_run_context(
         self,
-        deps: Any = None,
-        input_provider: InputProvider | None = None,
+        context: AgentContext[Any],
         prompt: str | Sequence[UserContent] | None = None,
     ) -> AsyncIterator[Self]:
         """Context manager for setting run-scoped state.
 
-        Ensures _current_deps, _current_input_provider, and _current_prompt are
-        properly set for the duration of the run and cleaned up afterwards.
+        Stores the AgentContext for the duration of the run so that
+        WrappedTool.run() can derive per-call contexts via replace().
 
         Args:
-            deps: Dependencies to set for tool invocations
-            input_provider: Input provider to set for tool invocations
-            prompt: Current prompt being processed
+            context: Base AgentContext for this run (deps, input_provider, pool, etc.)
+            prompt: Current prompt being processed (needed for stub RunContext)
         """
-        self._current_deps = deps
-        self._current_input_provider = input_provider
+        self._current_context = context
         self._current_prompt = prompt
+        self.tool_metadata.clear()
         try:
             yield self
         finally:
-            self._current_deps = None
-            self._current_input_provider = None
+            self._current_context = None
             self._current_prompt = None
 
     async def invoke_tool_with_context(
@@ -533,11 +514,11 @@ class ToolManagerBridge:
                 tool_name=tool.name,
                 tool_input=kwargs,
                 session_id=None,
+                env=self.node.env,
             )
             if pre_result.get("decision") == "deny":
                 reason = pre_result.get("reason", "Blocked by pre-tool hook")
-                msg = f"Tool {tool.name} blocked: {reason}"
-                raise ToolSkippedError(msg)
+                raise ToolSkippedError(f"Tool {tool.name} blocked: {reason}")
             # Apply modified input if provided
             if modified := pre_result.get("modified_input"):
                 kwargs.update(modified)
@@ -569,6 +550,7 @@ class ToolManagerBridge:
                 tool_output=result,
                 duration_ms=duration_ms,
                 session_id=None,
+                env=self.node.env,
             )
 
         return result
@@ -580,8 +562,7 @@ class ToolManagerBridge:
         import uvicorn
 
         if not self._mcp:
-            msg = "MCP server not initialized"
-            raise RuntimeError(msg)
+            raise RuntimeError("MCP server not initialized")
 
         # Auto-select an available port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -597,5 +578,4 @@ class ToolManagerBridge:
         name = f"mcp-bridge-{self.resolved_server_name}"
         self._server_task = asyncio.create_task(self._server.serve(), name=name)
         await anyio.sleep(0.1)  # Wait briefly for server to start
-        msg = "ToolManagerBridge started"
-        logger.info(msg, url=self.url)
+        logger.info("ToolManagerBridge started", url=self.url)

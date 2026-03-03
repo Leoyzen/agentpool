@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from agentpool import MessageNode
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import SubAgentType
     from agentpool.common_types import PromptCompatible
     from agentpool.delegation import AgentPool
     from agentpool_config.mcp_server import MCPServerConfig
@@ -290,9 +291,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                     else:
                         # Determine source type based on node type
                         if isinstance(node, Team):
-                            source_type: Literal["team_parallel", "team_sequential", "agent"] = (
-                                "team_parallel"
-                            )
+                            source_type: SubAgentType = "team_parallel"
                         elif isinstance(node, BaseTeam):
                             source_type = "team_sequential"
                         else:

@@ -9,7 +9,7 @@ Supports loading agents from markdown files with YAML frontmatter in various for
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 from upathtools import to_upath
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-
+AgentFileFormat = Literal["claude", "opencode", "native"]
 
 # Claude Code model alias mapping
 CLAUDE_MODEL_ALIASES: dict[str, str] = {
@@ -90,7 +90,7 @@ def extract_frontmatter(content: str, file_path: str) -> tuple[dict[str, Any], s
     return metadata, system_prompt
 
 
-def detect_format(metadata: dict[str, Any]) -> Literal["claude", "opencode", "native"]:
+def detect_format(metadata: dict[str, Any]) -> AgentFileFormat:
     """Detect the file format based on frontmatter content.
 
     Args:
@@ -156,14 +156,14 @@ def parse_claude_format(
             config_kwargs["requires_tool_confirmation"] = mapped
         else:
             logger.warning(
-                "Unknown permissionMode %r in %s, using default",
-                permission_mode,
-                file_path,
+                "Unknown permissionMode, using default",
+                permission_mode=permission_mode,
+                file_path=file_path,
             )
 
     # Tools string format (comma-separated) - not yet supported
     if (tools := metadata.get("tools")) and isinstance(tools, str):
-        logger.debug("Claude Code tools string %r in %s (not yet supported)", tools, file_path)
+        logger.debug("Claude Code tools string not yet supported", tools=tools, file_path=file_path)
 
     # Skills handling
     if (skills_str := metadata.get("skills")) and skills_registry is not None:
@@ -171,9 +171,9 @@ def parse_claude_format(
         for skill_name in skill_names:
             if skill_name not in skills_registry:
                 logger.warning(
-                    "Skill %r from %s not found in registry, ignoring",
-                    skill_name,
-                    file_path,
+                    "Skill not found in registry, ignoring",
+                    skill_name=skill_name,
+                    file_path=file_path,
                 )
 
     # System prompt from markdown body
@@ -221,20 +221,26 @@ def parse_opencode_format(
     # Temperature (logged, not directly supported)
     if temperature := metadata.get("temperature"):
         logger.debug(
-            "OpenCode temperature %r in %s (not directly supported)", temperature, file_path
+            "OpenCode temperature not directly supported",
+            temperature=temperature,
+            file_path=file_path,
         )
 
     # MaxSteps (logged, not directly supported)
     if max_steps := metadata.get("maxSteps"):
-        logger.debug("OpenCode maxSteps %r in %s (not directly supported)", max_steps, file_path)
+        logger.debug(
+            "OpenCode maxSteps not directly supported", max_steps=max_steps, file_path=file_path
+        )
 
     # Disable (logged, not directly supported)
     if disable := metadata.get("disable"):
-        logger.debug("OpenCode disable %r in %s (not directly supported)", disable, file_path)
+        logger.debug(
+            "OpenCode disable not directly supported", disable=disable, file_path=file_path
+        )
 
     # Mode (informational only)
     if mode := metadata.get("mode"):
-        logger.debug("OpenCode mode %r in %s (informational only)", mode, file_path)
+        logger.debug("OpenCode mode informational only", mode=mode, file_path=file_path)
 
     # Permission handling (granular per-tool)
     if permission := metadata.get("permission"):
@@ -243,11 +249,13 @@ def parse_opencode_format(
             config_kwargs["requires_tool_confirmation"] = (
                 "always" if edit_perm == "ask" else "never"
             )
-        logger.debug("OpenCode permission %r in %s (partial mapping)", permission, file_path)
+        logger.debug(
+            "OpenCode permission partial mapping", permission=permission, file_path=file_path
+        )
 
     # Tools dict format (not yet supported)
     if (tools := metadata.get("tools")) and isinstance(tools, dict):
-        logger.debug("OpenCode tools dict %r in %s (not yet supported)", tools, file_path)
+        logger.debug("OpenCode tools dict not yet supported", tools=tools, file_path=file_path)
 
     # System prompt from markdown body
     if system_prompt:
@@ -261,10 +269,7 @@ def parse_opencode_format(
     return config_kwargs
 
 
-def parse_native_format(
-    metadata: dict[str, Any],
-    system_prompt: str,
-) -> dict[str, Any]:
+def parse_native_format(metadata: dict[str, Any], system_prompt: str) -> dict[str, Any]:
     """Parse native format frontmatter.
 
     This format allows full NativeAgentConfig fields in the frontmatter,
@@ -290,7 +295,7 @@ def parse_native_format(
 def parse_agent_file(
     file_path: str,
     *,
-    file_format: Literal["claude", "opencode", "native", "auto"] = "auto",
+    file_format: AgentFileFormat | Literal["auto"] = "auto",
     skills_registry: Any | None = None,
 ) -> NativeAgentConfig:
     """Parse agent markdown file to NativeAgentConfig.
@@ -319,18 +324,17 @@ def parse_agent_file(
 
     # Detect or use specified format
     detected_format = detect_format(metadata) if file_format == "auto" else file_format
-
-    # Parse based on format
-    if detected_format == "claude":
-        config_kwargs = parse_claude_format(
-            metadata, system_prompt, file_path, skills_registry=skills_registry
-        )
-    elif detected_format == "opencode":
-        config_kwargs = parse_opencode_format(metadata, system_prompt, file_path)
-    elif detected_format == "native":
-        config_kwargs = parse_native_format(metadata, system_prompt)
-    else:
-        raise ValueError(f"Unknown format {detected_format!r} for {file_path}")
+    match detected_format:
+        case "claude":
+            config_kwargs = parse_claude_format(
+                metadata, system_prompt, file_path, skills_registry=skills_registry
+            )
+        case "opencode":
+            config_kwargs = parse_opencode_format(metadata, system_prompt, file_path)
+        case "native":
+            config_kwargs = parse_native_format(metadata, system_prompt)
+        case _ as unreachable:
+            assert_never(unreachable)
 
     return NativeAgentConfig(**config_kwargs)
 

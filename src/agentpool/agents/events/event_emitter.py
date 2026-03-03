@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.context import AgentContext
     from agentpool.agents.events import RichAgentStreamEvent, ToolCallContentItem
+    from agentpool.agents.events.events import ToolCallStatus
     from agentpool.resource_providers.plan_provider import PlanEntry
     from agentpool.tools.base import ToolKind
 
@@ -81,7 +82,7 @@ class StreamEventEmitter:
         self,
         title: str,
         *,
-        status: Literal["pending", "in_progress", "completed", "failed"] = "in_progress",
+        status: ToolCallStatus = "in_progress",
         items: Sequence[ToolCallContentItem | str] | None = None,
         replace_content: bool = False,
     ) -> None:
@@ -172,7 +173,7 @@ class StreamEventEmitter:
         path: str,
         old_text: str,
         new_text: str,
-        status: Literal["in_progress", "completed", "failed"],
+        status: ToolCallStatus,
     ) -> None:
         """Emit file edit progress event with diff information.
 
@@ -308,14 +309,14 @@ class StreamEventEmitter:
         )
         await self._emit(event)
 
-    async def plan_updated(self, entries: list[PlanEntry]) -> None:
+    async def plan_updated(self, entries: Sequence[PlanEntry]) -> None:
         """Emit plan update event.
 
         Args:
             entries: Current plan entries
         """
         event = PlanUpdateEvent(
-            entries=entries.copy(),
+            entries=list(entries),
             tool_call_id=self._context.tool_call_id,
         )
         await self._emit(event)

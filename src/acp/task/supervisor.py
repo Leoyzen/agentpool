@@ -28,11 +28,11 @@ class TaskSupervisor:
     awaited reliably when the connection closes.
     """
 
-    def __init__(self, *, source: str) -> None:
+    def __init__(self, *, source: str, error_handlers: list[ErrorHandler] | None = None) -> None:
         self._source = source
         self._tasks: set[asyncio.Task[Any]] = set()
         self._closed = False
-        self._error_handlers: list[ErrorHandler] = []
+        self._error_handlers = error_handlers or []
 
     def add_error_handler(self, handler: ErrorHandler) -> None:
         self._error_handlers.append(handler)
@@ -64,10 +64,7 @@ class TaskSupervisor:
                     on_error(task, exc)
                     handled = True
                 except Exception:
-                    logger.exception(
-                        "Error in task-specific error handler",
-                        source=self._source,
-                    )
+                    logger.exception("Error in task-specific error handler", source=self._source)
             if not handled:
                 for handler in self._error_handlers:
                     try:
@@ -82,6 +79,8 @@ class TaskSupervisor:
         self._closed = True
         if not self._tasks:
             return
+        # Snapshot the set before iterating — done-callbacks call discard()
+        # which would mutate self._tasks during iteration.
         tasks = list(self._tasks)
         for task in tasks:
             task.cancel()

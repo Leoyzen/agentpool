@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from functools import partial
 import inspect
-import json
 from typing import TYPE_CHECKING, Any
+
+import anyenv
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.resource_providers import AggregatingResourceProvider
@@ -136,7 +137,7 @@ class CodeModeResourceProvider(AggregatingResourceProvider):
                 "error": error_msg,
             }
             metadata_path = f"codemode/scripts/{timestamp}_{title}.json"
-            ctx.internal_fs.pipe(metadata_path, json.dumps(metadata, indent=2).encode("utf-8"))
+            ctx.internal_fs.pipe(metadata_path, anyenv.dump_json(metadata, indent=True).encode())
 
         return result_value
 

@@ -172,6 +172,7 @@ class ZedStorageProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
     ) -> None:
         """Log a conversation - NOT SUPPORTED (read-only provider)."""
         logger.warning("ZedStorageProvider is read-only, cannot log conversations")

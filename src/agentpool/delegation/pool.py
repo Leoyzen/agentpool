@@ -89,10 +89,10 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.models.manifest import AgentsManifest
         from agentpool.observability import registry
         from agentpool.prompts.manager import PromptManager
-        from agentpool.sessions import SessionManager
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
-        from agentpool.utils.streams import FileOpsTracker, TodoTracker
+        from agentpool.utils.streams import FileOpsTracker
+        from agentpool.utils.todos import TodoTracker
         from agentpool.vfs_registry import VFSRegistry
         from agentpool_toolsets.builtin.debug import install_memory_handler
 
@@ -117,8 +117,6 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         self.vfs_registry = VFSRegistry()
         for name, resource_config in self.manifest.resources.items():
             self.vfs_registry.register_from_config(name, resource_config)
-        session_store = self.manifest.storage.get_session_store()
-        self.sessions = SessionManager(pool=self, store=session_store)
         self.event_handlers = event_handlers or []
         self.connection_registry = ConnectionRegistry()
         servers = self.manifest.get_mcp_servers()
@@ -168,9 +166,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 teams = list(self.teams.values())
                 for agent in agents:
                     agent.tools.add_provider(aggregating_provider)
-                # Initialize storage and sessions sequentially (they share the same DB)
+                # Initialize storage
                 await self.exit_stack.enter_async_context(self.storage)
-                await self.exit_stack.enter_async_context(self.sessions)
                 # Initialize agents and teams (can be parallel)
                 comps: list[AbstractAsyncContextManager[Any]] = [*agents, *teams]
                 node_inits = [self.exit_stack.enter_async_context(c) for c in comps]
@@ -377,8 +374,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         agents = self.all_agents
         if not agents:
-            msg = "No agents available in pool"
-            raise RuntimeError(msg)
+            raise RuntimeError("No agents available in pool")
 
         if self._main_agent_name:
             if self._main_agent_name not in agents:

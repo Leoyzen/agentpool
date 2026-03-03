@@ -29,6 +29,13 @@ class MCPStatus(OpenCodeBaseModel):
     error: str | None = None
 
 
+class McpAuthorizationResponse(OpenCodeBaseModel):
+    """Response from starting MCP OAuth flow."""
+
+    authorization_url: str
+    """URL to open in browser for authorization."""
+
+
 class McpResource(OpenCodeBaseModel):
     """MCP resource info matching OpenCode SDK McpResource type."""
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from duty import duty  # pyright: ignore[reportMissingImports]
+from duty import duty  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 
 # Read configuration from copier-answers.yml
@@ -154,6 +154,7 @@ def lint(ctx, filepath: str | None = None):  # noqa: D417
     """
     ruff_target, mypy_target, jsonschema_files = _get_lint_targets(filepath)
 
+    ctx.run("ty check .")
     ctx.run(f"uv run ruff check --fix --unsafe-fixes {ruff_target}")
     ctx.run(f"uv run ruff format {ruff_target}")
 
@@ -238,6 +239,52 @@ def version(
     tag = f"v{new_version}"
     ctx.run(f"git tag {tag}")
     print(f"Created tag: {tag}")
+
+
+@duty(capture=False)
+def smoke_test(ctx, timeout: int = 10):  # noqa: D417
+    """Build wheel and verify serve-acp starts successfully via uvx.
+
+    Builds the package, installs it in an isolated uvx environment,
+    and checks that serve-acp stays alive for the given timeout.
+    Exit code 124 from timeout means the process was still running (success).
+    Any other exit code means it crashed (failure).
+
+    Args:
+        timeout: Seconds to wait before considering the server healthy.
+    """
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Build wheel
+        ctx.run(f"uv build --wheel --out-dir {tmpdir}")
+
+        # Find the built wheel
+        wheels = list(Path(tmpdir).glob("*.whl"))
+        if not wheels:
+            msg = "No wheel found after build"
+            raise RuntimeError(msg)
+        wheel = wheels[0]
+        print(f"Built: {wheel.name}")
+
+        # Run serve-acp from the wheel in an isolated environment
+        result = subprocess.run(  # noqa: PLW1510
+            ["timeout", str(timeout), "uvx", "--from", str(wheel), "agentpool", "serve-acp"],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode == 124:  # noqa: PLR2004
+            print(f"serve-acp stayed alive for {timeout}s (healthy)")
+        else:
+            print(f"serve-acp exited with code {result.returncode}")
+            if result.stdout:
+                print(f"stdout: {result.stdout}")
+            if result.stderr:
+                print(f"stderr: {result.stderr}")
+            msg = f"serve-acp crashed (exit code {result.returncode})"
+            raise RuntimeError(msg)
 
 
 @duty(capture=False)

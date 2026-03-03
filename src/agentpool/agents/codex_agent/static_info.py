@@ -85,3 +85,25 @@ EFFORT_MODES = [
         category_id="thought_level",
     ),
 ]
+
+
+PERSONALITY_MODES = [
+    ModeInfo(
+        id="none",
+        name="None",
+        description="No personality preset",
+        category_id="personality",
+    ),
+    ModeInfo(
+        id="friendly",
+        name="Friendly",
+        description="Warm and approachable tone",
+        category_id="personality",
+    ),
+    ModeInfo(
+        id="pragmatic",
+        name="Pragmatic",
+        description="Direct and efficient communication",
+        category_id="personality",
+    ),
+]

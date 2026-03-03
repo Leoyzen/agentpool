@@ -83,7 +83,7 @@ def node_function(
                 depends_on_ = []
             case str():
                 depends_on_ = [depends_on]
-            case Callable():
+            case Callable():  # ty: ignore[invalid-match-pattern]
                 depends_on_ = [get_fn_name(depends_on)]
             case [*items]:
                 depends_on_ = [

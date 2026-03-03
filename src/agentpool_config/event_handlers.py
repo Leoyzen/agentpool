@@ -18,7 +18,7 @@ StdOutStyle = Literal["simple", "detailed"]
 
 OpenAITTSModel = Literal["tts-1", "tts-1-hd"]
 OpenAITTSVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-
+SyncMode = Literal["sync_sentence", "sync_run", "async_queue", "async_cancel"]
 EdgeTTSVoice = Literal[
     "af-ZA-AdriNeural",
     "af-ZA-WillemNeural",
@@ -483,7 +483,7 @@ class TTSEventHandlerConfig(BaseEventHandlerConfig):
     )
     """Minimum text length before synthesizing (in characters)."""
 
-    mode: Literal["sync_sentence", "sync_run", "async_queue", "async_cancel"] = Field(
+    mode: SyncMode = Field(
         default="sync_run",
         examples=["sync_sentence", "sync_run", "async_queue", "async_cancel"],
         title="Synchronization Mode",
@@ -580,7 +580,7 @@ class EdgeTTSEventHandlerConfig(BaseEventHandlerConfig):
     )
     """Minimum text length before synthesizing (in characters)."""
 
-    mode: Literal["sync_sentence", "sync_run", "async_queue", "async_cancel"] = Field(
+    mode: SyncMode = Field(
         default="sync_run",
         examples=["sync_sentence", "sync_run", "async_queue", "async_cancel"],
         title="Synchronization Mode",

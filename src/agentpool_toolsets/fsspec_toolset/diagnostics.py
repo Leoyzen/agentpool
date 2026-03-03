@@ -349,25 +349,22 @@ class OxlintServer(DiagnosticServer):
         try:
             data = anyenv.load_json(stdout)
             for diag in data.get("diagnostics", []):
-                labels = diag.get("labels", [])
-                if labels:
+                if labels := diag.get("labels", []):
                     span = labels[0].get("span", {})
                     line = span.get("line", 1)
                     column = span.get("column", 1)
                 else:
                     line, column = 1, 1
-
-                diagnostics.append(
-                    Diagnostic(
-                        file=diag.get("filename", ""),
-                        line=line,
-                        column=column,
-                        severity=_severity_from_string(diag.get("severity", "warning")),
-                        message=diag.get("message", ""),
-                        code=diag.get("code"),
-                        source=self.id,
-                    )
+                obj = Diagnostic(
+                    file=diag.get("filename", ""),
+                    line=line,
+                    column=column,
+                    severity=_severity_from_string(diag.get("severity", "warning")),
+                    message=diag.get("message", ""),
+                    code=diag.get("code"),
+                    source=self.id,
                 )
+                diagnostics.append(obj)
         except anyenv.JsonLoadError:
             pass
         return diagnostics
@@ -391,18 +388,16 @@ class BiomeServer(DiagnosticServer):
                 span = location.get("span", [0, 0])
                 path_info = location.get("path", {})
                 file_path = path_info.get("file", "") if isinstance(path_info, dict) else ""
-
-                diagnostics.append(
-                    Diagnostic(
-                        file=file_path,
-                        line=1,  # Biome uses byte offsets
-                        column=span[0] if span else 1,
-                        severity=_severity_from_string(diag.get("severity", "error")),
-                        message=diag.get("description", ""),
-                        code=diag.get("category"),
-                        source=self.id,
-                    )
+                obj = Diagnostic(
+                    file=file_path,
+                    line=1,  # Biome uses byte offsets
+                    column=span[0] if span else 1,
+                    severity=_severity_from_string(diag.get("severity", "error")),
+                    message=diag.get("description", ""),
+                    code=diag.get("category"),
+                    source=self.id,
                 )
+                diagnostics.append(obj)
         except anyenv.JsonLoadError:
             pass
         return diagnostics

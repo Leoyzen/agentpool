@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import re
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from agentpool.log import get_logger
 
+
+if TYPE_CHECKING:
+    from exxec import ExecutionEnvironment
 
 logger = get_logger(__name__)
 
@@ -101,11 +104,17 @@ class Hook(ABC):
         return True
 
     @abstractmethod
-    async def execute(self, input_data: HookInput) -> HookResult:
+    async def execute(
+        self,
+        input_data: HookInput,
+        env: ExecutionEnvironment | None = None,
+    ) -> HookResult:
         """Execute the hook.
 
         Args:
             input_data: The hook input data.
+            env: Optional execution environment from the agent. Command hooks
+                use this to run in the same environment as the agent's tools.
 
         Returns:
             Hook result with decision and optional modifications.

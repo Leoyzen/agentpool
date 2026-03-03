@@ -66,7 +66,7 @@ class StaticResourceProvider(ResourceProvider):
         match tool:
             case Tool():
                 instance = tool
-            case Callable() | str():
+            case Callable() | str():  # ty: ignore[invalid-match-pattern]
                 instance = Tool.from_callable(tool)
         self._tools.append(instance)
 

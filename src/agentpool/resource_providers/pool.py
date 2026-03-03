@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from agentpool import AgentPool
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo
-    from agentpool.tools import Tool
+    from agentpool.tools import FunctionTool
 
 logger = get_logger(__name__)
 
@@ -45,7 +45,7 @@ class PoolResourceProvider(ResourceProvider):
         self.zed_mode = zed_mode
         self.include_team_members = include_team_members
 
-    async def get_tools(self) -> Sequence[Tool]:
+    async def get_tools(self) -> Sequence[FunctionTool]:
         """Get tools from all agents in pool."""
         team_tools = [team.to_tool() for team in self.pool.teams.values()]
         agents = list(self.pool.get_agents().values())

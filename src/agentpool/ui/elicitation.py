@@ -405,40 +405,39 @@ async def dispatch_elicitation[T](
 def _parse_enum_options(schema: dict[str, Any]) -> list[ChoiceOption]:
     """Parse enum options from JSON schema."""
     # Simple enum: {"enum": ["a", "b", "c"]}
-    if "enum" in schema:
-        return [ChoiceOption(value=str(val), title=str(val)) for val in schema["enum"]]
-
-    # oneOf with const/title: {"oneOf": [{"const": "a", "title": "Option A"}, ...]}
-    if "oneOf" in schema:
-        return [
-            ChoiceOption(
-                value=str(item["const"]),
-                title=item.get("title", str(item["const"])),
-                description=item.get("description", ""),
-            )
-            for item in schema["oneOf"]
-            if "const" in item
-        ]
-
-    return []
+    match schema:
+        case {"enum": enum}:
+            return [ChoiceOption(value=str(val), title=str(val)) for val in enum]
+        case {"oneOf": one_of}:  #  {"oneOf": [{"const": "a", "title": "Option A"}, ...]}
+            return [
+                ChoiceOption(
+                    value=str(item["const"]),
+                    title=item.get("title", str(item["const"])),
+                    description=item.get("description", ""),
+                )
+                for item in one_of
+                if "const" in item
+            ]
+        case _:
+            return []
 
 
 def _parse_array_enum_options(items_schema: dict[str, Any]) -> list[ChoiceOption]:
     """Parse multi-select enum options from array items schema."""
-    # items with enum: {"items": {"type": "string", "enum": ["a", "b"]}}
-    if "enum" in items_schema:
-        return [ChoiceOption(value=str(val), title=str(val)) for val in items_schema["enum"]]
-
-    # items with anyOf: {"items": {"anyOf": [{"const": "a", "title": "A"}, ...]}}
-    if "anyOf" in items_schema:
-        options: list[ChoiceOption] = []
-        for item in items_schema["anyOf"]:
-            if "const" in item:
-                val = str(item["const"])
-                title = item.get("title", val)
-                desc = item.get("description", "")
-                options.append(ChoiceOption(value=val, title=title, description=desc))
-        return options
+    match items_schema:
+        case {"enum": enum_list}:
+            # items with enum: {"items": {"type": "string", "enum": ["a", "b"]}}
+            return [ChoiceOption(value=str(val), title=str(val)) for val in enum_list]
+        case {"anyOf": any_of}:
+            # items with anyOf: {"items": {"anyOf": [{"const": "a", "title": "A"}, ...]}}
+            options: list[ChoiceOption] = []
+            for item in any_of:
+                if "const" in item:
+                    val = str(item["const"])
+                    title = item.get("title", val)
+                    desc = item.get("description", "")
+                    options.append(ChoiceOption(value=val, title=title, description=desc))
+            return options
 
     return []
 
@@ -457,64 +456,51 @@ def from_mcp_schema(schema: dict[str, Any]) -> ElicitRequest:
     description = schema.get("description", "")
     default = schema.get("default")
 
-    # Array type -> multi-select choice
-    if schema_type == "array":
-        items = schema.get("items", {})
-        options = _parse_array_enum_options(items)
-        return ElicitChoice(
-            title=title,
-            description=description,
-            options=options,
-            multi=True,
-            min_items=schema.get("minItems"),
-            max_items=schema.get("maxItems"),
-            default=default,
-        )
-
-    # String with enum -> single-select choice
-    if schema_type == "string" and ("enum" in schema or "oneOf" in schema):
-        options = _parse_enum_options(schema)
-        return ElicitChoice(
-            title=title,
-            description=description,
-            options=options,
-            multi=False,
-            default=default,
-        )
-
-    # Plain string
-    if schema_type == "string":
-        return ElicitString(
-            title=title,
-            description=description,
-            format=schema.get("format"),
-            min_length=schema.get("minLength"),
-            max_length=schema.get("maxLength"),
-            pattern=schema.get("pattern"),
-            default=default,
-        )
-
-    # Number or integer
-    if schema_type in ("number", "integer"):
-        return ElicitNumber(
-            title=title,
-            description=description,
-            integer=schema_type == "integer",
-            minimum=schema.get("minimum"),
-            maximum=schema.get("maximum"),
-            default=default,
-        )
-
-    # Boolean
-    if schema_type == "boolean":
-        return ElicitBoolean(
-            title=title,
-            description=description,
-            default=default,
-        )
-
-    # Fallback to string
-    return ElicitString(title=title, description=description)
+    match schema_type:
+        case "array":
+            items = schema.get("items", {})
+            options = _parse_array_enum_options(items)
+            return ElicitChoice(
+                title=title,
+                description=description,
+                options=options,
+                multi=True,
+                min_items=schema.get("minItems"),
+                max_items=schema.get("maxItems"),
+                default=default,
+            )
+        case "string" if "enum" in schema or "oneOf" in schema:
+            options = _parse_enum_options(schema)
+            return ElicitChoice(
+                title=title,
+                description=description,
+                options=options,
+                multi=False,
+                default=default,
+            )
+        case "string":
+            return ElicitString(
+                title=title,
+                description=description,
+                format=schema.get("format"),
+                min_length=schema.get("minLength"),
+                max_length=schema.get("maxLength"),
+                pattern=schema.get("pattern"),
+                default=default,
+            )
+        case "number" | "integer":
+            return ElicitNumber(
+                title=title,
+                description=description,
+                integer=schema_type == "integer",
+                minimum=schema.get("minimum"),
+                maximum=schema.get("maximum"),
+                default=default,
+            )
+        case "boolean":
+            return ElicitBoolean(title=title, description=description, default=default)
+        case _:
+            return ElicitString(title=title, description=description)
 
 
 def from_mcp_form_schema(message: str, schema: dict[str, Any]) -> ElicitForm:
@@ -539,11 +525,7 @@ def from_mcp_form_schema(message: str, schema: dict[str, Any]) -> ElicitForm:
             request.required = name in required
             fields[name] = request
 
-    return ElicitForm(
-        message=message,
-        fields=fields,
-        required_fields=required,
-    )
+    return ElicitForm(message=message, fields=fields, required_fields=required)
 
 
 # =============================================================================
@@ -666,13 +648,9 @@ def to_mcp_schema(request: ElicitRequest) -> dict[str, Any]:
             return _choice_to_schema(request)
         case ElicitUrl():
             raise ValueError("ElicitUrl doesn't have a JSON schema representation")
-        case ElicitForm():
-            properties = {name: to_mcp_schema(f) for name, f in request.fields.items()}
-            return {
-                "type": "object",
-                "properties": properties,
-                "required": request.required_fields,
-            }
+        case ElicitForm(fields=fields, required_fields=required_fields):
+            properties = {name: to_mcp_schema(f) for name, f in fields.items()}
+            return {"type": "object", "properties": properties, "required": required_fields}
 
     raise ValueError(f"Unknown elicitation type: {type(request)}")
 
@@ -711,12 +689,8 @@ def from_claude_question(question: dict[str, Any]) -> ElicitChoice:
     header = question.get("header", "")
     question_text = question.get("question", "")
     title = f"{header}: {question_text}" if header else question_text
-
-    return ElicitChoice(
-        title=title,
-        options=options,
-        multi=question.get("multiSelect", False),
-    )
+    multi = question.get("multiSelect", False)
+    return ElicitChoice(title=title, options=options, multi=multi)
 
 
 def from_claude_questions(questions: list[dict[str, Any]]) -> ElicitForm:
@@ -732,8 +706,7 @@ def from_claude_questions(questions: list[dict[str, Any]]) -> ElicitForm:
 
     for q in questions:
         question_text = q.get("question", "")
-        choice = from_claude_question(q)
-        fields[question_text] = choice
+        fields[question_text] = from_claude_question(q)
 
     return ElicitForm(
         message="Please answer the following questions",
@@ -774,7 +747,4 @@ def to_claude_answers(
                 else:
                     answers[question_text] = str(value)
 
-    return {
-        "questions": questions,
-        "answers": answers,
-    }
+    return {"questions": questions, "answers": answers}

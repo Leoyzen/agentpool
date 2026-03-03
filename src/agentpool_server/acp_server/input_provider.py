@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 import webbrowser
 
 from mcp import types
 
-from acp import AllowedOutcome, PermissionOption
+from acp import AllowedOutcome, DeniedOutcome, PermissionOption
 from acp.utils import DEFAULT_PERMISSION_OPTIONS
 from agentpool.log import get_logger
 from agentpool.ui.base import InputProvider
@@ -95,7 +95,7 @@ class ACPInputProvider(InputProvider):
             session: Active ACP session for handling requests
         """
         self.session = session
-        self._tool_approvals: dict[str, str] = {}  #  tool_name -> "allow_always" | "reject_always"
+        self._tool_approvals: dict[str, Literal["allow_always", "reject_always"]] = {}
 
     async def get_tool_confirmation(
         self,
@@ -120,43 +120,37 @@ class ACPInputProvider(InputProvider):
         Returns:
             Confirmation result indicating whether to allow, skip, or abort
         """
+        from acp.utils import generate_tool_title
+
         try:
             # Check if we have a standing approval/rejection for this tool
-            if tool_name in self._tool_approvals:
-                standing_decision = self._tool_approvals[tool_name]
-                if standing_decision == "allow_always":
-                    logger.debug("Auto-allowing tool", tool_name=tool_name, reason="allow_always")
-                    return "allow"
-                if standing_decision == "reject_always":
-                    logger.debug("Auto-rejecting tool", tool_name=tool_name, reason="reject_always")
-                    return "skip"
+            if decision := self._tool_approvals.get(tool_name):
+                logger.debug("Get tool confirmation", tool_name=tool_name, reason=decision)
+                match decision:
+                    case "allow_always":
+                        return "allow"
+                    case "reject_always":
+                        return "skip"
+                    case _ as unreachable:
+                        assert_never(unreachable)
 
             # Create a descriptive title for the permission request
             # args_str = ", ".join(f"{k}={v}" for k, v in args.items())
             # Use the tool_call_id from context - this must match the UI tool call
-            actual_tool_call_id = getattr(context, "tool_call_id", None)
-            if not actual_tool_call_id:
-                msg = (
-                    f"No tool_call_id in context for tool {tool_name!r}. "
-                    "This indicates a bug in tool call tracking."
-                )
+            tc_id = context.tool_call_id
+            if not tc_id:
+                msg = f"No tool_call_id in context for tool {tool_name!r}. "
                 logger.error(msg)
                 raise RuntimeError(msg)  # noqa: TRY301
-            logger.debug(
-                "Requesting permission",
-                tool_name=tool_name,
-                tool_call_id=actual_tool_call_id,
-            )
+            logger.debug("Requesting permission", tool_name=tool_name, tool_call_id=tc_id)
             # Note: We no longer send tool_call_start/progress notifications here.
             # The streaming loop (via ACPEventConverter) already sends ToolCallStart
             # before the permission callback is invoked, so Zed already knows about
             # the tool call. Sending duplicates was causing sync issues.
 
-            from acp.utils import generate_tool_title
-
             title = generate_tool_title(tool_name, args)
             response = await self.session.requests.request_permission(
-                tool_call_id=actual_tool_call_id,
+                tool_call_id=tc_id,
                 title=title,
                 raw_input=args,
                 options=DEFAULT_PERMISSION_OPTIONS,
@@ -164,22 +158,16 @@ class ACPInputProvider(InputProvider):
             logger.info(
                 "Permission response received",
                 tool_name=tool_name,
-                outcome=response.outcome,
-                outcome_type=type(response.outcome).__name__,
+                outcome=response.outcome.outcome,
             )
             # Map ACP permission response to our confirmation result
-            if isinstance(response.outcome, AllowedOutcome):
-                logger.info(
-                    "AllowedOutcome detected",
-                    option_id=response.outcome.option_id,
-                    tool_name=tool_name,
-                )
-                return self._handle_permission_response(response.outcome.option_id, tool_name)
-            if response.outcome.outcome == "cancelled":
-                logger.debug("Permission cancelled", tool_name=tool_name)
-                return "skip"
-            # Handle other unexpected outcomes
-            logger.warning("Unexpected permission outcome", outcome=response.outcome.outcome)
+            match response.outcome:
+                case AllowedOutcome(option_id=option_id):
+                    return self._handle_permission_response(option_id, tool_name)
+                case DeniedOutcome():
+                    return "skip"
+                case _ as outcome:
+                    logger.warning("Unexpected permission outcome", outcome=outcome)
 
         except Exception:
             logger.exception("Failed to get tool confirmation")
@@ -287,14 +275,16 @@ class ACPInputProvider(InputProvider):
             )
 
             # Convert permission response to elicitation result
-            if isinstance(response.outcome, AllowedOutcome):
-                if response.outcome.option_id == "accept":
+            match response.outcome:
+                case AllowedOutcome(option_id="accept"):
                     # For non-boolean schemas, return empty content
                     return types.ElicitResult(action="accept", content={})
-                return types.ElicitResult(action="decline")
-            if response.outcome.outcome == "cancelled":
-                return types.ElicitResult(action="cancel")
-            return types.ElicitResult(action="cancel")
+                case AllowedOutcome():
+                    return types.ElicitResult(action="decline")
+                case DeniedOutcome():
+                    return types.ElicitResult(action="cancel")
+                case _ as unreachable:
+                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
         except Exception as e:
             logger.exception("Failed to handle elicitation")
@@ -304,8 +294,8 @@ class ACPInputProvider(InputProvider):
         self, response: RequestPermissionResponse, schema: dict[str, Any]
     ) -> types.ElicitResult | types.ErrorData:
         """Handle ACP response for boolean elicitation."""
-        if isinstance(response.outcome, AllowedOutcome):
-            if response.outcome.option_id == "true":
+        match response.outcome:
+            case AllowedOutcome(option_id="true"):
                 # Check if we need to wrap in object structure
                 if schema.get("type") == "object":
                     properties = schema.get("properties", {})
@@ -313,7 +303,7 @@ class ACPInputProvider(InputProvider):
                         prop_name = next(iter(properties.keys()))
                         return types.ElicitResult(action="accept", content={prop_name: True})
                 return types.ElicitResult(action="accept", content={"value": True})
-            if response.outcome.option_id == "false":
+            case AllowedOutcome(option_id="false"):
                 # Check if we need to wrap in object structure
                 if schema.get("type") == "object":
                     properties = schema.get("properties", {})
@@ -321,14 +311,12 @@ class ACPInputProvider(InputProvider):
                         prop_name = next(iter(properties.keys()))
                         return types.ElicitResult(action="accept", content={prop_name: False})
                 return types.ElicitResult(action="accept", content={"value": False})
-            if response.outcome.option_id == "cancel":
+            case AllowedOutcome(option_id="cancel"):
                 return types.ElicitResult(action="cancel")
-
-        # Handle cancelled outcome
-        if response.outcome.outcome == "cancelled":
-            return types.ElicitResult(action="cancel")
-
-        return types.ElicitResult(action="cancel")
+            case DeniedOutcome():
+                return types.ElicitResult(action="cancel")
+            case _:
+                return types.ElicitResult(action="cancel")
 
     def clear_tool_approvals(self) -> None:
         """Clear all stored tool approval decisions.
@@ -340,7 +328,7 @@ class ACPInputProvider(InputProvider):
         self._tool_approvals.clear()
         logger.info("Cleared tool approval decisions", count=approval_count)
 
-    def get_tool_approval_state(self) -> dict[str, str]:
+    def get_tool_approval_state(self) -> dict[str, Literal["allow_always", "reject_always"]]:
         """Get current tool approval state for debugging/inspection.
 
         Returns:

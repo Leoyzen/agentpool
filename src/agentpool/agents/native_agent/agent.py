@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
-import inspect
 from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, overload
@@ -14,19 +13,20 @@ from uuid import uuid4
 
 import logfire
 from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode, RunContext
+from pydantic_ai.models import Model
 from pydantic_ai.tools import ToolDefinition
 
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
-from agentpool.agents.events.processors import FileTracker
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.storage import StorageManager
-from agentpool.tools import Tool, ToolManager
+from agentpool.tools import ToolManager
+from agentpool.tools.base import FunctionTool
 from agentpool.tools.exceptions import ToolError
-from agentpool.utils.inspection import get_argument_key
 from agentpool.utils.result_utils import to_type
 from agentpool.utils.streams import merge_queue_into_iterator
 
@@ -47,7 +47,6 @@ if TYPE_CHECKING:
     from toprompt import AnyPromptType
     from upathtools import JoinablePathLike
 
-    from agentpool.agents.context import AgentContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import (
@@ -66,7 +65,7 @@ if TYPE_CHECKING:
     from agentpool.prompts.prompts import PromptType
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
-    from agentpool.tools.base import FunctionTool
+    from agentpool.tools import Tool
     from agentpool.ui.base import InputProvider
     from agentpool_config.knowledge import Knowledge
     from agentpool_config.mcp_server import MCPServerConfig
@@ -105,6 +104,7 @@ class AgentKwargs(TypedDict, total=False):
     model_settings: ModelSettings | None
     usage_limits: UsageLimits | None
     providers: Sequence[ProviderType] | None
+    storage: StorageManager | None
 
 
 class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
@@ -151,6 +151,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         usage_limits: UsageLimits | None = None,
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
+        history_processors: Sequence[Callable[..., Any]] | None = None,
+        storage: StorageManager | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -198,6 +200,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers: Model providers for model discovery (e.g., ["openai", "anthropic"]).
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
+            history_processors: Pre-resolved history processor callables
+            storage: Optional per-agent StorageManager. Falls back to pool.storage if not provided.
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -235,6 +239,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             event_handlers=event_handlers,
             commands=all_commands,
             hooks=hooks,
+            storage=storage,
         )
         self.tool_confirmation_mode: ToolConfirmationMode = tool_confirmation_mode
         # Store builtin tools for pydantic-ai
@@ -250,9 +255,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if knowledge:
             resources.extend(knowledge.get_resources())
         manifest = agent_pool.manifest if agent_pool else AgentsManifest()
-        storage = agent_pool.storage if agent_pool else StorageManager()
+        effective_storage = self.storage or StorageManager()
         self.conversation = MessageHistory(
-            storage=storage,
+            storage=effective_storage,
             converter=ConversionManager(config=manifest.conversion),
             session_config=memory_cfg,
             resources=resources,
@@ -284,76 +289,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         )
         self._default_usage_limits = usage_limits
         self._providers = list(providers) if providers else None  # model discovery
-        self._resolved_history_processors: list[Callable[..., Any]] | None = None
-
-    def _validate_processor_signature(self, processor: Callable[..., Any]) -> None:
-        """Validate that a history processor has been correct signature.
-
-        Valid signatures:
-        - sync: (messages) -> msgs
-        - sync with ctx: (ctx, messages) -> msgs
-        - async: async (messages) -> msgs
-        - async with ctx: async (ctx, messages) -> msgs
-
-        Args:
-            processor: The processor to validate
-
-        Raises:
-            ValueError: If signature is not valid
-        """
-        # Define constant for parameter validation
-        two_params = 2
-
-        sig = inspect.signature(processor)
-        params = list(sig.parameters.values())
-
-        # Check parameter count
-        if len(params) not in (1, two_params):
-            msg = f"History processor must take 1 or {two_params} arguments, got {len(params)}"
-            raise ValueError(msg)
-
-        # Second parameter (if present) must be named 'messages' or similar
-        if len(params) == two_params:
-            last_param_name = params[1].name.lower()
-            if last_param_name not in ("messages", "msgs", "history"):
-                msg = (
-                    f"Second parameter of history processor must be "
-                    f"messages/msgs/history, got {params[1].name}"
-                )
-                raise ValueError(msg)
-
-    def _resolve_history_processors(self) -> list[Callable[..., Any]]:
-        """Resolve history processors from config with caching.
-
-        Returns:
-            List of resolved processor callables
-        """
-        # Return cached result if available
-        if self._resolved_history_processors is not None:
-            return self._resolved_history_processors
-
-        # Get history processors from memory config
-        processor_paths = getattr(self.conversation._config, "history_processors", None)
-        if not processor_paths:
-            self._resolved_history_processors = []
-            return []
-
-        from agentpool.utils.importing import import_callable
-
-        resolved: list[Callable[..., Any]] = []
-        for path in processor_paths:
-            try:
-                processor = import_callable(path)
-                # Validate signature
-                self._validate_processor_signature(processor)
-                resolved.append(processor)
-            except Exception as e:
-                msg = f"Failed to resolve history processor '{path}': {e}"
-                raise ValueError(msg) from e
-
-        # Cache resolved processors
-        self._resolved_history_processors = resolved
-        return resolved
+        self._history_processors = list(history_processors) if history_processors else []
 
     @classmethod
     def from_config(
@@ -417,8 +353,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         sys_prompts.append(content)
                     case LibraryPromptConfig(reference=reference):
                         if agent_pool is None:
-                            msg = f"Cannot resolve library prompt {reference!r}: no agent pool"
-                            raise ValueError(msg)
+                            raise ValueError(
+                                f"Cannot resolve library prompt {reference!r}: no agent pool"
+                            )
                         try:
                             content = agent_pool.prompt_manager.get.sync(reference)
                             sys_prompts.append(content)
@@ -434,10 +371,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         toolsets_list = config.get_toolsets()
         if config_tool_provider := config.get_tool_provider():
             toolsets_list.append(config_tool_provider)
-        # Convert workers config to a toolset (backwards compatibility)
-        if config.workers:
-            workers_provider = WorkersTools(workers=list(config.workers), name="workers")
-            toolsets_list.append(workers_provider)
+        # Convert workers config to a toolset
+        if workers := config.get_workers():
+            toolsets_list.append(WorkersTools(workers=workers, name="workers"))
         # Resolve output type from config
         resolved_output_type = to_type(t, manifest.responses) if (t := config.output_type) else str
         # Merge event handlers
@@ -470,6 +406,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             builtin_tools=config.get_builtin_tools() or None,
             usage_limits=config.usage_limits,
             providers=config.model_providers,
+            history_processors=config.get_history_processors() or None,
         )
 
     async def __aenter__(self) -> Self:
@@ -600,8 +537,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     @property
     def model_name(self) -> str | None:
         """Get the model name in a consistent format (provider:model_name)."""
-        # Construct full model ID with provider prefix (e.g., "anthropic:claude-haiku-4-5")
-        return f"{self._model.system}:{self._model.model_name}" if self._model else None
+        return self._model.model_id if self._model else None
 
     def to_tool(
         self,
@@ -649,14 +585,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         tool_name = name or f"ask_{self.name}"
         wrapped_tool.__doc__ = docstring
         wrapped_tool.__name__ = tool_name
-        return Tool.from_callable(wrapped_tool, source="agent")
+        return FunctionTool.from_callable(wrapped_tool, source="agent")
 
     async def get_agentlet[AgentOutputType](
         self,
         model: ModelType | None,
         output_type: type[AgentOutputType] | None,
         input_provider: InputProvider | None = None,
-    ) -> PydanticAgent[TDeps, AgentOutputType]:
+    ) -> PydanticAgent[AgentContext[TDeps], Any]:
         """Create pydantic-ai agent from current state."""
         from agentpool.agents.native_agent.tool_wrapping import wrap_tool
 
@@ -668,10 +604,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             model_ = actual_model
 
-        # Resolve history processors with caching
-        history_processors = self._resolve_history_processors()
+        context_for_tools = self.get_context(input_provider=input_provider)
 
-        agent = PydanticAgent(
+        # Collect pydantic_ai.tools.Tool instances using Tool.to_pydantic_ai()
+        pydantic_ai_tools = []
+        for tool in tools:
+            wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
+            pydantic_ai_tool = tool.to_pydantic_ai(function_override=wrapped)
+            pydantic_ai_tools.append(pydantic_ai_tool)
+
+        return PydanticAgent(
             name=self.name,
             model=model_,
             model_settings=self.model_settings,
@@ -679,43 +621,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             retries=self._retries,
             end_strategy=self._end_strategy,
             output_retries=self._output_retries,
-            deps_type=self.deps_type or NoneType,
+            deps_type=AgentContext[TDeps],
             output_type=final_type,
+            tools=pydantic_ai_tools,
             builtin_tools=self._builtin_tools,
-            history_processors=history_processors,
+            history_processors=self._history_processors or None,
         )
-
-        context_for_tools = self.get_context(input_provider=input_provider)
-
-        for tool in tools:
-            wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
-
-            prepare_fn = None
-            if tool.schema_override:
-
-                def create_prepare(
-                    t: Tool,
-                ) -> Callable[[RunContext[Any], ToolDefinition], Awaitable[ToolDefinition | None]]:
-                    async def prepare_schema(
-                        ctx: RunContext[Any], tool_def: ToolDefinition
-                    ) -> ToolDefinition | None:
-                        if not t.schema_override:
-                            return None
-                        return ToolDefinition(
-                            name=t.schema_override.get("name") or t.name,
-                            description=t.schema_override.get("description") or t.description,
-                            parameters_json_schema=t.schema_override.get("parameters"),
-                        )
-
-                    return prepare_schema
-
-                prepare_fn = create_prepare(tool)
-
-            if get_argument_key(wrapped, RunContext):
-                agent.tool(prepare=prepare_fn)(wrapped)
-            else:
-                agent.tool_plain(prepare=prepare_fn)(wrapped)
-        return agent  # type: ignore[return-value]
 
     async def _stream_events(
         self,
@@ -745,11 +656,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         agentlet = await self.get_agentlet(None, self._output_type, input_provider)
         response_msg: ChatMessage[Any] | None = None
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
-        # Track tool call starts to combine with results later
-        file_tracker = FileTracker()
         async with agentlet.iter(
             prompts,
-            deps=deps,  # type: ignore[arg-type]
+            deps=agent_deps,
             message_history=[m for run in history_list for m in run.to_pydantic_ai()],
             usage_limits=self._default_usage_limits,
         ) as agent_run:
@@ -759,23 +668,26 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     if self._cancelled:
                         self.log.info("Stream cancelled by user")
                         break
-                    if isinstance(node, End):
-                        break
-
-                    # Stream events from model request or tool call nodes
-                    if isinstance(node, ModelRequestNode | CallToolsNode):
-                        async with (
-                            node.stream(agent_run.ctx) as stream,
-                            merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
-                        ):
-                            async for event in file_tracker(merged):
-                                if self._cancelled:
-                                    break
-                                yield event
-                                if combined := process_tool_event(
-                                    self.name, event, pending_tcs, message_id
-                                ):
-                                    yield combined
+                    match node:
+                        case End():
+                            break
+                        # Stream events from model request or tool call nodes
+                        case ModelRequestNode() | CallToolsNode():
+                            async with (
+                                node.stream(agent_run.ctx) as stream,
+                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
+                            ):
+                                async for event in merged:
+                                    if self._cancelled:
+                                        break
+                                    yield event
+                                    if combined := process_tool_event(
+                                        self.name,
+                                        event,  # ty: ignore[invalid-argument-type]
+                                        pending_tcs,
+                                        message_id,
+                                    ):
+                                        yield combined
             except asyncio.CancelledError:
                 self.log.info("Stream cancelled via task cancellation")
                 self._cancelled = True
@@ -807,7 +719,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     session_id=self.session_id,
                     parent_id=user_msg.message_id,
                     response_time=response_time,
-                    metadata=file_tracker.get_metadata(),
                 )
             else:
                 raise RuntimeError("Stream completed without producing a result")
@@ -839,6 +750,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             # Direct Model instance assignment (no signal emission)
             self._model = model
+            assert self.model_name is not None
+            await self.update_state(config_id="model", value_id=self.model_name)
 
     async def _interrupt(self) -> None:
         """Cancel the current stream task."""
@@ -868,6 +781,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pause_routing: Whether to pause message routing
             model: Temporary model override
         """
+        from pydantic_ai.models import Model
+
         old_model = self._model
         old_settings = self.model_settings
         if output_type:
@@ -886,15 +801,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
             if pause_routing:  # Routing
                 await stack.enter_async_context(self.connections.paused_routing())
-
-            if model is not None:  # Model
-                if isinstance(model, str):
+            match model:
+                case str():
                     self._model, settings = self._resolve_model_string(model)
                     if settings:
                         self.model_settings = settings
-                else:
+                case Model():
                     self._model = model
-
             try:
                 yield self
             finally:  # Restore model and settings
@@ -917,7 +830,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from tokonomics.model_discovery import get_all_models
 
         delta = timedelta(days=200)
-        return await get_all_models(providers=self._providers or ["models.dev"], max_age=delta)
+        if self._providers:
+            return await get_all_models(providers=self._providers, max_age=delta)
+        return await get_all_models(providers=["models.dev"], max_age=delta)
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for this agent."""
@@ -946,11 +861,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             await self.update_state(config_id="mode", value_id=mode_id)
 
         elif category_id == "model":
-            # Validate model exists
-            if models := await self.get_available_models():
-                valid_ids = [m.pydantic_ai_id for m in models]
-                if mode_id not in valid_ids:
-                    raise UnknownModeError(mode_id, valid_ids)
             # Set the model directly
             self._model, settings = self._resolve_model_string(mode_id)
             if settings:
@@ -967,7 +877,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     ) -> list[SessionData]:
         """List sessions from storage.
 
-        For native agents, queries the pool's session store for all sessions
+        For native agents, queries the storage manager for all sessions
         associated with this agent. Fetches conversation titles from storage.
 
         Args:
@@ -977,28 +887,23 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             List of SessionData objects
         """
-        if not self.agent_pool:
+        storage = self.storage
+        if not storage:
             return []
-        # Get sessions from session store
         try:
-            # Get session IDs from store
-            session_ids = await self.agent_pool.sessions.store.list_sessions(agent_name=self.name)
-            # Load each session to get full SessionData
+            session_ids = await storage.list_session_ids(agent_name=self.name)
             result: list[SessionData] = []
             for session_id in session_ids:
-                if session_data := await self.agent_pool.sessions.store.load(session_id):
+                if session_data := await storage.load_session(session_id):
                     # Filter by cwd if specified
                     if cwd is not None and session_data.cwd != cwd:
                         continue
                     # Fetch title from conversation storage if not in metadata
-                    if (
-                        not session_data.title
-                        and (storage := self.agent_pool.storage)
-                        and (title := await storage.get_session_title(session_data.session_id))
+                    if not session_data.title and (
+                        title := await storage.get_session_title(session_data.session_id)
                     ):
                         session_data = session_data.with_metadata(title=title)
                     result.append(session_data)
-                    # Check limit
                     if limit is not None and len(result) >= limit:
                         break
 
@@ -1019,20 +924,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             SessionData if session was found and loaded, None otherwise
         """
-        if not self.agent_pool:
+        storage = self.storage
+        if not storage:
             return None
-
         try:
-            # Load session data from session store
-            session_data = await self.agent_pool.sessions.store.load(session_id)
+            session_data = await storage.load_session(session_id)
             if not session_data:
                 return None
             # Load conversation history if available from storage providers
-            if self.agent_pool.storage.providers:
-                provider = self.agent_pool.storage.providers[0]
+            if storage.providers:
+                provider = storage.providers[0]
                 if provider.can_load_history:
                     messages = await provider.get_session_messages(session_id=session_id)
-                    # Restore to conversation history
                     self.conversation.chat_messages.clear()
                     self.conversation.chat_messages.extend(messages)
                     msg = "Session loaded with conversation history"
