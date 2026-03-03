@@ -1,8 +1,7 @@
 from typing import cast
 from unittest.mock import MagicMock
 
-from pydantic_ai.messages import PartDeltaEvent, PartStartEvent, ThinkingPart, ThinkingPartDelta
-
+from agentpool.agents.events import PartDeltaEvent, PartStartEvent
 from agentpool_server.opencode_server.models import PartUpdatedEvent
 from agentpool_server.opencode_server.models.events import PartUpdatedEventProperties
 from agentpool_server.opencode_server.models.parts import ReasoningPart
@@ -23,26 +22,15 @@ def test_thinking_events_create_reasoning_part():
     )
 
     # Use the adapter's _handle_event method directly
-    events = list(
-        adapter._handle_event(PartStartEvent(index=0, part=ThinkingPart(content="Thinking...")))
-    )
-    events.extend(
-        list(
-            adapter._handle_event(
-                PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more..."))
-            )
-        )
-    )
+    events = list(adapter._handle_event(PartStartEvent.thinking(index=0, content="Thinking...")))
+    events.extend(list(adapter._handle_event(PartDeltaEvent.thinking(index=0, content=" more..."))))
 
     # Assert reasoning part was created
     # Based on models/events.py, PartUpdatedEvent has properties.part
     reasoning_events = []
     for e in events:
-        if isinstance(e, PartUpdatedEvent):
-            props = e.properties
-            if isinstance(props, PartUpdatedEventProperties) and isinstance(
-                props.part, ReasoningPart
-            ):
+        match e:
+            case PartUpdatedEvent(properties=PartUpdatedEventProperties(part=ReasoningPart())):
                 reasoning_events.append(e)
 
     assert len(reasoning_events) >= 1, "ReasoningPart should be created from thinking events"

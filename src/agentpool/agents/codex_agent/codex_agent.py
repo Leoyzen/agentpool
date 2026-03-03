@@ -466,7 +466,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     effort=self._current_effort,
                     approval_policy=self._approval_policy,
                     sandbox_policy=self._current_sandbox,
-                    output_schema=None if self._output_type is str else self._output_type,
+                    output_schema=None if self._output_type in (str, None) else self._output_type,
                     personality=self._current_personality,
                 )
                 # Wrap to capture metadata (turn_id, token usage), then convert
@@ -503,7 +503,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             request_usage = to_request_usage(usage)
         # Parse structured output if output_type is not str
         final_content: OutputDataT
-        if self._output_type is not str and self._output_type is not None:
+        if self._output_type not in (str, None):
             try:
                 parsed = anyenv.load_json(final_text)
                 final_content = TypeAdapter(self._output_type).validate_python(parsed)

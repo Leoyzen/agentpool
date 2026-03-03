@@ -142,29 +142,20 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
     # Name should not be None by the time we use it
     server_name = config.name or f"server_{id(config)}"
     match config:
-        case StdioMCPServerConfig():
+        case StdioMCPServerConfig(command=command, args=args, env=env, enabled=enabled):
             return (
                 server_name,
-                StdioMcpServer(
-                    command=config.command,
-                    args=config.args or [],
-                    env=config.env,
-                    enabled=config.enabled,
-                ),
+                StdioMcpServer(command=command, args=args, env=env, enabled=enabled),
             )
 
-        case SSEMCPServerConfig():
+        case SSEMCPServerConfig(url=url, enabled=enabled):
             # Codex uses HTTP transport for SSE
             # SSE config just has URL, no separate auth fields
-            return (server_name, HttpMcpServer(url=str(config.url), enabled=config.enabled))
+            return (server_name, HttpMcpServer(url=str(url), enabled=enabled))
 
-        case StreamableHTTPMCPServerConfig():
+        case StreamableHTTPMCPServerConfig(headers=headers, url=url, enabled=enabled):
             # StreamableHTTP has headers field
-            headers = config.headers if config.headers else None
-            return (
-                server_name,
-                HttpMcpServer(url=str(config.url), http_headers=headers, enabled=config.enabled),
-            )
+            return (server_name, HttpMcpServer(url=str(url), http_headers=headers, enabled=enabled))
 
         case _:
             raise TypeError(f"Unsupported MCP server config type: {type(config)}")
@@ -410,10 +401,7 @@ async def convert_codex_stream(  # noqa: PLR0915
             # === Stateful: Accumulate command execution output ===
             case CommandExecutionOutputDeltaEvent(data=data):
                 item_id = data.item_id
-                if item_id not in tool_outputs:
-                    tool_outputs[item_id] = []
-                tool_outputs[item_id].append(data.delta)
-
+                tool_outputs.setdefault(item_id, []).append(data.delta)
                 # Emit accumulated progress with replace semantics, wrapped in code block
                 output = "".join(tool_outputs[item_id])
                 items = [TextContentItem(text=f"```\n{output}\n```")]
@@ -435,21 +423,20 @@ async def convert_codex_stream(  # noqa: PLR0915
 
             # === Stateless: Tool/command started ===
             case ItemStartedEvent(data=data):
-                item = data.item
-                if part := _thread_item_to_tool_call_part(item):
+                if part := _thread_item_to_tool_call_part(data.item):
                     # Extract title based on tool type
-                    match item:
-                        case ThreadItemCommandExecution():
-                            title = f"Execute: {item.command}"
-                        case ThreadItemFileChange():
+                    match data.item:
+                        case ThreadItemCommandExecution(command=command):
+                            title = f"Execute: {command}"
+                        case ThreadItemFileChange(changes=changes):
                             # Build title from file paths
-                            paths = [c.path for c in item.changes[:3]]  # First 3 paths
-                            if len(item.changes) > 3:  # noqa: PLR2004
-                                title = f"Edit: {', '.join(paths)} (+{len(item.changes) - 3} more)"
+                            paths = [c.path for c in changes[:3]]  # First 3 paths
+                            if len(changes) > 3:  # noqa: PLR2004
+                                title = f"Edit: {', '.join(paths)} (+{len(changes) - 3} more)"
                             else:
                                 title = f"Edit: {', '.join(paths)}"
-                        case ThreadItemMcpToolCall():
-                            title = f"Call {item.tool}"
+                        case ThreadItemMcpToolCall(tool=tool):
+                            title = f"Call {tool}"
                         case _:
                             title = f"Call {part.tool_name}"
 
@@ -461,9 +448,9 @@ async def convert_codex_stream(  # noqa: PLR0915
                     )
 
                     # For file changes, immediately emit the diff as progress
-                    if isinstance(item, ThreadItemFileChange):
+                    if isinstance(data.item, ThreadItemFileChange):
                         diff_parts = []
-                        for change in item.changes:
+                        for change in data.item.changes:
                             diff_parts.append(f"{change.kind.kind.upper()}: {change.path}")
                             if change.diff:
                                 diff_parts.append(change.diff)

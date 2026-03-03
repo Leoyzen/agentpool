@@ -35,13 +35,8 @@ class TestFileContentPathTraversal:
         # Create an allowed file
         allowed_file = tmp_project_dir / "allowed.txt"
         allowed_file.write_text("allowed content")
-
         # Attempt to read /etc/passwd via path traversal
-        response = await async_client.get(
-            "/file/content",
-            params={"path": "../../../etc/passwd"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": "../../../etc/passwd"})
         # Should be rejected with 403 Forbidden or 400 Bad Request
         assert response.status_code in (400, 403), (
             f"Path traversal to /etc/passwd should be blocked, "
@@ -66,7 +61,6 @@ class TestFileContentPathTraversal:
             "/file/content",
             params={"path": "src/nested/../../../../../../../etc/passwd"},
         )
-
         assert response.status_code in (400, 403, 404), (
             f"Deeply nested traversal should be blocked, got status {response.status_code}"
         )
@@ -83,12 +77,7 @@ class TestFileContentPathTraversal:
         # Create a valid file
         valid_file = tmp_project_dir / "valid.txt"
         valid_file.write_text("valid content")
-
-        response = await async_client.get(
-            "/file/content",
-            params={"path": "valid.txt"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": "valid.txt"})
         assert response.status_code == 200
         data = response.json()
         assert data["content"] == "valid content"
@@ -103,12 +92,7 @@ class TestFileContentPathTraversal:
         subdir = tmp_project_dir / "src" / "utils"
         subdir.mkdir(parents=True)
         (subdir / "helper.py").write_text("# helper code")
-
-        response = await async_client.get(
-            "/file/content",
-            params={"path": "src/utils/helper.py"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": "src/utils/helper.py"})
         assert response.status_code == 200
         assert response.json()["content"] == "# helper code"
 
@@ -118,11 +102,7 @@ class TestFileContentPathTraversal:
         tmp_project_dir: Path,
     ):
         """Should reject absolute paths outside the project."""
-        response = await async_client.get(
-            "/file/content",
-            params={"path": "/etc/passwd"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": "/etc/passwd"})
         assert response.status_code in (400, 403, 404), (
             f"Absolute path outside project should be blocked, got status {response.status_code}"
         )
@@ -134,11 +114,7 @@ class TestFileContentPathTraversal:
     ):
         """Should reject URL-encoded path traversal attempts."""
         # %2e = '.', %2f = '/'
-        response = await async_client.get(
-            "/file/content",
-            params={"path": "%2e%2e%2fetc/passwd"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": "%2e%2e%2fetc/passwd"})
         # Note: FastAPI/Starlette may decode this, but we should still block
         assert response.status_code in (400, 403, 404)
 
@@ -155,11 +131,7 @@ class TestFileListPathTraversal:
 
         Ported from: "rejects ../ traversal attempting to list /etc"
         """
-        response = await async_client.get(
-            "/file",
-            params={"path": "../../../etc"},
-        )
-
+        response = await async_client.get("/file", params={"path": "../../../etc"})
         assert response.status_code in (400, 403), (
             f"Path traversal to /etc should be blocked, "
             f"got status {response.status_code}: {response.text}"
@@ -178,11 +150,7 @@ class TestFileListPathTraversal:
         subdir = tmp_project_dir / "subdir"
         subdir.mkdir()
         (subdir / "file.txt").write_text("content")
-
-        response = await async_client.get(
-            "/file",
-            params={"path": "subdir"},
-        )
+        response = await async_client.get("/file", params={"path": "subdir"})
 
         assert response.status_code == 200
         files = response.json()
@@ -196,11 +164,7 @@ class TestFileListPathTraversal:
         tmp_project_dir: Path,
     ):
         """Should reject absolute paths for directory listing."""
-        response = await async_client.get(
-            "/file",
-            params={"path": "/tmp"},
-        )
-
+        response = await async_client.get("/file", params={"path": "/tmp"})
         assert response.status_code in (400, 403, 404)
 
 
@@ -215,15 +179,9 @@ class TestFindPathTraversal:
         """Find should only return results from within the project directory."""
         # Create a file with searchable content
         (tmp_project_dir / "searchable.txt").write_text("findme pattern here")
-
-        response = await async_client.get(
-            "/find",
-            params={"pattern": "findme"},
-        )
-
+        response = await async_client.get("/find", params={"pattern": "findme"})
         assert response.status_code == 200
         matches = response.json()
-
         # Verify all matches are within project
         for match in matches:
             path = match.get("path", {}).get("text", "")
@@ -245,12 +203,7 @@ class TestFindFilePathTraversal:
         subdir = tmp_project_dir / "src"
         subdir.mkdir()
         (subdir / "main.py").write_text("# main")
-
-        response = await async_client.get(
-            "/find/file",
-            params={"query": "*.py"},
-        )
-
+        response = await async_client.get("/find/file", params={"query": "*.py"})
         assert response.status_code == 200
         files = response.json()
 
@@ -277,12 +230,10 @@ class TestPathContainmentLogic:
         nested = tmp_project_dir / "src" / "components"
         nested.mkdir(parents=True)
         (nested / "Button.tsx").write_text("export const Button = () => {}")
-
         response = await async_client.get(
             "/file/content",
             params={"path": "src/components/Button.tsx"},
         )
-
         assert response.status_code == 200
 
     async def test_blocks_prefix_collision(
@@ -332,12 +283,7 @@ class TestPathContainmentLogic:
         symlink = tmp_project_dir / "escape_link"
         try:
             symlink.symlink_to("/etc/passwd")
-
-            response = await async_client.get(
-                "/file/content",
-                params={"path": "escape_link"},
-            )
-
+            response = await async_client.get("/file/content", params={"path": "escape_link"})
             # Ideally should be blocked, but at minimum shouldn't expose /etc/passwd
             if response.status_code == 200:
                 # If it returns 200, make sure it's not the actual passwd content
@@ -365,12 +311,7 @@ class TestDotEnvProtection:
         """Should block reading .env files."""
         env_file = tmp_project_dir / ".env"
         env_file.write_text("SECRET_KEY=supersecret")
-
-        response = await async_client.get(
-            "/file/content",
-            params={"path": ".env"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": ".env"})
         # OpenCode blocks .env files even within the project
         # This might be a 403 or the file might just be filtered
         # For now, we document the expected behavior
@@ -389,12 +330,7 @@ class TestDotEnvProtection:
         """Should block reading .env.local files."""
         env_file = tmp_project_dir / ".env.local"
         env_file.write_text("LOCAL_SECRET=localvalue")
-
-        response = await async_client.get(
-            "/file/content",
-            params={"path": ".env.local"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": ".env.local"})
         if response.status_code == 200:
             pytest.skip(".env.local protection not yet implemented")
 
@@ -406,12 +342,7 @@ class TestDotEnvProtection:
         """Should block reading .env.production files."""
         env_file = tmp_project_dir / ".env.production"
         env_file.write_text("PROD_SECRET=prodvalue")
-
-        response = await async_client.get(
-            "/file/content",
-            params={"path": ".env.production"},
-        )
-
+        response = await async_client.get("/file/content", params={"path": ".env.production"})
         if response.status_code == 200:
             pytest.skip(".env.production protection not yet implemented")
 
