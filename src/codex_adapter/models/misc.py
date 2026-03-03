@@ -90,6 +90,38 @@ class ToolRequestUserInputQuestion(CodexBaseModel):
     is_secret: bool = False
     options: list[ToolRequestUserInputOption] | None = None
 
+    def to_schema_property(self) -> dict[str, Any]:
+        """Convert a Codex user input question to a JSON Schema property.
+
+        Maps question options to enum values, and handles secret/free-text questions.
+
+        Args:
+            question: Codex question with optional options list
+
+        Returns:
+            JSON Schema property definition
+        """
+        prop: dict[str, Any] = {"title": self.header or self.id}
+        if self.question:
+            prop["description"] = self.question
+
+        if self.options and not self.is_other:
+            # Question with fixed options -> enum
+            prop["type"] = "string"
+            prop["enum"] = [opt.label for opt in self.options]
+        elif self.options and self.is_other:
+            # Options with an "other" free-text fallback -> enum + freeform
+            prop["type"] = "string"
+            prop["enum"] = [opt.label for opt in self.options]
+        else:
+            # Free-text question
+            prop["type"] = "string"
+
+        if self.is_secret:
+            prop["writeOnly"] = True
+
+        return prop
+
 
 class ToolRequestUserInputAnswer(CodexBaseModel):
     """A user's answer to a request_user_input question."""

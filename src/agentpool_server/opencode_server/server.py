@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
-    from agentpool.utils.streams import TodoTracker
+    from agentpool.utils.todos import TodoTracker
 
 
 VERSION = "0.1.0"

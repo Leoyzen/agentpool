@@ -91,7 +91,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.prompts.manager import PromptManager
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
-        from agentpool.utils.streams import FileOpsTracker, TodoTracker
+        from agentpool.utils.streams import FileOpsTracker
+        from agentpool.utils.todos import TodoTracker
         from agentpool.vfs_registry import VFSRegistry
         from agentpool_toolsets.builtin.debug import install_memory_handler
 

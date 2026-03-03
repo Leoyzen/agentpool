@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Any, Literal
+
+
+FileOperation = Literal["create", "write", "edit", "delete"]
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-
-TodoPriority = Literal["high", "medium", "low"]
-TodoStatus = Literal["pending", "in_progress", "completed"]
 
 
 @asynccontextmanager
@@ -131,10 +130,10 @@ class FileChange:
     new_content: str | None
     """Content after change (None for deletions)."""
 
-    operation: str
+    operation: FileOperation
     """Type of operation: 'create', 'write', 'edit', 'delete'."""
 
-    timestamp: float = field(default_factory=lambda: __import__("time").time())
+    timestamp: float = field(default_factory=time.time)
     """Unix timestamp when the change occurred."""
 
     message_id: str | None = None
@@ -201,7 +200,7 @@ class FileOpsTracker:
         path: str,
         old_content: str | None,
         new_content: str | None,
-        operation: str,
+        operation: FileOperation,
         message_id: str | None = None,
         agent_name: str | None = None,
     ) -> None:
@@ -236,30 +235,15 @@ class FileOpsTracker:
         """
         return [c for c in self.changes if c.path == path]
 
-    def get_changes_since_message(self, message_id: str) -> list[FileChange]:
-        """Get all changes since (and including) a specific message.
-
-        Args:
-            message_id: Message ID to start from
-
-        Returns:
-            List of changes from the given message onwards
-        """
-        result = []
-        found = False
-        for change in self.changes:
+    def get_changes_since(self, message_id: str) -> list[FileChange]:
+        """Get all changes since (and including) a specific message."""
+        for i, change in enumerate(self.changes):
             if change.message_id == message_id:
-                found = True
-            if found:
-                result.append(change)
-        return result
+                return self.changes[i:]
+        return []
 
     def get_modified_paths(self) -> set[str]:
-        """Get set of all modified file paths.
-
-        Returns:
-            Set of file paths that have been modified
-        """
+        """Get set of all modified file paths."""
         return {c.path for c in self.changes}
 
     def get_current_state(self) -> dict[str, str | None]:
@@ -282,11 +266,7 @@ class FileOpsTracker:
         Returns:
             Dict mapping path to original content (or None if created)
         """
-        state: dict[str, str | None] = {}
-        for change in self.changes:
-            if change.path not in state:
-                state[change.path] = change.old_content
-        return state
+        return {change.path: change.old_content for change in reversed(self.changes)}
 
     def get_revert_operations(
         self, since_message_id: str | None = None
@@ -303,27 +283,15 @@ class FileOpsTracker:
         Returns:
             List of (path, content_to_restore) tuples for revert
         """
-        if since_message_id:
-            changes = self.get_changes_since_message(since_message_id)
-        else:
-            changes = self.changes
-
+        changes = self.get_changes_since(since_message_id) if since_message_id else self.changes
         # Build map of path -> content to restore
         # For each path, we need the old_content of the FIRST change in our subset
         # (that's what the file looked like before any of these changes)
-        original_for_path: dict[str, str | None] = {}
-        for change in changes:
-            if change.path not in original_for_path:
-                original_for_path[change.path] = change.old_content
-
+        original_for_path = {change.path: change.old_content for change in reversed(changes)}
         return list(original_for_path.items())
 
     def get_combined_diff(self) -> str:
-        """Get combined unified diff of all changes.
-
-        Returns:
-            Combined diff string for all file changes
-        """
+        """Get combined unified diff of all changes."""
         diffs = [diff for change in self.changes if (diff := change.to_unified_diff())]
         return "\n".join(diffs)
 
@@ -331,7 +299,7 @@ class FileOpsTracker:
         """Clear all recorded changes."""
         self.changes.clear()
 
-    def remove_changes_since_message(self, message_id: str) -> int:
+    def remove_changes_since(self, message_id: str) -> int:
         """Remove changes from a specific message onwards and store for unrevert.
 
         The removed changes are stored in `reverted_changes` so they can be
@@ -344,11 +312,10 @@ class FileOpsTracker:
             Number of changes removed
         """
         # Find the index of the first change with this message_id
-        start_idx = None
-        for i, change in enumerate(self.changes):
-            if change.message_id == message_id:
-                start_idx = i
-                break
+        start_idx = next(
+            (i for i, change in enumerate(self.changes) if change.message_id == message_id),
+            None,
+        )
 
         if start_idx is None:
             return 0
@@ -372,18 +339,11 @@ class FileOpsTracker:
 
         # For each path, we want the LAST new_content in the reverted changes
         # (that's what the file looked like before the revert)
-        final_content: dict[str, str | None] = {}
-        for change in self.reverted_changes:
-            final_content[change.path] = change.new_content
-
+        final_content = {change.path: change.new_content for change in self.reverted_changes}
         return list(final_content.items())
 
     def restore_reverted_changes(self) -> int:
-        """Move reverted changes back to the main changes list.
-
-        Returns:
-            Number of changes restored
-        """
+        """Move reverted changes back to main changes list. Returns number of changes restored."""
         if not self.reverted_changes:
             return 0
 
@@ -393,11 +353,7 @@ class FileOpsTracker:
         return restored_count
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization.
-
-        Returns:
-            Dict representation of all changes
-        """
+        """Convert to dictionary for JSON serialization."""
         return {
             "changes": [
                 {
@@ -413,223 +369,3 @@ class FileOpsTracker:
             ],
             "modified_paths": sorted(self.get_modified_paths()),
         }
-
-
-@dataclass
-class TodoEntry:
-    """A single todo/plan entry.
-
-    Represents a task that the agent intends to accomplish.
-    """
-
-    id: str
-    """Unique identifier for this entry."""
-
-    content: str
-    """Human-readable description of what this task aims to accomplish."""
-
-    status: TodoStatus = "pending"
-    """Current execution status."""
-
-    priority: TodoPriority = "medium"
-    """Relative importance of this task."""
-
-    created_at: float = field(default_factory=lambda: __import__("time").time())
-    """Unix timestamp when the entry was created."""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "id": self.id,
-            "content": self.content,
-            "status": self.status,
-            "priority": self.priority,
-            "created_at": self.created_at,
-        }
-
-
-# Type for todo change callback (async coroutine)
-TodoChangeCallback = Callable[["TodoTracker"], Coroutine[Any, Any, None]]
-
-
-@dataclass
-class TodoTracker:
-    """Tracks todo/plan entries at the pool level.
-
-    Provides a central place to manage todos that persists across
-    agent runs and is accessible from any toolset or endpoint.
-    """
-
-    entries: list[TodoEntry] = field(default_factory=list)
-    """List of all todo entries."""
-
-    _id_counter: int = field(default=0, repr=False)
-    """Counter for generating unique IDs."""
-
-    on_change: TodoChangeCallback | None = field(default=None, repr=False)
-    """Optional async callback invoked when todos change."""
-
-    _pending_tasks: set[asyncio.Task[None]] = field(default_factory=set, repr=False)
-    """Track pending notification tasks to prevent garbage collection."""
-
-    def _notify_change(self) -> None:
-        """Notify listener of changes (schedules async callback)."""
-        if self.on_change is not None:
-            task: asyncio.Task[None] = asyncio.create_task(self.on_change(self))
-            self._pending_tasks.add(task)
-            task.add_done_callback(self._pending_tasks.discard)
-
-    def _next_id(self) -> str:
-        """Generate next unique ID."""
-        self._id_counter += 1
-        return f"todo_{self._id_counter}"
-
-    def add(
-        self,
-        content: str,
-        *,
-        priority: TodoPriority = "medium",
-        status: TodoStatus = "pending",
-        index: int | None = None,
-    ) -> TodoEntry:
-        """Add a new todo entry. Appends if no index is given."""
-        id_ = self._next_id()
-        entry = TodoEntry(id=id_, content=content, priority=priority, status=status)
-        if index is None or index >= len(self.entries):
-            self.entries.append(entry)
-        else:
-            self.entries.insert(max(0, index), entry)
-        self._notify_change()
-        return entry
-
-    def get(self, entry_id: str) -> TodoEntry | None:
-        """Get entry by ID, or None if not found."""
-        return next((entry for entry in self.entries if entry.id == entry_id), None)
-
-    def get_by_index(self, index: int) -> TodoEntry | None:
-        """Get entry by index (0-based), or None if not found."""
-        return self.entries[index] if 0 <= index < len(self.entries) else None
-
-    def update(
-        self,
-        entry_id: str,
-        *,
-        content: str | None = None,
-        status: TodoStatus | None = None,
-        priority: TodoPriority | None = None,
-    ) -> bool:
-        """Update an existing entry.
-
-        Args:
-            entry_id: The entry ID to update
-            content: New content (if provided)
-            status: New status (if provided)
-            priority: New priority (if provided)
-
-        Returns:
-            True if entry was found and updated, False otherwise
-        """
-        entry = self.get(entry_id)
-        if entry is None:
-            return False
-
-        changed = False
-        if content is not None and entry.content != content:
-            entry.content = content
-            changed = True
-        if status is not None and entry.status != status:
-            entry.status = status
-            changed = True
-        if priority is not None and entry.priority != priority:
-            entry.priority = priority
-            changed = True
-        if changed:
-            self._notify_change()
-        return True
-
-    def update_by_index(
-        self,
-        index: int,
-        *,
-        content: str | None = None,
-        status: TodoStatus | None = None,
-        priority: TodoPriority | None = None,
-    ) -> bool:
-        """Update an entry by index.
-
-        Args:
-            index: The 0-based index
-            content: New content (if provided)
-            status: New status (if provided)
-            priority: New priority (if provided)
-
-        Returns:
-            True if entry was found and updated, False otherwise
-        """
-        entry = self.get_by_index(index)
-        if entry is None:
-            return False
-
-        changed = False
-        if content is not None and entry.content != content:
-            entry.content = content
-            changed = True
-        if status is not None and entry.status != status:
-            entry.status = status
-            changed = True
-        if priority is not None and entry.priority != priority:
-            entry.priority = priority
-            changed = True
-        if changed:
-            self._notify_change()
-        return True
-
-    def remove(self, entry_id: str) -> bool:
-        """Remove an entry by ID. Returns True if entry was found + removed, False otherwise."""
-        for i, entry in enumerate(self.entries):
-            if entry.id == entry_id:
-                self.entries.pop(i)
-                self._notify_change()
-                return True
-        return False
-
-    def remove_by_index(self, index: int) -> TodoEntry | None:
-        """Remove an entry by index (0-based) and return its entry if found."""
-        if 0 <= index < len(self.entries):
-            entry = self.entries.pop(index)
-            self._notify_change()
-            return entry
-        return None
-
-    def clear(self) -> None:
-        """Clear all entries."""
-        if self.entries:
-            self.entries.clear()
-            self._notify_change()
-
-    def replace_all(
-        self,
-        entries: list[tuple[str, TodoPriority, TodoStatus]],
-    ) -> None:
-        """Replace all entries with new ones (single notification).
-
-        More efficient than clear() + multiple add() calls since it only
-        triggers one change notification.
-
-        Args:
-            entries: List of (content, priority, status) tuples
-        """
-        self.entries.clear()
-        for content, priority, status in entries:
-            id_ = self._next_id()
-            entry = TodoEntry(id=id_, content=content, priority=priority, status=status)
-            self.entries.append(entry)
-        self._notify_change()
-
-    def get_by_status(self, status: TodoStatus) -> list[TodoEntry]:
-        """Get all entries with a specific status."""
-        return [e for e in self.entries if e.status == status]
-
-    def to_list(self) -> list[dict[str, Any]]:
-        """Convert to list of dicts for JSON serialization."""
-        return [e.to_dict() for e in self.entries]

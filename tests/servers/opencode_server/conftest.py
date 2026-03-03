@@ -23,8 +23,9 @@ import pytest
 
 from agentpool.models.manifest import AgentsManifest
 from agentpool.storage import StorageManager
-from agentpool.utils.streams import FileOpsTracker, TodoTracker
+from agentpool.utils.streams import FileOpsTracker
 from agentpool.utils.time_utils import now_ms
+from agentpool.utils.todos import TodoTracker
 from agentpool_server.opencode_server.dependencies import get_state
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated

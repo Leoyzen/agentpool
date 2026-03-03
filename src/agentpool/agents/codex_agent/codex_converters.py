@@ -60,44 +60,10 @@ if TYPE_CHECKING:
         StdioMcpServer,
         ThreadData,
         ThreadItem,
-        ToolRequestUserInputQuestion,
         Turn,
         TurnInputItem,
         UserInput,
     )
-
-
-def question_to_schema_property(question: ToolRequestUserInputQuestion) -> dict[str, Any]:
-    """Convert a Codex user input question to a JSON Schema property.
-
-    Maps question options to enum values, and handles secret/free-text questions.
-
-    Args:
-        question: Codex question with optional options list
-
-    Returns:
-        JSON Schema property definition
-    """
-    prop: dict[str, Any] = {"title": question.header or question.id}
-    if question.question:
-        prop["description"] = question.question
-
-    if question.options and not question.is_other:
-        # Question with fixed options -> enum
-        prop["type"] = "string"
-        prop["enum"] = [opt.label for opt in question.options]
-    elif question.options and question.is_other:
-        # Options with an "other" free-text fallback -> enum + freeform
-        prop["type"] = "string"
-        prop["enum"] = [opt.label for opt in question.options]
-    else:
-        # Free-text question
-        prop["type"] = "string"
-
-    if question.is_secret:
-        prop["writeOnly"] = True
-
-    return prop
 
 
 def to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:

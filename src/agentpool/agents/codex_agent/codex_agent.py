@@ -16,7 +16,6 @@ from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
     convert_codex_stream,
     mcp_config_to_codex,
-    question_to_schema_property,
     to_finish_reason,
     to_model_info,
     to_session_data,
@@ -108,7 +107,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             # Build a JSON schema property for this question
             schema: dict[str, Any] = {
                 "type": "object",
-                "properties": {question.id: question_to_schema_property(question)},
+                "properties": {question.id: question.to_schema_property()},
                 "required": [question.id],
             }
 
@@ -476,9 +475,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     # Handle plan updates - sync to pool.todos
                     if isinstance(native_event, PlanUpdateEvent) and self.agent_pool:
                         # Replace all entries in pool.todos with Codex plan
-                        self.agent_pool.todos.replace_all([
-                            (e.content, e.priority, e.status) for e in native_event.entries
-                        ])
+                        self.agent_pool.todos.replace_all(native_event.entries)
 
                     # Accumulate text for final message
                     if isinstance(native_event, PartDeltaEvent) and isinstance(

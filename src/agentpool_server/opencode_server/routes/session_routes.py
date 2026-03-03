@@ -505,7 +505,7 @@ async def get_session_diff(
     if not file_ops.changes:
         return []
     # Optionally filter by message_id
-    changes = file_ops.get_changes_since_message(message_id) if message_id else file_ops.changes
+    changes = file_ops.get_changes_since(message_id) if message_id else file_ops.changes
     return [FileDiff.from_file_change(change) for change in changes]
 
 
@@ -944,7 +944,7 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
             except Exception as e:
                 detail = f"Failed to revert {path}: {e}"
                 raise HTTPException(status_code=500, detail=detail) from e
-        file_ops.remove_changes_since_message(request.message_id)
+        file_ops.remove_changes_since(request.message_id)
 
     # Update session with revert info
     session = state.sessions[session_id]
