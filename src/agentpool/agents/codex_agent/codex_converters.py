@@ -100,7 +100,7 @@ def question_to_schema_property(question: ToolRequestUserInputQuestion) -> dict[
     return prop
 
 
-def codex_turn_status_to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
+def to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
     """Convert Codex TurnStatusValue to pydantic-ai FinishReason."""
     match status:
         case "completed":

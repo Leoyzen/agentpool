@@ -121,6 +121,8 @@ from codex_adapter.models import (
     TurnInputItem,
     TurnStartedData,
     TurnSteerResponse,
+    ThreadTokenUsage,
+    TokenUsageBreakdown,
     Usage,
 )
 
@@ -221,7 +223,9 @@ __all__ = [
     "ThreadStatusChangedEvent",
     "ThreadUnarchiveResponse",
     "ThreadUnarchivedData",
+    "ThreadTokenUsage",
     "ThreadUnarchivedEvent",
+    "TokenUsageBreakdown",
     "TurnCompletedData",
     "TurnCompletedEvent",
     "TurnErrorData",

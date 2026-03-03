@@ -14,10 +14,10 @@ from pydantic_ai.usage import RequestUsage, RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
-    codex_turn_status_to_finish_reason,
     convert_codex_stream,
     mcp_config_to_codex,
     question_to_schema_property,
+    to_finish_reason,
     to_model_info,
     to_session_data,
     turns_to_chat_messages,
@@ -31,6 +31,7 @@ from agentpool.agents.exceptions import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
+from codex_adapter.models.token_usage import TokenUsageBreakdown
 
 
 if TYPE_CHECKING:
@@ -229,7 +230,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         self._current_personality: Personality | None = personality
         self._current_turn_id: str | None = None
         # Populated by capture_metadata during streaming, read after stream completes
-        self._token_usage_data: dict[str, int] | None = None
+        self._token_usage_data: TokenUsageBreakdown | None = None
         # Pass injection_manager for mid-run injection support
         self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
 
@@ -451,13 +452,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     case TurnCompletedEvent(data=data):
                         self._turn_status = data.turn.status
                     case ThreadTokenUsageUpdatedEvent(data=data):
-                        usage = data.token_usage.last
-                        self._token_usage_data = {
-                            "input_tokens": usage.input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "cache_read_tokens": usage.cached_input_tokens,
-                            "reasoning_tokens": usage.reasoning_output_tokens,
-                        }
+                        self._token_usage_data = data.token_usage.last
                 yield event
 
         try:
@@ -509,18 +504,19 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         request_usage = RequestUsage()
 
         if self._token_usage_data:
+            usage = self._token_usage_data
             run_usage = RunUsage(
-                input_tokens=self._token_usage_data.get("input_tokens", 0),
-                output_tokens=self._token_usage_data.get("output_tokens", 0),
-                cache_read_tokens=self._token_usage_data.get("cache_read_tokens", 0),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_read_tokens=usage.cached_input_tokens,
                 cache_write_tokens=0,  # Codex doesn't provide cache write tokens
             )
             # TODO: Calculate actual cost - for now set to 0
             cost_info = TokenCost(token_usage=run_usage, total_cost=Decimal(0))
             request_usage = RequestUsage(
-                input_tokens=self._token_usage_data.get("input_tokens", 0),
-                output_tokens=self._token_usage_data.get("output_tokens", 0),
-                cache_read_tokens=self._token_usage_data.get("cache_read_tokens", 0),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_read_tokens=usage.cached_input_tokens,
                 cache_write_tokens=0,
             )
 
@@ -537,9 +533,6 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         else:
             final_content = final_text  # type: ignore[assignment]
 
-        finish_reason = (
-            codex_turn_status_to_finish_reason(self._turn_status) if self._turn_status else None
-        )
         complete_msg: ChatMessage[OutputDataT] = ChatMessage(
             content=final_content,
             role="assistant",
@@ -549,7 +542,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             cost_info=cost_info,
             usage=request_usage,
             model_name=self.model_name,
-            finish_reason=finish_reason,
+            finish_reason=to_finish_reason(self._turn_status) if self._turn_status else None,
         )
 
         yield StreamCompleteEvent[OutputDataT](message=complete_msg)
