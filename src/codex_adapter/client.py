@@ -1292,9 +1292,8 @@ class CodexClient:
 
         request = JsonRpcRequest(id=request_id, method=method, params=params_dict)
         try:
-            message = anyenv.load_json(
-                request.model_dump_json(by_alias=True, exclude_none=True), return_type=dict
-            )
+            data = request.model_dump_json(by_alias=True, exclude_none=True)
+            message = anyenv.load_json(data, return_type=dict)
             await self._write_message(message)
         except Exception as exc:
             del self._pending_requests[request_id]
@@ -1343,18 +1342,15 @@ class CodexClient:
         Args:
             message: Raw JSON-RPC message
         """
-        has_method = "method" in message
-        has_id = "id" in message
-
-        if has_method and has_id:
-            # Server request - the server is asking us to do something
-            await self._handle_server_request(message)
-        elif has_id:
-            # Response to one of our requests
-            self._handle_response(message)
-        elif has_method:
-            # Notification - one-way event
-            await self._handle_notification(message)
+        match message:
+            case {"method": _, "id": _}:  # Server request - the server is asking us to do something
+                await self._handle_server_request(message)
+            case {"id": _}:  # Response to one of our requests
+                self._handle_response(message)
+            case {"method": _}:  # Notification - one-way event
+                await self._handle_notification(message)
+            case _:
+                raise TypeError(f"Unknown message shape {message}")
 
     def _handle_response(self, message: dict[str, Any]) -> None:
         """Handle a JSON-RPC response to one of our pending requests."""
@@ -1444,22 +1440,16 @@ class CodexClient:
 
     async def _send_server_request_response(self, request_id: int | str, result: BaseModel) -> None:
         """Send a JSON-RPC response to a server request."""
-        response = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": result.model_dump(by_alias=True, exclude_none=True),
-        }
+        dct = result.model_dump(by_alias=True, exclude_none=True)
+        response = {"jsonrpc": "2.0", "id": request_id, "result": dct}
         await self._write_message(response)
 
     async def _send_server_request_error(
         self, request_id: int | str, code: int, message: str
     ) -> None:
         """Send a JSON-RPC error response to a server request."""
-        response = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {"code": code, "message": message},
-        }
+        error = {"code": code, "message": message}
+        response = {"jsonrpc": "2.0", "id": request_id, "error": error}
         await self._write_message(response)
 
     async def _write_message(self, message: dict[str, Any]) -> None:

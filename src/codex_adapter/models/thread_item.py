@@ -79,45 +79,46 @@ class CollabAgentState(CodexBaseModel):
     message: str | None = None
 
 
-class ThreadItemUserMessage(CodexBaseModel):
+class BaseThreadItem(CodexBaseModel):
+    """Base class for thread items."""
+
+    id: str
+
+
+class ThreadItemUserMessage(BaseThreadItem):
     """User message item."""
 
     type: Literal["userMessage"] = "userMessage"
-    id: str
     content: list[UserInput]
 
 
-class ThreadItemAgentMessage(CodexBaseModel):
+class ThreadItemAgentMessage(BaseThreadItem):
     """Agent message item."""
 
     type: Literal["agentMessage"] = "agentMessage"
-    id: str
     text: str
     phase: MessagePhase | None = None
 
 
-class ThreadItemPlan(CodexBaseModel):
+class ThreadItemPlan(BaseThreadItem):
     """Plan item."""
 
     type: Literal["plan"] = "plan"
-    id: str
     text: str
 
 
-class ThreadItemReasoning(CodexBaseModel):
+class ThreadItemReasoning(BaseThreadItem):
     """Reasoning item."""
 
     type: Literal["reasoning"] = "reasoning"
-    id: str
     summary: list[str] = Field(default_factory=list)
     content: list[str] = Field(default_factory=list)
 
 
-class ThreadItemCommandExecution(CodexBaseModel):
+class ThreadItemCommandExecution(BaseThreadItem):
     """Command execution item."""
 
     type: Literal["commandExecution"] = "commandExecution"
-    id: str
     command: str
     cwd: str
     process_id: str | None = None
@@ -128,20 +129,18 @@ class ThreadItemCommandExecution(CodexBaseModel):
     duration_ms: int | None = None
 
 
-class ThreadItemFileChange(CodexBaseModel):
+class ThreadItemFileChange(BaseThreadItem):
     """File change item."""
 
     type: Literal["fileChange"] = "fileChange"
-    id: str
     changes: list[FileUpdateChange]
     status: PatchApplyStatus
 
 
-class ThreadItemMcpToolCall(CodexBaseModel):
+class ThreadItemMcpToolCall(BaseThreadItem):
     """MCP tool call item."""
 
     type: Literal["mcpToolCall"] = "mcpToolCall"
-    id: str
     server: str
     tool: str
     status: McpToolCallStatus
@@ -151,11 +150,10 @@ class ThreadItemMcpToolCall(CodexBaseModel):
     duration_ms: int | None = None
 
 
-class ThreadItemDynamicToolCall(CodexBaseModel):
+class ThreadItemDynamicToolCall(BaseThreadItem):
     """Dynamic tool call item."""
 
     type: Literal["dynamicToolCall"] = "dynamicToolCall"
-    id: str
     tool: str
     arguments: dict[str, Any] | None = None
     status: DynamicToolCallStatus
@@ -164,51 +162,45 @@ class ThreadItemDynamicToolCall(CodexBaseModel):
     duration_ms: int | None = None
 
 
-class ThreadItemWebSearch(CodexBaseModel):
+class ThreadItemWebSearch(BaseThreadItem):
     """Web search item."""
 
     type: Literal["webSearch"] = "webSearch"
-    id: str
     query: str
     action: WebSearchAction | None = None
 
 
-class ThreadItemImageView(CodexBaseModel):
+class ThreadItemImageView(BaseThreadItem):
     """Image view item."""
 
     type: Literal["imageView"] = "imageView"
-    id: str
     path: str
 
 
-class ThreadItemEnteredReviewMode(CodexBaseModel):
+class ThreadItemEnteredReviewMode(BaseThreadItem):
     """Entered review mode item."""
 
     type: Literal["enteredReviewMode"] = "enteredReviewMode"
-    id: str
     review: str
 
 
-class ThreadItemExitedReviewMode(CodexBaseModel):
+class ThreadItemExitedReviewMode(BaseThreadItem):
     """Exited review mode item."""
 
     type: Literal["exitedReviewMode"] = "exitedReviewMode"
-    id: str
     review: str
 
 
-class ThreadItemContextCompaction(CodexBaseModel):
+class ThreadItemContextCompaction(BaseThreadItem):
     """Context compaction item."""
 
     type: Literal["contextCompaction"] = "contextCompaction"
-    id: str
 
 
-class ThreadItemCollabAgentToolCall(CodexBaseModel):
+class ThreadItemCollabAgentToolCall(BaseThreadItem):
     """Collab agent tool call item."""
 
     type: Literal["collabAgentToolCall"] = "collabAgentToolCall"
-    id: str
     tool: CollabAgentTool
     status: CollabAgentToolCallStatus
     sender_thread_id: str

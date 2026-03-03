@@ -31,9 +31,15 @@ from pydantic_ai import (
 from agentpool.messaging import ChatMessage
 from agentpool.sessions import SessionData
 from codex_adapter.models import (
+    ThreadItemAgentMessage,
+    ThreadItemCollabAgentToolCall,
     ThreadItemContextCompaction,
     ThreadItemDynamicToolCall,
+    ThreadItemEnteredReviewMode,
+    ThreadItemExitedReviewMode,
     ThreadItemPlan,
+    ThreadItemReasoning,
+    ThreadItemUserMessage,
 )
 
 
@@ -110,7 +116,7 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
         StdioMCPServerConfig,
         StreamableHTTPMCPServerConfig,
     )
-    from codex_adapter.models.codex_types import HttpMcpServer, StdioMcpServer
+    from codex_adapter.models.mcp_server import HttpMcpServer, StdioMcpServer
 
     # Name should not be None by the time we use it
     server_name = config.name or f"server_{id(config)}"
@@ -228,7 +234,7 @@ def _format_tool_result(item: ThreadItem) -> str:  # noqa: PLR0911
             return ""
 
 
-def _thread_item_to_tool_return_part(  # noqa: PLR0911
+def _thread_item_to_tool_return_part(
     item: ThreadItem,
 ) -> ToolReturnPart | BuiltinToolReturnPart | None:
     """Convert a completed ThreadItem to a ToolReturnPart or BuiltinToolReturnPart.
@@ -251,21 +257,17 @@ def _thread_item_to_tool_return_part(  # noqa: PLR0911
         ThreadItemWebSearch,
     )
 
-    # Only process completed items
-    if hasattr(item, "status") and item.status != "completed":  # pyright: ignore[reportAttributeAccessIssue]
-        return None
-
     result = _format_tool_result(item)
     match item:
-        case ThreadItemCommandExecution():
+        case ThreadItemCommandExecution(status="completed"):
             return BuiltinToolReturnPart(tool_name="bash", content=result, tool_call_id=item.id)
-        case ThreadItemFileChange():
+        case ThreadItemFileChange(status="completed"):
             return BuiltinToolReturnPart("file_change", content=result, tool_call_id=item.id)
         case ThreadItemWebSearch():
             return BuiltinToolReturnPart("web_search", content=result, tool_call_id=item.id)
         case ThreadItemImageView():
             return BuiltinToolReturnPart("image_view", content=result, tool_call_id=item.id)
-        case ThreadItemMcpToolCall():
+        case ThreadItemMcpToolCall(status="completed"):
             # TODO: Distinguish between local (ToolBridge) and remote MCP tools
             # See matching TODO in _thread_item_to_tool_call_part
             return ToolReturnPart(tool_name=item.tool, content=result, tool_call_id=item.id)
@@ -315,8 +317,20 @@ def _thread_item_to_tool_call_part(item: ThreadItem) -> ToolCallPart | BuiltinTo
             # This requires tracking which tools came from ToolBridge vs Codex config
             args = item.arguments or {}
             return ToolCallPart(tool_name=item.tool, args=args, tool_call_id=item.id)
-        case _:
+        case (
+            ThreadItemAgentMessage()
+            | ThreadItemContextCompaction()
+            | ThreadItemUserMessage()
+            | ThreadItemReasoning()
+            | ThreadItemPlan()
+            | ThreadItemCollabAgentToolCall()
+            | ThreadItemDynamicToolCall()
+            | ThreadItemEnteredReviewMode()
+            | ThreadItemExitedReviewMode()
+        ):
             return None
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 async def convert_codex_stream(  # noqa: PLR0915
