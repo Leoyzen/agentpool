@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from pydantic_ai import FinishReason, UserContent
-    from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
+    from tokonomics.model_discovery.model_info import Modality, ModelInfo as TokoModelInfo
 
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool_config.mcp_server import (
@@ -70,6 +70,10 @@ if TYPE_CHECKING:
         TurnInputItem,
         UserInput,
     )
+    from codex_adapter.models.codex_types import InputModality
+
+
+_MODALITY_MAP: dict[InputModality, Modality] = {"text": "text", "image": "image"}
 
 
 def to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
@@ -166,17 +170,30 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
             raise TypeError(f"Unsupported MCP server config type: {type(config)}")
 
 
-def to_model_info(model_data: ModelData) -> TokoModelInfo:
+def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelInfo:
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     model_id = model_data.model or model_data.id
-    # Use display_name and description from API if available
+    input_modalities: set[Modality] = {
+        _MODALITY_MAP[m] for m in model_data.input_modalities if m in _MODALITY_MAP
+    }
     return TokoModelInfo(
         id=model_id,
         name=model_data.display_name or model_data.id,
-        provider="openai",
-        description=model_data.description or f"Model: {model_id}",
+        provider=provider,
+        description=model_data.description or None,
         id_override=model_id,
+        input_modalities=input_modalities or {"text"},  # ty:ignore[invalid-argument-type]
+        metadata={
+            k: v
+            for k, v in {
+                "hidden": model_data.hidden or None,
+                "is_default": model_data.is_default or None,
+                "upgrade": model_data.upgrade,
+                "supports_personality": model_data.supports_personality or None,
+            }.items()
+            if v is not None
+        },
     )
 
 
@@ -212,7 +229,7 @@ def user_content_to_codex(content: list[UserContent]) -> list[TurnInputItem]:
     return result
 
 
-async def _format_tool_result(  # noqa: PLR0911
+async def _format_tool_result(
     item: ThreadItem,
 ) -> str | list[str | BinaryContent]:
     """Format tool result from a completed ThreadItem.
@@ -231,10 +248,8 @@ async def _format_tool_result(  # noqa: PLR0911
     )
 
     match item:
-        case ThreadItemCommandExecution():
-            if output := item.aggregated_output or "":
-                return f"```\n{output}\n```"
-            return ""
+        case ThreadItemCommandExecution(aggregated_output=output):
+            return f"```\n{output}\n```" or ""
         case ThreadItemFileChange(changes=changes):
             # Format file changes with their diffs
             parts = []
@@ -246,9 +261,7 @@ async def _format_tool_result(  # noqa: PLR0911
         case ThreadItemMcpToolCall(result=result) if result and result.content:
             return await from_mcp_content(result.content)
         case ThreadItemMcpToolCall(error=error) if error:
-            if error:
-                return f"Error: {error.message}"
-            return ""
+            return f"Error: {error.message}"
         case _:
             return ""
 
@@ -278,18 +291,18 @@ async def _thread_item_to_tool_return_part(
 
     result = await _format_tool_result(item)
     match item:
-        case ThreadItemCommandExecution(status="completed"):
-            return BuiltinToolReturnPart(tool_name="bash", content=result, tool_call_id=item.id)
-        case ThreadItemFileChange(status="completed"):
-            return BuiltinToolReturnPart("file_change", content=result, tool_call_id=item.id)
-        case ThreadItemWebSearch():
-            return BuiltinToolReturnPart("web_search", content=result, tool_call_id=item.id)
-        case ThreadItemImageView():
-            return BuiltinToolReturnPart("image_view", content=result, tool_call_id=item.id)
-        case ThreadItemMcpToolCall(status="completed"):
+        case ThreadItemCommandExecution(status="completed", id=tc_id):
+            return BuiltinToolReturnPart(tool_name="bash", content=result, tool_call_id=tc_id)
+        case ThreadItemFileChange(status="completed", id=tc_id):
+            return BuiltinToolReturnPart("file_change", content=result, tool_call_id=tc_id)
+        case ThreadItemWebSearch(id=tc_id):
+            return BuiltinToolReturnPart("web_search", content=result, tool_call_id=tc_id)
+        case ThreadItemImageView(id=tc_id):
+            return BuiltinToolReturnPart("image_view", content=result, tool_call_id=tc_id)
+        case ThreadItemMcpToolCall(status="completed", id=tc_id, tool=tool):
             # TODO: Distinguish between local (ToolBridge) and remote MCP tools
             # See matching TODO in _thread_item_to_tool_call_part
-            return ToolReturnPart(tool_name=item.tool, content=result, tool_call_id=item.id)
+            return ToolReturnPart(tool_name=tool, content=result, tool_call_id=tc_id)
         case _:
             return None
 
@@ -328,14 +341,13 @@ def _thread_item_to_tool_call_part(item: ThreadItem) -> ToolCallPart | BuiltinTo
         case ThreadItemImageView(path=path, id=tc_id):
             args = {"path": path}
             return BuiltinToolCallPart(tool_name="image_view", args=args, tool_call_id=tc_id)
-        case ThreadItemMcpToolCall():
+        case ThreadItemMcpToolCall(id=id_, tool=tool, arguments=arguments):
             # TODO: Distinguish between local (ToolBridge) and remote MCP tools
             # Currently all MCP tools use ToolCallPart, but ideally:
             # - Tools from AgentPool's ToolBridge → ToolCallPart (our tools)
             # - Tools from Codex's own MCP servers → BuiltinToolCallPart (their tools)
             # This requires tracking which tools came from ToolBridge vs Codex config
-            args = item.arguments or {}
-            return ToolCallPart(tool_name=item.tool, args=args, tool_call_id=item.id)
+            return ToolCallPart(tool_name=tool, args=arguments or {}, tool_call_id=id_)
         case (
             ThreadItemAgentMessage()
             | ThreadItemContextCompaction()

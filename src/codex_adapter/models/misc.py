@@ -295,7 +295,22 @@ class ReasoningEffortOption(CodexBaseModel):
     """A reasoning effort option with metadata."""
 
     reasoning_effort: ReasoningEffort
-    description: str | None = None
+    description: str
+
+
+class ModelUpgradeInfo(CodexBaseModel):
+    """Model upgrade information."""
+
+    model: str
+    upgrade_copy: str | None = None
+    model_link: str | None = None
+    migration_markdown: str | None = None
+
+
+class ModelAvailabilityNux(CodexBaseModel):
+    """Model availability notification."""
+
+    message: str
 
 
 class ModelData(CodexBaseModel):
@@ -304,13 +319,17 @@ class ModelData(CodexBaseModel):
     id: str
     model: str
     upgrade: str | None = None
-    display_name: str | None = None
-    description: str | None = None
-    hidden: bool = False
-    is_default: bool = False
-    supported_reasoning_efforts: list[ReasoningEffortOption] | None = None
-    default_reasoning_effort: ReasoningEffort | None = None
-    input_modalities: list[InputModality] | None = None
+    upgrade_info: ModelUpgradeInfo | None = None
+    availability_nux: ModelAvailabilityNux | None = None
+    display_name: str
+    description: str
+    hidden: bool
+    is_default: bool
+    supported_reasoning_efforts: list[ReasoningEffortOption]
+    default_reasoning_effort: ReasoningEffort
+    input_modalities: list[InputModality] = Field(
+        default_factory=lambda: list[InputModality](["text", "image"])
+    )
     supports_personality: bool = False
 
 
