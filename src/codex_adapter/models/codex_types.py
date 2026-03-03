@@ -97,13 +97,15 @@ class RejectApprovalPolicy(CodexBaseModel):
 
 
 def _ask_for_approval_discriminator(v: Any) -> str:
-    if isinstance(v, str):
-        return "simple"
-    if isinstance(v, dict) and "reject" in v:
-        return "reject"
-    if isinstance(v, RejectApprovalPolicy):
-        return "reject"
-    return "simple"
+    match v:
+        case str():
+            return "simple"
+        case {"reject": _}:
+            return "reject"
+        case RejectApprovalPolicy():
+            return "reject"
+        case _:
+            return "simple"
 
 
 AskForApproval = Annotated[
@@ -118,7 +120,7 @@ AskForApproval = Annotated[
 # ============================================================================
 
 
-# Mapping from camelCase type values (v1 protocol) to kebab-case (v2/canonical)
+# Mapping from camelCase type values (turn-level API) to kebab-case (thread-level API)
 _SANDBOX_TYPE_ALIASES: dict[str, str] = {
     "workspaceWrite": "workspace-write",
     "dangerFullAccess": "danger-full-access",
@@ -132,21 +134,23 @@ _READ_ONLY_ACCESS_TYPE_ALIASES: dict[str, str] = {
 
 
 def _sandbox_policy_discriminator(v: Any) -> str:
-    if isinstance(v, dict):
-        raw_type: str = v.get("type", "")
-        return _SANDBOX_TYPE_ALIASES.get(raw_type, raw_type)
-    if isinstance(v, BaseModel):
-        return str(v.model_fields["type"].default)
-    return str(v)
+    match v:
+        case {"type": str(raw_type)}:
+            return _SANDBOX_TYPE_ALIASES.get(raw_type, raw_type)
+        case BaseModel():
+            return str(v.model_fields["type"].default)
+        case _:
+            return str(v)
 
 
 def _read_only_access_discriminator(v: Any) -> str:
-    if isinstance(v, dict):
-        raw_type: str = v.get("type", "")
-        return _READ_ONLY_ACCESS_TYPE_ALIASES.get(raw_type, raw_type)
-    if isinstance(v, BaseModel):
-        return str(v.model_fields["type"].default)
-    return str(v)
+    match v:
+        case {"type": str(raw_type)}:
+            return _READ_ONLY_ACCESS_TYPE_ALIASES.get(raw_type, raw_type)
+        case BaseModel():
+            return str(v.model_fields["type"].default)
+        case _:
+            return str(v)
 
 
 class RestrictedReadOnlyAccess(CodexBaseModel):
