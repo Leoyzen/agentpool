@@ -33,6 +33,20 @@ TurnStatusValue = Literal["completed", "interrupted", "failed", "inProgress"]
 PlanStepStatus = Literal["pending", "inProgress", "completed"]
 
 
+class TextPosition(CodexBaseModel):
+    """1-based text position."""
+
+    line: int
+    column: int
+
+
+class TextRange(CodexBaseModel):
+    """Text range with start and end positions."""
+
+    start: TextPosition
+    end: TextPosition
+
+
 class ClientInfo(CodexBaseModel):
     """Client information for initialization."""
 

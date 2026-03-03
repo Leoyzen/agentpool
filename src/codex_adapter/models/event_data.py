@@ -4,13 +4,14 @@ from typing import Any
 
 from codex_adapter.models.base import CodexBaseModel
 from codex_adapter.models.codex_types import ModelRerouteReason  # noqa: TC001
-from codex_adapter.models.misc import (
-    AppInfo,  # noqa: TC001
-    RateLimitSnapshot,  # noqa: TC001
-    Thread,  # noqa: TC001
-    Turn,  # noqa: TC001
-    TurnError,  # noqa: TC001
-    TurnPlanStep,  # noqa: TC001
+from codex_adapter.models.misc import (  # noqa: TC001
+    AppInfo,
+    RateLimitSnapshot,
+    TextRange,
+    Thread,
+    Turn,
+    TurnError,
+    TurnPlanStep,
 )
 from codex_adapter.models.thread_item import ThreadItem  # noqa: TC001
 from codex_adapter.models.thread_status import ThreadStatusValue  # noqa: TC001
@@ -304,7 +305,7 @@ class ConfigWarningData(CodexBaseModel):
     summary: str
     details: str | None = None
     path: str | None = None
-    range: dict[str, Any] | None = None
+    range: TextRange | None = None
 
 
 class AppListUpdatedData(CodexBaseModel):
