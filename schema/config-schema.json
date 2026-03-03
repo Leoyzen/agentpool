@@ -475,6 +475,7 @@
                       "discriminator": {
                         "mapping": {
                           "code_execution": "#/$defs/CodeExecutionToolConfig",
+                          "file_search": "#/$defs/FileSearchToolConfig",
                           "image_generation": "#/$defs/ImageGenerationToolConfig",
                           "mcp_server": "#/$defs/MCPServerToolConfig",
                           "memory": "#/$defs/MemoryToolConfig",
@@ -498,6 +499,9 @@
                         },
                         {
                           "$ref": "#/$defs/MemoryToolConfig"
+                        },
+                        {
+                          "$ref": "#/$defs/FileSearchToolConfig"
                         },
                         {
                           "$ref": "#/$defs/MCPServerToolConfig"
@@ -571,6 +575,7 @@
                     "discriminator": {
                       "mapping": {
                         "code_execution": "#/$defs/CodeExecutionToolConfig",
+                        "file_search": "#/$defs/FileSearchToolConfig",
                         "image_generation": "#/$defs/ImageGenerationToolConfig",
                         "mcp_server": "#/$defs/MCPServerToolConfig",
                         "memory": "#/$defs/MemoryToolConfig",
@@ -594,6 +599,9 @@
                       },
                       {
                         "$ref": "#/$defs/MemoryToolConfig"
+                      },
+                      {
+                        "$ref": "#/$defs/FileSearchToolConfig"
                       },
                       {
                         "$ref": "#/$defs/MCPServerToolConfig"
@@ -1707,6 +1715,15 @@
           "default": null,
           "description": "Configuration for MCP servers.",
           "title": "Mcp Servers"
+        },
+        "background": {
+          "default": null,
+          "description": "Run as background agent.",
+          "title": "Background",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5594,9 +5611,9 @@
           "default": "opus",
           "description": "Model to use for this agent. Defaults to Claude's default model.",
           "examples": [
-            "claude-sonnet-4-5",
-            "claude-opus-4",
-            "claude-haiku-3-5"
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-haiku-4-5"
           ],
           "title": "Model"
         },
@@ -6081,6 +6098,7 @@
                       "discriminator": {
                         "mapping": {
                           "code_execution": "#/$defs/CodeExecutionToolConfig",
+                          "file_search": "#/$defs/FileSearchToolConfig",
                           "image_generation": "#/$defs/ImageGenerationToolConfig",
                           "mcp_server": "#/$defs/MCPServerToolConfig",
                           "memory": "#/$defs/MemoryToolConfig",
@@ -6104,6 +6122,9 @@
                         },
                         {
                           "$ref": "#/$defs/MemoryToolConfig"
+                        },
+                        {
+                          "$ref": "#/$defs/FileSearchToolConfig"
                         },
                         {
                           "$ref": "#/$defs/MCPServerToolConfig"
@@ -6177,6 +6198,7 @@
                     "discriminator": {
                       "mapping": {
                         "code_execution": "#/$defs/CodeExecutionToolConfig",
+                        "file_search": "#/$defs/FileSearchToolConfig",
                         "image_generation": "#/$defs/ImageGenerationToolConfig",
                         "mcp_server": "#/$defs/MCPServerToolConfig",
                         "memory": "#/$defs/MemoryToolConfig",
@@ -6200,6 +6222,9 @@
                       },
                       {
                         "$ref": "#/$defs/MemoryToolConfig"
+                      },
+                      {
+                        "$ref": "#/$defs/FileSearchToolConfig"
                       },
                       {
                         "$ref": "#/$defs/MCPServerToolConfig"
@@ -7499,6 +7524,8 @@
           "anyOf": [
             {
               "enum": [
+                "none",
+                "minimal",
                 "low",
                 "medium",
                 "high",
@@ -7553,6 +7580,29 @@
           "title": "Sandbox Mode",
           "type": "string"
         },
+        "personality": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "friendly",
+                "pragmatic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Personality preset for the Codex session.\n\n- \"none\": No personality preset\n- \"friendly\": Warm and approachable tone\n- \"pragmatic\": Direct and efficient communication",
+          "examples": [
+            "none",
+            "friendly",
+            "pragmatic"
+          ],
+          "title": "Personality"
+        },
         "base_instructions": {
           "default": null,
           "description": "Base system instructions for the Codex session.",
@@ -7593,6 +7643,7 @@
                       "discriminator": {
                         "mapping": {
                           "code_execution": "#/$defs/CodeExecutionToolConfig",
+                          "file_search": "#/$defs/FileSearchToolConfig",
                           "image_generation": "#/$defs/ImageGenerationToolConfig",
                           "mcp_server": "#/$defs/MCPServerToolConfig",
                           "memory": "#/$defs/MemoryToolConfig",
@@ -7616,6 +7667,9 @@
                         },
                         {
                           "$ref": "#/$defs/MemoryToolConfig"
+                        },
+                        {
+                          "$ref": "#/$defs/FileSearchToolConfig"
                         },
                         {
                           "$ref": "#/$defs/MCPServerToolConfig"
@@ -7689,6 +7743,7 @@
                     "discriminator": {
                       "mapping": {
                         "code_execution": "#/$defs/CodeExecutionToolConfig",
+                        "file_search": "#/$defs/FileSearchToolConfig",
                         "image_generation": "#/$defs/ImageGenerationToolConfig",
                         "mcp_server": "#/$defs/MCPServerToolConfig",
                         "memory": "#/$defs/MemoryToolConfig",
@@ -7712,6 +7767,9 @@
                       },
                       {
                         "$ref": "#/$defs/MemoryToolConfig"
+                      },
+                      {
+                        "$ref": "#/$defs/FileSearchToolConfig"
                       },
                       {
                         "$ref": "#/$defs/MCPServerToolConfig"
@@ -7873,7 +7931,7 @@
     },
     "CommandHookConfig": {
       "additionalProperties": false,
-      "description": "Hook that executes a shell command.\n\nThe command receives hook input as JSON via stdin and should return\nJSON output via stdout. Exit code 0 = success, exit code 2 = block.",
+      "description": "Hook that executes a shell command.\n\nThe command receives hook input as JSON via stdin and should return\nJSON output via stdout. Exit code 0 = success, exit code 2 = block.\n\nBy default, command hooks run in the agent's execution environment\n(e.g. Docker, E2B sandbox) so they operate on the same filesystem\nas the agent's tools. Use the ``environment`` field to override with\na specific environment, or set it to a local path to force local execution.",
       "properties": {
         "type": {
           "const": "command",
@@ -7945,6 +8003,91 @@
             }
           ],
           "title": "Environment variables"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "beam": "#/$defs/BeamExecutionEnvironmentConfig",
+                  "cloudflare": "#/$defs/CloudflareExecutionEnvironmentConfig",
+                  "daytona": "#/$defs/DaytonaExecutionEnvironmentConfig",
+                  "docker": "#/$defs/DockerExecutionEnvironmentConfig",
+                  "e2b": "#/$defs/E2bExecutionEnvironmentConfig",
+                  "hopx": "#/$defs/HopxExecutionEnvironmentConfig",
+                  "local": "#/$defs/LocalExecutionEnvironmentConfig",
+                  "microsandbox": "#/$defs/MicrosandboxExecutionEnvironmentConfig",
+                  "mock": "#/$defs/MockExecutionEnvironmentConfig",
+                  "modal": "#/$defs/ModalExecutionEnvironmentConfig",
+                  "pyodide": "#/$defs/PyodideExecutionEnvironmentConfig",
+                  "sprites": "#/$defs/SpritesExecutionEnvironmentConfig",
+                  "srt": "#/$defs/SRTExecutionEnvironmentConfig",
+                  "ssh": "#/$defs/SshExecutionEnvironmentConfig",
+                  "vercel": "#/$defs/VercelExecutionEnvironmentConfig"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/LocalExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/CloudflareExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/DockerExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/E2bExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/HopxExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/BeamExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/DaytonaExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/SRTExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/MicrosandboxExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/MockExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/ModalExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/SshExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/VercelExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/PyodideExecutionEnvironmentConfig"
+                },
+                {
+                  "$ref": "#/$defs/SpritesExecutionEnvironmentConfig"
+                }
+              ]
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-hook execution environment override.\n\nIf set, the hook command runs in this environment instead of the agent's.\nAccepts an ExecutionEnvironmentConfig or a string path for local execution.\nIf None (default), uses the agent's execution environment.",
+          "examples": [
+            "docker"
+          ],
+          "title": "Execution environment"
         }
       },
       "required": [
@@ -15232,6 +15375,103 @@
       "type": "object",
       "x-doc-title": "File Prompt"
     },
+    "FileSearchToolConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for PydanticAI file search builtin tool.\n\nProvides vector search over uploaded files (RAG). Supported by OpenAI and Google.\n\nExample:\n    ```yaml\n    tools:\n      - type: builtin\n        builtin_type: file_search\n        file_store_ids: [\"vs_abc123\"]\n    ```",
+      "properties": {
+        "type": {
+          "const": "builtin",
+          "default": "builtin",
+          "description": "Top-level discriminator - always 'builtin' for builtin tools.",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "description": "Optional override for the tool name.",
+          "examples": [
+            "search_web",
+            "file_reader",
+            "calculator"
+          ],
+          "title": "Tool name override",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "default": null,
+          "description": "Optional override for the tool description.",
+          "examples": [
+            "Search the web for information",
+            "Read file contents"
+          ],
+          "title": "Tool description override",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether this tool is initially enabled.",
+          "title": "Tool enabled",
+          "type": "boolean"
+        },
+        "requires_confirmation": {
+          "default": false,
+          "description": "Whether tool execution needs confirmation.",
+          "title": "Requires confirmation",
+          "type": "boolean"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Additional tool metadata.",
+          "title": "Tool metadata",
+          "type": "object"
+        },
+        "instructions": {
+          "default": null,
+          "description": "Instructions for how to use this tool effectively.",
+          "title": "Tool instructions",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "builtin_type": {
+          "const": "file_search",
+          "default": "file_search",
+          "description": "File search builtin tool.",
+          "title": "Builtin Type",
+          "type": "string"
+        },
+        "file_store_ids": {
+          "description": "The file store IDs to search through.\n\nFor OpenAI, these are vector store IDs created via the OpenAI API.\nFor Google, these are file search store names uploaded via the Gemini Files API.",
+          "examples": [
+            [
+              "vs_abc123"
+            ],
+            [
+              "corpora/my-corpus"
+            ]
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "File store IDs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "file_store_ids"
+      ],
+      "title": "File Search Tool",
+      "type": "object"
+    },
     "FileStorageConfig": {
       "additionalProperties": false,
       "description": "File storage configuration.",
@@ -17717,17 +17957,24 @@
           "type": "string"
         },
         "output_compression": {
-          "default": 100,
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Compression level for the output image.",
           "examples": [
-            80,
+            75,
             90,
             100
           ],
-          "maximum": 100,
-          "minimum": 0,
-          "title": "Output compression",
-          "type": "integer"
+          "title": "Output compression"
         },
         "output_format": {
           "anyOf": [
@@ -17783,22 +18030,65 @@
           "type": "string"
         },
         "size": {
-          "default": "auto",
-          "description": "The size of the generated image.",
-          "enum": [
-            "1024x1024",
-            "1024x1536",
-            "1536x1024",
-            "auto"
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "1024x1024",
+                "1024x1536",
+                "1536x1024",
+                "1K",
+                "2K",
+                "4K"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
+          "default": null,
+          "description": "The size of the generated image.\n\nOpenAI: 'auto', '1024x1024', '1024x1536', '1536x1024'.\nGoogle (Gemini): '1K', '2K', '4K'.",
           "examples": [
+            "auto",
             "1024x1024",
             "1024x1536",
             "1536x1024",
-            "auto"
+            "1K",
+            "2K",
+            "4K"
           ],
-          "title": "Image size",
-          "type": "string"
+          "title": "Image size"
+        },
+        "aspect_ratio": {
+          "anyOf": [
+            {
+              "enum": [
+                "21:9",
+                "16:9",
+                "4:3",
+                "3:2",
+                "1:1",
+                "9:16",
+                "3:4",
+                "2:3",
+                "5:4",
+                "4:5"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The aspect ratio for generated images. Supported by Google and OpenAI.",
+          "examples": [
+            "1:1",
+            "16:9",
+            "3:2"
+          ],
+          "title": "Aspect ratio"
         }
       },
       "title": "Image Generation Tool",
@@ -23098,6 +23388,7 @@
                       "discriminator": {
                         "mapping": {
                           "code_execution": "#/$defs/CodeExecutionToolConfig",
+                          "file_search": "#/$defs/FileSearchToolConfig",
                           "image_generation": "#/$defs/ImageGenerationToolConfig",
                           "mcp_server": "#/$defs/MCPServerToolConfig",
                           "memory": "#/$defs/MemoryToolConfig",
@@ -23121,6 +23412,9 @@
                         },
                         {
                           "$ref": "#/$defs/MemoryToolConfig"
+                        },
+                        {
+                          "$ref": "#/$defs/FileSearchToolConfig"
                         },
                         {
                           "$ref": "#/$defs/MCPServerToolConfig"
@@ -23194,6 +23488,7 @@
                     "discriminator": {
                       "mapping": {
                         "code_execution": "#/$defs/CodeExecutionToolConfig",
+                        "file_search": "#/$defs/FileSearchToolConfig",
                         "image_generation": "#/$defs/ImageGenerationToolConfig",
                         "mcp_server": "#/$defs/MCPServerToolConfig",
                         "memory": "#/$defs/MemoryToolConfig",
@@ -23217,6 +23512,9 @@
                       },
                       {
                         "$ref": "#/$defs/MemoryToolConfig"
+                      },
+                      {
+                        "$ref": "#/$defs/FileSearchToolConfig"
                       },
                       {
                         "$ref": "#/$defs/MCPServerToolConfig"
@@ -27754,6 +28052,7 @@
                       "discriminator": {
                         "mapping": {
                           "code_execution": "#/$defs/CodeExecutionToolConfig",
+                          "file_search": "#/$defs/FileSearchToolConfig",
                           "image_generation": "#/$defs/ImageGenerationToolConfig",
                           "mcp_server": "#/$defs/MCPServerToolConfig",
                           "memory": "#/$defs/MemoryToolConfig",
@@ -27777,6 +28076,9 @@
                         },
                         {
                           "$ref": "#/$defs/MemoryToolConfig"
+                        },
+                        {
+                          "$ref": "#/$defs/FileSearchToolConfig"
                         },
                         {
                           "$ref": "#/$defs/MCPServerToolConfig"
@@ -27850,6 +28152,7 @@
                     "discriminator": {
                       "mapping": {
                         "code_execution": "#/$defs/CodeExecutionToolConfig",
+                        "file_search": "#/$defs/FileSearchToolConfig",
                         "image_generation": "#/$defs/ImageGenerationToolConfig",
                         "mcp_server": "#/$defs/MCPServerToolConfig",
                         "memory": "#/$defs/MemoryToolConfig",
@@ -27873,6 +28176,9 @@
                       },
                       {
                         "$ref": "#/$defs/MemoryToolConfig"
+                      },
+                      {
+                        "$ref": "#/$defs/FileSearchToolConfig"
                       },
                       {
                         "$ref": "#/$defs/MCPServerToolConfig"
@@ -36071,6 +36377,83 @@
           "description": "Web fetch builtin tool.",
           "title": "Builtin Type",
           "type": "string"
+        },
+        "max_uses": {
+          "default": null,
+          "description": "Maximum number of times the tool can be used.",
+          "examples": [
+            5,
+            10,
+            20
+          ],
+          "title": "Maximum uses",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "allowed_domains": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If provided, only these domains will be fetched.",
+          "examples": [
+            [
+              "wikipedia.org",
+              "github.com"
+            ]
+          ],
+          "title": "Allowed domains"
+        },
+        "blocked_domains": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If provided, these domains will never be fetched.",
+          "examples": [
+            [
+              "spam.com",
+              "ads.example.com"
+            ]
+          ],
+          "title": "Blocked domains"
+        },
+        "enable_citations": {
+          "default": false,
+          "description": "If True, enables citations for fetched content.",
+          "title": "Enable citations",
+          "type": "boolean"
+        },
+        "max_content_tokens": {
+          "default": null,
+          "description": "Maximum content length in tokens for fetched content.",
+          "examples": [
+            1000,
+            5000
+          ],
+          "title": "Max content tokens",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "title": "Web Fetch Tool",
