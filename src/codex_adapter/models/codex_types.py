@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Discriminator, Field, Tag
 
 from codex_adapter.models.base import CodexBaseModel
+from codex_adapter.models.token_usage import TokenUsageBreakdown  # noqa: TC001
 
 
 # Type aliases for Codex types
@@ -224,7 +225,7 @@ class CodexTurn:
     status: TurnStatus = "pending"
     items: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
-    usage: dict[str, int] | None = None
+    usage: TokenUsageBreakdown | None = None
 
 
 @dataclass

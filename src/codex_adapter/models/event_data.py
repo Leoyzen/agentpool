@@ -8,13 +8,13 @@ from codex_adapter.models.misc import (
     AppInfo,  # noqa: TC001
     RateLimitSnapshot,  # noqa: TC001
     Thread,  # noqa: TC001
-    ThreadTokenUsage,  # noqa: TC001
     Turn,  # noqa: TC001
     TurnError,  # noqa: TC001
     TurnPlanStep,  # noqa: TC001
 )
 from codex_adapter.models.thread_item import ThreadItem  # noqa: TC001
 from codex_adapter.models.thread_status import ThreadStatusValue  # noqa: TC001
+from codex_adapter.models.token_usage import ThreadTokenUsage  # noqa: TC001
 
 
 class TurnPlanUpdatedData(CodexBaseModel):

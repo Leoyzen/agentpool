@@ -41,8 +41,6 @@ from codex_adapter.models.misc import (
     SkillsContainer,
     Thread,
     ThreadData,
-    ThreadTokenUsage,
-    TokenUsageBreakdown,
     ToolRequestUserInputAnswer,
     ToolRequestUserInputOption,
     ToolRequestUserInputQuestion,
@@ -50,6 +48,10 @@ from codex_adapter.models.misc import (
     TurnData,
     TurnError,
     TurnPlanStep,
+)
+from codex_adapter.models.token_usage import (
+    ThreadTokenUsage,
+    TokenUsageBreakdown,
     Usage,
 )
 from codex_adapter.models.misc import PlanStepStatus as MiscPlanStepStatus
