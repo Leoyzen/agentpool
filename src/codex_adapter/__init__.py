@@ -14,7 +14,6 @@ from codex_adapter.client import CodexClient
 from codex_adapter.models.codex_types import (
     ApprovalPolicy,
     AskForApproval,
-    CodexTurn,
     DangerFullAccessSandboxPolicy,
     ExternalSandboxPolicy,
     CollabAgentStatus,
@@ -139,7 +138,6 @@ __all__ = [
     "CodexEvent",
     "CodexProcessError",
     "CodexRequestError",
-    "CodexTurn",
     "CollabAgentStatus",
     "CollabAgentTool",
     "CollabAgentToolCallStatus",

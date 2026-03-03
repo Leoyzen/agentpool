@@ -67,8 +67,6 @@ from codex_adapter.models.base import (
 from codex_adapter.models.codex_types import (
     ApprovalPolicy,
     AskForApproval,
-    CodexItem,
-    CodexTurn,
     DangerFullAccessSandboxPolicy,
     ExternalSandboxPolicy,
     FullAccessReadOnlyAccess,
@@ -377,8 +375,6 @@ __all__ = [
     "ClientInfo",
     "CodexBaseModel",
     "CodexEvent",
-    "CodexItem",
-    "CodexTurn",
     "CollabAgentState",
     "CollabAgentStatus",
     "CollabAgentTool",

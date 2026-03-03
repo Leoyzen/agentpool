@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Discriminator, Field, Tag
 
 from codex_adapter.models.base import CodexBaseModel
-from codex_adapter.models.token_usage import TokenUsageBreakdown  # noqa: TC001
 
 
 # Type aliases for Codex types
@@ -214,29 +212,6 @@ SandboxPolicy = Annotated[
     Discriminator(_sandbox_policy_discriminator),
 ]
 """Discriminated union for sandbox execution restrictions."""
-
-
-@dataclass
-class CodexTurn:
-    """Represents a turn in a Codex conversation."""
-
-    id: str
-    thread_id: str
-    status: TurnStatus = "pending"
-    items: list[dict[str, Any]] = field(default_factory=list)
-    error: str | None = None
-    usage: TokenUsageBreakdown | None = None
-
-
-@dataclass
-class CodexItem:
-    """Represents an item (message, tool call, etc.) in a turn."""
-
-    id: str
-    type: ItemType
-    content: str = ""
-    status: ItemStatus = "pending"
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # MCP Server Configuration Types
