@@ -69,10 +69,7 @@ class Skill(BaseModel):
             if skill_file.exists():
                 content = skill_file.read_text(encoding="utf-8")
                 parts = content.split("---", 2)
-                if len(parts) >= 3:  # noqa: PLR2004
-                    self.instructions = parts[2].strip()
-                else:
-                    self.instructions = ""
+                self.instructions = parts[2].strip() if len(parts) >= 3 else ""  # noqa: PLR2004
             else:
                 self.instructions = ""
         return self.instructions
@@ -132,26 +129,21 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     Raises:
         ValueError: If frontmatter is missing or invalid.
     """
+    import yamling
+
     if not content.startswith("---"):
-        msg = "SKILL.md must start with YAML frontmatter (---)"
-        raise ValueError(msg)
+        raise ValueError("SKILL.md must start with YAML frontmatter (---)")
 
     parts = content.split("---", 2)
     if len(parts) < 3:  # noqa: PLR2004
-        msg = "SKILL.md frontmatter not properly closed with ---"
-        raise ValueError(msg)
-
-    import yamling
-
+        raise ValueError("SKILL.md frontmatter not properly closed with ---")
     try:
         metadata = yamling.load_yaml(parts[1])
     except yamling.YAMLError as e:
-        msg = f"Invalid YAML in frontmatter: {e}"
-        raise ValueError(msg) from e
+        raise ValueError(f"Invalid YAML in frontmatter: {e}") from e
 
     if not isinstance(metadata, dict):
-        msg = "SKILL.md frontmatter must be a YAML mapping"
-        raise TypeError(msg)
+        raise TypeError("SKILL.md frontmatter must be a YAML mapping")
 
     return metadata, parts[2].strip()
 
