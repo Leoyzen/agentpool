@@ -193,15 +193,18 @@ def user_content_to_codex(content: list[UserContent]) -> list[TurnInputItem]:
     return result
 
 
-def _format_tool_result(item: ThreadItem) -> str:  # noqa: PLR0911
+async def _format_tool_result(
+    item: ThreadItem,
+) -> str | list[str | BinaryContent]:
     """Format tool result from a completed ThreadItem.
 
     Args:
         item: Completed thread item
 
     Returns:
-        Formatted result string
+        Formatted result string, or list of content items for MCP tool results.
     """
+    from agentpool.mcp_server.conversions import from_mcp_content
     from codex_adapter.models import (
         ThreadItemCommandExecution,
         ThreadItemFileChange,
@@ -222,8 +225,7 @@ def _format_tool_result(item: ThreadItem) -> str:  # noqa: PLR0911
                     parts.append(change.diff)
             return "\n".join(parts)
         case ThreadItemMcpToolCall(result=result) if result and result.content:
-            texts = [str(block.model_dump().get("text", "")) for block in result.content]
-            return "\n".join(texts)
+            return await from_mcp_content(result.content)
         case ThreadItemMcpToolCall(error=error) if error:
             if error:
                 return f"Error: {error.message}"
@@ -232,7 +234,7 @@ def _format_tool_result(item: ThreadItem) -> str:  # noqa: PLR0911
             return ""
 
 
-def _thread_item_to_tool_return_part(
+async def _thread_item_to_tool_return_part(
     item: ThreadItem,
 ) -> ToolReturnPart | BuiltinToolReturnPart | None:
     """Convert a completed ThreadItem to a ToolReturnPart or BuiltinToolReturnPart.
@@ -255,7 +257,7 @@ def _thread_item_to_tool_return_part(
         ThreadItemWebSearch,
     )
 
-    result = _format_tool_result(item)
+    result = await _format_tool_result(item)
     match item:
         case ThreadItemCommandExecution(status="completed"):
             return BuiltinToolReturnPart(tool_name="bash", content=result, tool_call_id=item.id)
@@ -448,7 +450,7 @@ async def convert_codex_stream(  # noqa: PLR0915
                         tool_name=part.tool_name,
                         tool_call_id=part.tool_call_id,
                         tool_input=part.args_as_dict(),
-                        tool_result=_format_tool_result(item),
+                        tool_result=await _format_tool_result(item),
                         agent_name="codex",  # Will be overridden by agent
                         message_id=data.turn_id,
                     )
@@ -478,7 +480,7 @@ async def convert_codex_stream(  # noqa: PLR0915
                 pass
 
 
-def event_to_part(
+async def event_to_part(
     event: CodexEvent,
 ) -> (
     TextPart
@@ -516,7 +518,7 @@ def event_to_part(
         case ItemStartedEvent(data=data):
             return _thread_item_to_tool_call_part(data.item)
         case ItemCompletedEvent(data=data):
-            return _thread_item_to_tool_return_part(data.item)
+            return await _thread_item_to_tool_return_part(data.item)
         case _:
             return None
 
