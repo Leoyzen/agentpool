@@ -1192,15 +1192,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         else:
             final_content = content  # type: ignore[assignment]
 
-        # Build cost_info and usage from ResultMessage if available
+        # Build cost_info and usage from client per-query tracking.
+        # result_message.total_cost_usd is cumulative across the session,
+        # but client.query_cost is the per-turn delta computed by the SDK.
+        # result_message.usage is last-API-call-only; client.query_usage
+        # accumulates all API calls in the turn.
         cost_info: TokenCost | None = None
         request_usage: RequestUsage | None = None
         stop_reason: StopReason | None = "end_turn"
         if result_message:
-            run_usage = to_run_usage(result_message.usage)
-            total_cost = Decimal(str(result_message.total_cost_usd))
+            run_usage = to_run_usage(client.query_usage)
+            total_cost = Decimal(str(client.query_cost))
             cost_info = TokenCost(token_usage=run_usage, total_cost=total_cost)
-            request_usage = to_request_usage(result_message.usage)
+            request_usage = to_request_usage(client.query_usage)
             stop_reason = result_message.stop_reason
         # Build metadata with SDK session ID
         msg_metadata = {}

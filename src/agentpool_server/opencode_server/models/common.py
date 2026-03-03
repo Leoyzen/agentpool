@@ -50,14 +50,18 @@ class ModelRef(OpenCodeBaseModel):
 
 
 class TokenCache(OpenCodeBaseModel):
-    """Token cache information."""
+    """Prompt-cache token counts."""
 
     read: int = 0
     write: int = 0
 
 
 class Tokens(OpenCodeBaseModel):
-    """Token usage information."""
+    """Token usage for one assistant message.
+
+    The TUI computes context-window fill as
+    ``input + output + reasoning + cache.read + cache.write``.
+    """
 
     input: int = 0
     output: int = 0

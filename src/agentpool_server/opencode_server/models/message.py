@@ -216,7 +216,17 @@ class AssistantMessage(OpenCodeBaseModel):
     path: MessagePath
     time: MessageTime
     tokens: Tokens = Field(default_factory=Tokens)
+    """Context window usage from the latest step.
+
+    Replaced (not accumulated) on each step. The TUI shows this from the
+    last assistant message as the session "Context" indicator.
+    """
     cost: float = 0.0
+    """Per-message cost in USD.
+
+    The TUI sums this across all assistant messages for the session total,
+    so this must be per-message, not cumulative.
+    """
     error: MessageError | None = None
     summary: bool | None = None
     finish: str | None = None

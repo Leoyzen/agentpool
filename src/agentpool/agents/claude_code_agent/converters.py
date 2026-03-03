@@ -90,21 +90,23 @@ def to_prompt_input(content: Sequence[UserContent]) -> Iterator[UserPrompt]:
                 yield UserTextPrompt(str(other_content))
 
 
-def to_run_usage(usage_dict: Usage) -> RunUsage:
+def to_run_usage(usage: Usage) -> RunUsage:
+    """Convert SDK Usage to RunUsage."""
     return RunUsage(
-        input_tokens=usage_dict["input_tokens"],
-        output_tokens=usage_dict["output_tokens"],
-        cache_read_tokens=usage_dict["cache_read_input_tokens"],
-        cache_write_tokens=usage_dict["cache_creation_input_tokens"],
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_input_tokens,
+        cache_write_tokens=usage.cache_creation_input_tokens,
     )
 
 
-def to_request_usage(usage_dict: Usage) -> RequestUsage:
+def to_request_usage(usage: Usage) -> RequestUsage:
+    """Convert SDK Usage to RequestUsage."""
     return RequestUsage(
-        input_tokens=usage_dict["input_tokens"],
-        output_tokens=usage_dict["output_tokens"],
-        cache_read_tokens=usage_dict["cache_read_input_tokens"],
-        cache_write_tokens=usage_dict["cache_creation_input_tokens"],
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_input_tokens,
+        cache_write_tokens=usage.cache_creation_input_tokens,
     )
 
 
