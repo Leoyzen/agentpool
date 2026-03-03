@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
 from codex_adapter.models.base import CodexBaseModel
 
@@ -24,6 +24,14 @@ class ImageInputItem(CodexBaseModel):
 
     type: Literal["image"] = "image"
     url: str
+
+    @classmethod
+    def from_bytes(cls, data: bytes, media_type: str) -> Self:
+        import base64
+
+        b64 = base64.b64encode(data).decode()
+        data_uri = f"data:{media_type};base64,{b64}"
+        return cls(url=data_uri)
 
 
 class SkillInputItem(CodexBaseModel):

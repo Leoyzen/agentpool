@@ -7,7 +7,6 @@ Provides converters for:
 
 from __future__ import annotations
 
-import base64
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, assert_never, overload
 
@@ -182,10 +181,7 @@ def user_content_to_codex(content: list[UserContent]) -> list[TurnInputItem]:
             case ImageUrl(url=url):
                 result.append(ImageInputItem(url=url))
             case BinaryContent(data=data, media_type=media_type, is_image=is_image) if is_image:
-                # Convert binary image to data URI
-                b64 = base64.b64encode(data).decode()
-                data_uri = f"data:{media_type};base64,{b64}"
-                result.append(ImageInputItem(url=data_uri))
+                result.append(ImageInputItem.from_bytes(data=data, media_type=media_type))
             case FileUrl() | BinaryContent() | CachePoint():
                 pass
             case _ as unreachable:
@@ -217,9 +213,7 @@ def _format_tool_result(item: ThreadItem) -> str:  # noqa: PLR0911
             # Format file changes with their diffs
             parts = []
             for change in changes:
-                kind = change.kind.kind  # "add", "delete", or "update"
-                path = change.path
-                parts.append(f"{kind.upper()}: {path}")
+                parts.append(f"{change.kind.kind.upper()}: {change.path}")
                 if change.diff:
                     parts.append(change.diff)
             return "\n".join(parts)
@@ -425,9 +419,7 @@ async def convert_codex_stream(  # noqa: PLR0915
                     if isinstance(item, ThreadItemFileChange):
                         diff_parts = []
                         for change in item.changes:
-                            kind = change.kind.kind
-                            path = change.path
-                            diff_parts.append(f"{kind.upper()}: {path}")
+                            diff_parts.append(f"{change.kind.kind.upper()}: {change.path}")
                             if change.diff:
                                 diff_parts.append(change.diff)
                         if diff_parts:
