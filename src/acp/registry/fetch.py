@@ -58,3 +58,14 @@ async def fetch_agent(agent_id: str) -> RegistryAgent | None:
         return agent
     agents = await list_agents()
     return next((a for a in agents if a.id == agent_id), None)
+
+
+if __name__ == "__main__":
+
+    async def main() -> None:
+        agents = await list_agents()
+        print(agents)
+
+    import asyncio
+
+    asyncio.run(main())

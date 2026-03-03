@@ -121,8 +121,7 @@ class AnthropicAuthBackend(ProviderAuthBackend):
         verifier: str | None = None,
     ) -> bool:
         if not code or not verifier:
-            msg = "Missing code or verifier for Anthropic OAuth"
-            raise ValueError(msg)
+            raise ValueError("Missing code or verifier for Anthropic OAuth")
         token = exchange_code_for_token(code, verifier)
         store = AnthropicTokenStore()
         store.save(token)

@@ -8,7 +8,7 @@ and persistence are handled by the caller.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from pydantic_ai import FunctionToolCallEvent, RequestUsage
 from pydantic_ai.messages import (
@@ -23,11 +23,13 @@ from pydantic_ai.messages import (
 
 from agentpool.agents.events import (
     CompactionEvent,
+    DiffContentItem,
     FileContentItem,
     LocationContentItem,
     RunErrorEvent,
     StreamCompleteEvent,
     SubAgentEvent,
+    TerminalContentItem,
     TextContentItem,
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
@@ -413,6 +415,10 @@ class OpenCodeStreamAdapter:
                     file_paths.append(path)
                 case LocationContentItem(path=path):
                     file_paths.append(path)
+                case TerminalContentItem() | DiffContentItem():
+                    pass
+                case _ as unreachable:
+                    assert_never(unreachable)
 
         if file_paths:
             if self.on_file_paths is not None:
@@ -564,7 +570,7 @@ class OpenCodeStreamAdapter:
 
 
 def _extract_title_from_tool_state(state: ToolState) -> str:
-    """Extract the title from a tool state without getattr."""
+    """Extract the title from a tool state."""
     match state:
         case ToolStateRunning(title=title):
             return title or ""
@@ -572,3 +578,5 @@ def _extract_title_from_tool_state(state: ToolState) -> str:
             return title or ""
         case ToolStatePending() | ToolStateError():
             return ""
+        case _ as unreachable:
+            assert_never(unreachable)
