@@ -324,11 +324,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             self._sdk_session_id = thread.id
             self.log.info("Codex thread resumed", sdk_session_id=self._sdk_session_id, cwd=cwd)
             # Restore conversation history from resumed thread
-            if thread.turns:
-                chat_messages = turns_to_chat_messages(thread.turns)
-                self.conversation.chat_messages.clear()
-                self.conversation.chat_messages.extend(chat_messages)
-                self.log.info("Restored conversation history", turn_count=len(thread.turns))
+            chat_messages = turns_to_chat_messages(thread.turns)
+            self.conversation.chat_messages.clear()
+            self.conversation.chat_messages.extend(chat_messages)
+            self.log.info("Restored conversation history", turn_count=len(thread.turns))
         else:
             # Start a new thread
             response = await self._client.thread_start(
