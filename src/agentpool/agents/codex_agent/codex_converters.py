@@ -193,7 +193,7 @@ def user_content_to_codex(content: list[UserContent]) -> list[TurnInputItem]:
     return result
 
 
-async def _format_tool_result(
+async def _format_tool_result(  # noqa: PLR0911
     item: ThreadItem,
 ) -> str | list[str | BinaryContent]:
     """Format tool result from a completed ThreadItem.

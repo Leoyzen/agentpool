@@ -6,14 +6,7 @@ from pydantic import BaseModel
 
 
 class StdioMcpServer(BaseModel):
-    """MCP server running as a subprocess via stdio transport.
-
-    Example:
-        StdioMcpServer(
-            command="npx",
-            args=["-y", "@openai/codex-shell-tool-mcp"]
-        )
-    """
+    """MCP server running as a subprocess via stdio transport."""
 
     command: str
     args: list[str] = []
@@ -22,14 +15,7 @@ class StdioMcpServer(BaseModel):
 
 
 class HttpMcpServer(BaseModel):
-    """MCP server accessible via HTTP/SSE transport.
-
-    Example:
-        HttpMcpServer(
-            url="http://localhost:8000/mcp",
-            bearer_token_env_var="MY_MCP_TOKEN"
-        )
-    """
+    """MCP server accessible via HTTP/SSE transport."""
 
     url: str
     bearer_token_env_var: str | None = None
@@ -37,5 +23,4 @@ class HttpMcpServer(BaseModel):
     enabled: bool = True
 
 
-# Union type for any MCP server config
 McpServerConfig = StdioMcpServer | HttpMcpServer
