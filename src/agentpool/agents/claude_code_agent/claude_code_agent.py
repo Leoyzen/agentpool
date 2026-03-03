@@ -1293,6 +1293,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
     async def _set_mode(self, mode_id: str, category_id: str) -> None:
         """Handle permissions, model, and thinking_level mode switching."""
+        from clawd_code_sdk import PermissionMode
+
         from agentpool.agents.claude_code_agent.static_info import VALID_MODES
 
         match category_id:
@@ -1300,11 +1302,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 # Map mode_id to PermissionMode
                 if mode_id not in VALID_MODES:
                     raise UnknownModeError(mode_id, list(VALID_MODES))
-                permission_mode: PermissionMode = mode_id  # type: ignore[assignment]
-                self._permission_mode = permission_mode
+                self._permission_mode = cast(PermissionMode, mode_id)
                 if self._client:  # Update SDK client if initialized
                     await self.ensure_initialized()
-                    await self._client.set_permission_mode(permission_mode)
+                    await self._client.set_permission_mode(self._permission_mode)
             case "model":
                 # Validate model exists
                 if models := await self.get_available_models():

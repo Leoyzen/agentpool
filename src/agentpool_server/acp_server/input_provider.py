@@ -53,17 +53,14 @@ def _create_enum_elicitation_options(schema: dict[str, Any]) -> list[PermissionO
 def _is_boolean_schema(schema: dict[str, Any]) -> bool:
     """Check if the elicitation schema is requesting a boolean value."""
     # Direct boolean type
-    if schema.get("type") == "boolean":
-        return True
-
-    # Check if it's an object with a single boolean property (common pattern)
-    if schema.get("type") == "object":
-        properties = schema.get("properties", {})
-        if len(properties) == 1:
-            prop_schema = next(iter(properties.values()))
+    match schema:
+        case {"type": "boolean"}:
+            return True
+        case {"type": "object", "properties": dict() as props} if len(props) == 1:
+            prop_schema = next(iter(props.values()))
             return bool(prop_schema.get("type") == "boolean")
-
-    return False
+        case _:
+            return False
 
 
 def _is_enum_schema(schema: dict[str, Any]) -> bool:
@@ -235,12 +232,16 @@ class ACPInputProvider(InputProvider):
                     title=title,
                     options=url_options,
                 )
-                if isinstance(response.outcome, AllowedOutcome):
-                    if response.outcome.option_id == "accept":
+                match response.outcome:
+                    case AllowedOutcome(option_id="accept"):
                         webbrowser.open(params.url)
                         return types.ElicitResult(action="accept")
-                    return types.ElicitResult(action="decline")
-                return types.ElicitResult(action="cancel")
+                    case AllowedOutcome():
+                        return types.ElicitResult(action="decline")
+                    case DeniedOutcome():
+                        return types.ElicitResult(action="cancel")
+                    case _ as unreachable:
+                        assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
             # Form mode elicitation
             schema = params.requestedSchema

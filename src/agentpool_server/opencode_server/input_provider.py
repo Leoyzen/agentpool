@@ -93,12 +93,13 @@ class OpenCodeInputProvider(InputProvider):
             # Check if we have a standing approval/rejection for this tool
             if tool_name in self._tool_approvals:
                 standing_decision = self._tool_approvals[tool_name]
-                if standing_decision == "always":
-                    logger.debug("Auto-allowing tool", tool_name=tool_name, reason="always")
-                    return "allow"
-                if standing_decision == "reject":
-                    logger.debug("Auto-rejecting tool", tool_name=tool_name, reason="reject")
-                    return "skip"
+                match standing_decision:
+                    case "always":
+                        logger.debug("Auto-allowing tool", tool_name=tool_name, reason="always")
+                        return "allow"
+                    case "reject":
+                        logger.debug("Auto-rejecting tool", tool_name=tool_name, reason="reject")
+                        return "skip"
 
             # Create a pending permission request
             permission_id = self._generate_permission_id()
@@ -206,17 +207,16 @@ class OpenCodeInputProvider(InputProvider):
         for p in self._pending_permissions.values():
             args_preview = ", ".join(f"{k}={v!r}" for k, v in list(p.args.items())[:3])
             pattern = f"{p.tool_name}: {args_preview}" if args_preview else p.tool_name
-            result.append(
-                PermissionAskedProperties(
-                    id=p.permission_id,
-                    session_id=self.session_id,
-                    permission=p.tool_name,
-                    patterns=[pattern],
-                    metadata=p.args,
-                    always=[pattern],
-                    tool=PermissionToolInfo(message_id="", call_id=None),
-                )
+            props = PermissionAskedProperties(
+                id=p.permission_id,
+                session_id=self.session_id,
+                permission=p.tool_name,
+                patterns=[pattern],
+                metadata=p.args,
+                always=[pattern],
+                tool=PermissionToolInfo(message_id="", call_id=None),
             )
+            result.append(props)
         return result
 
     async def get_elicitation(
@@ -234,31 +234,19 @@ class OpenCodeInputProvider(InputProvider):
         Returns:
             Elicit result with user's response or error data
         """
-        # For URL elicitation, we could open the URL
-        if isinstance(params, types.ElicitRequestURLParams):
-            logger.info("URL elicitation request", message=params.message, url=params.url)
-            # Could potentially open URL in browser here
-            return types.ElicitResult(action="decline")
-        # For form elicitation with enum schema, use OpenCode questions
-        if isinstance(params, types.ElicitRequestFormParams):
-            schema = params.requestedSchema
-            # Check if schema defines options (enum)
-            enum_values = schema.get("enum")
-            if enum_values:
+        match params:
+            case types.ElicitRequestURLParams(message=message, url=url):
+                # For URL elicitation, we could open the URL.in browser?
+                logger.info("URL elicitation request", message=message, url=url)
+                return types.ElicitResult(action="decline")
+            case types.ElicitRequestFormParams(
+                requestedSchema=({"enum": _} | {"type": "array", "items": {"enum": _}}) as schema
+            ):
                 return await self._handle_question_elicitation(params, schema)
-            # Check if it's an array schema with enum items
-            if schema.get("type") == "array":
-                items = schema.get("items", {})
-                if items.get("enum"):
-                    return await self._handle_question_elicitation(params, schema)
-
-        # For other form elicitation, we don't have UI support yet
-        logger.info(
-            "Form elicitation request (not supported)",
-            message=params.message,
-            schema=params.requestedSchema,
-        )
-        return types.ElicitResult(action="decline")
+            case types.ElicitRequestFormParams(requestedSchema=schema, message=msg):
+                # For other form elicitation, we don't have UI support yet
+                logger.info("Form elicitation request (not supported)", message=msg, schema=schema)
+                return types.ElicitResult(action="decline")
 
     async def _handle_question_elicitation(
         self,
