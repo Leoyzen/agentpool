@@ -21,8 +21,8 @@ if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext
     from agentpool.agents.events import RichAgentStreamEvent, ToolCallContentItem
     from agentpool.agents.events.events import ToolCallStatus
-    from agentpool.resource_providers.plan_provider import PlanEntry
     from agentpool.tools.base import ToolKind
+    from agentpool.utils.todos import PlanEntry
 
 
 class StreamEventEmitter:

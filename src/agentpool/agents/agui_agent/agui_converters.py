@@ -30,7 +30,7 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent as NativeToolCallStartEvent,
 )
-from agentpool.resource_providers.plan_provider import PlanEntry
+from agentpool.utils.todos import PlanEntry
 
 
 if TYPE_CHECKING:

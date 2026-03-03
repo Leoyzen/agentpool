@@ -313,7 +313,7 @@ def _thread_item_to_tool_call_part(item: ThreadItem) -> ToolCallPart | BuiltinTo
             # - Tools from AgentPool's ToolBridge → ToolCallPart (our tools)
             # - Tools from Codex's own MCP servers → BuiltinToolCallPart (their tools)
             # This requires tracking which tools came from ToolBridge vs Codex config
-            args = item.arguments if isinstance(item.arguments, dict) else {"args": item.arguments}
+            args = item.arguments or {}
             return ToolCallPart(tool_name=item.tool, args=args, tool_call_id=item.id)
         case _:
             return None
@@ -339,7 +339,7 @@ async def convert_codex_stream(  # noqa: PLR0915
         ToolCallProgressEvent,
         ToolCallStartEvent,
     )
-    from agentpool.resource_providers.plan_provider import PlanEntry
+    from agentpool.utils.todos import PlanEntry
     from codex_adapter.models import (
         ThreadItemCommandExecution,
         ThreadItemFileChange,

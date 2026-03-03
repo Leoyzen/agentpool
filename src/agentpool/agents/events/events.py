@@ -37,8 +37,8 @@ from agentpool.messaging import ChatMessage  # noqa: TC001
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentpool.resource_providers.plan_provider import PlanEntry
     from agentpool.tools.base import ToolKind
+    from agentpool.utils.todos import PlanEntry
 
 
 SubAgentType = Literal["agent", "team_parallel", "team_sequential"]

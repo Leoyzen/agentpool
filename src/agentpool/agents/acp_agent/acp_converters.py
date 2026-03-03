@@ -344,7 +344,7 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
 
         # Plan update -> PlanUpdateEvent
         case AgentPlanUpdate(entries=entries):
-            from agentpool.resource_providers.plan_provider import PlanEntry
+            from agentpool.utils.todos import PlanEntry
 
             native_entries = [
                 PlanEntry(content=e.content, priority=e.priority, status=e.status) for e in entries

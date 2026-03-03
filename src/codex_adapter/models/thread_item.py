@@ -63,7 +63,7 @@ class McpToolCallResult(CodexBaseModel):
     """MCP tool call result."""
 
     content: list[McpContentBlock]
-    structured_content: dict[str, Any] | list[Any] | str | int | float | bool | None = None
+    structured_content: Any = None
 
 
 class McpToolCallError(CodexBaseModel):
@@ -145,7 +145,7 @@ class ThreadItemMcpToolCall(CodexBaseModel):
     server: str
     tool: str
     status: McpToolCallStatus
-    arguments: dict[str, Any] | list[Any] | str | int | float | bool | None = None
+    arguments: dict[str, Any] | None = None
     result: McpToolCallResult | None = None
     error: McpToolCallError | None = None
     duration_ms: int | None = None
@@ -157,7 +157,7 @@ class ThreadItemDynamicToolCall(CodexBaseModel):
     type: Literal["dynamicToolCall"] = "dynamicToolCall"
     id: str
     tool: str
-    arguments: Any = None
+    arguments: dict[str, Any] | None = None
     status: DynamicToolCallStatus
     content_items: list[DynamicToolCallOutputContentItem] | None = None
     success: bool | None = None
