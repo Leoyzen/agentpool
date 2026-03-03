@@ -57,6 +57,11 @@ from codex_adapter.models.token_usage import (
 from codex_adapter.models.misc import PlanStepStatus as MiscPlanStepStatus
 from codex_adapter.models.misc import TurnStatus as MiscTurnStatus
 from codex_adapter.models.misc import TurnStatusValue as MiscTurnStatusValue
+from codex_adapter.models.mcp_server import (
+    HttpMcpServer,
+    McpServerConfig,
+    StdioMcpServer,
+)
 from codex_adapter.models.base import (
     CodexBaseModel,
     JsonRpcError,
@@ -80,12 +85,10 @@ from codex_adapter.models.codex_types import (
     ExperimentalFeatureStage,
     ExternalAgentConfigMigrationItemType,
     FileChangeApprovalDecision,
-    HttpMcpServer,
     InputModality,
     ItemStatus,
     ItemType,
     McpAuthStatusValue,
-    McpServerConfig,
     McpToolCallStatus,
     MergeStrategy,
     MessagePhase,
@@ -110,7 +113,6 @@ from codex_adapter.models.codex_types import (
     SessionSource,
     SkillApprovalDecision,
     SkillScope,
-    StdioMcpServer,
     ThreadActiveFlag,
     WorkspaceWriteSandboxPolicy,
     ThreadSortKey,

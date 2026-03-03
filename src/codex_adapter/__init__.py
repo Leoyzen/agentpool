@@ -11,6 +11,11 @@ Example:
 """
 
 from codex_adapter.client import CodexClient
+from codex_adapter.models.mcp_server import (
+    HttpMcpServer,
+    McpServerConfig,
+    StdioMcpServer,
+)
 from codex_adapter.models.codex_types import (
     ApprovalPolicy,
     AskForApproval,
@@ -23,12 +28,10 @@ from codex_adapter.models.codex_types import (
     CommandExecutionStatus,
     DynamicToolCallStatus,
     FileChangeApprovalDecision,
-    HttpMcpServer,
     InputModality,
     ItemStatus,
     ItemType,
     McpAuthStatusValue,
-    McpServerConfig,
     McpToolCallStatus,
     MessagePhase,
     ModelProvider,
@@ -47,7 +50,6 @@ from codex_adapter.models.codex_types import (
     SessionSource,
     SkillApprovalDecision,
     SkillScope,
-    StdioMcpServer,
     ThreadActiveFlag,
     WorkspaceWriteSandboxPolicy,
     ThreadSortKey,
