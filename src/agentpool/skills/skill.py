@@ -94,8 +94,7 @@ class Skill(BaseModel):
         """
         skill_file = find_skill_md(skill_dir)
         if skill_file is None:
-            msg = f"SKILL.md not found in {skill_dir}"
-            raise FileNotFoundError(msg)
+            raise FileNotFoundError(f"SKILL.md not found in {skill_dir}")
 
         content = skill_file.read_text("utf-8")
         metadata, _body = parse_frontmatter(content)
@@ -105,19 +104,14 @@ class Skill(BaseModel):
 def find_skill_md(skill_dir: UPath) -> UPath | None:
     """Find the SKILL.md file in a skill directory.
 
-    Prefers SKILL.md (uppercase) but accepts skill.md (lowercase).
-
     Args:
         skill_dir: Path to the skill directory.
 
     Returns:
         Path to the SKILL.md file, or None if not found.
     """
-    for name in ("SKILL.md", "skill.md"):
-        path = skill_dir / name
-        if path.exists():
-            return path
-    return None
+    path = skill_dir / "SKILL.md"
+    return path if path.exists() else None
 
 
 def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:

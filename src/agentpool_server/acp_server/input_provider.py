@@ -291,27 +291,20 @@ class ACPInputProvider(InputProvider):
             logger.exception("Failed to handle elicitation")
             return types.ErrorData(code=types.INTERNAL_ERROR, message=f"Elicitation failed: {e}")
 
-    def _handle_boolean_elicitation_response(  # noqa: PLR0911
+    def _handle_boolean_elicitation_response(
         self, response: RequestPermissionResponse, schema: dict[str, Any]
     ) -> types.ElicitResult | types.ErrorData:
         """Handle ACP response for boolean elicitation."""
         match response.outcome:
-            case AllowedOutcome(option_id="true"):
+            case AllowedOutcome(option_id="false" | "true" as option_id):
                 # Check if we need to wrap in object structure
                 if schema.get("type") == "object":
                     properties = schema.get("properties", {})
                     if len(properties) == 1:
                         prop_name = next(iter(properties.keys()))
-                        return types.ElicitResult(action="accept", content={prop_name: True})
+                        val = option_id == "true"
+                        return types.ElicitResult(action="accept", content={prop_name: val})
                 return types.ElicitResult(action="accept", content={"value": True})
-            case AllowedOutcome(option_id="false"):
-                # Check if we need to wrap in object structure
-                if schema.get("type") == "object":
-                    properties = schema.get("properties", {})
-                    if len(properties) == 1:
-                        prop_name = next(iter(properties.keys()))
-                        return types.ElicitResult(action="accept", content={prop_name: False})
-                return types.ElicitResult(action="accept", content={"value": False})
             case AllowedOutcome(option_id="cancel"):
                 return types.ElicitResult(action="cancel")
             case DeniedOutcome():
