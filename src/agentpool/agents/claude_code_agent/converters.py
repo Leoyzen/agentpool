@@ -22,10 +22,10 @@ from clawd_code_sdk.models import (
     EditOutput,
     ReadOutput,
     TodoWriteOutput,
+    UserImagePrompt,
     UserTextPrompt,
     WriteOutput,
 )
-from clawd_code_sdk.models.messages import UserImagePrompt
 from pydantic_ai import BinaryContent, FileUrl, ImageUrl, RequestUsage, RunUsage
 
 from agentpool.utils.diffs import compute_unified_diff
@@ -44,8 +44,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from clawd_code_sdk import PermissionResult, ThinkingConfig
-    from clawd_code_sdk.models import HookEvent, StopReason, ToolInput, Usage, UserPrompt
-    from clawd_code_sdk.models.output_types import StructuredPatchHunk
+    from clawd_code_sdk.models import (
+        HookEvent,
+        StopReason,
+        StructuredPatchHunk,
+        ToolInput,
+        Usage,
+        UserPrompt,
+    )
     from exxec import ExecutionEnvironment
     from pydantic_ai import FinishReason, UserContent
 

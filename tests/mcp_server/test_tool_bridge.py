@@ -6,7 +6,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
-from clawd_code_sdk.models.messages import ResultMessage
+from clawd_code_sdk.models import ResultMessage
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 import pytest

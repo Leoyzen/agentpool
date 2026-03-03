@@ -12,7 +12,6 @@ from agentpool_server.opencode_server.input_provider import OpenCodeInputProvide
 from agentpool_server.opencode_server.state import ServerState
 
 
-@pytest.mark.asyncio
 async def test_question_elicitation_single_select():
     """Test single-select question via elicitation."""
     # This is a basic unit test without full server
@@ -58,7 +57,6 @@ async def test_question_elicitation_single_select():
     assert question_id not in state.pending_questions
 
 
-@pytest.mark.asyncio
 async def test_question_elicitation_multi_select():
     """Test multi-select question via elicitation."""
     mock_agent = Mock()
@@ -85,7 +83,6 @@ async def test_question_elicitation_multi_select():
     assert result.content == {"value": ["Auth", "Admin"]}
 
 
-@pytest.mark.asyncio
 async def test_question_cancellation():
     """Test question cancellation."""
     mock_agent = Mock()
@@ -106,7 +103,6 @@ async def test_question_cancellation():
     assert result.action == "cancel"
 
 
-@pytest.mark.asyncio
 async def test_question_with_descriptions():
     """Test question with option descriptions."""
     mock_agent = Mock()

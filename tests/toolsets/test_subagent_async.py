@@ -13,7 +13,6 @@ from agentpool import AgentPool, AgentsManifest
 class TestAsyncSubagentTask:
     """Tests for task tool async_mode that runs agents in background."""
 
-    @pytest.mark.asyncio
     async def test_task_async_mode_returns_task_id_immediately(self) -> None:
         """Test that task with async_mode=True returns a task ID without blocking."""
         manifest = AgentsManifest.from_yaml("""
@@ -49,7 +48,6 @@ agents:
             content = str(result.content)
             assert "Task started" in content or "output" in content.lower()
 
-    @pytest.mark.asyncio
     async def test_task_async_mode_writes_to_internal_fs(self) -> None:
         """Test that async task output is written to the calling agent's internal_fs."""
         manifest = AgentsManifest.from_yaml("""
@@ -97,7 +95,6 @@ agents:
             output_content = fs.cat(output_path).decode("utf-8")
             assert "This is the worker output" in output_content
 
-    @pytest.mark.asyncio
     async def test_task_sync_mode_still_works(self) -> None:
         """Test that task without async_mode still works synchronously."""
         manifest = AgentsManifest.from_yaml("""
@@ -129,7 +126,6 @@ agents:
             assert result.content is not None
             # The orchestrator's response should reflect the worker completed
 
-    @pytest.mark.asyncio
     async def test_task_async_mode_with_nonexistent_agent_raises(self) -> None:
         """Test that task async_mode raises when agent doesn't exist."""
         manifest = AgentsManifest.from_yaml("""

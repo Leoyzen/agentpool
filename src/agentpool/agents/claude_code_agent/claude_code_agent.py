@@ -131,9 +131,14 @@ if TYPE_CHECKING:
         ToolPermissionContext,
         ToolUseBlock,
     )
-    from clawd_code_sdk.models import ReasoningEffort, StopReason, ToolInput
-    from clawd_code_sdk.models.input_types import AskUserQuestionInput
-    from clawd_code_sdk.models.permissions import ElicitationRequest, ElicitationResult
+    from clawd_code_sdk.models import (
+        AskUserQuestionInput,
+        ElicitationRequest,
+        ElicitationResult,
+        ReasoningEffort,
+        StopReason,
+        ToolInput,
+    )
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
@@ -651,7 +656,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         Returns:
             ElicitationResult with user's response
         """
-        from clawd_code_sdk.models.permissions import ElicitationResult
+        from clawd_code_sdk.models import ElicitationResult
         from mcp.types import ElicitRequestFormParams, ElicitRequestURLParams, ElicitResult
 
         if self._tool_bridge._current_context is None:
@@ -851,10 +856,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             ToolUseBlock,
             UserMessage,
         )
-        from clawd_code_sdk.models import StreamEvent
-        from clawd_code_sdk.models.messages import (
+        from clawd_code_sdk.models import (
             CompactBoundarySystemMessage,
             StatusSystemMessage,
+            StreamEvent,
         )
 
         await self.ensure_initialized()

@@ -9,7 +9,7 @@ from agentpool import log
 
 if TYPE_CHECKING:
     from clawd_code_sdk import PermissionResult, ToolPermissionContext
-    from clawd_code_sdk.models.input_types import AskUserQuestionInput
+    from clawd_code_sdk.models import AskUserQuestionInput
 
     from agentpool.agents.context import AgentContext
 

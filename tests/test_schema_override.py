@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.tools import ToolDefinition
-import pytest
 
 from agentpool.agents.native_agent.agent import Agent
 from agentpool.tools.base import Tool
@@ -19,7 +18,6 @@ def my_tool(arg1: str):
     return f"Hello {arg1}"
 
 
-@pytest.mark.asyncio
 async def test_schema_override_propagation():
     """Test that schema overrides are propagated to the PydanticAI agent via prepare."""
     # Define a schema override

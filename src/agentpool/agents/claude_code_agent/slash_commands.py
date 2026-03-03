@@ -6,7 +6,7 @@ from agentpool.agents.context import AgentContext  # noqa: TC001
 
 
 if TYPE_CHECKING:
-    from clawd_code_sdk.models.server_info import ClaudeCodeCommandInfo
+    from clawd_code_sdk.models import ClaudeCodeCommandInfo
     from slashed import Command, CommandContext
 
 

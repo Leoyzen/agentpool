@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from clawd_code_sdk.models.input_types import BashInput, TodoItem
-from clawd_code_sdk.models.output_types import BashOutput, TodoWriteOutput
+from clawd_code_sdk.models import BashInput, BashOutput, TodoItem, TodoWriteOutput
 import pytest
 
 from agentpool.agents.claude_code_agent.converters import convert_to_opencode_metadata
