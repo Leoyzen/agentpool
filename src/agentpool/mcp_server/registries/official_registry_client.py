@@ -38,6 +38,9 @@ class RegistryRepository(Schema):
     source: str | None = None
     """Repository platform (e.g., 'github')."""
 
+    id: str | None = None
+    """Repository identifier."""
+
     subfolder: str | None = None
     """Repository subfolder path."""
 
