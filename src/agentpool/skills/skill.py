@@ -38,17 +38,13 @@ class Skill(BaseModel):
     def _validate_name(cls, v: str) -> str:
         name = unicodedata.normalize("NFKC", v.strip())
         if not name:
-            msg = "Skill name must be non-empty"
-            raise ValueError(msg)
+            raise ValueError("Skill name must be non-empty")
         if name != name.lower():
-            msg = f"Skill name {name!r} must be lowercase"
-            raise ValueError(msg)
+            raise ValueError(f"Skill name {name!r} must be lowercase")
         if name.startswith("-") or name.endswith("-"):
-            msg = "Skill name cannot start or end with a hyphen"
-            raise ValueError(msg)
+            raise ValueError("Skill name cannot start or end with a hyphen")
         if "--" in name:
-            msg = "Skill name cannot contain consecutive hyphens"
-            raise ValueError(msg)
+            raise ValueError("Skill name cannot contain consecutive hyphens")
         if not all(c.isalnum() or c == "-" for c in name):
             msg = (
                 f"Skill name {name!r} contains invalid characters. "
@@ -124,7 +120,7 @@ def find_skill_md(skill_dir: UPath) -> UPath | None:
     return None
 
 
-def parse_frontmatter(content: str) -> tuple[dict[str, object], str]:
+def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """Parse YAML frontmatter from SKILL.md content.
 
     Args:
@@ -155,7 +151,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, object], str]:
 
     if not isinstance(metadata, dict):
         msg = "SKILL.md frontmatter must be a YAML mapping"
-        raise ValueError(msg)
+        raise TypeError(msg)
 
     return metadata, parts[2].strip()
 
