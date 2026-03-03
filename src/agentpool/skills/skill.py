@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from upathtools import UPath
 
 
+# Last synced with https://github.com/agentskills/agentskills
+SPEC_SYNCED_COMMIT = "f019a02dbbb1302217c4b4a14557d6384d9ace9a"
+
 MAX_SKILL_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
 MAX_COMPATIBILITY_LENGTH = 500
