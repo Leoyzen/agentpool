@@ -338,14 +338,11 @@ def _handle_enum_elicitation_response(
     """Handle ACP response for enum elicitation."""
     from mcp import types
 
-    if isinstance(response.outcome, AllowedOutcome):
-        option_id = response.outcome.option_id
-
-        if option_id == "cancel":
+    match response.outcome:
+        case AllowedOutcome(option_id="cancel"):
             return types.ElicitResult(action="cancel")
-
-        # Extract enum value from option_id format: "enum_{index}_{value}"
-        if option_id.startswith("enum_"):
+        case AllowedOutcome(option_id=option_id) if option_id.startswith("enum_"):
+            # Extract enum value from option_id format: "enum_{index}_{value}"
             try:
                 parts = option_id.split("_", 2)  # Split into ["enum", index, value]
                 if len(parts) >= 3:  # noqa: PLR2004
@@ -358,9 +355,12 @@ def _handle_enum_elicitation_response(
                         )
             except (ValueError, IndexError):
                 pass
-
-        # Fallback if parsing fails
-        logger.warning("Failed to parse enum option_id", option_id=option_id)
-        return types.ElicitResult(action="cancel")
-
-    return types.ElicitResult(action="cancel")
+            logger.warning("Failed to parse enum option_id", option_id=option_id)
+            return types.ElicitResult(action="cancel")
+        case AllowedOutcome(option_id=option_id):
+            logger.warning("Failed to parse enum option_id", option_id=option_id)
+            return types.ElicitResult(action="cancel")
+        case DeniedOutcome():
+            return types.ElicitResult(action="cancel")
+        case _ as unreachable:
+            assert_never(unreachable)
