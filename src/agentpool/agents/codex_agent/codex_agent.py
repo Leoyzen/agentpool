@@ -31,7 +31,6 @@ from agentpool.agents.exceptions import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
-from codex_adapter.models.token_usage import TokenUsageBreakdown
 
 
 if TYPE_CHECKING:
@@ -58,6 +57,7 @@ if TYPE_CHECKING:
         CodexEvent,
         McpServerConfig,
         MiscTurnStatusValue,
+        TokenUsageBreakdown,
         ToolRequestUserInputParams,
         ToolRequestUserInputResponse,
     )
