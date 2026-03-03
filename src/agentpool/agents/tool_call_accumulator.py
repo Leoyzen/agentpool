@@ -7,7 +7,7 @@ input_json_delta or OpenAI's function call streaming).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 import anyenv
 
@@ -57,6 +57,13 @@ def repair_partial_json(buffer: str) -> str:
     return result
 
 
+class ToolCall(TypedDict):
+    """Tool call in construction."""
+
+    name: str
+    args_buffer: str
+
+
 class ToolCallAccumulator:
     """Accumulates streamed tool call arguments.
 
@@ -85,7 +92,7 @@ class ToolCallAccumulator:
     """
 
     def __init__(self) -> None:
-        self._calls: dict[str, dict[str, Any]] = {}
+        self._calls: dict[str, ToolCall] = {}
 
     def start(self, tool_call_id: str, tool_name: str) -> None:
         """Start tracking a new tool call.
@@ -94,7 +101,7 @@ class ToolCallAccumulator:
             tool_call_id: Unique identifier for the tool call
             tool_name: Name of the tool being called
         """
-        self._calls[tool_call_id] = {"name": tool_name, "args_buffer": ""}
+        self._calls[tool_call_id] = ToolCall(name=tool_name, args_buffer="")
 
     def add_args(self, tool_call_id: str, delta: str) -> None:
         """Add argument delta to a tool call.
@@ -163,7 +170,7 @@ class ToolCallAccumulator:
 
         # Try direct parse first
         try:
-            result: dict[str, Any] = anyenv.load_json(buffer)
+            result = anyenv.load_json(buffer, return_type=dict)
         except anyenv.JsonLoadError:
             pass
         else:
@@ -172,36 +179,21 @@ class ToolCallAccumulator:
         # Try to repair truncated JSON
         try:
             repaired = repair_partial_json(buffer)
-            result = anyenv.load_json(repaired)
+            result = anyenv.load_json(repaired, return_type=dict)
         except anyenv.JsonLoadError:
             return {}
         else:
             return result
 
     def is_pending(self, tool_call_id: str) -> bool:
-        """Check if a tool call is being tracked.
-
-        Args:
-            tool_call_id: Tool call identifier
-
-        Returns:
-            True if the tool call is being accumulated
-        """
+        """Check if a tool call is being tracked."""
         return tool_call_id in self._calls
 
     def get_tool_name(self, tool_call_id: str) -> str | None:
-        """Get the tool name for a pending call.
-
-        Args:
-            tool_call_id: Tool call identifier
-
-        Returns:
-            Tool name or None if not found
-        """
+        """Get the tool name for a pending call."""
         if tool_call_id not in self._calls:
             return None
-        name: str = self._calls[tool_call_id]["name"]
-        return name
+        return self._calls[tool_call_id]["name"]
 
     def clear(self) -> None:
         """Clear all pending tool calls."""
