@@ -21,6 +21,7 @@ from codex_adapter.models import (
     AppsListResponse,
     CancelLoginAccountParams,
     CancelLoginAccountResponse,
+    CollaborationModeListResponse,
     CommandExecParams,
     CommandExecResponse,
     CommandExecutionRequestApprovalParams,
@@ -62,6 +63,10 @@ from codex_adapter.models import (
     SkillsConfigWriteParams,
     SkillsListParams,
     SkillsListResponse,
+    SkillsRemoteExportParams,
+    SkillsRemoteExportResponse,
+    SkillsRemoteListParams,
+    SkillsRemoteListResponse,
     StdioMcpServer,
     TextInputItem,
     ThreadArchiveParams,
@@ -80,6 +85,8 @@ from codex_adapter.models import (
     ThreadStartParams,
     ThreadUnarchiveParams,
     ThreadUnarchiveResponse,
+    ThreadUnsubscribeParams,
+    ThreadUnsubscribeResponse,
     ToolRequestUserInputParams,
     ToolRequestUserInputResponse,
     TurnCompletedEvent,
@@ -153,6 +160,8 @@ if TYPE_CHECKING:
         AppInfo,
         ApprovalPolicy,
         CodexEvent,
+        CollaborationMode,
+        CollaborationModeMask,
         ConfigEdit,
         ExperimentalFeature,
         ExternalAgentConfigMigrationItem,
@@ -162,6 +171,7 @@ if TYPE_CHECKING:
         Personality,
         ReasoningEffort,
         ReasoningSummary,
+        RemoteSkillSummary,
         ReviewDelivery,
         SandboxMode,
         SkillData,
@@ -169,7 +179,7 @@ if TYPE_CHECKING:
         ThreadSourceKind,
         TurnInputItem,
     )
-    from codex_adapter.models.request_params import LoginType
+    from codex_adapter.models.request_params import HazelnutScope, LoginType, ProductSurface
 
 ResultType = TypeVar("ResultType", bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -560,6 +570,19 @@ class CodexClient:
         response = ThreadLoadedListResponse.model_validate(result)
         return response.data
 
+    async def thread_unsubscribe(self, thread_id: str) -> ThreadUnsubscribeResponse:
+        """Stop listening to a thread's events.
+
+        Args:
+            thread_id: The thread ID to unsubscribe from
+
+        Returns:
+            ThreadUnsubscribeResponse with status (notLoaded/notSubscribed/unsubscribed)
+        """
+        params = ThreadUnsubscribeParams(thread_id=thread_id)
+        result = await self._send_request("thread/unsubscribe", params)
+        return ThreadUnsubscribeResponse.model_validate(result)
+
     async def thread_archive(self, thread_id: str) -> None:
         """Archive a thread (move to archived directory)."""
         params = ThreadArchiveParams(thread_id=thread_id)
@@ -889,6 +912,45 @@ class CodexClient:
         params = SkillsConfigWriteParams(path=path, enabled=enabled)
         await self._send_request("skills/config/write", params)
 
+    async def skills_remote_list(
+        self,
+        *,
+        hazelnut_scope: HazelnutScope = "example",
+        product_surface: ProductSurface = "codex",
+        enabled: bool = False,
+    ) -> list[RemoteSkillSummary]:
+        """List remote skills.
+
+        Args:
+            hazelnut_scope: Scope filter (example/workspace-shared/all-shared/personal)
+            product_surface: Product surface filter (chatgpt/codex/api/atlas)
+            enabled: Whether to filter by enabled status
+
+        Returns:
+            List of remote skill summaries
+        """
+        params = SkillsRemoteListParams(
+            hazelnut_scope=hazelnut_scope,
+            product_surface=product_surface,
+            enabled=enabled,
+        )
+        result = await self._send_request("skills/remote/list", params)
+        response = SkillsRemoteListResponse.model_validate(result)
+        return response.data
+
+    async def skills_remote_export(self, hazelnut_id: str) -> SkillsRemoteExportResponse:
+        """Export a skill to remote storage.
+
+        Args:
+            hazelnut_id: ID of the remote skill to export
+
+        Returns:
+            SkillsRemoteExportResponse with id and local path
+        """
+        params = SkillsRemoteExportParams(hazelnut_id=hazelnut_id)
+        result = await self._send_request("skills/remote/export", params)
+        return SkillsRemoteExportResponse.model_validate(result)
+
     # ========================================================================
     # Model methods
     # ========================================================================
@@ -909,6 +971,16 @@ class CodexClient:
         params = ModelListParams(include_hidden=include_hidden)
         result = await self._send_request("model/list", params)
         response = ModelListResponse.model_validate(result)
+        return response.data
+
+    async def collaboration_mode_list(self) -> list[CollaborationModeMask]:
+        """List available collaboration mode presets (experimental).
+
+        Returns:
+            List of collaboration mode presets with name, mode, model, and effort
+        """
+        result = await self._send_request("collaborationMode/list")
+        response = CollaborationModeListResponse.model_validate(result)
         return response.data
 
     # ========================================================================

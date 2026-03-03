@@ -7,6 +7,7 @@ from codex_adapter.models.codex_types import (  # noqa: TC001
     AskForApproval,
     CommandExecutionApprovalDecision,
     FileChangeApprovalDecision,
+    ModeKind,
     ReasoningEffort,
     SandboxPolicy,
     WriteStatus,
@@ -127,6 +128,27 @@ class SkillsConfigWriteResponse(CodexBaseModel):
     """Response for skills/config/write request."""
 
 
+class RemoteSkillSummary(CodexBaseModel):
+    """Summary of a remote skill."""
+
+    id: str
+    name: str
+    description: str
+
+
+class SkillsRemoteListResponse(CodexBaseModel):
+    """Response for skills/remote/list request."""
+
+    data: list[RemoteSkillSummary]
+
+
+class SkillsRemoteExportResponse(CodexBaseModel):
+    """Response for skills/remote/export request."""
+
+    id: str
+    path: str
+
+
 class ModelListResponse(CodexBaseModel):
     """Response for model/list request."""
 
@@ -236,6 +258,30 @@ class FeedbackUploadResponse(CodexBaseModel):
     """Response for feedback/upload request."""
 
     thread_id: str
+
+
+ThreadUnsubscribeStatus = Literal["notLoaded", "notSubscribed", "unsubscribed"]
+
+
+class ThreadUnsubscribeResponse(CodexBaseModel):
+    """Response for thread/unsubscribe request."""
+
+    status: ThreadUnsubscribeStatus
+
+
+class CollaborationModeMask(CodexBaseModel):
+    """Collaboration mode preset metadata."""
+
+    name: str
+    mode: ModeKind | None = None
+    model: str | None = None
+    reasoning_effort: ReasoningEffort | None = None
+
+
+class CollaborationModeListResponse(CodexBaseModel):
+    """Response for collaborationMode/list request."""
+
+    data: list[CollaborationModeMask]
 
 
 class ExternalAgentConfigDetectResponse(CodexBaseModel):

@@ -147,6 +147,12 @@ class ThreadRollbackParams(CodexBaseModel):
     turns: int
 
 
+class ThreadUnsubscribeParams(CodexBaseModel):
+    """Parameters for thread/unsubscribe request."""
+
+    thread_id: str
+
+
 class ThreadLoadedListParams(CodexBaseModel):
     """Parameters for thread/loaded/list request."""
 
@@ -203,6 +209,28 @@ class SkillsConfigWriteParams(CodexBaseModel):
 
     path: str
     enabled: bool
+
+
+HazelnutScope = Literal["example", "workspace-shared", "all-shared", "personal"]
+ProductSurface = Literal["chatgpt", "codex", "api", "atlas"]
+
+
+class SkillsRemoteListParams(CodexBaseModel):
+    """Parameters for skills/remote/list request."""
+
+    hazelnut_scope: HazelnutScope = "example"
+    product_surface: ProductSurface = "codex"
+    enabled: bool = False
+
+
+class SkillsRemoteExportParams(CodexBaseModel):
+    """Parameters for skills/remote/export request."""
+
+    hazelnut_id: str
+
+
+class CollaborationModeListParams(CodexBaseModel):
+    """Parameters for collaborationMode/list request."""
 
 
 class CommandExecParams(CodexBaseModel):
