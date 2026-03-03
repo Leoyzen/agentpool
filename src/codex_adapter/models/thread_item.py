@@ -27,12 +27,21 @@ from codex_adapter.models.web_search import WebSearchAction  # noqa: TC001
 # ---------------------------------------------------------------------------
 
 
-class DynamicToolCallOutputContentItem(CodexBaseModel):
-    """Output content item for dynamic tool call response."""
+class DynamicToolCallOutputTextItem(CodexBaseModel):
+    """Text output content item for dynamic tool call response."""
 
-    type: Literal["inputText", "inputImage"]
-    text: str | None = None
-    image_url: str | None = None
+    type: Literal["inputText"] = "inputText"
+    text: str
+
+
+class DynamicToolCallOutputImageItem(CodexBaseModel):
+    """Image output content item for dynamic tool call response."""
+
+    type: Literal["inputImage"] = "inputImage"
+    image_url: str
+
+
+DynamicToolCallOutputContentItem = DynamicToolCallOutputTextItem | DynamicToolCallOutputImageItem
 
 
 class PatchChangeKind(CodexBaseModel):
