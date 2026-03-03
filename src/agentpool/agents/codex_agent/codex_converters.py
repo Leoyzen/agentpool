@@ -19,6 +19,8 @@ from pydantic_ai import (
     ImageUrl,
     ModelRequest,
     ModelResponse,
+    RequestUsage,
+    RunUsage,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
         StdioMCPServerConfig,
         StreamableHTTPMCPServerConfig,
     )
+    from codex_adapter import TokenUsageBreakdown
     from codex_adapter.models import (
         CodexEvent,
         HttpMcpServer,
@@ -80,6 +83,22 @@ def to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
             return "error"
         case "inProgress":
             return "stop"
+
+
+def to_run_usage(usage_dict: TokenUsageBreakdown) -> RunUsage:
+    return RunUsage(
+        input_tokens=usage_dict.input_tokens,
+        output_tokens=usage_dict.output_tokens,
+        cache_read_tokens=usage_dict.cached_input_tokens,
+    )
+
+
+def to_request_usage(usage_dict: TokenUsageBreakdown) -> RequestUsage:
+    return RequestUsage(
+        input_tokens=usage_dict.input_tokens,
+        output_tokens=usage_dict.output_tokens,
+        cache_read_tokens=usage_dict.cached_input_tokens,
+    )
 
 
 @overload

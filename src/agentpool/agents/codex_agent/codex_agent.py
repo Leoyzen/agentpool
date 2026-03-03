@@ -10,7 +10,7 @@ from uuid import uuid4
 import anyenv
 from pydantic import TypeAdapter
 from pydantic_ai import TextPartDelta
-from pydantic_ai.usage import RequestUsage, RunUsage
+from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
@@ -18,6 +18,8 @@ from agentpool.agents.codex_agent.codex_converters import (
     mcp_config_to_codex,
     to_finish_reason,
     to_model_info,
+    to_request_usage,
+    to_run_usage,
     to_session_data,
     turns_to_chat_messages,
     user_content_to_codex,
@@ -437,7 +439,6 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         self._token_usage_data = None
         self._turn_status: MiscTurnStatusValue | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
-        output_schema = None if self._output_type is str else self._output_type
 
         async def capture_metadata(
             raw_events: AsyncIterator[CodexEvent],
@@ -465,7 +466,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     effort=self._current_effort,
                     approval_policy=self._approval_policy,
                     sandbox_policy=self._current_sandbox,
-                    output_schema=output_schema,
+                    output_schema=None if self._output_type is str else self._output_type,
                     personality=self._current_personality,
                 )
                 # Wrap to capture metadata (turn_id, token usage), then convert
@@ -496,21 +497,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         request_usage = RequestUsage()
 
         if usage := self._token_usage_data:
-            run_usage = RunUsage(
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_read_tokens=usage.cached_input_tokens,
-                cache_write_tokens=0,  # Codex doesn't provide cache write tokens
-            )
+            run_usage = to_run_usage(usage)
             # TODO: Calculate actual cost - for now set to 0
             cost_info = TokenCost(token_usage=run_usage, total_cost=Decimal(0))
-            request_usage = RequestUsage(
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_read_tokens=usage.cached_input_tokens,
-                cache_write_tokens=0,
-            )
-
+            request_usage = to_request_usage(usage)
         # Parse structured output if output_type is not str
         final_content: OutputDataT
         if self._output_type is not str and self._output_type is not None:

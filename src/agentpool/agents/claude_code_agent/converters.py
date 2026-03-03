@@ -44,13 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from clawd_code_sdk import PermissionResult, ThinkingConfig
-    from clawd_code_sdk.models import (
-        HookEvent,
-        StopReason,
-        ToolInput,
-        Usage,
-        UserPrompt,
-    )
+    from clawd_code_sdk.models import HookEvent, StopReason, ToolInput, Usage, UserPrompt
     from clawd_code_sdk.models.output_types import StructuredPatchHunk
     from exxec import ExecutionEnvironment
     from pydantic_ai import FinishReason, UserContent
