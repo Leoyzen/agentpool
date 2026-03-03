@@ -25,11 +25,8 @@ from pydantic_ai import (
     ImageUrl,
     ModelRequest,
     ModelResponse,
-    PartDeltaEvent,
     TextPart,
-    TextPartDelta,
     ThinkingPart,
-    ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -57,6 +54,7 @@ from acp.schema import (
 from agentpool.agents.events import (
     DiffContentItem,
     LocationContentItem,
+    PartDeltaEvent,
     PlanUpdateEvent,
     TerminalContentItem,
     ToolCallProgressEvent,
@@ -283,11 +281,11 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
     match update:
         # Text message chunks -> PartDeltaEvent with TextPartDelta
         case AgentMessageChunk(content=TextContentBlock(text=text)):
-            return PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=text))
+            return PartDeltaEvent.text(index=0, content=text)
 
         # Thought chunks -> PartDeltaEvent with ThinkingPartDelta
         case AgentThoughtChunk(content=TextContentBlock(text=text)):
-            return PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=text))
+            return PartDeltaEvent.thinking(index=0, content=text)
 
         # User message echo - usually ignored
         case UserMessageChunk():

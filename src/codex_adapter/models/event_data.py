@@ -156,7 +156,11 @@ class ThreadStartedData(CodexBaseModel):
     """Payload for thread/started notification (V2 protocol)."""
 
     thread: Thread
-    thread_id: str | None = None
+
+    @property
+    def thread_id(self) -> str:
+        """Thread ID derived from the thread object."""
+        return self.thread.id
 
 
 class ThreadStatusChangedData(CodexBaseModel):

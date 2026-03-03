@@ -64,23 +64,23 @@ async def handle_clarifying_questions(
     Returns:
         PermissionResult with updated input containing user's answers
     """
-    questions = input_data.get("questions", [])
+    questions = input_data["questions"]
     if not questions:
         return PermissionResultDeny(message="No questions provided")
     # Collect answers from the user
     answers: dict[str, str] = {}
     for question_obj in questions:
-        question_text = question_obj.get("question", "")
-        header = question_obj.get("header", "")
-        options = question_obj.get("options", [])
-        multi_select = question_obj.get("multiSelect", False)
+        question_text = question_obj["question"]
+        header = question_obj["header"]
+        options = question_obj["options"]
+        multi_select = question_obj["multiSelect"]
         if not question_text or not options:
             continue
 
         # Format the question for display
         formatted_question = f"{header}: {question_text}" if header else question_text
-        option_labels = [opt.get("label", "") for opt in options]
-        option_descriptions = {opt.get("label", ""): opt.get("description", "") for opt in options}
+        option_labels = [opt["label"] for opt in options]
+        option_descriptions = {opt["label"]: opt["description"] for opt in options}
         # Get user's answer via input provider
         # Build a display string showing the options
         options_display = "\n".join(

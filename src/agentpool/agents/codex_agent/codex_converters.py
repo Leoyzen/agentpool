@@ -20,9 +20,7 @@ from pydantic_ai import (
     ModelRequest,
     ModelResponse,
     TextPart,
-    TextPartDelta,
     ThinkingPart,
-    ThinkingPartDelta,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -396,11 +394,11 @@ async def convert_codex_stream(  # noqa: PLR0915
 
             # === Stateless: Text deltas from agent messages ===
             case AgentMessageDeltaEvent(data=data):
-                yield PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=data.delta))
+                yield PartDeltaEvent.text(index=0, content=data.delta)
 
             # === Stateless: Reasoning/thinking deltas ===
             case ReasoningTextDeltaEvent(data=data):
-                yield PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=data.delta))
+                yield PartDeltaEvent.thinking(index=0, content=data.delta)
 
             # === Stateless: Tool/command started ===
             case ItemStartedEvent(data=data):
@@ -437,10 +435,8 @@ async def convert_codex_stream(  # noqa: PLR0915
                             if change.diff:
                                 diff_parts.append(change.diff)
                         if diff_parts:
-                            yield ToolCallProgressEvent(
-                                tool_call_id=part.tool_call_id,
-                                items=[TextContentItem(text="\n".join(diff_parts))],
-                            )
+                            items = [TextContentItem(text="\n".join(diff_parts))]
+                            yield ToolCallProgressEvent(tool_call_id=part.tool_call_id, items=items)
 
             # === Stateful: Tool/command completed - clean up accumulator ===
             case ItemCompletedEvent(data=data):
@@ -538,14 +534,14 @@ def _user_input_to_content(inp: UserInput) -> UserContent:
     match inp:
         case UserInputText():
             return inp.text
-        case UserInputImage():
-            return ImageUrl(url=inp.url)
-        case UserInputLocalImage():
-            return ImageUrl(url=f"file://{inp.path}")
-        case UserInputSkill():
-            return f"[Skill: {inp.name}]"
-        case UserInputMention():
-            return f"@{inp.name}"
+        case UserInputImage(url=url):
+            return ImageUrl(url=url)
+        case UserInputLocalImage(path=path):
+            return ImageUrl(url=f"file://{path}")
+        case UserInputSkill(name=name):
+            return f"[Skill: {name}]"
+        case UserInputMention(name=name):
+            return f"@{name}"
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -597,9 +593,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 output = out or ""
                 display = f"[Executed: {cmd}]" + (f"\n{output[:200]}" if output else "")
                 assistant_display_parts.append(display)
-                cmd_args: dict[str, str] = {"command": cmd}
-                if cwd:
-                    cmd_args["cwd"] = cwd
+                cmd_args = {"command": cmd, "cwd": cwd}
                 bash_call = BuiltinToolCallPart(tool_name="bash", args=cmd_args, tool_call_id=tc_id)
                 bash_ret = ToolReturnPart(tool_name="bash", content=output, tool_call_id=tc_id)
                 assistant_responses.append(ModelResponse(parts=[bash_call]))
@@ -614,9 +608,8 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 assistant_display_parts.append(display)
                 diffs = [c.diff for c in changes if c.diff]
                 text = "\n".join(diffs) or "OK"
-                edit_call = ToolCallPart(
-                    tool_name="edit", args={"files": paths}, tool_call_id=tc_id
-                )
+                args = {"files": paths}
+                edit_call = ToolCallPart(tool_name="edit", args=args, tool_call_id=tc_id)
                 edit_ret = ToolReturnPart(tool_name="edit", content=text, tool_call_id=tc_id)
                 assistant_responses.append(ModelResponse(parts=[edit_call]))
                 assistant_responses.append(ModelRequest(parts=[edit_ret]))

@@ -17,8 +17,6 @@ import anyenv
 from pydantic_ai import (
     BinaryContent,
     FileUrl,
-    TextPartDelta,
-    ThinkingPartDelta,
 )
 
 from agentpool.agents.events import (
@@ -96,15 +94,19 @@ def agui_to_native_event(event: BaseEvent) -> RichAgentStreamEvent[Any] | None: 
 
         # === Text Message Events ===
         case TextMessageContentEvent(delta=delta) | TextMessageChunkEvent(delta=str() as delta):
-            return PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=delta))
+            return PartDeltaEvent.text(index=0, content=delta)
 
         case TextMessageStartEvent() | TextMessageEndEvent():
             return None
 
         # === Thinking/Reasoning Events ===
 
-        case ThinkingTextMessageContentEvent(delta=delta):
-            return PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=delta))
+        case (
+            ThinkingTextMessageContentEvent(delta=delta)
+            | ReasoningMessageContentEvent(delta=delta)
+            | ReasoningMessageChunkEvent(delta=str() as delta)
+        ):
+            return PartDeltaEvent.thinking(index=0, content=delta)
 
         case (
             ThinkingStartEvent()
@@ -114,14 +116,6 @@ def agui_to_native_event(event: BaseEvent) -> RichAgentStreamEvent[Any] | None: 
         ):
             # These mark thinking blocks but don't carry content
             return None
-
-        # === Reasoning Events (new AG-UI protocol) ===
-
-        case ReasoningMessageContentEvent(delta=delta):
-            return PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=delta))
-
-        case ReasoningMessageChunkEvent(delta=str() as delta):
-            return PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=delta))
 
         case (
             ReasoningStartEvent()

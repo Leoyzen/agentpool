@@ -46,8 +46,7 @@ async def simple_chat() -> None:
                     print(get_text_delta(event), end="", flush=True)
 
                 case CommandExecutionOutputDeltaEvent():
-                    delta = get_text_delta(event)
-                    if delta:
+                    if delta := get_text_delta(event):
                         print(f"\n[Command output]\n{delta}", flush=True)
 
                 case TurnCompletedEvent():
@@ -64,10 +63,7 @@ async def multi_turn_chat() -> None:
     print("=== Multi-Turn Chat Example ===\n")
 
     async with CodexClient() as client:
-        response = await client.thread_start(
-            cwd=".",
-            model="gpt-5-codex",
-        )
+        response = await client.thread_start(cwd=".", model="gpt-5-codex")
         thread_id = response.thread.id
 
         messages = [
