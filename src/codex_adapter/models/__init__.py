@@ -74,6 +74,8 @@ from codex_adapter.models.base import (
 from codex_adapter.models.codex_types import (
     ApprovalPolicy,
     AskForApproval,
+    CollaborationMode,
+    CollaborationModeSettings,
     DangerFullAccessSandboxPolicy,
     ExternalSandboxPolicy,
     FullAccessReadOnlyAccess,
@@ -112,6 +114,7 @@ from codex_adapter.models.codex_types import (
     RestrictedReadOnlyAccess,
     SandboxMode,
     SandboxPolicy,
+    ModeKind,
     SessionSource,
     SkillApprovalDecision,
     SkillScope,

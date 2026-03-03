@@ -70,6 +70,7 @@ NetworkApprovalProtocol = Literal["http", "https", "socks5Tcp", "socks5Udp"]
 NetworkPolicyRuleAction = Literal["allow", "deny"]
 ExternalAgentConfigMigrationItemType = Literal["AGENTS_MD", "CONFIG", "SKILLS", "MCP_SERVER_CONFIG"]
 PlanType = Literal["free", "go", "plus", "pro", "team", "business", "enterprise", "edu", "unknown"]
+ModeKind = Literal["plan", "default"]
 
 
 # ============================================================================
@@ -212,3 +213,26 @@ SandboxPolicy = Annotated[
     Discriminator(_sandbox_policy_discriminator),
 ]
 """Discriminated union for sandbox execution restrictions."""
+
+
+# ============================================================================
+# CollaborationMode (experimental per-turn preset)
+# ============================================================================
+
+
+class CollaborationModeSettings(CodexBaseModel):
+    """Settings within a collaboration mode preset."""
+
+    model: str
+    reasoning_effort: ReasoningEffort | None = None
+    developer_instructions: str | None = None
+
+
+class CollaborationMode(CodexBaseModel):
+    """Collaboration mode preset for a turn (experimental).
+
+    Overrides model, reasoning effort, and developer instructions when set.
+    """
+
+    mode: ModeKind
+    settings: CollaborationModeSettings

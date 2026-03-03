@@ -5,6 +5,7 @@ from typing import Any, Literal, Self
 from codex_adapter.models.base import CodexBaseModel
 from codex_adapter.models.codex_types import (  # noqa: TC001
     ApprovalPolicy,
+    CollaborationMode,
     CommandExecutionApprovalDecision,
     MergeStrategy,
     Personality,
@@ -163,7 +164,7 @@ class TurnStartParams(CodexBaseModel):
     summary: ReasoningSummary | None = None
     output_schema: dict[str, Any] | None = None  # JSON Schema - arbitrary structure
     personality: Personality | None = None
-    collaboration_mode: dict[str, Any] | None = None  # CollaborationMode - flexible structure
+    collaboration_mode: CollaborationMode | None = None
 
 
 class TurnSteerParams(CodexBaseModel):

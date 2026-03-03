@@ -608,10 +608,12 @@ class CodexClient:
         model: str | None = None,
         effort: ReasoningEffort | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        cwd: str | None = None,
         sandbox_policy: SandboxMode | dict[str, Any] | None = None,
         output_schema: dict[str, Any] | type[Any] | None = None,
         personality: Personality | None = None,
         summary: ReasoningSummary | None = None,
+        collaboration_mode: CollaborationMode | None = None,
     ) -> AsyncIterator[CodexEvent]:
         """Start a turn and stream events.
 
@@ -621,10 +623,12 @@ class CodexClient:
             model: Optional model override for this turn
             effort: Optional reasoning effort override
             approval_policy: Optional approval policy
+            cwd: Optional working directory override for this and subsequent turns
             sandbox_policy: Optional sandbox mode or policy dict
             output_schema: Optional JSON Schema dict or Pydantic type to constrain output
             personality: Optional personality override
             summary: Optional reasoning summary mode
+            collaboration_mode: Optional collaboration mode preset (experimental)
 
         Yields:
             CodexEvent: Streaming events from the turn
@@ -662,10 +666,12 @@ class CodexClient:
             model=model,
             effort=effort,
             approval_policy=approval_policy,
+            cwd=cwd,
             sandbox_policy=sandbox_dict,
             output_schema=schema_dict,
             personality=personality,
             summary=summary,
+            collaboration_mode=collaboration_mode,
         )
 
         # Start turn (non-blocking request)
@@ -743,6 +749,11 @@ class CodexClient:
         model: str | None = None,
         effort: ReasoningEffort | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        cwd: str | None = None,
+        sandbox_policy: SandboxMode | dict[str, Any] | None = None,
+        personality: Personality | None = None,
+        summary: ReasoningSummary | None = None,
+        collaboration_mode: CollaborationMode | None = None,
     ) -> ResultType:
         """Start a turn with structured output and return the parsed result.
 
@@ -759,6 +770,11 @@ class CodexClient:
             model: Optional model override for this turn
             effort: Optional reasoning effort override
             approval_policy: Optional approval policy
+            cwd: Optional working directory override for this and subsequent turns
+            sandbox_policy: Optional sandbox mode or policy dict
+            personality: Optional personality override
+            summary: Optional reasoning summary mode
+            collaboration_mode: Optional collaboration mode preset (experimental)
 
         Returns:
             Parsed Pydantic model instance of type result_type
@@ -791,7 +807,12 @@ class CodexClient:
             model=model,
             effort=effort,
             approval_policy=approval_policy,
+            cwd=cwd,
+            sandbox_policy=sandbox_policy,
             output_schema=result_type,  # Auto-generate schema from type
+            personality=personality,
+            summary=summary,
+            collaboration_mode=collaboration_mode,
         ):
             match event:
                 case AgentMessageDeltaEvent(data=AgentMessageDeltaData(delta=delta)):
