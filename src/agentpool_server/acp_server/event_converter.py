@@ -40,9 +40,12 @@ from acp.schema import (
     AgentPlanUpdate,
     AgentThoughtChunk,
     ContentToolCallContent,
+    Cost,
     ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
+    Usage,
+    UsageUpdate,
 )
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
@@ -78,7 +81,12 @@ logger = get_logger(__name__)
 
 # Type alias for all session updates the converter can yield
 ACPSessionUpdate = (
-    AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
+    AgentMessageChunk
+    | AgentThoughtChunk
+    | ToolCallStart
+    | ToolCallProgress
+    | AgentPlanUpdate
+    | UsageUpdate
 )
 
 
@@ -132,12 +140,16 @@ class ACPEventConverter:
     _subagent_content: dict[str, list[str]] = field(default_factory=dict)
     """Accumulated content per subagent (for tool_box mode)."""
 
+    last_usage: Usage | None = field(default=None, init=False)
+    """Usage from the last completed stream, if available."""
+
     def reset(self) -> None:
         """Reset converter state for a new run."""
         self._tool_states.clear()
         self._current_tool_inputs.clear()
         self._subagent_headers.clear()
         self._subagent_content.clear()
+        self.last_usage = None
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
         """Cancel all pending tool calls.
@@ -413,8 +425,29 @@ class ACPEventConverter:
             case FinalResultEvent():
                 pass  # No notification needed
 
-            case StreamCompleteEvent():
-                pass  # No notification needed
+            case StreamCompleteEvent(message=message):
+                request_usage = message.usage
+                if request_usage.total_tokens > 0:
+                    thought = request_usage.details.get("reasoning_tokens") or None
+                    self.last_usage = Usage(
+                        total_tokens=request_usage.total_tokens,
+                        input_tokens=request_usage.input_tokens,
+                        output_tokens=request_usage.output_tokens,
+                        thought_tokens=thought,
+                        cached_read_tokens=request_usage.cache_read_tokens or None,
+                        cached_write_tokens=request_usage.cache_write_tokens or None,
+                    )
+                    cost_obj: Cost | None = None
+                    if message.cost_info and message.cost_info.total_cost:
+                        cost_obj = Cost(
+                            amount=float(message.cost_info.total_cost),
+                            currency="USD",
+                        )
+                    yield UsageUpdate(
+                        used=request_usage.total_tokens,
+                        size=request_usage.total_tokens,  # best approximation
+                        cost=cost_obj,
+                    )
 
             case PlanUpdateEvent(entries=entries):
                 acp_entries = [

@@ -14,6 +14,7 @@ from acp.schema.session_state import (  # noqa: TC001
     SessionModelState,
     SessionModeState,
 )
+from acp.schema.session_updates import Usage  # noqa: TC001
 
 
 class CustomResponse(Response):
@@ -165,6 +166,9 @@ class PromptResponse(Response):
 
     stop_reason: StopReason
     """Indicates why the agent stopped processing the turn."""
+
+    usage: Usage | None = None
+    """**UNSTABLE**: Token usage for this turn (optional)."""
 
     user_message_id: str | None = None
     """**UNSTABLE**: The acknowledged user message ID.

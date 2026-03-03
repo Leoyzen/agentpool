@@ -536,7 +536,11 @@ class AgentPoolACPAgent(ACPAgent):
 
             return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
         else:
-            response = PromptResponse(stop_reason=stop_reason, user_message_id=params.message_id)
+            response = PromptResponse(
+                stop_reason=stop_reason,
+                user_message_id=params.message_id,
+                usage=session.last_usage,
+            )
             logger.info("Returning PromptResponse", stop_reason=stop_reason)
             return response
 

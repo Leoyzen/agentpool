@@ -414,6 +414,53 @@ class ToolCallStart(AnnotatedObject):
     """Unique identifier for this tool call within the session."""
 
 
+class Cost(AnnotatedObject):
+    """**UNSTABLE**: Cost information for a session."""
+
+    amount: float
+    """Total cumulative cost for session."""
+
+    currency: str
+    """ISO 4217 currency code (e.g., ``USD``, ``EUR``)."""
+
+
+class Usage(AnnotatedObject):
+    """**UNSTABLE**: Token usage information for a prompt turn."""
+
+    total_tokens: int = Field(ge=0)
+    """Sum of all token types across session."""
+
+    input_tokens: int = Field(ge=0)
+    """Total input tokens across all turns."""
+
+    output_tokens: int = Field(ge=0)
+    """Total output tokens across all turns."""
+
+    thought_tokens: int | None = Field(default=None, ge=0)
+    """Total thought/reasoning tokens."""
+
+    cached_read_tokens: int | None = Field(default=None, ge=0)
+    """Total cache read tokens."""
+
+    cached_write_tokens: int | None = Field(default=None, ge=0)
+    """Total cache write tokens."""
+
+
+class UsageUpdate(AnnotatedObject):
+    """**UNSTABLE**: Context window and cost update for a session."""
+
+    session_update: Literal["usage_update"] = Field(default="usage_update", init=False)
+
+    used: int = Field(ge=0)
+    """Tokens currently in context."""
+
+    size: int = Field(ge=0)
+    """Total context window size in tokens."""
+
+    cost: Cost | None = None
+    """Cumulative session cost (optional)."""
+
+
 class SessionInfoUpdate(AnnotatedObject):
     """Incremental update to session metadata.
 
@@ -453,6 +500,7 @@ SessionUpdate = Annotated[
         | CurrentModelUpdate
         | ConfigOptionUpdate
         | SessionInfoUpdate
+        | UsageUpdate
     ),
     Field(discriminator="session_update"),
 ]

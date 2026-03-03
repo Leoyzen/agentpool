@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         Implementation,
         McpServer,
         StopReason,
+        Usage,
     )
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import PathReference
@@ -201,6 +202,7 @@ class ACPSession:
         self._task_lock = asyncio.Lock()
         self._cancelled = False
         self._current_converter: ACPEventConverter | None = None
+        self.last_usage: Usage | None = None
         self.fs = ACPFileSystem(self.client, session_id=self.session_id)
         self.command_store = CommandStore(commands=get_all_commands())
         self.command_store._initialize_sync()
@@ -465,6 +467,7 @@ class ACPSession:
                 return "end_turn"
             else:
                 # Title generation is now handled automatically by log_session
+                self.last_usage = converter.last_usage
                 self._current_converter = None  # Clear converter reference
                 return "end_turn"
 
