@@ -30,6 +30,8 @@ if TYPE_CHECKING:
         SetSessionModelResponse,
         SetSessionModeRequest,
         SetSessionModeResponse,
+        StopSessionRequest,
+        StopSessionResponse,
     )
 
 
@@ -51,6 +53,8 @@ class Agent(Protocol):
     async def fork_session(self, params: ForkSessionRequest) -> ForkSessionResponse: ...
 
     async def resume_session(self, params: ResumeSessionRequest) -> ResumeSessionResponse: ...
+
+    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse: ...
 
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None: ...
 

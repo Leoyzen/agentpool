@@ -132,6 +132,16 @@ class SessionResumeCapabilities(AnnotatedObject):
     """
 
 
+class SessionStopCapabilities(AnnotatedObject):
+    """Capabilities for the `session/stop` method.
+
+    **UNSTABLE**: This capability is not part of the spec yet,
+    and may be removed or changed at any point.
+
+    By supplying ``{}`` it means that the agent supports stopping of sessions.
+    """
+
+
 class SessionCapabilities(AnnotatedObject):
     """Session capabilities supported by the agent.
 
@@ -171,6 +181,14 @@ class SessionCapabilities(AnnotatedObject):
     Whether the agent supports `session/resume`.
     """
 
+    stop: SessionStopCapabilities | None = None
+    """**UNSTABLE**
+
+    This capability is not part of the spec yet, and may be removed or changed at any point.
+
+    Whether the agent supports `session/stop`.
+    """
+
 
 class AgentCapabilities(AnnotatedObject):
     """Capabilities supported by the agent.
@@ -204,6 +222,7 @@ class AgentCapabilities(AnnotatedObject):
         image_prompts: bool = False,
         list_sessions: bool = False,
         resume_session: bool = False,
+        stop_session: bool = False,
     ) -> Self:
         """Create an instance of AgentCapabilities.
 
@@ -216,10 +235,12 @@ class AgentCapabilities(AnnotatedObject):
             image_prompts: Whether the agent supports image prompts.
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
+            stop_session: Whether the agent supports `session/stop` (unstable).
         """
         session_caps = SessionCapabilities(
             list=SessionListCapabilities() if list_sessions else None,
             resume=SessionResumeCapabilities() if resume_session else None,
+            stop=SessionStopCapabilities() if stop_session else None,
         )
         return cls(
             load_session=load_session,

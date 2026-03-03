@@ -24,6 +24,7 @@ from acp.schema import (
     ReadTextFileResponse,
     ResumeSessionResponse,
     SessionInfo,
+    StopSessionResponse,
     WriteTextFileResponse,
 )
 
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
         ReadTextFileRequest,
         ResumeSessionRequest,
         SetSessionConfigOptionRequest,
+        StopSessionRequest,
         WriteTextFileRequest,
     )
 
@@ -163,3 +165,10 @@ class MockAgent(Agent):
         if params.session_id in self.debug_state.sessions:
             self.debug_state.active_session_id = params.session_id
         return ResumeSessionResponse()
+
+    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
+        """Mock stop session."""
+        self.debug_state.sessions.pop(params.session_id, None)
+        if self.debug_state.active_session_id == params.session_id:
+            self.debug_state.active_session_id = None
+        return StopSessionResponse()

@@ -33,6 +33,7 @@ from acp.schema import (
     ResumeSessionRequest,
     SetSessionModelRequest,
     SetSessionModeRequest,
+    StopSessionRequest,
 )
 from acp.transports import spawn_stdio_transport
 
@@ -139,6 +140,10 @@ class ACPBridge:
                 resume_session_request = ResumeSessionRequest.model_validate(params)
                 resume_session_resp = await self._connection.resume_session(resume_session_request)
                 return resume_session_resp.model_dump(by_alias=True, exclude_none=True)
+            case "session/stop":
+                stop_session_request = StopSessionRequest.model_validate(params)
+                stop_session_resp = await self._connection.stop_session(stop_session_request)
+                return stop_session_resp.model_dump(by_alias=True, exclude_none=True)
             case "session/prompt":
                 prompt_request = PromptRequest.model_validate(params)
                 prompt_resp = await self._connection.prompt(prompt_request)

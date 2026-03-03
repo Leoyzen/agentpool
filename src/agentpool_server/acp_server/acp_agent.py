@@ -24,6 +24,7 @@ from acp.schema import (
     SetSessionModelResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
+    StopSessionResponse,
 )
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
+        StopSessionRequest,
     )
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
@@ -239,6 +241,7 @@ class AgentPoolACPAgent(ACPAgent):
             load_session=True,
             list_sessions=True,
             resume_session=True,
+            stop_session=True,
             http_mcp_servers=True,
             sse_mcp_servers=True,
             audio_prompts=True,
@@ -536,6 +539,24 @@ class AgentPoolACPAgent(ACPAgent):
             response = PromptResponse(stop_reason=stop_reason, user_message_id=params.message_id)
             logger.info("Returning PromptResponse", stop_reason=stop_reason)
             return response
+
+    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
+        """Stop an active session and free its resources.
+
+        Cancels any ongoing work (like session/cancel) and then
+        closes the session and releases all associated resources.
+        """
+        logger.info("Stopping session", session_id=params.session_id)
+        try:
+            # Cancel ongoing work first
+            if session := self.session_manager.get_session(params.session_id):
+                await session.cancel()
+            # Close and release session resources
+            await self.session_manager.close_session(params.session_id)
+            logger.info("Session stopped", session_id=params.session_id)
+        except Exception:
+            logger.exception("Failed to stop session", session_id=params.session_id)
+        return StopSessionResponse()
 
     async def cancel(self, params: CancelNotification) -> None:
         """Cancel operations for a session."""
