@@ -166,6 +166,15 @@ class PromptResponse(Response):
     stop_reason: StopReason
     """Indicates why the agent stopped processing the turn."""
 
+    user_message_id: str | None = None
+    """**UNSTABLE**: The acknowledged user message ID.
+
+    If the client provided a ``message_id`` in the ``PromptRequest``, the agent echoes
+    it here to confirm it was recorded. If the client did not provide one, the agent
+    MAY assign one and return it here. Absence of this field indicates the agent did
+    not record a message ID.
+    """
+
 
 class AuthenticateResponse(Response):
     """Response to authenticate method."""

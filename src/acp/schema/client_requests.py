@@ -130,6 +130,14 @@ class PromptRequest(Request):
     See protocol docs: [User Message](https://agentclientprotocol.com/protocol/prompt-turn#1-user-message)
     """
 
+    message_id: str | None = None
+    """**UNSTABLE**: A client-generated unique identifier for this user message.
+
+    If provided, the Agent SHOULD echo this value as ``user_message_id`` in the
+    ``PromptResponse`` to confirm it was recorded.
+    Both clients and agents MUST use UUID format for message IDs.
+    """
+
     prompt: Sequence[ContentBlock]
     """The blocks of content that compose the user's message.
 

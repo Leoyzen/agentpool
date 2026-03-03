@@ -44,6 +44,14 @@ class BaseChunk(AnnotatedObject):
     content: ContentBlock
     """A single item of content"""
 
+    message_id: str | None = None
+    """**UNSTABLE**: A unique identifier for the message this chunk belongs to.
+
+    All chunks belonging to the same message share the same ``message_id``.
+    A change in ``message_id`` indicates a new message has started.
+    Both clients and agents MUST use UUID format for message IDs.
+    """
+
     @classmethod
     def text(
         cls,

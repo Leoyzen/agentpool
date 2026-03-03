@@ -516,7 +516,7 @@ class AgentPoolACPAgent(ACPAgent):
                     self.tasks.create_task(session.agent.load_rules(session.cwd))
             except Exception:
                 logger.exception("Failed to recreate session", session_id=params.session_id)
-                return PromptResponse(stop_reason="end_turn")
+                return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
 
         try:
             if not session:
@@ -531,9 +531,9 @@ class AgentPoolACPAgent(ACPAgent):
                 name = f"error_notification_{params.session_id}"
                 self.tasks.create_task(session._send_error_notification(msg), name=name)
 
-            return PromptResponse(stop_reason="end_turn")
+            return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
         else:
-            response = PromptResponse(stop_reason=stop_reason)
+            response = PromptResponse(stop_reason=stop_reason, user_message_id=params.message_id)
             logger.info("Returning PromptResponse", stop_reason=stop_reason)
             return response
 
