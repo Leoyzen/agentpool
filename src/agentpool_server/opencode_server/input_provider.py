@@ -267,15 +267,13 @@ class OpenCodeInputProvider(InputProvider):
         from agentpool_server.opencode_server.state import PendingQuestion
 
         # Extract enum values
-        is_multi = schema.get("type") == "array"
-        if is_multi:
-            enum_values = schema.get("items", {}).get("enum", [])
-        else:
-            enum_values = schema.get("enum", [])
-
-        if not enum_values:
-            return types.ElicitResult(action="decline")
-
+        match schema:
+            case {"type": "array", "items": {"enum": [_, *_] as enum_values}}:
+                is_multi = True
+            case {"enum": [_, *_] as enum_values}:
+                is_multi = False
+            case _:
+                return types.ElicitResult(action="decline")
         # Extract descriptions if available (custom x-option-descriptions field)
         descriptions = schema.get("x-option-descriptions", {})
         question_id = self._generate_permission_id()  # Reuse ID generator

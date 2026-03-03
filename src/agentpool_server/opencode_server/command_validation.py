@@ -119,12 +119,9 @@ def _check_path_traversal(command: str, working_dir: str) -> None:
         # Check if token looks like a path with traversal
         if ".." in token:
             # Resolve the path relative to working_dir
-            try:
-                if token.startswith("/"):
-                    resolved = Path(token).resolve()
-                else:
-                    resolved = (working_path / token).resolve()
-                # Check if resolved path is within working_dir
+            path = Path(token) if token.startswith("/") else (working_path / token)
+            resolved = path.resolve()
+            try:  # Check if resolved path is within working_dir
                 try:
                     resolved.relative_to(working_path)
                 except ValueError:
