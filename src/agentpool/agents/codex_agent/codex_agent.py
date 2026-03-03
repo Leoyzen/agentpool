@@ -674,26 +674,27 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _set_mode(self, mode_id: str, category_id: str) -> None:
         """Handle approval_policy, reasoning_effort, and model mode switching."""
-        if category_id == "mode":
-            if mode_id not in VALID_POLICIES:
+        match category_id:
+            case "mode" if mode_id in VALID_POLICIES:
+                self._approval_policy = mode_id  # type: ignore[assignment]
+            case "mode":
                 raise UnknownModeError(mode_id, VALID_POLICIES)
-            self._approval_policy = mode_id  # type: ignore[assignment]
-        elif category_id == "thought_level":
-            if mode_id not in VALID_EFFORTS:
+            case "thought_level" if mode_id in VALID_EFFORTS:
+                self._current_effort = mode_id  # type: ignore[assignment]
+            case "thought_level":
                 raise UnknownModeError(mode_id, VALID_EFFORTS)
-            self._current_effort = mode_id  # type: ignore[assignment]
-        elif category_id == "model":
-            self._current_model = mode_id
-        elif category_id == "sandbox":
-            if mode_id not in VALID_SANDBOXES:
+            case "model":
+                self._current_model = mode_id
+            case "sandbox" if mode_id in VALID_SANDBOXES:
+                self._current_sandbox = mode_id  # type: ignore[assignment]
+            case "sandbox":
                 raise UnknownModeError(mode_id, VALID_SANDBOXES)
-            self._current_sandbox = mode_id  # type: ignore[assignment]
-        elif category_id == "personality":
-            if mode_id not in VALID_PERSONALITIES:
+            case "personality" if mode_id in VALID_PERSONALITIES:
+                self._current_personality = mode_id  # type: ignore[assignment]
+            case "personality":
                 raise UnknownModeError(mode_id, VALID_PERSONALITIES)
-            self._current_personality = mode_id  # type: ignore[assignment]
-        else:
-            raise UnknownCategoryError(category_id)
+            case _:
+                raise UnknownCategoryError(category_id)
         await self.update_state(config_id=category_id, value_id=mode_id)
 
     async def list_sessions(
