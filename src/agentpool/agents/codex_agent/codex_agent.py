@@ -498,8 +498,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         cost_info: TokenCost | None = None
         request_usage = RequestUsage()
 
-        if self._token_usage_data:
-            usage = self._token_usage_data
+        if usage := self._token_usage_data:
             run_usage = RunUsage(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
@@ -579,8 +578,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         Args:
             policy: Approval policy - "never", "on-request", "on-failure", or "untrusted"
         """
-        self._approval_policy = policy
-        self.log.info("Approval policy updated", policy=policy)
+        await self._set_mode(policy, "mode")
 
     async def _interrupt(self) -> None:
         """Call Codex turn_interrupt if there's an active turn."""
