@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from fsspec import AbstractFileSystem
@@ -21,8 +20,6 @@ if TYPE_CHECKING:
     from upathtools import JoinablePathLike, UPath
 
 
-SKILL_NAME_LIMIT = 64
-SKILL_DESCRIPTION_LIMIT = 1024
 logger = get_logger(__name__)
 
 
@@ -40,12 +37,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             self.skills_dirs = [to_upath(i).expanduser() for i in self.DEFAULT_SKILL_PATHS]
 
     async def discover_skills(self) -> None:
-        """Scan filesystem and register all found skills.
-
-        Args:
-            filesystem: Optional async filesystem to use. If None, will use upath_to_fs()
-                       to get appropriate filesystem for each skills directory.
-        """
+        """Scan filesystem and register all found skills."""
         for skills_dir in self.skills_dirs:
             await self.register_skills_from_path(skills_dir)
 
@@ -66,8 +58,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
         from upathtools.async_ops import to_async_fs
 
         if isinstance(skills_dir, AbstractFileSystem):
-            fs = skills_dir
-            fs = to_async_fs(fs)
+            fs = to_async_fs(skills_dir)
             search_path = base_path if base_path is not None else fs.root_marker
             original_skills_dir: UPath | None = None
         else:
@@ -76,12 +67,11 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             search_path = fs.root_marker
 
         try:
-            # List entries in skills directory
             entries = await fs._ls(search_path, detail=True)
         except FileNotFoundError:
             logger.warning("Skills directory not found", path=search_path)
             return
-        # Filter for directories that might contain skills
+
         skill_dirs = [
             entry
             for entry in entries
@@ -92,16 +82,12 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             return
         logger.info("Found skills", skills=skill_dirs, skills_dir=search_path)
         for skill_entry in skill_dirs:
-            # entry["name"] is relative to the filesystem root
-            # We need to construct the full path for _parse_skill
             entry_name = skill_entry["name"]
             if original_skills_dir is not None:
-                # When we created fs from a path, entry names are relative to that path
                 skill_dir_path = original_skills_dir / entry_name
             else:
-                # When fs was provided directly, entry names should be usable as-is
                 skill_dir_path = to_upath(entry_name)
-            # For fs._cat_file, use the path relative to the filesystem
+
             fs_skill_md_path = f"{entry_name}/SKILL.md"
             try:
                 await fs._cat_file(fs_skill_md_path)
@@ -109,49 +95,14 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
                 continue
 
             try:
-                skill = self._parse_skill(skill_dir_path)
+                skill = Skill.from_skill_dir(skill_dir_path)
                 self.register(skill.name, skill, replace=True)
             except Exception as e:  # noqa: BLE001
-                # Log but don't fail discovery for one bad skill
-                print(f"Warning: Failed to parse skill at {skill_dir_path}: {e}")
-
-    def _parse_skill(self, skill_dir: JoinablePathLike) -> Skill:
-        """Parse a SKILL.md file and extract metadata."""
-        skill_file = to_upath(skill_dir) / "SKILL.md"
-        content = skill_file.read_text("utf-8")
-
-        # Extract YAML frontmatter
-        frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
-        if not frontmatter_match:
-            raise ToolError(f"No YAML frontmatter found in {skill_file}")
-        import yamling
-
-        try:
-            metadata = yamling.load_yaml(frontmatter_match.group(1))
-        except yamling.YAMLError as e:
-            raise ToolError(f"Invalid YAML frontmatter in {skill_file}: {e}") from e
-
-        # Validate required fields
-        if not isinstance(metadata, dict):
-            raise ToolError(f"YAML frontmatter must be a dictionary in {skill_file}")
-
-        name = metadata.get("name")
-        description = metadata.get("description")
-
-        if not name:
-            raise ToolError(f"Missing 'name' field in {skill_file}")
-        if not description:
-            raise ToolError(f"Missing 'description' field in {skill_file}")
-
-        # Validate limits
-        if len(name) > SKILL_NAME_LIMIT:
-            msg = f"{skill_file}: Skill name exceeds {SKILL_NAME_LIMIT} chars"
-            raise ToolError(msg)
-        if len(description) > SKILL_DESCRIPTION_LIMIT:
-            msg = f"{skill_file}: Skill description exceeds {SKILL_DESCRIPTION_LIMIT} chars"
-            raise ToolError(msg)
-
-        return Skill(name=name, description=description, skill_path=to_upath(skill_dir))
+                logger.warning(
+                    "Failed to parse skill",
+                    path=str(skill_dir_path),
+                    error=str(e),
+                )
 
     @property
     def _error_class(self) -> type[ToolError]:
@@ -190,7 +141,7 @@ if __name__ == "__main__":
             repo="skills",
         )
         print("Repository contents:")
-        print([f.name for f in p.iterdir()][:5])  # Show first 5 items
+        print([f.name for f in p.iterdir()][:5])
 
         await reg.register_skills_from_path(
             p,

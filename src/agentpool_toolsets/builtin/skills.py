@@ -36,7 +36,21 @@ async def load_skill(ctx: AgentContext, skill_name: str) -> str:
             instructions = ctx.pool.skills.get_skill_instructions(skill_name)
         except Exception as e:  # noqa: BLE001
             return f"Failed to load skill {skill_name!r}: {e}"
-        return f"# {skill.name}\n{instructions}\nSkill directory: {skill.skill_path}"
+        header = f"# {skill.name}\n\n{skill.description}"
+        meta_lines: list[str] = []
+        if skill.license:
+            meta_lines.append(f"License: {skill.license}")
+        if skill.compatibility:
+            meta_lines.append(f"Compatibility: {skill.compatibility}")
+        if skill.allowed_tools:
+            meta_lines.append(f"Allowed tools: {skill.allowed_tools}")
+        meta = "\n".join(meta_lines)
+        parts = [header]
+        if meta:
+            parts.append(meta)
+        parts.append(instructions)
+        parts.append(f"Skill directory: {skill.skill_path}")
+        return "\n\n".join(parts)
     available = ", ".join(s.name for s in skills)
     return f"Skill {skill_name!r} not found. Available skills: {available}"
 
