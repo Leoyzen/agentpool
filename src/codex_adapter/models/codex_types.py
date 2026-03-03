@@ -133,19 +133,19 @@ _READ_ONLY_ACCESS_TYPE_ALIASES: dict[str, str] = {
 
 def _sandbox_policy_discriminator(v: Any) -> str:
     if isinstance(v, dict):
-        raw_type = v.get("type", "")
+        raw_type: str = v.get("type", "")
         return _SANDBOX_TYPE_ALIASES.get(raw_type, raw_type)
     if isinstance(v, BaseModel):
-        return v.type  # type: ignore[return-value]
+        return str(v.model_fields["type"].default)
     return str(v)
 
 
 def _read_only_access_discriminator(v: Any) -> str:
     if isinstance(v, dict):
-        raw_type = v.get("type", "")
+        raw_type: str = v.get("type", "")
         return _READ_ONLY_ACCESS_TYPE_ALIASES.get(raw_type, raw_type)
     if isinstance(v, BaseModel):
-        return v.type  # type: ignore[return-value]
+        return str(v.model_fields["type"].default)
     return str(v)
 
 
