@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
-from pydantic.alias_generators import to_camel
+from mcp.types import ContentBlock  # noqa: TC002
+from pydantic import Field
 
 from codex_adapter.models.base import CodexBaseModel
 from codex_adapter.models.codex_types import (  # noqa: TC001
@@ -59,19 +59,10 @@ class FileUpdateChange(CodexBaseModel):
     diff: str | None = None  # May be absent in "inProgress" state
 
 
-class McpContentBlock(CodexBaseModel):
-    """MCP content block (from external mcp_types crate).
-
-    We allow extra fields since this comes from an external library.
-    """
-
-    model_config = ConfigDict(extra="allow", populate_by_name=True, alias_generator=to_camel)
-
-
 class McpToolCallResult(CodexBaseModel):
     """MCP tool call result."""
 
-    content: list[McpContentBlock]
+    content: list[ContentBlock]
     structured_content: Any = None
 
 
