@@ -151,8 +151,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         file_entries = self._get_file_entries()
         if path in file_entries:
             return file_entries[path]
-        msg = f"File not found: {path}"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError(f"File not found: {path}")
 
     async def _info(self, path: str, **kwargs: Any) -> dict[str, Any]:
         """Get file/directory info."""
@@ -169,8 +168,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
                 "size": len(file_entries[path]),
             }
 
-        msg = f"Path not found: {path}"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError(f"Path not found: {path}")
 
     async def _exists(self, path: str, **kwargs: Any) -> bool:
         """Check if path exists."""
@@ -191,8 +189,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
 
     async def _rm_file(self, path: str, **kwargs: Any) -> None:
         """Remove file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _mkdir(
         self,
@@ -201,13 +198,11 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         **kwargs: Any,
     ) -> None:
         """Create directory - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _makedirs(self, path: str, exist_ok: bool = False) -> None:
         """Create directories - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _pipe_file(
         self,
@@ -217,8 +212,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         **kwargs: Any,
     ) -> None:
         """Write file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _put_file(
         self,
@@ -228,15 +222,12 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         **kwargs: Any,
     ) -> None:
         """Upload file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _cp_file(self, path1: str, path2: str, **kwargs: Any) -> None:
         """Copy file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _mv_file(self, path1: str, path2: str, **kwargs: Any) -> None:
         """Move file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")

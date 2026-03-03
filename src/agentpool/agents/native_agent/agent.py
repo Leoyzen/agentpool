@@ -353,8 +353,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         sys_prompts.append(content)
                     case LibraryPromptConfig(reference=reference):
                         if agent_pool is None:
-                            msg = f"Cannot resolve library prompt {reference!r}: no agent pool"
-                            raise ValueError(msg)
+                            raise ValueError(
+                                f"Cannot resolve library prompt {reference!r}: no agent pool"
+                            )
                         try:
                             content = agent_pool.prompt_manager.get.sync(reference)
                             sys_prompts.append(content)

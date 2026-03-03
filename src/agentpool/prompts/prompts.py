@@ -315,8 +315,7 @@ class DynamicPrompt(BasePrompt):
                 PromptMessage(role="user", content=content),
             ]
         except Exception as exc:
-            msg = f"Failed to execute prompt callable: {exc}"
-            raise ValueError(msg) from exc
+            raise ValueError(f"Failed to execute prompt callable: {exc}") from exc
 
     @classmethod
     def from_callable(

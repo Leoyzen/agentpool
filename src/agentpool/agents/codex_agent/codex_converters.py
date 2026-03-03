@@ -175,8 +175,7 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
             )
 
         case _:
-            msg = f"Unsupported MCP server config type: {type(config)}"
-            raise TypeError(msg)
+            raise TypeError(f"Unsupported MCP server config type: {type(config)}")
 
 
 def to_model_info(model_data: ModelData) -> TokoModelInfo:

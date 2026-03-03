@@ -177,8 +177,7 @@ async def grep_with_subprocess(
         backend = await detect_grep_backend(env)
 
     if backend == "fsspec":
-        msg = "Subprocess grep requested but no grep/ripgrep found"
-        raise ValueError(msg)
+        raise ValueError("Subprocess grep requested but no grep/ripgrep found")
 
     base_exclude = exclude_patterns or DEFAULT_EXCLUDE_PATTERNS
     # Filter out patterns that the user is explicitly searching inside

@@ -209,8 +209,7 @@ async def batch_stream_deltas(  # noqa: PLR0915
             case "tool_call":
                 delta = ToolCallPartDelta(args_delta=content)
             case _:
-                msg = f"Unexpected pending type: {pending_type}"
-                raise ValueError(msg)
+                raise ValueError(f"Unexpected pending type: {pending_type}")
         return PartDeltaEvent(index=pending_index, delta=delta)
 
     async for event in stream:

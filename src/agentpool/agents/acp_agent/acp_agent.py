@@ -150,11 +150,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         from agentpool.mcp_server.tool_bridge import ToolManagerBridge
 
         if not command and not registry_id:
-            msg = "Exactly one of 'command' or 'registry_id' must be provided"
-            raise ValueError(msg)
+            raise ValueError("Exactly one of 'command' or 'registry_id' must be provided")
         if command and registry_id:
-            msg = "Exactly one of 'command' or 'registry_id' must be provided, not both"
-            raise ValueError(msg)
+            raise ValueError("Exactly one of 'command' or 'registry_id' must be provided, not both")
 
         super().__init__(
             name=name or command or registry_id,  # type: ignore[arg-type]
@@ -329,8 +327,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         agent = await fetch_agent(self._registry_id)
         if agent is None:
-            msg = f"Agent '{self._registry_id}' not found in ACP registry"
-            raise RuntimeError(msg)
+            raise RuntimeError(f"Agent {self._registry_id!r} not found in ACP registry")
         # Merge registry env vars (agent-specific take precedence)
         self._env_vars = {**agent.dist.env, **self._env_vars}
         return await prepare_agent(agent, self._args)

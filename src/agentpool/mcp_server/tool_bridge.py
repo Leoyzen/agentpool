@@ -518,8 +518,7 @@ class ToolManagerBridge:
             )
             if pre_result.get("decision") == "deny":
                 reason = pre_result.get("reason", "Blocked by pre-tool hook")
-                msg = f"Tool {tool.name} blocked: {reason}"
-                raise ToolSkippedError(msg)
+                raise ToolSkippedError(f"Tool {tool.name} blocked: {reason}")
             # Apply modified input if provided
             if modified := pre_result.get("modified_input"):
                 kwargs.update(modified)
@@ -563,8 +562,7 @@ class ToolManagerBridge:
         import uvicorn
 
         if not self._mcp:
-            msg = "MCP server not initialized"
-            raise RuntimeError(msg)
+            raise RuntimeError("MCP server not initialized")
 
         # Auto-select an available port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

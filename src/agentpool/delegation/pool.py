@@ -373,8 +373,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         agents = self.all_agents
         if not agents:
-            msg = "No agents available in pool"
-            raise RuntimeError(msg)
+            raise RuntimeError("No agents available in pool")
 
         if self._main_agent_name:
             if self._main_agent_name not in agents:
