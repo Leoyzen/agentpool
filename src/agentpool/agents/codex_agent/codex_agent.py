@@ -475,11 +475,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     yield native_event
 
                     # Handle plan updates - sync to pool.todos
-                    if (
-                        isinstance(native_event, PlanUpdateEvent)
-                        and self.agent_pool
-                        and self.agent_pool.todos
-                    ):
+                    if isinstance(native_event, PlanUpdateEvent) and self.agent_pool:
                         # Replace all entries in pool.todos with Codex plan
                         self.agent_pool.todos.replace_all([
                             (e.content, e.priority, e.status) for e in native_event.entries

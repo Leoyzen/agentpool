@@ -127,17 +127,13 @@ from codex_adapter.models import (
 )
 
 __all__ = [
-    # Data models
     "AgentMessageDeltaData",
-    # Event classes
     "AgentMessageDeltaEvent",
     "AppInfo",
     "AppListUpdatedData",
     "AppListUpdatedEvent",
-    # Types
     "ApprovalPolicy",
     "AskForApproval",
-    # Client and exceptions
     "CodexClient",
     "CodexError",
     "CodexEvent",
@@ -147,7 +143,6 @@ __all__ = [
     "CollabAgentStatus",
     "CollabAgentTool",
     "CollabAgentToolCallStatus",
-    # Response models
     "CommandExecResponse",
     "CommandExecutionApprovalDecision",
     "CommandExecutionOutputDeltaData",
@@ -221,9 +216,9 @@ __all__ = [
     "ThreadStartedEvent",
     "ThreadStatusChangedData",
     "ThreadStatusChangedEvent",
+    "ThreadTokenUsage",
     "ThreadUnarchiveResponse",
     "ThreadUnarchivedData",
-    "ThreadTokenUsage",
     "ThreadUnarchivedEvent",
     "TokenUsageBreakdown",
     "TurnCompletedData",
@@ -238,7 +233,6 @@ __all__ = [
     "TurnSteerResponse",
     "Usage",
     "WorkspaceWriteSandboxPolicy",
-    # Event helper functions
     "get_text_delta",
     "is_completed_event",
     "is_delta_event",
