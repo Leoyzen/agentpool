@@ -78,22 +78,19 @@ def to_acp_content_blocks(  # noqa: PLR0911
                 list_blocks.extend(to_acp_content_blocks(item))
             return list_blocks
 
-        case BinaryContent(data=data, media_type=media_type) if media_type.startswith("image/"):
-            image_data = base64.b64encode(data).decode("utf-8")
+        case BinaryContent(data=data, media_type=media_type) if tool_output.is_image:
+            image_data = base64.b64encode(data).decode()
             return [ImageContentBlock(data=image_data, mime_type=media_type)]
 
-        case BinaryContent(data=data, media_type=media_type) if media_type.startswith("audio/"):
-            audio_data = base64.b64encode(data).decode("utf-8")
+        case BinaryContent(data=data, media_type=media_type) if tool_output.is_audio:
+            audio_data = base64.b64encode(data).decode()
             return [AudioContentBlock(data=audio_data, mime_type=media_type)]
 
         case BinaryContent(data=data, media_type=media_type):
-            blob_data = base64.b64encode(data).decode("utf-8")
-            blob_resource = BlobResourceContents(
-                blob=blob_data,
-                mime_type=media_type,
-                uri=f"data:{media_type};base64,{blob_data[:50]}...",
-            )
-            return [EmbeddedResourceContentBlock(resource=blob_resource)]  # ty: ignore[invalid-return-type]
+            blob_data = base64.b64encode(data).decode()
+            uri = f"data:{media_type};base64,{blob_data[:50]}..."
+            blob_resource = BlobResourceContents(blob=blob_data, mime_type=media_type, uri=uri)
+            return [EmbeddedResourceContentBlock(resource=blob_resource)]
 
         case ImageUrl() | AudioUrl() | VideoUrl() | DocumentUrl() as file_url:
             from urllib.parse import urlparse

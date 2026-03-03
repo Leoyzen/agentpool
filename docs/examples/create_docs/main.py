@@ -19,7 +19,7 @@ from pathlib import Path
 from mypy import api
 import rich
 
-from agentpool import AgentPool, AgentsManifest
+from agentpool import AgentPool, AgentsManifest, Agent
 from agentpool.docs.utils import run
 
 
@@ -52,7 +52,7 @@ async def main() -> None:
 
         # Start async docs generation (the writer will start working in async fashion)
         await scanner.run('List all Python files in "src/agentpool/agent"')
-
+        assert isinstance(scanner, Agent)
         # Use error checker as tool (this blocks until complete)
         scanner.register_worker(checker)
         prompt = 'Check types for all Python files in "src/agentpool/agent"'

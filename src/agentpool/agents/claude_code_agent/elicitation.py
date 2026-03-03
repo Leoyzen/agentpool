@@ -9,6 +9,7 @@ from agentpool import log
 
 if TYPE_CHECKING:
     from clawd_code_sdk import PermissionResult, ToolPermissionContext
+    from clawd_code_sdk.models.input_types import AskUserQuestionInput
 
     from agentpool.agents.context import AgentContext
 
@@ -17,7 +18,7 @@ logger = log.get_logger(__name__)
 
 async def handle_clarifying_questions(
     agent_ctx: AgentContext[Any],
-    input_data: dict[str, Any],
+    input_data: AskUserQuestionInput,
     context: ToolPermissionContext,
 ) -> PermissionResult:
     """Handle AskUserQuestion tool - Claude asking for clarification.

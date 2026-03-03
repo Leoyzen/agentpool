@@ -13,7 +13,7 @@ import time
 from typing import Literal
 
 
-PrefixType = Literal["session", "message", "permission", "user", "part", "pty"]
+PrefixType = Literal["session", "message", "permission", "user", "part", "pty", "call"]
 
 PREFIXES: dict[PrefixType, str] = {
     "session": "ses",
@@ -22,6 +22,7 @@ PREFIXES: dict[PrefixType, str] = {
     "user": "usr",
     "part": "prt",
     "pty": "pty",
+    "call": "cal",
 }
 
 BASE62_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"

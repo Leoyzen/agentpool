@@ -6,9 +6,9 @@ allowing tools and agents to browse messages as files.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import anyenv
 from fsspec.asyn import AsyncFileSystem
 
 
@@ -71,7 +71,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
                 "cost": float(msg.cost_info.total_cost) if msg.cost_info else None,
             }
             metadata_path = f"/messages/{base_name}.json"
-            entries[metadata_path] = json.dumps(metadata, indent=2).encode("utf-8")
+            entries[metadata_path] = anyenv.dump_json(metadata, indent=True).encode()
 
         # Summary file
         summary = {
@@ -83,7 +83,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
                 "assistant": len([m for m in self._messages if m.role == "assistant"]),
             },
         }
-        entries["/summary.json"] = json.dumps(summary, indent=2).encode("utf-8")
+        entries["/summary.json"] = anyenv.dump_json(summary, indent=True).encode("utf-8")
 
         return entries
 
@@ -108,59 +108,50 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         file_entries = self._get_file_entries()
 
         entries: list[dict[str, Any]] = []
-
-        if path == "/":
-            entries = [
-                {"name": "/messages", "type": "directory", "size": 0},
-                {"name": "/by_role", "type": "directory", "size": 0},
-                {
-                    "name": "/summary.json",
-                    "type": "file",
-                    "size": len(file_entries.get("/summary.json", b"")),
-                },
-            ]
-        elif path == "/messages":
-            for file_path, content in file_entries.items():
-                if file_path.startswith("/messages/"):
-                    entries.append({
-                        "name": file_path,
+        match path:
+            case "/":
+                entries = [
+                    {"name": "/messages", "type": "directory", "size": 0},
+                    {"name": "/by_role", "type": "directory", "size": 0},
+                    {
+                        "name": "/summary.json",
                         "type": "file",
-                        "size": len(content),
-                    })
-        elif path == "/by_role":
-            entries = [
-                {"name": "/by_role/user", "type": "directory", "size": 0},
-                {"name": "/by_role/assistant", "type": "directory", "size": 0},
-            ]
-        elif path == "/by_role/user":
-            for file_path, content in file_entries.items():
-                if file_path.startswith("/messages/") and "_user_" in file_path:
-                    entries.append({
-                        "name": file_path,
-                        "type": "file",
-                        "size": len(content),
-                    })
-        elif path == "/by_role/assistant":
-            for file_path, content in file_entries.items():
-                if file_path.startswith("/messages/") and "_assistant_" in file_path:
-                    entries.append({
-                        "name": file_path,
-                        "type": "file",
-                        "size": len(content),
-                    })
+                        "size": len(file_entries.get("/summary.json", b"")),
+                    },
+                ]
+            case "/messages":
+                for file_path, content in file_entries.items():
+                    if file_path.startswith("/messages/"):
+                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+            case "/by_role":
+                entries = [
+                    {"name": "/by_role/user", "type": "directory", "size": 0},
+                    {"name": "/by_role/assistant", "type": "directory", "size": 0},
+                ]
+            case "/by_role/user":
+                for file_path, content in file_entries.items():
+                    if file_path.startswith("/messages/") and "_user_" in file_path:
+                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+            case "/by_role/assistant":
+                for file_path, content in file_entries.items():
+                    if file_path.startswith("/messages/") and "_assistant_" in file_path:
+                        entries.append({"name": file_path, "type": "file", "size": len(content)})
 
-        if detail:
-            return entries
-        return [e["name"] for e in entries]
+        return entries if detail else [e["name"] for e in entries]
 
-    async def _cat_file(self, path: str, **kwargs: Any) -> bytes:
+    async def _cat_file(
+        self,
+        path: str,
+        start: int | None = None,
+        end: int | None = None,
+        **kwargs: Any,
+    ) -> bytes:
         """Read file content."""
         path = self._normalize_path(path)
         file_entries = self._get_file_entries()
         if path in file_entries:
             return file_entries[path]
-        msg = f"File not found: {path}"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError(f"File not found: {path}")
 
     async def _info(self, path: str, **kwargs: Any) -> dict[str, Any]:
         """Get file/directory info."""
@@ -177,8 +168,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
                 "size": len(file_entries[path]),
             }
 
-        msg = f"Path not found: {path}"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError(f"Path not found: {path}")
 
     async def _exists(self, path: str, **kwargs: Any) -> bool:
         """Check if path exists."""
@@ -199,8 +189,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
 
     async def _rm_file(self, path: str, **kwargs: Any) -> None:
         """Remove file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _mkdir(
         self,
@@ -209,23 +198,21 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         **kwargs: Any,
     ) -> None:
         """Create directory - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _makedirs(self, path: str, exist_ok: bool = False) -> None:
         """Create directories - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _pipe_file(
         self,
         path: str,
         value: bytes,
+        mode: str = "overwrite",
         **kwargs: Any,
     ) -> None:
         """Write file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _put_file(
         self,
@@ -235,15 +222,12 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         **kwargs: Any,
     ) -> None:
         """Upload file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _cp_file(self, path1: str, path2: str, **kwargs: Any) -> None:
         """Copy file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")
 
     async def _mv_file(self, path1: str, path2: str, **kwargs: Any) -> None:
         """Move file - not supported."""
-        msg = "ChatMessageFileSystem is read-only"
-        raise PermissionError(msg)
+        raise PermissionError("ChatMessageFileSystem is read-only")

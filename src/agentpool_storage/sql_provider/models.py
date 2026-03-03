@@ -189,51 +189,6 @@ class Message(AsyncAttrs, SQLModel, table=True):
     model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
 
 
-class Session(AsyncAttrs, SQLModel, table=True):
-    """Database model for session persistence."""
-
-    session_id: str = Field(primary_key=True)
-    """Unique session identifier. Also used as session_id for message storage."""
-
-    agent_name: str = Field(index=True)
-    """Name of the currently active agent."""
-
-    pool_id: str | None = Field(default=None, index=True)
-    """Optional pool/manifest identifier for multi-pool setups."""
-
-    project_id: str | None = Field(default=None, index=True)
-    """Project identifier (e.g., for OpenCode compatibility)."""
-
-    parent_id: str | None = Field(default=None, index=True)
-    """Parent session ID for forked sessions."""
-
-    version: str = Field(default="1")
-    """Session version string."""
-
-    title: str | None = Field(default=None, index=True)
-    """AI-generated or user-provided title for the conversation."""
-
-    cwd: str | None = Field(default=None, sa_column=Column(Text))
-    """Working directory for the session."""
-
-    created_at: datetime = Field(
-        sa_column=Column(UTCDateTime, index=True),
-        default_factory=get_now,
-    )
-    """When the session was created."""
-
-    last_active: datetime = Field(
-        sa_column=Column(UTCDateTime, index=True),
-        default_factory=get_now,
-    )
-    """Last activity timestamp."""
-
-    metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    """Protocol-specific or custom metadata stored as JSON."""
-
-    model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
-
-
 class Project(AsyncAttrs, SQLModel, table=True):
     """Database model for project/worktree tracking."""
 
@@ -271,10 +226,14 @@ class Project(AsyncAttrs, SQLModel, table=True):
 
 
 class Conversation(AsyncAttrs, SQLModel, table=True):
-    """Database model for conversations."""
+    """Database model for conversations/sessions.
+
+    Unified model that stores both conversation tracking data (messages, tokens, cost)
+    and session lifecycle data (pool_id, project_id, cwd, metadata).
+    """
 
     id: str = Field(primary_key=True)
-    """Unique identifier for the conversation"""
+    """Unique identifier for the conversation/session"""
 
     agent_name: str = Field(index=True)
     """Name of the agent handling the conversation"""
@@ -293,5 +252,37 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
 
     model: str | None = Field(default=None, index=True)
     """Requested model identifier for this session"""
+
+    # Session lifecycle fields (merged from Session table)
+
+    pool_id: str | None = Field(default=None, index=True)
+    """Optional pool/manifest identifier for multi-pool setups."""
+
+    project_id: str | None = Field(default=None, index=True)
+    """Project identifier (e.g., for OpenCode compatibility)."""
+
+    parent_id: str | None = Field(default=None, index=True)
+    """Parent session ID for forked sessions."""
+
+    version: str = Field(default="1")
+    """Session version string."""
+
+    cwd: str | None = Field(default=None, sa_column=Column(Text))
+    """Working directory for the session."""
+
+    agent_type: str | None = Field(default=None, index=True)
+    """Type of agent backend (native, claude, codex, acp, agui)."""
+
+    sdk_session_id: str | None = Field(default=None, index=True)
+    """External SDK session ID for cross-referencing."""
+
+    last_active: datetime = Field(
+        sa_column=Column(UTCDateTime, index=True),
+        default_factory=get_now,
+    )
+    """Last activity timestamp."""
+
+    metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    """Protocol-specific or custom metadata stored as JSON."""
 
     model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentpool import Agent
 from agentpool.hooks import AgentHooks, CallableHook
+
+
+if TYPE_CHECKING:
+    from agentpool.hooks import HookResult
 
 
 # Hook state for testing
@@ -23,25 +27,25 @@ def reset_hook_state():
 # Hook functions
 
 
-def allow_hook(**kwargs) -> dict[str, Any]:
+def allow_hook(**kwargs) -> HookResult:
     """Hook that allows the action."""
     hook_state["calls"].append(("allow", kwargs.get("event")))
     return {"decision": "allow"}
 
 
-def deny_hook(**kwargs) -> dict[str, Any]:
+def deny_hook(**kwargs) -> HookResult:
     """Hook that denies the action."""
     hook_state["calls"].append(("deny", kwargs.get("event")))
     return {"decision": "deny", "reason": "Denied by test hook"}
 
 
-def record_result_hook(**kwargs) -> dict[str, Any]:
+def record_result_hook(**kwargs) -> HookResult:
     """Hook that records data passed to it."""
     hook_state["results"].append(kwargs)
     return {"decision": "allow"}
 
 
-def modify_input_hook(**kwargs) -> dict[str, Any]:
+def modify_input_hook(**kwargs) -> HookResult:
     """Hook that modifies tool input."""
     hook_state["calls"].append(("modify", kwargs.get("tool_input")))
     return {"decision": "allow", "modified_input": {"modified": True}}
@@ -114,6 +118,7 @@ async def test_pre_tool_hook_allow():
     async with Agent(model="test", hooks=hooks, tools=[simple_tool]) as agent:
         # Just verify the hooks are set up correctly
         assert agent._hook_manager.has_hooks()
+        assert agent._hook_manager.agent_hooks
         assert len(agent._hook_manager.agent_hooks.pre_tool_use) == 1
 
 
@@ -140,6 +145,7 @@ async def test_post_tool_hook():
     hooks = AgentHooks(post_tool_use=[CallableHook(event="post_tool_use", fn=record_result_hook)])
     async with Agent(model="test", hooks=hooks) as agent:
         assert agent._hook_manager.has_hooks()
+        assert agent._hook_manager.agent_hooks
         assert len(agent._hook_manager.agent_hooks.post_tool_use) == 1
 
 

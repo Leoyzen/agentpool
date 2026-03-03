@@ -7,6 +7,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, Field
 
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from agentpool_server.opencode_server.models.common import FileDiffStatus  # noqa: TC001
 
 
 class FileNode(OpenCodeBaseModel):
@@ -30,7 +31,7 @@ class FileStatus(OpenCodeBaseModel):
     """File status (for VCS)."""
 
     path: str
-    status: str  # modified, added, deleted, etc.
+    status: FileDiffStatus
 
 
 class TextWrapper(OpenCodeBaseModel):
@@ -82,7 +83,7 @@ class Symbol(OpenCodeBaseModel):
     """Code symbol."""
 
     name: str
-    kind: str
+    kind: int  # LSP SymbolKind (1-26), see LSP spec
     path: str
     line: int
     character: int

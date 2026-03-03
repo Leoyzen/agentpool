@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from string import Template
 from typing import TYPE_CHECKING, Literal
 
+import anyenv
 from pydantic import Field
 from schemez import Schema
 
@@ -14,6 +14,8 @@ from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
+    from exxec import ExecutionEnvironment
+
     from agentpool.hooks.base import HookEvent, HookInput
 
 
@@ -63,11 +65,16 @@ class PromptHook(Hook):
         self.prompt_template = prompt
         self.model = model or DEFAULT_HOOK_MODEL
 
-    async def execute(self, input_data: HookInput) -> HookResult:
+    async def execute(
+        self,
+        input_data: HookInput,
+        env: ExecutionEnvironment | None = None,
+    ) -> HookResult:
         """Execute the LLM evaluation.
 
         Args:
             input_data: The hook input data.
+            env: Unused. Prompt hooks always run locally via LLM call.
 
         Returns:
             Hook result from LLM.
@@ -90,10 +97,10 @@ class PromptHook(Hook):
             Formatted prompt string.
         """
         variables = {
-            "INPUT": json.dumps(dict(input_data), indent=2),
+            "INPUT": anyenv.dump_json(dict(input_data), indent=True),
             "TOOL_NAME": input_data.get("tool_name", ""),
-            "TOOL_INPUT": json.dumps(input_data.get("tool_input", {}), indent=2),
-            "TOOL_OUTPUT": json.dumps(input_data.get("tool_output", ""), indent=2),
+            "TOOL_INPUT": anyenv.dump_json(input_data.get("tool_input", {}), indent=True),
+            "TOOL_OUTPUT": anyenv.dump_json(input_data.get("tool_output", ""), indent=True),
             "AGENT_NAME": input_data.get("agent_name", ""),
             "PROMPT": input_data.get("prompt", ""),
             "EVENT": input_data.get("event", ""),
@@ -110,13 +117,13 @@ class PromptHook(Hook):
         Returns:
             Structured hook decision.
         """
-        from pydantic_ai import Agent
+        from agentpool import Agent
 
-        agent: Agent[None, HookDecision] = Agent(
+        agent = Agent(
             model=self.model,
             system_prompt="You are a security/policy evaluation assistant. "
             "Analyze the request and decide whether to allow or deny it.",
             output_type=HookDecision,
         )
         result = await agent.run(prompt)
-        return result.output
+        return result.data

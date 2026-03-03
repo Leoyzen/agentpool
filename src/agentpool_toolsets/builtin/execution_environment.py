@@ -21,6 +21,15 @@ if TYPE_CHECKING:
     from agentpool.tools.base import Tool
 
 
+def filter_lines_regex(pattern_str: str, text: str) -> str:
+    try:
+        pattern = re.compile(pattern_str)
+        filtered_lines = [line for line in text.splitlines(keepends=True) if pattern.search(line)]
+        return "".join(filtered_lines)
+    except re.error as regex_err:
+        return f"Invalid filter regex: {regex_err}"
+
+
 class ProcessManagementTools(ResourceProvider):
     """Provider for background process management tools.
 
@@ -79,6 +88,9 @@ class ProcessManagementTools(ResourceProvider):
     ) -> str:
         """Start a command in the background and return process ID.
 
+        This is the preferred tool  for long-running processes that should run in the background
+        (e.g. servers, file watchers, build --watch).
+
         Args:
             command: Command to execute
             args: Command arguments
@@ -121,22 +133,11 @@ class ProcessManagementTools(ResourceProvider):
         try:
             output = await manager.get_output(process_id)
             await agent_ctx.events.process_output(process_id, output.combined or "")
-
             combined = output.combined or ""
-
             # Apply regex filter if specified
             if filter_lines and combined:
-                try:
-                    pattern = re.compile(filter_lines)
-                    filtered_lines = [
-                        line for line in combined.splitlines(keepends=True) if pattern.search(line)
-                    ]
-                    combined = "".join(filtered_lines)
-                except re.error as regex_err:
-                    return f"Invalid filter regex: {regex_err}"
-
+                combined = filter_lines_regex(filter_lines, combined)
             status = "completed" if output.exit_code is not None else "running"
-
             # Format as plain text
             suffix_parts = [f"Status: {status}"]
             if output.exit_code is not None:
@@ -178,18 +179,8 @@ class ProcessManagementTools(ResourceProvider):
             return f"Error waiting for process: {e}"
         else:
             combined = output.combined or ""
-
-            # Apply regex filter if specified
-            if filter_lines and combined:
-                try:
-                    pattern = re.compile(filter_lines)
-                    filtered_lines = [
-                        line for line in combined.splitlines(keepends=True) if pattern.search(line)
-                    ]
-                    combined = "".join(filtered_lines)
-                except re.error as regex_err:
-                    return f"Invalid filter regex: {regex_err}"
-
+            if filter_lines and combined:  # Apply regex filter if specified
+                combined = filter_lines_regex(filter_lines, combined)
             # Format as plain text
             suffix_parts = []
             if output.truncated:

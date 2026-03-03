@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
 
 from anyenv.signals import Signal
-from psygnal.containers import EventedList
 
 from agentpool.log import get_logger
 from agentpool.talk import AggregatedTalkStats, Talk, TeamTalk
@@ -33,7 +32,7 @@ class ConnectionManager:
     def __init__(self, owner: MessageNode[Any, Any]) -> None:
         self.owner = owner
         # helper class for the user
-        self._connections = EventedList[Talk]()
+        self._connections: list[Talk] = []
         self._wait_states: dict[AgentName, bool] = {}
 
     def __repr__(self) -> str:
@@ -136,7 +135,7 @@ class ConnectionManager:
             talks = [
                 self.create_connection(
                     source,
-                    t,
+                    t,  # ty: ignore[invalid-argument-type]
                     connection_type=connection_type,
                     priority=priority,
                     delay=delay,

@@ -112,7 +112,7 @@ def extract_nav_item_info(nav_item: Tag) -> tuple[str | None, str | None]:
     if not href or href == "":
         # Handle root/index case
         href = "index"
-
+    assert isinstance(href, str)
     # Clean up href - remove leading/trailing slashes and trailing index.html
     href = href.strip("/")  # pyright: ignore[reportAttributeAccessIssue]
     if href.endswith("/"):
@@ -179,7 +179,7 @@ def sort_nav_items_with_context(
             return (999999, "")
 
         href = link.get("href", "")
-
+        assert isinstance(href, str)
         # Resolve relative paths based on current page context
         # Use Path-like resolution
 

@@ -6,20 +6,36 @@ import asyncio
 from collections.abc import Callable
 import contextlib
 from dataclasses import dataclass
-import json
 import logging
 from typing import Any
 
+import anyenv
 import anyio
 from anyio.abc import ByteSendStream
 
 from acp.task.supervisor import TaskSupervisor
 
 
-__all__ = ["MessageSender", "SenderFactory"]
-
+logger = logging.getLogger(__name__)
 
 SenderFactory = Callable[[ByteSendStream, TaskSupervisor], "MessageSender"]
+
+_JSON_PRIMITIVE = (str, int, float, bool, type(None))
+
+
+def _find_non_serializable(obj: Any, path: str = "$") -> list[tuple[str, Any]]:
+    """Walk a nested dict/list and return paths to non-JSON-serializable values."""
+    results: list[tuple[str, Any]] = []
+    match obj:
+        case dict():
+            for key, value in obj.items():
+                results.extend(_find_non_serializable(value, f"{path}.{key}"))
+        case list() | tuple():
+            for idx, value in enumerate(obj):
+                results.extend(_find_non_serializable(value, f"{path}[{idx}]"))
+        case _ if not isinstance(obj, _JSON_PRIMITIVE):
+            results.append((path, obj))
+    return results
 
 
 @dataclass(slots=True)
@@ -31,11 +47,7 @@ class _PendingSend:
 class MessageSender:
     """Async message sender that queues and transmits JSON-RPC messages."""
 
-    def __init__(
-        self,
-        writer: ByteSendStream,
-        supervisor: TaskSupervisor,
-    ) -> None:
+    def __init__(self, writer: ByteSendStream, supervisor: TaskSupervisor) -> None:
         self._writer = writer
         self._queue: asyncio.Queue[_PendingSend | None] = asyncio.Queue()
         self._closed = False
@@ -44,7 +56,21 @@ class MessageSender:
         )
 
     async def send(self, payload: dict[str, Any]) -> None:
-        data = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        try:
+            data = (anyenv.dump_json(payload) + "\n").encode()
+        except TypeError:
+            offenders = _find_non_serializable(payload)
+            logger.exception(
+                "Failed to JSON-serialize message payload.\n"
+                "Non-serializable values:\n%s\n"
+                "Full payload repr:\n%s",
+                "\n".join(
+                    f"  {path}: {type(value).__name__} = {value!r:.200s}"
+                    for path, value in offenders
+                ),
+                repr(payload)[:2000],
+            )
+            raise
         future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         await self._queue.put(_PendingSend(data, future))
         await future

@@ -101,12 +101,11 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                 tool_name=tool.name,
                 tool_input=tool_input,
                 session_id=None,  # Could be passed through if needed
+                env=agent_ctx.agent.env,
             )
-            if pre_result.get("decision") == "deny":
+            if pre_result["decision"] == "deny":
                 reason = pre_result.get("reason", "Blocked by pre-tool hook")
-                msg = f"Tool {tool.name} blocked: {reason}"
-                raise ToolSkippedError(msg)
-
+                raise ToolSkippedError(f"Tool {tool.name} blocked: {reason}")
             # Apply modified input if provided
             if modified := pre_result.get("modified_input"):
                 kwargs.update(modified)
@@ -115,14 +114,10 @@ def wrap_tool[TReturn](  # noqa: PLR0915
         start_time = time.perf_counter()
         result: TReturn | ToolResult | ToolReturn = await execute_fn(*args, **kwargs)
         duration_ms = (time.perf_counter() - start_time) * 1000
-
         # Convert AgentPool ToolResult to pydantic-ai ToolReturn
         if isinstance(result, ToolResult):
-            result = ToolReturn(
-                return_value=result.structured_content or result.content,
-                content=result.content,
-                metadata=result.metadata,
-            )
+            val = result.structured_content or result.content
+            result = ToolReturn(return_value=val, content=result.content, metadata=result.metadata)
 
         # Post-tool hooks
         if hooks:
@@ -133,6 +128,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                 tool_output=result,
                 duration_ms=duration_ms,
                 session_id=None,
+                env=agent_ctx.agent.env,
             )
 
             # Inject additional context if provided by hooks

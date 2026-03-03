@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-import json
 from typing import TYPE_CHECKING, Any
 
+import anyenv
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -143,7 +143,7 @@ async def calculate_usage_from_parts(
         if isinstance(part, ThinkingPart) and part.content:
             output_text += part.content
         elif isinstance(part, ToolCallPart) and part.args:
-            args_str = json.dumps(part.args) if not isinstance(part.args, str) else part.args
+            args_str = anyenv.dump_json(part.args) if not isinstance(part.args, str) else part.args
             output_text += args_str
     output_tokens = count_tokens(output_text, model_for_count)
 
@@ -201,7 +201,7 @@ def _messages_to_text(messages: Sequence[ModelMessage]) -> str:
                     if isinstance(args, str):
                         text_parts.append(args)
                     elif args:
-                        text_parts.append(json.dumps(args))
+                        text_parts.append(anyenv.dump_json(args))
     return "\n".join(text_parts)
 
 
@@ -258,7 +258,7 @@ async def get_token_breakdown(
     tool_usages: list[TokenUsage] = []
     for tool in tool_schemas:
         schema = _normalize_tool_schema(tool)
-        schema_text = json.dumps(schema)
+        schema_text = anyenv.dump_json(schema)
         token_count = count_tokens(schema_text, model_name)
         tool_name = schema.get("name", "unknown")
         tool_usages.append(TokenUsage(token_count=token_count, label=tool_name))

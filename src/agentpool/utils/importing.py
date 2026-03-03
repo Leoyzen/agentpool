@@ -4,59 +4,11 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from pathlib import Path
-import pkgutil
-from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterator
-
-
-def get_module_source(
-    import_path: str,
-    recursive: bool = False,
-    include_tests: bool = False,
-) -> str:
-    """Get source code from a module or package."""
-    try:
-        module = importlib.import_module(import_path)
-        sources = _get_sources(module, recursive=recursive, include_tests=include_tests)
-        return "\n\n# " + "-" * 40 + "\n\n".join(sources)
-
-    except ImportError as exc:
-        raise ValueError(f"Could not import module: {import_path}") from exc
-
-
-def _get_sources(
-    module: ModuleType,
-    recursive: bool,
-    include_tests: bool,
-) -> Generator[str]:
-    """Generate source code for a module and optionally its submodules."""
-    # Get the module's source code
-    if hasattr(module, "__file__") and module.__file__:
-        path = Path(module.__file__)
-        if _should_include_file(path, include_tests):
-            yield f"# File: {path}\n{inspect.getsource(module)}"
-
-    # If recursive and it's a package, get all submodules
-    if recursive and hasattr(module, "__path__"):
-        for _, name, _ in pkgutil.iter_modules(module.__path__):
-            submodule_path = f"{module.__name__}.{name}"
-            try:
-                submodule = importlib.import_module(submodule_path)
-                yield from _get_sources(submodule, recursive, include_tests)
-            except ImportError:
-                continue
-
-
-def _should_include_file(path: Path, include_tests: bool) -> bool:
-    """Check if a file should be included in the source."""
-    if not include_tests and any(p.startswith("test") for p in path.parts):
-        return False
-    return path.suffix == ".py"
+    from collections.abc import Callable
 
 
 def import_callable(path: str) -> Callable[..., Any]:
@@ -133,49 +85,6 @@ def import_class(path: str) -> type:
         raise ValueError(f"Failed to import class from {path}") from exc
     else:
         return obj
-
-
-def get_pyobject_members(
-    obj: type | ModuleType | Any,
-    *,
-    include_imported: bool = False,
-) -> Iterator[tuple[str, Callable[..., Any]]]:
-    """Get callable members defined in a Python object.
-
-    Works with modules, classes, and instances. Only returns public callable
-    members (functions, methods, etc.) that are defined in the object's module
-    unless include_imported is True.
-
-    Args:
-        obj: Any Python object to inspect (module, class, instance)
-        include_imported: Whether to include imported/inherited callables
-
-    Yields:
-        Tuples of (name, callable) for each public callable
-
-    Example:
-        >>> class MyClass:
-        ...     def method(self): pass
-        ...     def _private(self): pass
-        >>> for name, func in get_pyobject_members(MyClass()):
-        ...     print(name)
-        method
-
-        >>> import my_module
-        >>> for name, func in get_pyobject_members(my_module):
-        ...     print(name)
-        public_function
-    """
-    # Get the module where the object is defined
-    defining_module = obj.__name__ if isinstance(obj, ModuleType) else obj.__module__
-
-    for name, member in inspect.getmembers(obj, inspect.isroutine):
-        if name.startswith("_"):
-            continue
-
-        # Check if callable is defined in the object's module
-        if include_imported or getattr(member, "__module__", None) == defining_module:
-            yield name, member
 
 
 if __name__ == "__main__":

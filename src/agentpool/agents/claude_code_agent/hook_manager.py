@@ -1,23 +1,29 @@
 """Hook manager for ClaudeCodeAgent.
 
 Centralizes all hook-related logic:
-- Built-in hooks (PreCompact, injection)
+- Built-in hooks (injection via PostToolUse)
 - AgentHooks integration
 - Injection consumption from PromptInjectionManager
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING
 
 from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Awaitable, Callable
 
-    from clawd_code_sdk.types import HookContext, HookInput, HookMatcher, SyncHookJSONOutput
+    from clawd_code_sdk.models import (
+        HookContext,
+        HookEvent,
+        HookInput,
+        HookMatcher,
+        SyncHookJSONOutput,
+    )
+    from exxec import ExecutionEnvironment
 
     from agentpool.agents.prompt_injection import PromptInjectionManager
     from agentpool.hooks import AgentHooks
@@ -39,50 +45,47 @@ class ClaudeCodeHookManager:
         *,
         agent_name: str,
         agent_hooks: AgentHooks | None = None,
-        event_queue: asyncio.Queue[Any] | None = None,
-        get_session_id: Callable[[], str | None] | None = None,
         injection_manager: PromptInjectionManager | None = None,
         set_mode: Callable[[str, str], Awaitable[None]] | None = None,
+        env: ExecutionEnvironment | None = None,
     ) -> None:
         """Initialize hook manager.
 
         Args:
             agent_name: Name of the agent (for logging/events)
             agent_hooks: Optional AgentHooks for pre/post tool hooks
-            event_queue: Queue for emitting events (CompactionEvent, etc.)
-            get_session_id: Callable to get current session ID
             injection_manager: Shared injection manager from BaseAgent
             set_mode: Callback to set agent mode (mode_id, category_id)
+            env: Agent's execution environment, passed to command hooks
         """
         self.agent_name = agent_name
         self.agent_hooks = agent_hooks
-        self._event_queue = event_queue
-        self._get_session_id = get_session_id or (lambda: None)
         self._injection_manager = injection_manager
         self._set_mode = set_mode
+        self._env = env
 
-    def build_hooks(self) -> dict[str, list[HookMatcher]]:
+    def build_hooks(self) -> dict[HookEvent, list[HookMatcher]]:
         """Build complete SDK hooks configuration.
 
         Combines:
-        - Built-in hooks (PreCompact, injection via PostToolUse)
+        - Built-in hooks (injection via PostToolUse)
         - AgentHooks (pre/post tool use)
 
         Returns:
             Dictionary mapping hook event names to HookMatcher lists
         """
-        from clawd_code_sdk.types import HookMatcher
+        from clawd_code_sdk.models import HookMatcher
 
         from agentpool.agents.claude_code_agent.converters import build_sdk_hooks_from_agent_hooks
 
-        result: dict[str, list[Any]] = {}
-        # Add PreCompact hook for compaction events
-        result["PreCompact"] = [HookMatcher(matcher=None, hooks=[self._on_pre_compact])]
+        result: dict[HookEvent, list[HookMatcher]] = {}
         # Add PostToolUse hook for injection
         result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[self._on_post_tool_use])]
         # Merge AgentHooks if present
         if self.agent_hooks:
-            agent_hooks = build_sdk_hooks_from_agent_hooks(self.agent_hooks, self.agent_name)
+            agent_hooks = build_sdk_hooks_from_agent_hooks(
+                self.agent_hooks, self.agent_name, env=self._env
+            )
             for event_name, matchers in agent_hooks.items():
                 if event_name in result:
                     result[event_name].extend(matchers)
@@ -90,24 +93,6 @@ class ClaudeCodeHookManager:
                     result[event_name] = matchers
 
         return result
-
-    async def _on_pre_compact(
-        self,
-        input_data: HookInput,
-        tool_use_id: str | None,
-        context: HookContext,
-    ) -> SyncHookJSONOutput:
-        """Handle PreCompact hook by emitting a CompactionEvent."""
-        from agentpool.agents.events import CompactionEvent
-
-        trigger_value = input_data.get("trigger", "auto")
-        trigger: Literal["auto", "manual"] = "manual" if trigger_value == "manual" else "auto"
-        session_id = self._get_session_id() or "unknown"
-        compaction_event = CompactionEvent(session_id=session_id, trigger=trigger, phase="starting")
-        if self._event_queue:
-            await self._event_queue.put(compaction_event)
-
-        return {"continue_": True}
 
     async def _on_post_tool_use(
         self,
@@ -120,15 +105,17 @@ class ClaudeCodeHookManager:
         Consumes pending injection from the shared PromptInjectionManager
         and adds it as additionalContext in the response.
         """
+        from clawd_code_sdk.models import PostToolUseHookSpecificOutput
+
         result: SyncHookJSONOutput = {"continue_": True}
         # Consume pending injection from shared manager
         if self._injection_manager and (injection := await self._injection_manager.consume()):
             tool_name = input_data.get("tool_name", "unknown")
             logger.debug("Injecting context after tool use", agent=self.agent_name, tool=tool_name)
-            result["hookSpecificOutput"] = {
-                "hookEventName": "PostToolUse",
-                "additionalContext": injection,
-            }
+            result["hookSpecificOutput"] = PostToolUseHookSpecificOutput(
+                hookEventName="PostToolUse",
+                additionalContext=injection,
+            )
         if input_data.get("tool_name") == "EnterPlanMode" and self._set_mode:
             await self._set_mode("plan", "mode")
 

@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 from typing import TYPE_CHECKING, Any
 
-from fsspec import AbstractFileSystem
 from upathtools import is_directory
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
@@ -58,11 +57,9 @@ EXTENSION_TO_LANGUAGE: dict[str, str] = {
 def _substitute_metavars(match: Any, fix_pattern: str, source_code: str) -> str:
     """Substitute $METAVARS and $$$METAVARS in fix pattern with captured values."""
     result = fix_pattern
-
     # Handle $$$ multi-match metavars first (greedy match)
     for metavar in re.findall(r"\$\$\$([A-Z_][A-Z0-9_]*)", fix_pattern):
-        captured_list = match.get_multiple_matches(metavar)
-        if captured_list:
+        if captured_list := match.get_multiple_matches(metavar):
             first = captured_list[0]
             last = captured_list[-1]
             start_idx = first.range().start.index
@@ -72,8 +69,7 @@ def _substitute_metavars(match: Any, fix_pattern: str, source_code: str) -> str:
 
     # Handle single $ metavars
     for metavar in re.findall(r"(?<!\$)\$([A-Z_][A-Z0-9_]*)", fix_pattern):
-        captured = match.get_match(metavar)
-        if captured:
+        if captured := match.get_match(metavar):
             result = result.replace(f"${metavar}", captured.text())
 
     return result
@@ -104,13 +100,12 @@ class CodeTools(ResourceProvider):
             diagnostics_config: Configuration for diagnostic tools (server selection, etc.)
         """
         super().__init__(name=name)
-
         self._explicit_env = env
         self._explicit_cwd = cwd
         self._diagnostics_config = diagnostics_config
         self._tools: list[Tool] | None = None
 
-    def _get_env(self, agent_ctx: AgentContext) -> ExecutionEnvironment | None:
+    def _get_env(self, agent_ctx: AgentContext) -> ExecutionEnvironment:
         """Get execution environment (explicit or from agent)."""
         return self._explicit_env or agent_ctx.agent.env
 
@@ -119,23 +114,12 @@ class CodeTools(ResourceProvider):
         if self._explicit_cwd:
             return self._explicit_cwd
         env = self._get_env(agent_ctx)
-        return env.cwd if env else None
+        return env.cwd
 
     def _get_fs(self, agent_ctx: AgentContext) -> AsyncFileSystem:
         """Get filesystem (from env or fallback to local)."""
-        from fsspec.asyn import AsyncFileSystem
-        from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
-        from upathtools.filesystems import AsyncLocalFileSystem
-
         env = self._get_env(agent_ctx)
-        fs = env.get_fs() if env else None
-        match fs:
-            case AsyncFileSystem():
-                return fs
-            case AbstractFileSystem():
-                return AsyncFileSystemWrapper(fs)
-            case _:
-                return AsyncLocalFileSystem()
+        return env.get_fs()
 
     def _resolve_path(self, path: str, agent_ctx: AgentContext) -> str:
         """Resolve a potentially relative path to an absolute path.
@@ -316,14 +300,8 @@ class CodeTools(ResourceProvider):
                 {
                     "text": m.text(),
                     "range": {
-                        "start": {
-                            "line": m.range().start.line,
-                            "column": m.range().start.column,
-                        },
-                        "end": {
-                            "line": m.range().end.line,
-                            "column": m.range().end.column,
-                        },
+                        "start": {"line": m.range().start.line, "column": m.range().start.column},
+                        "end": {"line": m.range().end.line, "column": m.range().end.column},
                     },
                     "kind": m.kind(),
                 }
@@ -343,7 +321,7 @@ class CodeTools(ResourceProvider):
 
         return result
 
-    async def run_diagnostics(self, agent_ctx: AgentContext, path: str) -> str:  # noqa: PLR0911, D417
+    async def run_diagnostics(self, agent_ctx: AgentContext, path: str) -> str:  # noqa: D417
         """Run LSP diagnostics (type checking, linting) on files.
 
         Uses available CLI diagnostic tools (pyright, mypy, ty, oxlint, biome, etc.)
@@ -365,10 +343,6 @@ class CodeTools(ResourceProvider):
         resolved = self._resolve_path(path, agent_ctx)
         fs = self._get_fs(agent_ctx)
         env = self._get_env(agent_ctx)
-
-        if not env:
-            return "Diagnostics unavailable: no execution environment configured"
-
         # Create diagnostics manager with config
         manager = DiagnosticsManager(env, config=self._diagnostics_config)
 
@@ -383,11 +357,7 @@ class CodeTools(ResourceProvider):
             items = []
             if command:
                 items.append(f"```bash\n{command}\n```")
-            await agent_ctx.events.tool_call_progress(
-                message,
-                status="in_progress",
-                items=items if items else None,
-            )
+            await agent_ctx.events.tool_call_progress(message, items=items or None)
 
         # Check if path is directory or file
         try:
@@ -427,11 +397,5 @@ class CodeTools(ResourceProvider):
 
         formatted = format_diagnostics_table(result.diagnostics)
         summary = format_run_summary(result)
-
-        await agent_ctx.events.tool_call_progress(
-            summary,
-            status="in_progress",
-            items=[formatted],
-        )
-
+        await agent_ctx.events.tool_call_progress(summary, status="in_progress", items=[formatted])
         return f"{summary}\n\n{formatted}"

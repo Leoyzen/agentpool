@@ -23,15 +23,14 @@ class ComposioTools(ResourceProvider):
 
     def __init__(self, user_id: str, toolsets: list[str], api_key: str | None = None) -> None:
         from composio import Composio
-        from composio.core.provider._openai import OpenAIProvider
 
         super().__init__(name=f"composio_{user_id}")
         self.user_id = user_id
         key = api_key or os.environ.get("COMPOSIO_API_KEY")
         if key:
-            self.composio = Composio[OpenAIProvider](api_key=key)
+            self.composio = Composio(api_key=key)
         else:
-            self.composio = Composio[OpenAIProvider]()
+            self.composio = Composio()
         self._tools: list[Tool] | None = None
         self._toolkits = toolsets
 
@@ -70,7 +69,7 @@ class ComposioTools(ResourceProvider):
                     tool_slug = tool_def["function"].get("name", "")
                     if tool_slug:
                         fn = self._create_tool_handler(tool_slug)
-                        tool = self.create_tool(fn, schema_override=tool_def["function"])
+                        tool = self.create_tool(fn, schema_override=tool_def["function"])  # type: ignore[arg-type]
                         self._tools.append(tool)
 
         except Exception:

@@ -78,6 +78,22 @@ def get_file_url_obj(url: str, mime: str) -> MultiModalContent | None:
     return None
 
 
+def to_user_content(url: str, mime: str) -> MultiModalContent:
+    if mime.startswith("image/"):
+        mime_typ = mime if mime != "image/*" else None
+        return ImageUrl(url=url, media_type=mime_typ)
+    if mime.startswith("audio/"):
+        mime_typ = mime if mime != "audio/*" else None
+        return AudioUrl(url=url, media_type=mime_typ)
+    if mime.startswith("video/"):
+        mime_typ = mime if mime != "video/*" else None
+        return VideoUrl(url=url, media_type=mime_typ)
+    if mime == "application/pdf" or mime.startswith("application/"):
+        return DocumentUrl(url=url, media_type=mime)
+    # Unknown MIME type - treat as document
+    return DocumentUrl(url=url, media_type=mime)
+
+
 def to_user_content_or_path_ref(
     mime: str,
     url: str,

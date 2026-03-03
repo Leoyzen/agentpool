@@ -239,10 +239,8 @@ async def _serve_websocket(
                     client_done.set()
 
             monitor_task = asyncio.create_task(monitor_websocket())
-            _done, _ = await asyncio.wait(
-                [asyncio.create_task(client_done.wait()), asyncio.create_task(shutdown.wait())],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            tasks = [asyncio.create_task(client_done.wait()), asyncio.create_task(shutdown.wait())]
+            _done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             monitor_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await monitor_task

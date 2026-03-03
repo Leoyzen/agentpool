@@ -3,17 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any
-
-__all__ = ["RpcTask", "RpcTaskKind"]
+from typing import Any, Literal
 
 
-class RpcTaskKind(Enum):
-    """RpcTaskKind represents the kind of task to be executed by the agent."""
-
-    REQUEST = "request"
-    NOTIFICATION = "notification"
+RpcTaskKind = Literal["request", "notification"]
 
 
 @dataclass(slots=True)
@@ -36,7 +29,7 @@ from .state import InMemoryMessageStateStore, MessageStateStore
 from .supervisor import TaskSupervisor
 from .debug import DebugEntry, DebuggingMessageStateStore
 
-__all__ += [
+__all__ = [
     "DebugEntry",
     "DebuggingMessageStateStore",
     "DefaultMessageDispatcher",
@@ -48,6 +41,8 @@ __all__ += [
     "MessageStateStore",
     "NotificationRunner",
     "RequestRunner",
+    "RpcTask",
+    "RpcTaskKind",
     "SenderFactory",
     "TaskSupervisor",
 ]

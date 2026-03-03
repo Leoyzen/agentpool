@@ -69,6 +69,9 @@ class BashTool(Tool[ToolResult]):
     ) -> ToolResult:
         """Execute a shell command and return the output.
 
+        This is the primary tool for running shell commands. It executes the command,
+        waits for completion, and returns the full output in a single call.
+
         Args:
             ctx: Agent context for event emission and environment access
             command: Shell command to execute

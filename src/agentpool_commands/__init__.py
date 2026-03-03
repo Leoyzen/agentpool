@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentpool_commands.base import NodeCommand
 from agentpool_commands.agents import (
     CreateAgentCommand,
     CreateTeamCommand,
@@ -56,78 +55,57 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from slashed import BaseCommand, SlashedCommand
-
-    from agentpool.messaging import MessageNode
+    from slashed import BaseCommand
 
 
-def get_agent_commands(**kwargs: Any) -> Sequence[BaseCommand | type[SlashedCommand]]:
+def get_agent_commands(**kwargs: Any) -> Sequence[BaseCommand]:
     """Get commands that operate primarily on a single agent."""
     command_map = {
-        "enable_clear": ClearCommand,
-        "enable_reset": ResetCommand,
-        "enable_copy_clipboard": CopyClipboardCommand,
-        "enable_share_history": ShareHistoryCommand,
-        "enable_set_model": SetModelCommand,
-        "enable_list_tools": ListToolsCommand,
-        "enable_show_tool": ShowToolCommand,
-        "enable_enable_tool": EnableToolCommand,
-        "enable_disable_tool": DisableToolCommand,
-        "enable_register_tool": RegisterToolCommand,
-        "enable_register_code_tool": RegisterCodeToolCommand,
-        "enable_list_resources": ListResourcesCommand,
-        "enable_show_resource": ShowResourceCommand,
-        "enable_add_resource": AddResourceCommand,
-        "enable_list_prompts": ListPromptsCommand,
-        "enable_show_prompt": ShowPromptCommand,
-        "enable_add_worker": AddWorkerCommand,
-        "enable_remove_worker": RemoveWorkerCommand,
-        "enable_list_workers": ListWorkersCommand,
-        "enable_connect": ConnectCommand,
-        "enable_disconnect": DisconnectCommand,
-        "enable_list_connections": ListConnectionsCommand,
-        "enable_disconnect_all": DisconnectAllCommand,
-        "enable_read": ReadCommand,
-        "enable_add_mcp_server": AddMCPServerCommand,
-        "enable_add_remote_mcp_server": AddRemoteMCPServerCommand,
-        "enable_list_mcp_servers": ListMCPServersCommand,
-        "enable_search_history": SearchHistoryCommand,
-        "enable_get_logs": GetLogsCommand,
+        "enable_clear": ClearCommand(),
+        "enable_reset": ResetCommand(),
+        "enable_copy_clipboard": CopyClipboardCommand(),
+        "enable_share_history": ShareHistoryCommand(),
+        "enable_set_model": SetModelCommand(),
+        "enable_list_tools": ListToolsCommand(),
+        "enable_show_tool": ShowToolCommand(),
+        "enable_enable_tool": EnableToolCommand(),
+        "enable_disable_tool": DisableToolCommand(),
+        "enable_register_tool": RegisterToolCommand(),
+        "enable_register_code_tool": RegisterCodeToolCommand(),
+        "enable_list_resources": ListResourcesCommand(),
+        "enable_show_resource": ShowResourceCommand(),
+        "enable_add_resource": AddResourceCommand(),
+        "enable_list_prompts": ListPromptsCommand(),
+        "enable_show_prompt": ShowPromptCommand(),
+        "enable_add_worker": AddWorkerCommand(),
+        "enable_remove_worker": RemoveWorkerCommand(),
+        "enable_list_workers": ListWorkersCommand(),
+        "enable_connect": ConnectCommand(),
+        "enable_disconnect": DisconnectCommand(),
+        "enable_list_connections": ListConnectionsCommand(),
+        "enable_disconnect_all": DisconnectAllCommand(),
+        "enable_read": ReadCommand(),
+        "enable_add_mcp_server": AddMCPServerCommand(),
+        "enable_add_remote_mcp_server": AddRemoteMCPServerCommand(),
+        "enable_list_mcp_servers": ListMCPServersCommand(),
+        "enable_search_history": SearchHistoryCommand(),
+        "enable_get_logs": GetLogsCommand(),
     }
     return [command for flag, command in command_map.items() if kwargs.get(flag, True)]
 
 
-def get_pool_commands(**kwargs: Any) -> Sequence[BaseCommand | type[SlashedCommand]]:
+def get_pool_commands(**kwargs: Any) -> Sequence[BaseCommand]:
     """Get commands that operate on multiple agents or the pool itself."""
     command_map = {
-        "enable_create_agent": CreateAgentCommand,
-        "enable_create_team": CreateTeamCommand,
-        "enable_list_agents": ListAgentsCommand,
-        "enable_show_agent": ShowAgentCommand,
-        "enable_edit_agent_file": EditAgentFileCommand,
-        "enable_list_pools": ListPoolsCommand,
-        "enable_spawn": SpawnCommand,
+        "enable_create_agent": CreateAgentCommand(),
+        "enable_create_team": CreateTeamCommand(),
+        "enable_list_agents": ListAgentsCommand(),
+        "enable_show_agent": ShowAgentCommand(),
+        "enable_edit_agent_file": EditAgentFileCommand(),
+        "enable_list_pools": ListPoolsCommand(),
+        "enable_spawn": SpawnCommand(),
     }
     return [command for flag, command in command_map.items() if kwargs.get(flag, True)]
-
-
-def filter_commands_for_node(
-    commands: Sequence[BaseCommand | type[SlashedCommand]],
-    node: MessageNode[Any, Any],
-) -> list[BaseCommand | type[SlashedCommand]]:
-    """Filter commands to those supporting the given node type.
-
-    Args:
-        commands: Commands to filter
-        node: The node to check compatibility with
-    """
-    result: list[BaseCommand | type[SlashedCommand]] = []
-    for cmd in commands:
-        cmd_cls = cmd if isinstance(cmd, type) else type(cmd)
-        if issubclass(cmd_cls, NodeCommand) and not cmd_cls.supports_node(node):
-            continue
-        result.append(cmd)
-    return result
 
 
 def get_commands(
@@ -168,7 +146,7 @@ def get_commands(
     enable_edit_agent_file: bool = True,
     enable_list_pools: bool = True,
     enable_spawn: bool = True,
-) -> list[BaseCommand | type[SlashedCommand]]:
+) -> list[BaseCommand]:
     """Get all built-in commands."""
     agent_kwargs = {
         "enable_clear": enable_clear,
@@ -211,7 +189,4 @@ def get_commands(
         "enable_spawn": enable_spawn,
     }
 
-    return [
-        *get_agent_commands(**agent_kwargs),
-        *get_pool_commands(**pool_kwargs),
-    ]
+    return [*get_agent_commands(**agent_kwargs), *get_pool_commands(**pool_kwargs)]

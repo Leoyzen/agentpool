@@ -29,7 +29,6 @@ from acp.task import (
     NotificationRunner,
     RequestRunner,
     RpcTask,
-    RpcTaskKind,
     TaskSupervisor,
 )
 
@@ -94,8 +93,7 @@ class Connection:
         self._text_reader = TextReceiveStream(reader)
         self._next_request_id = 0
         self._state = state_store or InMemoryMessageStateStore()
-        self._tasks = TaskSupervisor(source="acp.Connection")
-        self._tasks.add_error_handler(self._on_task_error)
+        self._tasks = TaskSupervisor(source="acp.Connection", error_handlers=[self._on_task_error])
         self._queue = queue or InMemoryMessageQueue()
         self._closed = False
         self._sender = (sender_factory or MessageSender)(self._writer, self._tasks)
@@ -151,8 +149,8 @@ class Connection:
         This approach has no 64KB line limit unlike asyncio's readline().
         Pattern follows MCP SDK's stdio client implementation.
         """
+        buffer = ""
         try:
-            buffer = ""
             async for chunk in self._text_reader:
                 lines = (buffer + chunk).split("\n")
                 buffer = lines.pop()  # Keep incomplete line in buffer
@@ -179,11 +177,9 @@ class Connection:
     async def _process_message(self, message: dict[str, Any]) -> None:
         method = message.get("method")
         has_id = "id" in message
-        if method is not None and has_id:
-            await self._queue.publish(RpcTask(RpcTaskKind.REQUEST, message))
-            return
-        if method is not None and not has_id:
-            await self._queue.publish(RpcTask(RpcTaskKind.NOTIFICATION, message))
+        if method is not None:
+            task = RpcTask("request" if has_id else "notification", message)
+            await self._queue.publish(task)
             return
         if has_id:
             await self._handle_response(message)
@@ -243,18 +239,14 @@ class Connection:
             await self._handler(message["method"], message.get("params"), True)
 
     async def _handle_response(self, message: dict[str, Any]) -> None:
-        request_id = message["id"]
-        result = message.get("result")
-        if "result" in message:
-            self._state.resolve_outgoing(request_id, result)
-            return
-        if "error" in message:
-            dct = message.get("error") or {}
-            code = dct.get("code", -32603)
-            error = RequestError(code, dct.get("message", "Error"), dct.get("data"))
-            self._state.reject_outgoing(request_id, error)
-            return
-        self._state.resolve_outgoing(request_id, None)
+        match message:
+            case {"id": request_id, "result": result}:
+                self._state.resolve_outgoing(request_id, result)
+            case {"id": request_id, "error": {"code": code, "message": err, "data": data}}:
+                error = RequestError(code, err or "Error", data)
+                self._state.reject_outgoing(request_id, error)
+            case {"id": request_id}:
+                self._state.resolve_outgoing(request_id, None)
 
     def _on_receive_error(self, task: asyncio.Task[Any], exc: BaseException) -> None:
         logging.exception("Receive loop failed", exc_info=exc)

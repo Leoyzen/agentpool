@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import anyenv
 from fastapi import APIRouter, HTTPException
 
+from agentpool.utils.time_utils import datetime_to_ms
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
     App,
@@ -44,33 +45,32 @@ async def get_app(state: StateDep) -> App:
 def _project_data_to_response(data: ProjectData) -> Project:
     """Convert ProjectData to OpenCode Project response."""
     working_path = Path(data.worktree)
-    vcs_dir: str | None = None
-    if data.vcs == "git":
-        vcs_dir = str(working_path / ".git")
-    elif data.vcs == "hg":
-        vcs_dir = str(working_path / ".hg")
-
+    match data.vcs:
+        case "git":
+            vcs_dir: str | None = str(working_path / ".git")
+        case "hg":
+            vcs_dir = str(working_path / ".hg")
+        case _:
+            vcs_dir = None
     return Project(
         id=data.project_id,
         worktree=data.worktree,
         vcs_dir=vcs_dir,
         vcs=data.vcs,
-        time=ProjectTime(created=int(data.created_at.timestamp() * 1000)),
+        time=ProjectTime(created=datetime_to_ms(data.created_at)),
     )
 
 
 async def _get_current_project(state: StateDep) -> ProjectData:
     """Get or create the current project from storage."""
-    storage = state.pool.storage
-    project_store = ProjectStore(storage)
+    project_store = ProjectStore(state.storage)
     return await project_store.get_or_create(state.working_dir)
 
 
 @router.get("/project")
 async def list_projects(state: StateDep) -> list[Project]:
     """List all projects."""
-    storage = state.pool.storage
-    project_store = ProjectStore(storage)
+    project_store = ProjectStore(state.storage)
     projects = await project_store.list_recent(limit=50)
     return [_project_data_to_response(p) for p in projects]
 
@@ -99,7 +99,7 @@ async def update_project(project_id: str, update: ProjectUpdateRequest, state: S
     Raises:
         HTTPException: If project not found
     """
-    store = ProjectStore(state.pool.storage)
+    store = ProjectStore(state.storage)
     project_data = None
     # Update name if provided
     if update.name is not None:

@@ -1,11 +1,21 @@
 """Common/shared models used across multiple domains."""
 
-from typing import Self
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import Field
 
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+
+
+if TYPE_CHECKING:
+    from pydantic_ai.usage import UsageBase
+
+    from agentpool.utils.streams import FileChange
+
+FileDiffStatus = Literal["added", "deleted", "modified"]
 
 
 class TimeCreatedUpdated(OpenCodeBaseModel):
@@ -53,6 +63,23 @@ class Tokens(OpenCodeBaseModel):
     output: int = 0
     reasoning: int = 0
     cache: TokenCache = Field(default_factory=TokenCache)
+    total: int | None = None
+
+    @classmethod
+    def from_pydantic_ai(cls, usage: UsageBase) -> Tokens:
+        """Create from a pydantic-ai Usage object.
+
+        Args:
+            usage: pydantic-ai request usage with token counts.
+        """
+        reasoning = usage.details.get("reasoning_tokens", 0)
+        return cls(
+            input=usage.input_tokens,
+            output=usage.output_tokens,
+            reasoning=reasoning,
+            cache=TokenCache(read=usage.cache_read_tokens, write=usage.cache_write_tokens),
+            total=usage.total_tokens + reasoning,
+        )
 
 
 class TextSpan(OpenCodeBaseModel):
@@ -71,3 +98,26 @@ class FileDiff(OpenCodeBaseModel):
     after: str
     additions: int
     deletions: int
+    status: FileDiffStatus | None = None
+
+    @classmethod
+    def from_file_change(cls, change: FileChange) -> Self:
+        """Create a FileDiff from a FileChange."""
+        diff_text = change.to_unified_diff()
+        match change.operation:
+            case "create":
+                status: FileDiffStatus | None = "added"
+            case "delete":
+                status = "deleted"
+            case "edit" | "write":
+                status = "modified"
+            case _:
+                status = None
+        return cls(
+            file=change.path,
+            before=change.old_content or "",
+            after=change.new_content or "",
+            additions=diff_text.count("\n+"),
+            deletions=diff_text.count("\n-"),
+            status=status,
+        )

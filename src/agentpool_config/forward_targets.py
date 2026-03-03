@@ -113,7 +113,7 @@ class ConnectionConfig(Schema):
         )
         source.connections.set_wait_state(target, wait=self.wait_for_completion)
 
-    def get_node(self, agents: Sequence[MessageNode[Any, Any]]) -> MessageNode[Any, Any]:
+    def get_node(self, nodes: Sequence[MessageNode[Any, Any]]) -> MessageNode[Any, Any]:
         raise NotImplementedError
 
 
@@ -203,7 +203,7 @@ class FileConnectionConfig(ConnectionConfig):
     )
     """File encoding to use."""
 
-    def get_node(self, agents: Sequence[MessageNode[Any, Any]]) -> MessageNode[Any, Any]:
+    def get_node(self, nodes: Sequence[MessageNode[Any, Any]]) -> MessageNode[Any, Any]:
         from agentpool import Agent
 
         agent_name = f"file_writer_{Path(self.path).stem}"
@@ -268,10 +268,11 @@ class CallableConnectionConfig(ConnectionConfig):
     kw_args: dict[str, Any] = Field(default_factory=dict, title="Additional arguments")
     """Additional kwargs to pass to the callable."""
 
-    def get_node(self, agents: Sequence[MessageNode[Any, Any]]) -> MessageNode[Any, Any]:
+    def get_node(self, nodes: Sequence[MessageNode[Any, Any]]) -> MessageNode[Any, Any]:
         from agentpool import Agent
+        from agentpool.utils.inspection import get_fn_name
 
-        return Agent(model=self.get_model(), name=self.callable.__name__)
+        return Agent(model=self.get_model(), name=get_fn_name(self.callable))
 
     async def process_message(self, message: ChatMessage[Any]) -> Any:
         """Process a message through the callable.

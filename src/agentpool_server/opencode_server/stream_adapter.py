@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import FunctionToolCallEvent
+from pydantic_ai import FunctionToolCallEvent, RequestUsage
 from pydantic_ai.messages import (
     PartDeltaEvent,
     PartStartEvent,
@@ -43,9 +43,9 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     SessionCompactedEvent,
     SessionErrorEvent,
-    TokenCache,
     Tokens,
 )
+from agentpool_server.opencode_server.models.events import FileEditedEvent
 from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     StepFinishPart,
@@ -66,8 +66,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 
     from agentpool.agents.events import ToolCallContentItem
-    from agentpool.agents.events.events import RichAgentStreamEvent
-    from agentpool.messaging import ChatMessage
+    from agentpool.agents.events.events import RichAgentStreamEvent, SubAgentType
+    from agentpool.messaging.messages import TokenCost
     from agentpool_server.opencode_server.models import MessageWithParts
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
@@ -81,34 +81,27 @@ class OpenCodeStreamAdapter:
 
     Owns all mutable tracking state (tool parts, text accumulation, token
     counters). Yields OpenCode ``Event`` objects ready for broadcasting.
-
-    The adapter does NOT own:
-    - Broadcasting (caller does ``state.broadcast_event``)
-    - Agent invocation (caller provides the async iterator)
-    - Message creation (caller sets up user/assistant messages)
-    - Storage persistence (caller persists after streaming)
-    - LSP warmup (caller provides ``on_file_paths`` callback)
-
-    Args:
-        session_id: The OpenCode session ID.
-        assistant_msg_id: The assistant message ID.
-        assistant_msg: The mutable assistant message to append parts to.
-        working_dir: Working directory for path context.
-        on_file_paths: Optional callback invoked with file paths discovered during
-            tool progress events (used for LSP warmup).
     """
 
     session_id: str
+    """The OpenCode session ID."""
+
     assistant_msg_id: str
+    """The assistant message ID."""
+
     assistant_msg: MessageWithParts
+    """The mutable assistant message to append parts to."""
+
     working_dir: str
+    """Working directory for path context."""
+
     on_file_paths: Callable[[list[str]], None] | None = None
+    """Optional callback invoked with file paths discovered during tool progress events."""
 
     # --- mutable tracking state ---
     _response_text: str = field(default="", init=False)
-    _input_tokens: int = field(default=0, init=False)
-    _output_tokens: int = field(default=0, init=False)
-    _total_cost: float = field(default=0.0, init=False)
+    _usage: RequestUsage = field(default_factory=RequestUsage, init=False)
+    _cost_info: TokenCost | None = field(default=None, init=False)
 
     _tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
     _tool_outputs: dict[str, str] = field(default_factory=dict, init=False)
@@ -128,16 +121,12 @@ class OpenCodeStreamAdapter:
         return self._response_text
 
     @property
-    def input_tokens(self) -> int:
-        return self._input_tokens
+    def usage(self) -> RequestUsage:
+        return self._usage
 
     @property
-    def output_tokens(self) -> int:
-        return self._output_tokens
-
-    @property
-    def total_cost(self) -> float:
-        return self._total_cost
+    def cost_info(self) -> TokenCost | None:
+        return self._cost_info
 
     @property
     def text_part(self) -> TextPart | None:
@@ -169,8 +158,6 @@ class OpenCodeStreamAdapter:
         streamed), the step-finish part, and the final text timing update.
         """
         response_time = now_ms()
-        start = self._stream_start_ms
-
         # Final text part
         if self._response_text and self._text_part is None:
             # Text was never streamed incrementally — create a text part now
@@ -179,7 +166,7 @@ class OpenCodeStreamAdapter:
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
                 text=self._response_text,
-                time=TimeStartEndOptional(start=start, end=response_time),
+                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
             )
             self.assistant_msg.parts.append(text_part)
             yield PartUpdatedEvent.create(text_part)
@@ -190,24 +177,17 @@ class OpenCodeStreamAdapter:
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
                 text=self._response_text,
-                time=TimeStartEndOptional(start=start, end=response_time),
+                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
             )
             self.assistant_msg.update_part(final_text_part)
 
         # Step finish
-        cache = TokenCache(read=0, write=0)
-        tokens = Tokens(
-            cache=cache,
-            input=self._input_tokens,
-            output=self._output_tokens,
-            reasoning=0,
-        )
         step_finish = StepFinishPart(
             id=identifier.ascending("part"),
             message_id=self.assistant_msg_id,
             session_id=self.session_id,
-            tokens=tokens,
-            cost=self._total_cost,
+            tokens=Tokens.from_pydantic_ai(self._usage),
+            cost=float(self._cost_info.total_cost) if self._cost_info else 0.0,
         )
         self.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
@@ -262,7 +242,8 @@ class OpenCodeStreamAdapter:
                 yield from self._on_tool_complete(tool_call_id, result, event_metadata)
 
             case StreamCompleteEvent(message=msg) if msg:
-                self._on_stream_complete(msg)
+                self._usage = msg.usage
+                self._cost_info = msg.cost_info
 
             case SubAgentEvent(
                 source_name=source_name,
@@ -317,13 +298,12 @@ class OpenCodeStreamAdapter:
         if not delta or not delta.strip():
             return
 
-        reasoning_part_id = identifier.ascending("part")
         self._reasoning_part = ReasoningPart(
-            id=reasoning_part_id,
+            id=identifier.ascending("part"),
             message_id=self.assistant_msg_id,
             session_id=self.session_id,
             text=delta,
-            time=TimeStartEndOptional(start=now_ms()),
+            time=TimeStartEndOptional.now(),
         )
         self.assistant_msg.parts.append(self._reasoning_part)
         yield PartUpdatedEvent.create(self._reasoning_part)
@@ -361,18 +341,15 @@ class OpenCodeStreamAdapter:
             # Update existing part with the custom title
             existing = self._tool_parts[tool_call_id]
             self._tool_inputs[tool_call_id] = ui_input or self._tool_inputs.get(tool_call_id, {})
-            running_state = ToolStateRunning(
-                time=TimeStart(start=self._stream_start_ms),
-                input=self._tool_inputs[tool_call_id],
-                title=title,
-            )
+            start = TimeStart(start=self._stream_start_ms)
+            state = ToolStateRunning(time=start, input=self._tool_inputs[tool_call_id], title=title)
             updated = ToolPart(
                 id=existing.id,
                 message_id=existing.message_id,
                 session_id=existing.session_id,
                 tool=existing.tool,
                 call_id=existing.call_id,
-                state=running_state,
+                state=state,
             )
             self._tool_parts[tool_call_id] = updated
             self.assistant_msg.update_part(updated)
@@ -381,15 +358,13 @@ class OpenCodeStreamAdapter:
             # Create new tool part
             self._tool_inputs[tool_call_id] = ui_input
             self._tool_outputs[tool_call_id] = ""
-            ts = TimeStart(start=now_ms())
-            tool_state = ToolStateRunning(time=ts, input=ui_input, title=title)
             tool_part = ToolPart(
                 id=identifier.ascending("part"),
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
                 tool=tool_name,
                 call_id=tool_call_id,
-                state=tool_state,
+                state=ToolStateRunning(time=TimeStart.now(), input=ui_input, title=title),
             )
             self._tool_parts[tool_call_id] = tool_part
             self.assistant_msg.parts.append(tool_part)
@@ -402,20 +377,16 @@ class OpenCodeStreamAdapter:
         tool_name = tc_part.tool_name
         raw_input = safe_args_as_dict(tc_part)
         ui_input = _convert_params_for_ui(raw_input)
-
         self._tool_inputs[tool_call_id] = ui_input
         self._tool_outputs[tool_call_id] = ""
-
         rich_info = derive_rich_tool_info(tool_name, raw_input)
-        ts = TimeStart(start=now_ms())
-        tool_state = ToolStateRunning(time=ts, input=ui_input, title=rich_info.title)
         tool_part = ToolPart(
             id=identifier.ascending("part"),
             message_id=self.assistant_msg_id,
             session_id=self.session_id,
             tool=tool_name,
             call_id=tool_call_id,
-            state=tool_state,
+            state=ToolStateRunning(time=TimeStart.now(), input=ui_input, title=rich_info.title),
         )
         self._tool_parts[tool_call_id] = tool_part
         self.assistant_msg.parts.append(tool_part)
@@ -443,8 +414,12 @@ class OpenCodeStreamAdapter:
                 case LocationContentItem(path=path):
                     file_paths.append(path)
 
-        if file_paths and self.on_file_paths is not None:
-            self.on_file_paths(file_paths)
+        if file_paths:
+            if self.on_file_paths is not None:
+                self.on_file_paths(file_paths)
+            # Emit file.edited for each file path (matches OpenCode's edit/write/patch tools)
+            for fp in file_paths:
+                yield FileEditedEvent.create(file=fp)
 
         if new_output:
             self._tool_outputs[tool_call_id] = self._tool_outputs.get(tool_call_id, "") + new_output
@@ -452,12 +427,11 @@ class OpenCodeStreamAdapter:
         if tool_call_id in self._tool_parts:
             existing = self._tool_parts[tool_call_id]
             existing_title = _extract_title_from_tool_state(existing.state)
-            tool_input = self._tool_inputs.get(tool_call_id, {})
             accumulated_output = self._tool_outputs.get(tool_call_id, "")
             tool_state = ToolStateRunning(
-                time=TimeStart(start=now_ms()),
+                time=TimeStart.now(),
                 title=title or existing_title,
-                input=tool_input,
+                input=self._tool_inputs.get(tool_call_id, {}),
                 metadata={"output": accumulated_output} if accumulated_output else None,
             )
             updated = ToolPart(
@@ -477,7 +451,7 @@ class OpenCodeStreamAdapter:
             self._tool_inputs[tool_call_id] = ui_input
             accumulated_output = self._tool_outputs.get(tool_call_id, "")
             tool_state = ToolStateRunning(
-                time=TimeStart(start=now_ms()),
+                time=TimeStart.now(),
                 input=ui_input,
                 title=title or tool_name or "Running...",
                 metadata={"output": accumulated_output} if accumulated_output else None,
@@ -503,23 +477,19 @@ class OpenCodeStreamAdapter:
         event_metadata: dict[str, Any] | None,
     ) -> Iterator[Event]:
         existing = self._tool_parts[tool_call_id]
-        result_str = str(result) if result else ""
         tool_input = self._tool_inputs.get(tool_call_id, {})
-        is_error = isinstance(result, dict) and result.get("error")
-        start = self._stream_start_ms
-
         new_state: ToolStateCompleted | ToolStateError
-        if is_error:
-            t = TimeStartEnd(start=start, end=now_ms())
+        if isinstance(result, dict) and result.get("error"):
+            t = TimeStartEnd(start=self._stream_start_ms, end=now_ms())
             error_string = str(result.get("error", "Unknown error"))
             new_state = ToolStateError(error=error_string, input=tool_input, time=t)
         else:
             new_state = ToolStateCompleted(
                 title=f"Completed {existing.tool}",
                 input=tool_input,
-                output=result_str,
+                output=str(result) if result else "",
                 metadata=event_metadata or {},
-                time=TimeStartEndCompacted(start=start, end=now_ms()),
+                time=TimeStartEndCompacted(start=self._stream_start_ms, end=now_ms()),
             )
 
         updated = ToolPart(
@@ -534,22 +504,12 @@ class OpenCodeStreamAdapter:
         self.assistant_msg.update_part(updated)
         yield PartUpdatedEvent.create(updated)
 
-    # --- stream complete ---
-
-    def _on_stream_complete(self, msg: ChatMessage[Any]) -> None:
-        """Extract token usage and cost from the completed stream message."""
-        if msg.usage:
-            self._input_tokens = msg.usage.input_tokens or 0
-            self._output_tokens = msg.usage.output_tokens or 0
-        if msg.cost_info and msg.cost_info.total_cost:
-            self._total_cost = float(msg.cost_info.total_cost)
-
     # --- sub-agent / team events ---
 
     def _on_subagent(
         self,
         source_name: str,
-        source_type: str,
+        source_type: SubAgentType,
         wrapped_event: RichAgentStreamEvent[Any],
         depth: int,
     ) -> Iterator[Event]:
@@ -557,21 +517,23 @@ class OpenCodeStreamAdapter:
 
         match wrapped_event:
             case StreamCompleteEvent(message=msg):
-                icon = "⚡" if source_type == "team_parallel" else "→"
-                type_label = (
-                    " (parallel)"
-                    if source_type == "team_parallel"
-                    else " (sequential)"
-                    if source_type == "team_sequential"
-                    else ""
-                )
+                match source_type:
+                    case "team_parallel":
+                        type_label = " (parallel)"
+                        icon = "⚡"
+                    case "team_sequential":
+                        type_label = " (sequential)"
+                        icon = "→"
+                    case _:
+                        type_label = ""
+                        icon = "→"
                 indicator = f"{indent}{icon} {source_name}{type_label}"
                 indicator_part = TextPart(
                     id=identifier.ascending("part"),
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
                     text=indicator,
-                    time=TimeStartEndOptional(start=now_ms()),
+                    time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(indicator_part)
                 yield PartUpdatedEvent.create(indicator_part)
@@ -582,7 +544,7 @@ class OpenCodeStreamAdapter:
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
                     text=content,
-                    time=TimeStartEndOptional(start=now_ms()),
+                    time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(content_part)
                 yield PartUpdatedEvent.create(content_part)
@@ -595,7 +557,7 @@ class OpenCodeStreamAdapter:
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
                     text=f"{indent}  ├─ {tool_name}: {preview}",
-                    time=TimeStartEndOptional(start=now_ms()),
+                    time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(summary_part)
                 yield PartUpdatedEvent.create(summary_part)

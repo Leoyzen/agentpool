@@ -49,7 +49,6 @@ if TYPE_CHECKING:
         StreamWithCommandsEvent,
     )
     from agentpool.agents.modes import ConfigOptionChanged, ModeCategory, ModeCategoryId
-    from agentpool.agents.native_agent import Agent
     from agentpool.common_types import (
         AgentName,
         AnyEventHandlerType,
@@ -62,6 +61,7 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
     from agentpool.sessions import SessionData
+    from agentpool.storage import StorageManager
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
@@ -171,6 +171,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
+        storage: StorageManager | None = None,
     ) -> None:
         """Initialize base agent with shared infrastructure.
 
@@ -190,6 +191,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             event_handlers: Event handlers for this agent
             commands: Slash commands to register with this agent
             hooks: Agent hooks for intercepting agent behavior at run and tool events
+            storage: Optional per-agent StorageManager. Falls back to pool.storage if not provided.
         """
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
@@ -206,13 +208,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             agent_pool=agent_pool,
             enable_logging=enable_logging,
             event_configs=event_configs,
+            storage=storage,
         )
         self._infinite = False
         self.deps_type = deps_type  # or type(None)
         self._background_task: asyncio.Task[ChatMessage[Any]] | None = None
         self._event_queue: asyncio.Queue[RichAgentStreamEvent[Any]] = asyncio.Queue()
-        storage = agent_pool.storage if agent_pool else None
-        self.conversation = MessageHistory(storage=storage)
+        self.conversation = MessageHistory(storage=self.storage)
         match env:
             case ExecutionEnvironment():
                 self.env = env
@@ -224,7 +226,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._output_type: type[TResult] = output_type
         self.tools = ToolManager()
         handlers = resolve_event_handlers(event_handlers)
-        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
+        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)  # ty: ignore[invalid-assignment]
         self.hooks = hooks
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
@@ -255,12 +257,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
     @overload
     def __and__(  # if other doesnt define deps, we take the agents one
-        self, other: ProcessorCallback[Any] | Team[TDeps] | Agent[TDeps, Any]
+        self, other: ProcessorCallback[Any] | MessageNode[TDeps, Any]
     ) -> Team[TDeps]: ...
 
     @overload
     def __and__(  # otherwise, we dont know and deps is Any
-        self, other: ProcessorCallback[Any] | Team[Any] | Agent[Any, Any]
+        self, other: ProcessorCallback[Any] | MessageNode[Any, Any]
     ) -> Team[Any]: ...
 
     def __and__(self, other: MessageNode[Any, Any] | ProcessorCallback[Any]) -> Team[Any]:
@@ -276,8 +278,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         match other:
             case Team():
                 return Team([self, *other.nodes])
-            case Callable():
-                agent_2 = Agent.from_callback(other, agent_pool=self.agent_pool)
+            case Callable():  # ty: ignore[invalid-match-pattern]
+                agent_2 = Agent.from_callback(other, agent_pool=self.agent_pool)  # ty: ignore[no-matching-overload]
                 return Team([self, agent_2])
             case MessageNode():
                 return Team([self, other])
@@ -457,7 +459,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             latest = None
             while (max_count is None or count < max_count) and not self._cancelled:
                 try:
-                    agent_ctx = self.get_context()
+                    agent_ctx = self.get_context(input_provider=kwargs.get("input_provider"))
                     current_prompts = [
                         call_with_context(p, agent_ctx, **kwargs) if callable(p) else p
                         for p in prompt
@@ -604,7 +606,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self.session_id = session_id or generate_session_id()
             user_prompts = [str(p) for p in prompts if isinstance(p, str)]
             initial_prompt = user_prompts[-1] if user_prompts else None
-            await self.log_session(initial_prompt, model=self.model_name)
+            await self.log_session(
+                initial_prompt, model=self.model_name, agent_type=self.AGENT_TYPE
+            )
         elif session_id and self.session_id != session_id:
             self.session_id = session_id
 
@@ -712,10 +716,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if self.hooks:
                 pre_run_result = await self.hooks.run_pre_run_hooks(
                     agent_name=self.name,
-                    prompt=user_msg.content
-                    if isinstance(user_msg.content, str)
-                    else str(user_msg.content),
+                    prompt=str(user_msg.content),  # TODO: allow UserContent for hook?
                     session_id=self.session_id,
+                    env=self.env,
                 )
                 if pre_run_result.get("decision") == "deny":
                     reason = pre_run_result.get("reason", "Blocked by pre-run hook")
@@ -754,14 +757,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if final_message is not None:
             # Execute post-run hooks
             if self.hooks:
-                prompt_str = (
-                    user_msg.content if isinstance(user_msg.content, str) else str(user_msg.content)
-                )
                 await self.hooks.run_post_run_hooks(
                     agent_name=self.name,
-                    prompt=prompt_str,
+                    prompt=str(user_msg.content),
                     result=final_message.content,
                     session_id=self.session_id,
+                    env=self.env,
                 )
 
             # Emit signal (always - for event handlers)
@@ -790,10 +791,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Command output and completion events
         """
-        from slashed.events import (
-            CommandExecutedEvent,
-            CommandOutputEvent as SlashedCommandOutputEvent,
-        )
+        from slashed import CommandExecutedEvent, CommandOutputEvent as SlashedCommandOutputEvent
 
         from agentpool.agents.events import CommandCompleteEvent, CommandOutputEvent
 
@@ -812,9 +810,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         cmd_ctx = self._command_store.create_context(data=self.get_context())
         command_str = f"{cmd_name} {args}".strip()
         try:
-            execute_task = asyncio.create_task(
-                self._command_store.execute_command(command_str, cmd_ctx)
-            )
+            coro = self._command_store.execute_command(command_str, cmd_ctx)
+            execute_task = asyncio.create_task(coro)
             success = True
             # Yield events from queue as command runs
             while not execute_task.done():
@@ -970,11 +967,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
 
     def is_cancelled(self) -> bool:
-        """Check if the agent has been cancelled.
-
-        Returns:
-            True if cancellation was requested
-        """
+        """Check if the agent has been cancelled."""
         return self._cancelled
 
     async def interrupt(self) -> None:

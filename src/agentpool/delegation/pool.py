@@ -6,7 +6,7 @@ import asyncio
 from asyncio import Lock
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import os
-from typing import TYPE_CHECKING, Any, Self, overload
+from typing import TYPE_CHECKING, Any, Self, assert_never, overload
 
 from anyenv import ProcessManager
 import anyio
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
     from upathtools import JoinablePathLike
 
-    from agentpool.agents import Agent
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import AgentName, AnyEventHandlerType
     from agentpool.delegation.base_team import BaseTeam
@@ -90,10 +89,10 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.models.manifest import AgentsManifest
         from agentpool.observability import registry
         from agentpool.prompts.manager import PromptManager
-        from agentpool.sessions import SessionManager
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
-        from agentpool.utils.streams import FileOpsTracker, TodoTracker
+        from agentpool.utils.streams import FileOpsTracker
+        from agentpool.utils.todos import TodoTracker
         from agentpool.vfs_registry import VFSRegistry
         from agentpool_toolsets.builtin.debug import install_memory_handler
 
@@ -101,10 +100,10 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         match manifest:
             case None:
                 self.manifest = AgentsManifest()
-            case str() | os.PathLike() | UPath():
-                self.manifest = AgentsManifest.from_file(manifest)
             case AgentsManifest():
                 self.manifest = manifest
+            case str() | os.PathLike() | UPath():
+                self.manifest = AgentsManifest.from_file(manifest)
             case _:
                 raise ValueError(f"Invalid config type: {type(manifest)}")
         registry.configure_observability(self.manifest.observability)
@@ -118,8 +117,6 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         self.vfs_registry = VFSRegistry()
         for name, resource_config in self.manifest.resources.items():
             self.vfs_registry.register_from_config(name, resource_config)
-        session_store = self.manifest.storage.get_session_store()
-        self.sessions = SessionManager(pool=self, store=session_store)
         self.event_handlers = event_handlers or []
         self.connection_registry = ConnectionRegistry()
         servers = self.manifest.get_mcp_servers()
@@ -169,9 +166,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 teams = list(self.teams.values())
                 for agent in agents:
                     agent.tools.add_provider(aggregating_provider)
-                # Initialize storage and sessions sequentially (they share the same DB)
+                # Initialize storage
                 await self.exit_stack.enter_async_context(self.storage)
-                await self.exit_stack.enter_async_context(self.sessions)
                 # Initialize agents and teams (can be parallel)
                 comps: list[AbstractAsyncContextManager[Any]] = [*agents, *teams]
                 node_inits = [self.exit_stack.enter_async_context(c) for c in comps]
@@ -358,7 +354,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.agents.base_agent import BaseAgent
 
         filter_type = agent_type or BaseAgent
-        return {i.name: i for i in self._items.values() if isinstance(i, filter_type)}
+        return {i.name: i for i in self._items.values() if isinstance(i, filter_type)}  # ty: ignore[invalid-return-type]
 
     @property
     def all_agents(self) -> dict[str, BaseAgent[Any, Any]]:
@@ -378,8 +374,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         agents = self.all_agents
         if not agents:
-            msg = "No agents available in pool"
-            raise RuntimeError(msg)
+            raise RuntimeError("No agents available in pool")
 
         if self._main_agent_name:
             if self._main_agent_name not in agents:
@@ -451,7 +446,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     @overload
     def get_agent[TResult = str](
         self,
-        agent: AgentName | Agent[Any, str],
+        agent: AgentName | BaseAgent[Any, Any],
         *,
         output_type: type[TResult] = str,  # type: ignore[assignment]
     ) -> BaseAgent[TPoolDeps, TResult]: ...
@@ -459,7 +454,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     @overload
     def get_agent[TCustomDeps, TResult = str](
         self,
-        agent: AgentName | Agent[Any, str],
+        agent: AgentName | BaseAgent[Any, Any],
         *,
         deps_type: type[TCustomDeps],
         output_type: type[TResult] = str,  # type: ignore[assignment]
@@ -467,7 +462,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
 
     def get_agent(
         self,
-        agent: AgentName | Agent[Any, str],
+        agent: AgentName | BaseAgent[Any, Any],
         *,
         deps_type: Any | None = None,
         output_type: Any = str,
@@ -494,7 +489,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         from agentpool.agents.base_agent import BaseAgent
 
-        base = agent if isinstance(agent, BaseAgent) else self.get_agents()[agent]
+        match agent:
+            case BaseAgent():
+                base = agent
+            case str():
+                base = self.get_agents()[agent]
+            case _ as unreachable:
+                assert_never(unreachable)  # ty: ignore[type-assertion-failure]
         # Use custom deps if provided, otherwise use shared deps
         # base.context.data = deps if deps is not None else self.shared_deps
         base.deps_type = deps_type

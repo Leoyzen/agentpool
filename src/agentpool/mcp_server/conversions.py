@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         ContentBlock,
         PromptMessage,
         SamplingMessage,
+        SamplingMessageContentBlock,
         TextResourceContents,
     )
     from pydantic_ai import ModelRequestPart, ModelResponsePart, UserContent
@@ -48,13 +49,13 @@ def to_mcp_messages(
         case UserPromptPart(content=content_items):
             for item in content_items:
                 match item:
-                    case BinaryContent() if item.is_audio:
-                        encoded = base64.b64encode(item.data).decode("utf-8")
-                        audio = AudioContent(type="audio", data=encoded, mimeType=item.media_type)
+                    case BinaryContent(data=data, media_type=media_type) if item.is_audio:
+                        encoded = base64.b64encode(data).decode()
+                        audio = AudioContent(type="audio", data=encoded, mimeType=media_type)
                         messages.append(PromptMessage(role="user", content=audio))
-                    case BinaryContent() if item.is_image:
-                        encoded = base64.b64encode(item.data).decode("utf-8")
-                        image = ImageContent(type="image", data=encoded, mimeType=item.media_type)
+                    case BinaryContent(data=data, media_type=media_type) if item.is_image:
+                        encoded = base64.b64encode(data).decode()
+                        image = ImageContent(type="image", data=encoded, mimeType=media_type)
                         messages.append(PromptMessage(role="user", content=image))
                     case FileUrl(url=url):
                         content = TextContent(type="text", text=url)
@@ -63,28 +64,41 @@ def to_mcp_messages(
         case SystemPromptPart(content=msg):
             messages.append(PromptMessage(role="user", content=TextContent(type="text", text=msg)))
         case TextPart(content=msg):
-            messages.append(
-                PromptMessage(role="assistant", content=TextContent(type="text", text=msg))
-            )
+            text_content = TextContent(type="text", text=msg)
+            messages.append(PromptMessage(role="assistant", content=text_content))
     return messages
 
 
 def sampling_messages_to_user_content(msgs: list[SamplingMessage]) -> list[UserContent]:
-    from mcp import types
 
     # Convert messages to prompts for the agent
     prompts: list[UserContent] = []
     for mcp_msg in msgs:
         match mcp_msg.content:
-            case types.TextContent(text=text):
-                prompts.append(text)
-            case types.ImageContent(data=data, mimeType=mime_type):
-                binary_data = base64.b64decode(data)
-                prompts.append(BinaryImage(data=binary_data, media_type=mime_type))
-            case types.AudioContent(data=data, mimeType=mime_type):
-                binary_data = base64.b64decode(data)
-                prompts.append(BinaryContent(data=binary_data, media_type=mime_type))
+            case list(content_blocks):
+                prompts.extend(c for i in content_blocks if (c := content_block_to_user_content(i)))
+            case _ as content_block:
+                if content := content_block_to_user_content(content_block):
+                    prompts.append(content)
     return prompts
+
+
+def content_block_to_user_content(content: SamplingMessageContentBlock) -> UserContent | None:
+    from mcp import types
+
+    match content:
+        case types.TextContent(text=text):
+            return text
+        case types.ImageContent(data=data, mimeType=mime_type):
+            binary_data = base64.b64decode(data)
+            return BinaryImage(data=binary_data, media_type=mime_type)
+        case types.AudioContent(data=data, mimeType=mime_type):
+            binary_data = base64.b64decode(data)
+            return BinaryContent(data=binary_data, media_type=mime_type)
+        case types.ToolUseContent() | types.ToolResultContent():
+            return None
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 async def from_mcp_content(
@@ -144,8 +158,8 @@ async def from_mcp_content(
                 match resource:
                     case TextResourceContents(text=text):
                         contents.append(text)
-                    case BlobResourceContents() as blob_resource:
-                        contents.append(f"[Binary data: {blob_resource.mimeType}]")
+                    case BlobResourceContents(mimeType=mime_type):
+                        contents.append(f"[Binary data: {mime_type}]")
                     case _ as unreachable:
                         assert_never(unreachable)  # ty: ignore
             case _ as unreachable:

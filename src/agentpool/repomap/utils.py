@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from fsspec import AbstractFileSystem
+    from fsspec.asyn import AsyncFileSystem
 
 
 # Important files that should be prioritized in repo map
@@ -103,7 +103,7 @@ def truncate_with_notice(
     )
 
 
-async def find_src_files(fs: AbstractFileSystem, directory: str) -> list[str]:
+async def find_src_files(fs: AsyncFileSystem, directory: str) -> list[str]:
     """Find all source files in a directory using async fsspec.
 
     Args:
@@ -113,12 +113,9 @@ async def find_src_files(fs: AbstractFileSystem, directory: str) -> list[str]:
     Returns:
         List of file paths found
     """
-    from fsspec.asyn import AsyncFileSystem
-    from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
     from upathtools import is_directory
 
     results: list[str] = []
-    fs = fs if isinstance(fs, AsyncFileSystem) else AsyncFileSystemWrapper(fs)
 
     async def _recurse(path: str) -> None:
         try:
@@ -128,9 +125,7 @@ async def find_src_files(fs: AbstractFileSystem, directory: str) -> list[str]:
 
         for entry in entries:
             entry_path = entry.get("name", "")
-            entry_type = entry.get("type", "")
-
-            if await is_directory(fs, entry_path, entry_type=entry_type):
+            if await is_directory(fs, entry):
                 await _recurse(entry_path)
             else:
                 results.append(entry_path)

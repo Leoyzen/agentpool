@@ -25,6 +25,7 @@ from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     FilePartInput,
+    MCPStatus,
     MessagePath,
     MessageTime,
     MessageWithParts,
@@ -40,7 +41,6 @@ from agentpool_server.opencode_server.models import (
     TimeStartEnd,
     TimeStartEndCompacted,
     TimeStartEndOptional,
-    TokenCache,
     Tokens,
     ToolPart,
     ToolStateCompleted,
@@ -56,9 +56,12 @@ if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import UserContent
 
-    from agentpool.common_types import PathReference
+    from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
     from agentpool_server.opencode_server.models import ToolState
+    from agentpool_server.opencode_server.models.mcp import (
+        MCPConnectionStatus as OpenCodeMCPConnectionStatus,
+    )
     from agentpool_server.opencode_server.models.message import PartInput
     from agentpool_server.opencode_server.models.parts import ResourceSource
 
@@ -74,6 +77,27 @@ _PARAM_NAME_MAP: dict[str, str] = {
     "replace_all": "replaceAll",
     "line_hint": "lineHint",
 }
+
+
+def to_mcp_status(status: MCPServerStatus) -> MCPStatus:
+    return MCPStatus(
+        name=status.name,
+        status=to_opencode_mcp_status(status.status),
+        error=status.error,
+    )
+
+
+def to_opencode_mcp_status(status: MCPConnectionStatus) -> OpenCodeMCPConnectionStatus:
+    mapping: dict[MCPConnectionStatus, OpenCodeMCPConnectionStatus] = {
+        "connected": "connected",
+        "disconnected": "disconnected",
+        "error": "error",
+        "pending": "disconnected",
+        "failed": "error",
+        "needs-auth": "disconnected",
+        "disabled": "disconnected",
+    }
+    return mapping[status]
 
 
 def _convert_params_for_ui(params: dict[str, Any]) -> dict[str, Any]:
@@ -233,9 +257,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
         if msg.response_time:
             completed_ms = created_ms + int(msg.response_time * 1000)
 
-        usage = msg.usage
-        cache = TokenCache(read=usage.cache_read_tokens, write=usage.cache_write_tokens)
-        tokens = Tokens(input=usage.input_tokens, output=usage.output_tokens, cache=cache)
+        tokens = Tokens.from_pydantic_ai(msg.usage)
         result = MessageWithParts.assistant(
             message_id=message_id,
             session_id=session_id,
@@ -330,12 +352,6 @@ def chat_message_to_opencode(  # noqa: PLR0915
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
                                 state = ToolStateCompleted(title=title, output=output, time=tsc)
                             result.add_tool_part(tool_name, call_id, state=state)
-        tokens = Tokens(
-            input=tokens.input,
-            output=tokens.output,
-            reasoning=tokens.reasoning,
-            cache=TokenCache(read=tokens.cache.read, write=tokens.cache.write),
-        )
         cost = float(msg.cost_info.total_cost) if msg.cost_info else 0.0
         result.add_step_finish_part(reason=msg.finish_reason or "stop", cost=cost, tokens=tokens)
 

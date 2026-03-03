@@ -6,9 +6,9 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import json
 from typing import TYPE_CHECKING, Any, Self
 
+import anyenv
 import anyio
 
 from agentpool.log import get_logger
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from exxec.models import ServerInfo
     from exxec_config import ExecutionEnvironmentConfig
     from fastapi import FastAPI
-    from fsspec.implementations.memory import MemoryFileSystem
+    from fsspec import AbstractFileSystem
     from schemez import ToolsetCodeGenerator
     import uvicorn
 
@@ -92,7 +92,7 @@ class RemoteCodeExecutor:
         self,
         code: str,
         title: str,
-        internal_fs: MemoryFileSystem | None = None,
+        internal_fs: AbstractFileSystem | None = None,
     ) -> Any:
         """Execute code with tools available via HTTP API.
 
@@ -104,7 +104,10 @@ class RemoteCodeExecutor:
         Returns:
             Execution result from the environment
         """
+        from upathtools.async_ops import to_async_fs
+
         fs = internal_fs or self._fallback_fs
+        fs = to_async_fs(fs)
         start_time = datetime.now(UTC)
         exit_code = 0
         error_msg: str | None = None
@@ -115,13 +118,9 @@ class RemoteCodeExecutor:
             exec_result = await self.execution_env.execute(code)
             result_str = str(exec_result)
             # Check if execution failed
-            if (
-                hasattr(exec_result, "exit_code")
-                and exec_result.exit_code is not None
-                and exec_result.exit_code != 0
-            ):
+            if exec_result.exit_code is not None and exec_result.exit_code != 0:
                 exit_code = exec_result.exit_code
-                error_msg = getattr(exec_result, "error", None)
+                error_msg = exec_result.error
         except Exception as e:  # noqa: BLE001
             exit_code = 1
             error_msg = str(e)
@@ -134,7 +133,7 @@ class RemoteCodeExecutor:
 
             # Write script file
             script_path = f"remote_code/scripts/{timestamp}_{title}.py"
-            fs.pipe(script_path, code.encode("utf-8"))
+            await fs._pipe_file(script_path, code.encode("utf-8"))
 
             # Write metadata file
             metadata = {
@@ -146,7 +145,8 @@ class RemoteCodeExecutor:
                 "error": error_msg,
             }
             metadata_path = f"remote_code/scripts/{timestamp}_{title}.json"
-            fs.pipe(metadata_path, json.dumps(metadata, indent=2).encode("utf-8"))
+            dumped = anyenv.dump_json(metadata, indent=True)
+            await fs._pipe_file(metadata_path, dumped.encode("utf-8"))
 
         return exec_result
 
@@ -186,6 +186,7 @@ class ToolServerLifecycleHandler:
         """Start FastAPI server with tool routes."""
         from exxec.models import ServerInfo
         from fastapi import FastAPI
+        import uvicorn
 
         from agentpool.utils.network import _create_socket
 
@@ -195,12 +196,8 @@ class ToolServerLifecycleHandler:
         self._socket, self.port = _create_socket(self.port)
         # Create FastAPI app
         self.app = FastAPI(title="Tool Server", description="Generated tool endpoints")
-
         # Add tool routes
         self.toolset_generator.add_all_routes(self.app, "/tools")
-
-        import uvicorn
-
         config = uvicorn.Config(
             self.app,
             log_level="error",  # Reduce log noise
@@ -210,7 +207,6 @@ class ToolServerLifecycleHandler:
             ws="websockets-sansio",
         )
         self.server = uvicorn.Server(config)
-
         # Start server in background with our socket
         self._server_task = asyncio.create_task(self.server.serve([self._socket]))
         logger.info("Started tool server", host=self.host, port=self.port)
@@ -233,10 +229,8 @@ class ToolServerLifecycleHandler:
         """Stop FastAPI server."""
         # Stop server gracefully
         if self.server:
-            with contextlib.suppress(Exception):
-                self.server.should_exit = True
-                if hasattr(self.server, "force_exit"):
-                    self.server.force_exit = True
+            self.server.should_exit = True
+            self.server.force_exit = True
 
         # Cancel server task
         if self._server_task and not self._server_task.done():

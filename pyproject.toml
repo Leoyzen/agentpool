@@ -2,7 +2,7 @@
 
 [project]
 name = "agentpool"
-version = "2.8.11"
+version = "2.9.4"
 description = "Pydantic-AI based Multi-Agent Framework with YAML-based Agents, Teams, Workflows & Extended ACP / AGUI integration"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -31,6 +31,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
+  "alembic>=1.16.5",
   "anyenv[httpx]>=0.3.0",
   "clawd-code-sdk>=0.1.36",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
@@ -53,6 +54,7 @@ dependencies = [
   "platformdirs",
   "promptantic>=0.4.5",
   "psygnal>=0.11.1",
+  "py-key-value-aio[disk]",
   "pydantic>=2.10.0",
   "pydantic-ai-slim[openai,google,anthropic,mistral,retries]>=1.0.0",
   # Only add below (Copier)
@@ -102,6 +104,12 @@ acp = "acp.filesystem:ACPPath"
 [project.optional-dependencies]
 a2a = ["fasta2a", "starlette"]  # A2A Server
 ag-ui = ["ag-ui-protocol>=0.1.10"]  # Ag-UI Agents
+bot = [
+  "python-telegram-bot[socks]>=21.0",
+  "slack-sdk>=3.26.0",
+  "slackify-markdown>=0.2.0",
+  "croniter>=2.0.0",
+]  # Chat channel integrations (Telegram, Slack, Discord, etc.)
 braintrust = ["braintrust", "autoevals"]  # Braintrust Prompt Hub
 clipboard = ["copykitten"]  # Clipboard functionality
 coding = [
@@ -143,7 +151,6 @@ zed = ["zstandard>=0.23.0"]  # Zed IDE storage provider
 
 [dependency-groups]
 dev = [
-  "alembic>=1.16.5",
   "check-jsonschema>=0.35.0",
   "devtools",
   "fastembed>=0.7.4; python_version < '3.14'",
@@ -174,6 +181,7 @@ lint = [
   "ruff",
   "types-PyYAML",
   "types-Pygments",
+  "types-croniter",
   "types-jsonschema>=4.25.1.20251009",
   # Only add below (Copier)
 ]
@@ -440,9 +448,11 @@ python-version = "3.13"
 python-platform = "all"
 
 [tool.ty.rules]
-unresolved-import = "ignore"
 unused-type-ignore-comment = "ignore"
 invalid-type-form = "ignore"
+not-subscriptable = "ignore"
+possibly-missing-import = "warn"
+division-by-zero = "warn"
 
 [tool.uv]
 default-groups = ["dev", "lint", "docs"]

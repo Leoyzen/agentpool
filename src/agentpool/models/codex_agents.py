@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 from pydantic import ConfigDict, Field
 
 from agentpool.models.agents import AnyToolConfig  # noqa: TC001
 from agentpool.models.fields import OutputTypeField  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
-from codex_adapter import ApprovalPolicy, ReasoningEffort, SandboxMode  # noqa: TC001
+from codex_adapter import ApprovalPolicy, Personality, ReasoningEffort, SandboxMode  # noqa: TC001
 
 
 if TYPE_CHECKING:
@@ -84,6 +84,18 @@ class CodexAgentConfig(BaseAgentConfig):
     If not specified, Codex uses its default sandbox policy.
     """
 
+    personality: Personality | None = Field(
+        default=None,
+        title="Personality",
+        examples=["none", "friendly", "pragmatic"],
+    )
+    """Personality preset for the Codex session.
+
+    - "none": No personality preset
+    - "friendly": Warm and approachable tone
+    - "pragmatic": Direct and efficient communication
+    """
+
     base_instructions: str | None = Field(default=None, title="Base Instructions")
     """Base system instructions for the Codex session."""
 
@@ -113,7 +125,7 @@ class CodexAgentConfig(BaseAgentConfig):
     ) -> CodexAgent[TDeps, Any]:
         from agentpool.agents.codex_agent import CodexAgent
 
-        return CodexAgent.from_config(
+        return CodexAgent[TDeps, Any].from_config(
             self,
             event_handlers=event_handlers,
             input_provider=input_provider,
@@ -143,12 +155,15 @@ class CodexAgentConfig(BaseAgentConfig):
 
         for tool_config in self.tools:
             try:
-                if isinstance(tool_config, BaseToolsetConfig):
-                    providers.append(tool_config.get_provider())
-                elif isinstance(tool_config, str):
-                    static_tools.append(Tool.from_callable(tool_config))
-                elif isinstance(tool_config, BaseToolConfig):
-                    static_tools.append(tool_config.get_tool())
+                match tool_config:
+                    case BaseToolsetConfig():
+                        providers.append(tool_config.get_provider())
+                    case str():
+                        static_tools.append(Tool.from_callable(tool_config))
+                    case BaseToolConfig():
+                        static_tools.append(tool_config.get_tool())
+                    case _ as unreachable:
+                        assert_never(unreachable)
             except Exception:
                 logger.exception("Failed to load tool", config=tool_config)
                 continue

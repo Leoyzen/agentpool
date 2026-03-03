@@ -6,6 +6,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
+from clawd_code_sdk.models.messages import ResultMessage
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 import pytest
@@ -14,7 +15,7 @@ from agentpool import AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.native_agent import Agent
 from agentpool.mcp_server.tool_bridge import ToolManagerBridge
-from agentpool.models.acp_agents.non_mcp import ClaudeACPAgentConfig
+from agentpool.models.acp_agents.base import ACPAgentConfig
 from agentpool_config.toolsets import SkillsToolsetConfig, SubagentToolsetConfig
 
 
@@ -104,7 +105,7 @@ async def test_acp_agent_toolsets_adds_providers():
     """Test that toolsets from config are added to ToolManager."""
     async with AgentPool() as pool:
         toolsets = [SubagentToolsetConfig(), SkillsToolsetConfig()]
-        config = ClaudeACPAgentConfig(name="test_acp", tools=toolsets)
+        config = ACPAgentConfig(name="test_acp", command="claude-code-acp", tools=toolsets)
         agent = ACPAgent.from_config(config, agent_pool=pool)
         await agent._setup_toolsets()
         # Check that providers were added
@@ -261,7 +262,7 @@ async def test_claude_code_mcp_bridge_integration():
 
                 # Stream messages until we get a result
                 async for msg in client.receive_messages():
-                    if type(msg).__name__ == "ResultMessage":
+                    if isinstance(msg, ResultMessage):
                         break
 
                 if not captured_ids:

@@ -34,15 +34,15 @@ async def run_example() -> None:
 
     async with AgentPool(manifest) as pool:
         # Get the boss agent
-        boss: Agent[Any, str] = pool.get_agent("overseer")
+        boss = pool.get_agent("overseer")
 
         # Create second downloader by cloning the first
         worker_1 = pool.get_agent("file_getter_1")
         worker_2 = pool.get_agent("file_getter_2")
 
         # Register both as worker tools
-        boss.register_worker(worker_1)
-        boss.register_worker(worker_2)
+        boss.tools.register_worker(worker_1)
+        boss.tools.register_worker(worker_2)
 
         print("Calling both tools:")
         start_time = time.time()

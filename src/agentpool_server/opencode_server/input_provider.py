@@ -10,18 +10,20 @@ from mcp import types
 
 from agentpool.log import get_logger
 from agentpool.ui.base import InputProvider
-from agentpool_server.opencode_server.models.events import PermissionRequestEvent
+from agentpool_server.opencode_server.models.events import (
+    PermissionAskedProperties,
+    PermissionRequestEvent,
+    PermissionToolInfo,
+)
 
 
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
     from agentpool.messaging import ChatMessage
+    from agentpool_server.opencode_server.models.events import PermissionReply
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)
-
-# OpenCode permission responses
-PermissionResponse = str  # "once" | "always" | "reject"
 
 
 @dataclass
@@ -31,7 +33,7 @@ class PendingPermission:
     permission_id: str
     tool_name: str
     args: dict[str, Any]
-    future: asyncio.Future[PermissionResponse]
+    future: asyncio.Future[PermissionReply]
     created_at: float = field(default_factory=lambda: __import__("time").time())
 
 
@@ -100,7 +102,7 @@ class OpenCodeInputProvider(InputProvider):
 
             # Create a pending permission request
             permission_id = self._generate_permission_id()
-            future: asyncio.Future[PermissionResponse] = asyncio.get_event_loop().create_future()
+            future: asyncio.Future[PermissionReply] = asyncio.get_event_loop().create_future()
             pending = PendingPermission(
                 permission_id=permission_id,
                 tool_name=tool_name,
@@ -149,7 +151,7 @@ class OpenCodeInputProvider(InputProvider):
             return "abort_run"
 
     def _handle_permission_response(
-        self, response: PermissionResponse, tool_name: str
+        self, response: PermissionReply, tool_name: str
     ) -> ConfirmationResult:
         """Handle permission response and update tool approval state."""
         match response:
@@ -165,7 +167,7 @@ class OpenCodeInputProvider(InputProvider):
                 logger.warning("Unknown permission response", response=response)
                 return "abort_run"
 
-    def resolve_permission(self, permission_id: str, response: PermissionResponse) -> bool:
+    def resolve_permission(self, permission_id: str, response: PermissionReply) -> bool:
         """Resolve a pending permission request.
 
         Called by the REST endpoint when the client responds.
@@ -194,21 +196,28 @@ class OpenCodeInputProvider(InputProvider):
         )
         return True
 
-    def get_pending_permissions(self) -> list[dict[str, Any]]:
+    def get_pending_permissions(self) -> list[PermissionAskedProperties]:
         """Get all pending permission requests.
 
         Returns:
-            List of pending permission info dicts
+            List of pending permission properties
         """
-        return [
-            {
-                "permission_id": p.permission_id,
-                "tool_name": p.tool_name,
-                "args": p.args,
-                "created_at": p.created_at,
-            }
-            for p in self._pending_permissions.values()
-        ]
+        result: list[PermissionAskedProperties] = []
+        for p in self._pending_permissions.values():
+            args_preview = ", ".join(f"{k}={v!r}" for k, v in list(p.args.items())[:3])
+            pattern = f"{p.tool_name}: {args_preview}" if args_preview else p.tool_name
+            result.append(
+                PermissionAskedProperties(
+                    id=p.permission_id,
+                    session_id=self.session_id,
+                    permission=p.tool_name,
+                    patterns=[pattern],
+                    metadata=p.args,
+                    always=[pattern],
+                    tool=PermissionToolInfo(message_id="", call_id=None),
+                )
+            )
+        return result
 
     async def get_elicitation(
         self,
@@ -282,16 +291,14 @@ class OpenCodeInputProvider(InputProvider):
         # Extract descriptions if available (custom x-option-descriptions field)
         descriptions = schema.get("x-option-descriptions", {})
         question_id = self._generate_permission_id()  # Reuse ID generator
+        opts = [
+            QuestionOption(label=str(val), description=descriptions.get(str(val), ""))
+            for val in enum_values
+        ]
         question_info = QuestionInfo(
             question=params.message,
             header=params.message[:12],  # Truncate to 12 chars
-            options=[
-                QuestionOption(
-                    label=str(val),
-                    description=descriptions.get(str(val), ""),
-                )
-                for val in enum_values
-            ],
+            options=opts,
             multiple=is_multi or None,
         )
         # Create future to wait for answer
@@ -314,7 +321,6 @@ class OpenCodeInputProvider(InputProvider):
             message=params.message,
             is_multi=is_multi,
         )
-
         # Wait for answer
         try:
             answers = await future  # list[list[str]]
@@ -326,7 +332,7 @@ class OpenCodeInputProvider(InputProvider):
             content: dict[str, str | list[str]] = (
                 {"value": answer} if is_multi else {"value": answer[0] if answer else ""}
             )
-            return types.ElicitResult(action="accept", content=content)  # pyright: ignore[reportArgumentType]
+            return types.ElicitResult(action="accept", content=content)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
         except asyncio.CancelledError:
             logger.info("Question cancelled", question_id=question_id)
             return types.ElicitResult(action="cancel")

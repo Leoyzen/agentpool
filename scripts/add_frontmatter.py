@@ -77,6 +77,7 @@ def extract_page_metadata(python_file: Path) -> dict[str, dict[str, Any]]:
                                         and isinstance(right.args[0], ast.Constant)
                                     ):
                                         md_path = right.args[0].value
+                                        assert isinstance(md_path, str)
                                         if page_metadata:
                                             metadata[md_path] = page_metadata  # pyright: ignore[reportArgumentType]
                                             break  # Found the template, move to next function

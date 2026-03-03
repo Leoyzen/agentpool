@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING
 
 
@@ -59,11 +60,7 @@ async def generate_file_outline(
     return get_file_map_from_content(content, Path(path_str).name, max_tokens=max_tokens)
 
 
-def get_file_map_from_content(  # noqa: PLR0915
-    content: str,
-    filename: str,
-    max_tokens: int = 2048,
-) -> str | None:
+def get_file_map_from_content(content: str, filename: str, max_tokens: int = 2048) -> str | None:  # noqa: PLR0915
     """Generate structure map from content without filesystem IO.
 
     Pure function for generating a file structure map when you already
@@ -116,57 +113,45 @@ def get_file_map_from_content(  # noqa: PLR0915
     context.add_lines_of_interest(lois)
     context.add_context()
     tree_output: str = context.format()
-
     # Add line number annotations to definitions
-    import re
-
     code_lines = content.splitlines()
     lois_set = set(lois)
     def_pattern = re.compile(r"^(.*?)(class\s+\w+|def\s+\w+|async\s+def\s+\w+)")
-
     result_lines = []
     for output_line in tree_output.splitlines():
         modified_line = output_line
-        match = def_pattern.search(output_line)
-        if match:
+        if def_pattern.search(output_line):
             stripped = output_line.lstrip("│ \t")
             for line_num in lois_set:
-                if line_num < len(code_lines):
-                    orig_line = code_lines[line_num].strip()
-                    if orig_line and stripped.startswith(orig_line.split("(")[0].split(":")[0]):
-                        name_match = re.search(
-                            r"(class\s+\w+|def\s+\w+|async\s+def\s+\w+)", output_line
-                        )
-                        if name_match:
-                            start_line_display = line_num + 1
-                            end_line = line_ranges.get(line_num, -1)
-                            if end_line >= 0 and end_line != line_num:
-                                end_line_display = end_line + 1
-                                line_info = f"  # [{start_line_display}-{end_line_display}]"
-                            else:
-                                line_info = f"  # [{start_line_display}]"
-                            modified_line = f"{output_line}{line_info}"
-                        break
+                if line_num <= len(code_lines):
+                    continue
+                orig_line = code_lines[line_num].strip()
+                if orig_line and stripped.startswith(orig_line.split("(")[0].split(":")[0]):
+                    if re.search(r"(class\s+\w+|def\s+\w+|async\s+def\s+\w+)", output_line):
+                        start_line_display = line_num + 1
+                        end_line = line_ranges.get(line_num, -1)
+                        if end_line >= 0 and end_line != line_num:
+                            end_line_display = end_line + 1
+                            line_info = f"  # [{start_line_display}-{end_line_display}]"
+                        else:
+                            line_info = f"  # [{start_line_display}]"
+                        modified_line = f"{output_line}{line_info}"
+                    break
         result_lines.append(modified_line)
 
     tree_output = "\n".join(result_lines)
     if result_lines:
         tree_output += "\n"
-
     # Build final output with header
     lines = content.count("\n") + 1
     tokens_approx = len(tree_output) // 4
-
     header = (
         f"# File: {filename} ({lines} lines)\n"
         f"# Structure map (~{tokens_approx} tokens). Use read with line/limit for details.\n\n"
     )
-
     result = header + f"{filename}:\n" + tree_output
-
     # Truncate if needed
     max_chars = max_tokens * 4
     if len(result) > max_chars:
         result = result[:max_chars] + "\n... [truncated]\n"
-
     return result

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, assert_never
 
@@ -251,8 +251,15 @@ class ToolManager:
         Yields:
             List of registered tool infos
         """
-        # Normalize inputs to lists
-        tools_list: list[ToolType] = [tools] if not isinstance(tools, Sequence) else list(tools)
+        from agentpool.tools.base import Tool
+
+        match tools:
+            case str() | Callable() | Tool():  # ty: ignore[invalid-match-pattern]
+                tools_list = [tools]
+            case Sequence():
+                tools_list = list(tools)
+            case _ as unreachable:
+                assert_never(unreachable)  # ty: ignore[type-assertion-failure]
         # Store original tool states if exclusive
         tools = await self.get_tools()
         original_states: dict[str, bool] = {}
@@ -291,15 +298,16 @@ class ToolManager:
         result: dict[str, MCPServerStatus] = {}
         try:
             for provider in self.external_providers:
-                if isinstance(provider, MCPResourceProvider):
-                    add_status(provider, result)
-                elif isinstance(provider, AggregatingResourceProvider):
-                    for nested in provider.providers:
-                        if isinstance(nested, MCPResourceProvider):
-                            add_status(nested, result)
-                elif isinstance(provider, MCPManager):
-                    for mcp_provider in provider.get_mcp_providers():
-                        add_status(mcp_provider, result)
+                match provider:
+                    case MCPResourceProvider():
+                        add_status(provider, result)
+                    case AggregatingResourceProvider():
+                        for nested in provider.providers:
+                            if isinstance(nested, MCPResourceProvider):
+                                add_status(nested, result)
+                    case MCPManager():
+                        for mcp_provider in provider.get_mcp_providers():
+                            add_status(mcp_provider, result)
         except Exception:  # noqa: BLE001
             pass
 

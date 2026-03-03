@@ -9,6 +9,7 @@ import asyncio
 
 from mcp import types
 
+from agentpool import Agent
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.state import ServerState
 
@@ -16,16 +17,9 @@ from agentpool_server.opencode_server.state import ServerState
 async def demo_single_select():
     """Demo single-select question."""
     print("\n=== Single-Select Question Demo ===")
-
     # Create minimal state
-    state = ServerState(
-        working_dir="/tmp",
-        pool=None,  # type: ignore
-        agent=None,  # type: ignore
-    )
-
+    state = ServerState(working_dir="/tmp", agent=Agent(model="test"))
     provider = OpenCodeInputProvider(state=state, session_id="demo_session")
-
     # Create question
     params = types.ElicitRequestFormParams(
         message="Which database would you like to use?",
@@ -46,38 +40,28 @@ async def demo_single_select():
 
     task = asyncio.create_task(get_answer())
     await asyncio.sleep(0.1)  # Let question be created
-
     # Show pending question
     question_id = next(iter(state.pending_questions.keys()))
     pending = state.pending_questions[question_id]
     print(f"\nQuestion ID: {question_id}")
-    print(f"Question: {pending['questions'][0]['question']}")
+    print(f"Question: {pending.questions[0].question}")
     print("Options:")
-    for opt in pending["questions"][0]["options"]:
-        print(f"  - {opt['label']}: {opt['description']}")
-
+    for opt in pending.questions[0].options:
+        print(f"  - {opt.label}: {opt.description}")
     # Simulate user selecting PostgreSQL
     print("\n→ User selects: PostgreSQL")
     provider.resolve_question(question_id, [["PostgreSQL"]])
-
-    # Get result
     result = await task
     print(f"\nResult: {result}")
-    print(f"Content: {result.content}")
+    print(f"Content: {result.content}")  # pyright: ignore[reportAttributeAccessIssue]
 
 
 async def demo_multi_select():
     """Demo multi-select question."""
     print("\n\n=== Multi-Select Question Demo ===")
 
-    state = ServerState(
-        working_dir="/tmp",
-        pool=None,  # type: ignore
-        agent=None,  # type: ignore
-    )
-
+    state = ServerState(working_dir="/tmp", agent=Agent(model="test"))
     provider = OpenCodeInputProvider(state=state, session_id="demo_session")
-
     params = types.ElicitRequestFormParams(
         message="Which features would you like to enable?",
         requestedSchema={
@@ -97,22 +81,20 @@ async def demo_multi_select():
 
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
-
     # Show question
     question_id = next(iter(state.pending_questions.keys()))
     pending = state.pending_questions[question_id]
-    question_info = pending["questions"][0]
-    print(f"\nQuestion: {question_info['question']}")
-    print(f"Multi-select: {question_info['multiple']}")
+    question_info = pending.questions[0]
+    print(f"\nQuestion: {question_info.question}")
+    print(f"Multi-select: {question_info.multiple}")
     print("Options:")
-    for opt in question_info["options"]:
-        print(f"  - {opt['label']}: {opt['description']}")
-
+    for opt in question_info.options:
+        print(f"  - {opt.label}: {opt.description}")
     # Simulate user selecting multiple options
     print("\n→ User selects: Authentication, REST API, Analytics")
     provider.resolve_question(question_id, [["Authentication", "REST API", "Analytics"]])
-
     result = await task
+    assert isinstance(result, types.ElicitResult)
     print(f"\nResult: {result}")
     print(f"Content: {result.content}")
 
@@ -120,36 +102,23 @@ async def demo_multi_select():
 async def demo_cancellation():
     """Demo question cancellation."""
     print("\n\n=== Cancellation Demo ===")
-
-    state = ServerState(
-        working_dir="/tmp",
-        pool=None,  # type: ignore
-        agent=None,  # type: ignore
-    )
-
+    state = ServerState(working_dir="/tmp", agent=Agent(model="test"))
     provider = OpenCodeInputProvider(state=state, session_id="demo_session")
-
     params = types.ElicitRequestFormParams(
         message="Choose a deployment target",
-        requestedSchema={
-            "type": "string",
-            "enum": ["AWS", "Azure", "GCP"],
-        },
+        requestedSchema={"type": "string", "enum": ["AWS", "Azure", "GCP"]},
     )
-
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
-
     # Show question
     question_id = next(iter(state.pending_questions.keys()))
     print(f"\nQuestion ID: {question_id}")
-
     # Simulate user pressing Esc
     print("→ User presses Esc (cancel)")
-    future = state.pending_questions[question_id]["future"]
+    future = state.pending_questions[question_id].future
     future.cancel()
-
     result = await task
+    assert isinstance(result, types.ElicitResult)
     print(f"\nResult: {result}")
     print(f"Action: {result.action}")
 
@@ -159,7 +128,6 @@ async def main():
     await demo_single_select()
     await demo_multi_select()
     await demo_cancellation()
-
     print("\n\n=== Demo Complete ===")
     print("\nKey Points:")
     print("1. Questions use OpenCode's structured format with options")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -25,10 +25,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-async def _should_confirm_tool(
-    tool: Tool,
-    confirmation_mode: ToolConfirmationMode,
-) -> bool:
+async def _should_confirm_tool(tool: Tool, confirmation_mode: ToolConfirmationMode) -> bool:
     """Determine if a tool requires confirmation based on mode.
 
     Args:
@@ -38,12 +35,15 @@ async def _should_confirm_tool(
     Returns:
         True if confirmation is required
     """
-    if confirmation_mode == "never":
-        return False
-    if confirmation_mode == "always":
-        return True
-    # "per_tool" mode - check tool's requires_confirmation attribute
-    return tool.requires_confirmation
+    match confirmation_mode:
+        case "never":
+            return False
+        case "always":
+            return True
+        case "per_tool":  # "per_tool" mode - check tool's requires_confirmation attribute
+            return tool.requires_confirmation
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 async def _get_tool_confirmation(
@@ -103,14 +103,10 @@ async def execute_tool_calls(
             continue
 
         tool = tools_by_name[tool_name]
-
         # Check if confirmation is required
         if await _should_confirm_tool(tool, confirmation_mode):
             if input_provider is None or context is None:
-                logger.warning(
-                    "Tool requires confirmation but no input provider available",
-                    tool=tool_name,
-                )
+                logger.warning("Tool needs confirmation but no input provider set", tool=tool_name)
                 result_msg = AGUIToolMessage(
                     id=str(uuid4()),
                     tool_call_id=tc_id,
@@ -187,9 +183,8 @@ async def parse_sse_stream(response: httpx.Response) -> AsyncIterator[Event]:
             for line in event_text.split("\n"):
                 if not line.startswith("data: "):
                     continue
-                json_str = line[6:]  # Remove "data: " prefix
+                json_str = line.removeprefix("data: ")
                 try:
-                    event = event_adapter.validate_json(json_str)
-                    yield event
+                    yield event_adapter.validate_json(json_str)
                 except (ValueError, TypeError) as e:
                     logger.warning("Failed to parse AG-UI event", json=json_str[:100], error=str(e))

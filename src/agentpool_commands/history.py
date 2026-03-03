@@ -42,13 +42,13 @@ class SearchHistoryCommand(NodeCommand):
             hours: Look back period in hours
             limit: Maximum results to return
         """
-        if ctx.context.pool is None:
-            raise CommandError("No agent pool available for history search")
+        if ctx.context.agent.storage is None:
+            raise CommandError("No storage manager available for history search")
 
         try:
             from agentpool_storage.formatters import format_output
 
-            provider = ctx.context.pool.storage.get_history_provider()
+            provider = ctx.context.agent.storage.get_history_provider()
             results = await provider.get_filtered_conversations(
                 query=query,
                 period=f"{hours}h",

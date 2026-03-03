@@ -1,4 +1,4 @@
-"""Tests for the session management infrastructure."""
+"""Tests for session data models and storage provider session CRUD."""
 
 from __future__ import annotations
 
@@ -6,45 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.delegation.pool import AgentPool
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool.sessions import SessionData, SessionManager
-from agentpool.sessions.store import MemorySessionStore
-from agentpool_config.storage import SQLStorageConfig
-from agentpool_storage.session_store import SQLSessionStore
+from agentpool.sessions import SessionData
+from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
+from agentpool_storage.memory_provider import MemoryStorageProvider
+from agentpool_storage.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.fixture
-def memory_store() -> MemorySessionStore:
-    """Create a memory session store for testing."""
-    return MemorySessionStore()
-
-
-@pytest.fixture
-async def agent_pool():
-    """Create a real agent pool for testing."""
-    manifest = AgentsManifest(
-        agents={
-            "test_agent": NativeAgentConfig(
-                name="test_agent",
-                model="test",
-                system_prompt="You are a test agent",
-            ),
-            "other_agent": NativeAgentConfig(
-                name="other_agent",
-                model="test",
-                system_prompt="You are another test agent",
-            ),
-        }
-    )
-    pool = AgentPool(manifest=manifest)
-    async with pool:
-        yield pool
 
 
 class TestSessionData:
@@ -100,54 +69,59 @@ class TestSessionData:
         assert "key2" not in original.metadata
 
 
-class TestMemorySessionStore:
-    """Tests for MemorySessionStore."""
+class TestMemoryProviderSessions:
+    """Tests for session CRUD on MemoryStorageProvider."""
 
-    async def test_save_and_load(self, memory_store: MemorySessionStore) -> None:
+    @pytest.fixture
+    def provider(self) -> MemoryStorageProvider:
+        """Create a memory storage provider."""
+        return MemoryStorageProvider(MemoryStorageConfig())
+
+    async def test_save_and_load(self, provider: MemoryStorageProvider) -> None:
         """Test saving and loading a session."""
         data = SessionData(
             session_id="test_session",
             agent_name="test_agent",
         )
 
-        async with memory_store:
-            await memory_store.save(data)
-            loaded = await memory_store.load("test_session")
+        async with provider:
+            await provider.save_session(data)
+            loaded = await provider.load_session("test_session")
 
         assert loaded is not None
         assert loaded.session_id == data.session_id
         assert loaded.agent_name == data.agent_name
 
-    async def test_load_nonexistent(self, memory_store: MemorySessionStore) -> None:
+    async def test_load_nonexistent(self, provider: MemoryStorageProvider) -> None:
         """Test loading a nonexistent session returns None."""
-        async with memory_store:
-            loaded = await memory_store.load("nonexistent")
+        async with provider:
+            loaded = await provider.load_session("nonexistent")
 
         assert loaded is None
 
-    async def test_delete(self, memory_store: MemorySessionStore) -> None:
+    async def test_delete(self, provider: MemoryStorageProvider) -> None:
         """Test deleting a session."""
         data = SessionData(
             session_id="test_session",
             agent_name="test_agent",
         )
 
-        async with memory_store:
-            await memory_store.save(data)
-            deleted = await memory_store.delete("test_session")
+        async with provider:
+            await provider.save_session(data)
+            deleted = await provider.delete_session("test_session")
             assert deleted is True
 
-            loaded = await memory_store.load("test_session")
+            loaded = await provider.load_session("test_session")
             assert loaded is None
 
-    async def test_delete_nonexistent(self, memory_store: MemorySessionStore) -> None:
+    async def test_delete_nonexistent(self, provider: MemoryStorageProvider) -> None:
         """Test deleting a nonexistent session returns False."""
-        async with memory_store:
-            deleted = await memory_store.delete("nonexistent")
+        async with provider:
+            deleted = await provider.delete_session("nonexistent")
 
         assert deleted is False
 
-    async def test_list_sessions(self, memory_store: MemorySessionStore) -> None:
+    async def test_list_session_ids(self, provider: MemoryStorageProvider) -> None:
         """Test listing sessions."""
         data1 = SessionData(
             session_id="session1",
@@ -165,60 +139,60 @@ class TestMemorySessionStore:
             pool_id="pool2",
         )
 
-        async with memory_store:
-            await memory_store.save(data1)
-            await memory_store.save(data2)
-            await memory_store.save(data3)
+        async with provider:
+            await provider.save_session(data1)
+            await provider.save_session(data2)
+            await provider.save_session(data3)
 
             # List all
-            all_sessions = await memory_store.list_sessions()
+            all_sessions = await provider.list_session_ids()
             expected_total = 3
             assert len(all_sessions) == expected_total
 
             # Filter by pool_id
-            pool1_sessions = await memory_store.list_sessions(pool_id="pool1")
+            pool1_sessions = await provider.list_session_ids(pool_id="pool1")
             expected_pool1 = 2
             assert len(pool1_sessions) == expected_pool1
             assert "session1" in pool1_sessions
             assert "session2" in pool1_sessions
 
             # Filter by agent_name
-            agent1_sessions = await memory_store.list_sessions(agent_name="agent1")
+            agent1_sessions = await provider.list_session_ids(agent_name="agent1")
             expected_agent1 = 2
             assert len(agent1_sessions) == expected_agent1
             assert "session1" in agent1_sessions
             assert "session3" in agent1_sessions
 
-    async def test_update_existing(self, memory_store: MemorySessionStore) -> None:
+    async def test_update_existing(self, provider: MemoryStorageProvider) -> None:
         """Test updating an existing session."""
         original = SessionData(
             session_id="test_session",
             agent_name="agent1",
         )
 
-        async with memory_store:
-            await memory_store.save(original)
+        async with provider:
+            await provider.save_session(original)
 
             updated = original.with_agent("agent2")
-            await memory_store.save(updated)
+            await provider.save_session(updated)
 
-            loaded = await memory_store.load("test_session")
+            loaded = await provider.load_session("test_session")
 
         assert loaded is not None
         assert loaded.agent_name == "agent2"
 
 
-class TestSQLSessionStore:
-    """Tests for SQLSessionStore."""
+class TestSQLProviderSessions:
+    """Tests for session CRUD on SQLModelProvider."""
 
     @pytest.fixture
-    def sql_store(self, tmp_path: Path) -> SQLSessionStore:
-        """Create a SQL session store with temp database."""
+    def provider(self, tmp_path: Path) -> SQLModelProvider:
+        """Create a SQL provider with temp database."""
         db_path = tmp_path / "test_sessions.db"
         config = SQLStorageConfig(url=f"sqlite:///{db_path}")
-        return SQLSessionStore(config)
+        return SQLModelProvider(config)
 
-    async def test_save_and_load(self, sql_store: SQLSessionStore) -> None:
+    async def test_save_and_load(self, provider: SQLModelProvider) -> None:
         """Test saving and loading a session."""
         data = SessionData(
             session_id="sql_test_session",
@@ -227,9 +201,9 @@ class TestSQLSessionStore:
             metadata={"protocol": "acp"},
         )
 
-        async with sql_store:
-            await sql_store.save(data)
-            loaded = await sql_store.load("sql_test_session")
+        async with provider:
+            await provider.save_session(data)
+            loaded = await provider.load_session("sql_test_session")
 
         assert loaded is not None
         assert loaded.session_id == data.session_id
@@ -237,47 +211,47 @@ class TestSQLSessionStore:
         assert loaded.cwd == data.cwd
         assert loaded.metadata["protocol"] == "acp"
 
-    async def test_load_nonexistent(self, sql_store: SQLSessionStore) -> None:
+    async def test_load_nonexistent(self, provider: SQLModelProvider) -> None:
         """Test loading a nonexistent session returns None."""
-        async with sql_store:
-            loaded = await sql_store.load("nonexistent")
+        async with provider:
+            loaded = await provider.load_session("nonexistent")
 
         assert loaded is None
 
-    async def test_delete(self, sql_store: SQLSessionStore) -> None:
+    async def test_delete(self, provider: SQLModelProvider) -> None:
         """Test deleting a session."""
         data = SessionData(
             session_id="delete_test",
             agent_name="test_agent",
         )
 
-        async with sql_store:
-            await sql_store.save(data)
-            deleted = await sql_store.delete("delete_test")
+        async with provider:
+            await provider.save_session(data)
+            deleted = await provider.delete_session("delete_test")
             assert deleted is True
 
-            loaded = await sql_store.load("delete_test")
+            loaded = await provider.load_session("delete_test")
             assert loaded is None
 
-    async def test_update_existing(self, sql_store: SQLSessionStore) -> None:
+    async def test_update_existing(self, provider: SQLModelProvider) -> None:
         """Test updating an existing session (upsert)."""
         original = SessionData(
             session_id="update_test",
             agent_name="agent1",
         )
 
-        async with sql_store:
-            await sql_store.save(original)
+        async with provider:
+            await provider.save_session(original)
 
             updated = original.with_agent("agent2")
-            await sql_store.save(updated)
+            await provider.save_session(updated)
 
-            loaded = await sql_store.load("update_test")
+            loaded = await provider.load_session("update_test")
 
         assert loaded is not None
         assert loaded.agent_name == "agent2"
 
-    async def test_list_sessions(self, sql_store: SQLSessionStore) -> None:
+    async def test_list_session_ids(self, provider: SQLModelProvider) -> None:
         """Test listing sessions with filters."""
         data1 = SessionData(
             session_id="sql_session1",
@@ -290,148 +264,17 @@ class TestSQLSessionStore:
             pool_id="pool1",
         )
 
-        async with sql_store:
-            await sql_store.save(data1)
-            await sql_store.save(data2)
+        async with provider:
+            await provider.save_session(data1)
+            await provider.save_session(data2)
 
-            all_sessions = await sql_store.list_sessions()
+            all_sessions = await provider.list_session_ids()
             expected_total = 2
             assert len(all_sessions) == expected_total
 
-            pool1_sessions = await sql_store.list_sessions(pool_id="pool1")
+            pool1_sessions = await provider.list_session_ids(pool_id="pool1")
             assert len(pool1_sessions) == expected_total
 
-            agent1_sessions = await sql_store.list_sessions(agent_name="agent1")
+            agent1_sessions = await provider.list_session_ids(agent_name="agent1")
             assert len(agent1_sessions) == 1
             assert "sql_session1" in agent1_sessions
-
-    async def test_get_all(self, sql_store: SQLSessionStore) -> None:
-        """Test getting all session data objects."""
-        data1 = SessionData(
-            session_id="all_test_1",
-            agent_name="agent1",
-        )
-        data2 = SessionData(
-            session_id="all_test_2",
-            agent_name="agent2",
-        )
-
-        async with sql_store:
-            await sql_store.save(data1)
-            await sql_store.save(data2)
-
-            all_data = await sql_store.get_all()
-
-        expected_count = 2
-        assert len(all_data) == expected_count
-        session_ids = {d.session_id for d in all_data}
-        assert "all_test_1" in session_ids
-        assert "all_test_2" in session_ids
-
-
-class TestSessionManager:
-    """Tests for SessionManager."""
-
-    async def test_create_session(self, agent_pool: AgentPool) -> None:
-        """Test creating a session through the manager."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            data = await manager.create(agent_name="test_agent")
-
-            assert data.agent_name == "test_agent"
-            assert data.session_id.startswith("ses_")  # OpenCode-compatible format
-
-    async def test_create_session_with_custom_id(self, agent_pool: AgentPool) -> None:
-        """Test creating a session with a specific ID."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            data = await manager.create(
-                agent_name="test_agent",
-                session_id="custom_id_123",
-            )
-
-            assert data.session_id == "custom_id_123"
-
-    async def test_create_duplicate_session_raises(self, agent_pool: AgentPool) -> None:
-        """Test that creating a session with existing ID raises."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            await manager.create(agent_name="test_agent", session_id="duplicate_test")
-
-            with pytest.raises(ValueError, match="already exists"):
-                await manager.create(agent_name="test_agent", session_id="duplicate_test")
-
-    async def test_create_session_unknown_agent_raises(self, agent_pool: AgentPool) -> None:
-        """Test that creating a session with unknown agent raises."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            with pytest.raises(KeyError):
-                await manager.create(agent_name="unknown_agent")
-
-    async def test_get_session(self, agent_pool: AgentPool) -> None:
-        """Test getting a session from storage."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            created = await manager.create(agent_name="test_agent")
-            retrieved = await manager.get(created.session_id)
-
-            assert retrieved is not None
-            assert retrieved.session_id == created.session_id
-
-    async def test_get_nonexistent_session(self, agent_pool: AgentPool) -> None:
-        """Test getting a nonexistent session returns None."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            retrieved = await manager.get("nonexistent")
-
-        assert retrieved is None
-
-    async def test_delete_session(self, agent_pool: AgentPool) -> None:
-        """Test deleting a session."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            data = await manager.create(agent_name="test_agent")
-            session_id = data.session_id
-
-            deleted = await manager.delete(session_id)
-            assert deleted is True
-
-            # Session should no longer exist
-            retrieved = await manager.get(session_id)
-            assert retrieved is None
-
-    async def test_list_sessions(self, agent_pool: AgentPool) -> None:
-        """Test listing sessions."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            await manager.create(agent_name="test_agent", session_id="list_test_1")
-            await manager.create(agent_name="other_agent", session_id="list_test_2")
-
-            sessions = await manager.list_sessions()
-            expected_count = 2
-            assert len(sessions) == expected_count
-            assert "list_test_1" in sessions
-            assert "list_test_2" in sessions
-
-    async def test_list_sessions_by_agent(self, agent_pool: AgentPool) -> None:
-        """Test listing sessions filtered by agent name."""
-        manager = SessionManager(pool=agent_pool)
-
-        async with manager:
-            await manager.create(agent_name="test_agent", session_id="agent_filter_1")
-            await manager.create(agent_name="other_agent", session_id="agent_filter_2")
-            await manager.create(agent_name="test_agent", session_id="agent_filter_3")
-
-            test_agent_sessions = await manager.list_sessions(agent_name="test_agent")
-            expected_test_agent = 2
-            assert len(test_agent_sessions) == expected_test_agent
-            assert "agent_filter_1" in test_agent_sessions
-            assert "agent_filter_3" in test_agent_sessions

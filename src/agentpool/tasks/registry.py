@@ -20,14 +20,13 @@ class TaskRegistry(BaseRegistry[str, Job[Any, Any]]):
         from agentpool_config.task import Job
 
         if not isinstance(item, Job):
-            msg = f"Expected Job, got {type(item)}"
-            raise self._error_class(msg)
+            raise self._error_class(f"Expected Job, got {type(item)}")
         return item
 
-    def register(self, name: str, task: Job[Any, Any], replace: bool = False) -> None:
+    def register(self, key: str, item: Job[Any, Any], replace: bool = False) -> None:
         """Register a task with name.
 
         Creates a copy of the task with the name set.
         """
-        task_copy = task.model_copy(update={"name": name})
-        super().register(name, task_copy, replace)
+        task_copy = item.model_copy(update={"name": key})
+        super().register(key, task_copy, replace)

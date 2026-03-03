@@ -69,22 +69,15 @@ class Model(OpenCodeBaseModel):
         # Convert limits
         context = float(model.context_window) if model.context_window else 128000.0
         output = float(model.max_output_tokens) if model.max_output_tokens else 4096.0
-        limit = ModelLimit(context=context, output=output)
-        # Determine capabilities from modalities and metadata
-        has_vision = "image" in model.input_modalities
-        has_reasoning = "reasoning" in model.output_modalities or "thinking" in model.name.lower()
-        # Format release date if available
-        release_date = model.created_at.strftime("%Y-%m-%d") if model.created_at else ""
         # Use id_override if available (e.g., "opus" for Claude Code SDK)
-        model_id = model.id_override or model.id
         return cls(
-            id=model_id,
+            id=model.id_override or model.id,
             name=model.name,
-            attachment=has_vision,
+            attachment="image" in model.input_modalities,
             cost=cost,
-            limit=limit,
-            reasoning=has_reasoning,
-            release_date=release_date,
+            limit=ModelLimit(context=context, output=output),
+            reasoning="reasoning" in model.output_modalities or "thinking" in model.name.lower(),
+            release_date=model.created_at.strftime("%Y-%m-%d") if model.created_at else "",
             temperature=True,
         )
 

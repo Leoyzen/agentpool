@@ -24,15 +24,6 @@ if TYPE_CHECKING:
     from acp.client.protocol import Client
     from acp.connection import MethodHandler, StreamObserver
 
-__all__ = [
-    "connect_to_agent",
-    "run_agent",
-    "spawn_agent_process",
-    "spawn_client_process",
-    "spawn_stdio_connection",
-    "stdio_streams",
-]
-
 
 class StdinStream(ByteReceiveStream):
     """Wrapper for stdin that implements ByteReceiveStream interface."""
@@ -241,7 +232,7 @@ async def run_agent(
     else:
 
         def agent_factory(connection: AgentSideConnection) -> Agent:
-            return agent  # ty: ignore[invalid-return-type]
+            return agent
 
     conn = AgentSideConnection(agent_factory, input_stream, output_stream, **connection_kwargs)
     shutdown_event = asyncio.Event()

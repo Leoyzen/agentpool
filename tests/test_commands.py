@@ -8,6 +8,7 @@ import tempfile
 
 import pytest
 
+from agentpool.utils.inspection import get_fn_name
 from agentpool_config.commands import (
     CallableCommandConfig,
     FileCommandConfig,
@@ -26,7 +27,7 @@ def test_static_command_get_callable():
     func = cmd.get_callable()
 
     # Check function metadata
-    assert func.__name__ == "greet"
+    assert get_fn_name(func) == "greet"
     assert func.__doc__ == "Greet a user in a project"
 
     # Check signature
@@ -53,16 +54,10 @@ def test_file_command_get_callable():
         temp_path = f.name
 
     try:
-        cmd = FileCommandConfig(
-            name="analyze",
-            path=temp_path,
-            description="Run analysis command",
-        )
-
+        cmd = FileCommandConfig(name="analyze", path=temp_path, description="Run analysis command")
         func = cmd.get_callable()
-
         # Check function metadata
-        assert func.__name__ == "analyze"
+        assert get_fn_name(func) == "analyze"
         assert func.__doc__ == "Run analysis command"
 
         # Check signature

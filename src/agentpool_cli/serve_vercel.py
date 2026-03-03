@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
+from contextlib import asynccontextmanager
 import os
 from typing import TYPE_CHECKING, Annotated, Any
 
+import anyenv
 import typer as t
 
 from agentpool_cli import log, resolve_agent_config
@@ -73,30 +74,31 @@ def vercel_command(  # noqa: PLR0915
         for agent in pool.all_agents.values():
             agent.message_sent.connect(on_message)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        await pool.__aenter__()
+        logger.info("Agent pool initialized")
+        try:
+            yield
+        finally:
+            await pool.__aexit__(None, None, None)
+            logger.info("Agent pool shut down")
+
     # Create FastAPI app
     app = FastAPI(
         title="AgentPool - Vercel AI Server",
         description="Vercel AI Data Stream Protocol server for AgentPool",
+        lifespan=lifespan,
     )
 
     if cors:
         app.add_middleware(
-            CORSMiddleware,
+            CORSMiddleware,  # ty: ignore[invalid-argument-type]
             allow_origins=["*"],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
         )
-
-    @app.on_event("startup")
-    async def startup() -> None:
-        await pool.__aenter__()
-        logger.info("Agent pool initialized")
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        await pool.__aexit__(None, None, None)
-        logger.info("Agent pool shut down")
 
     @app.post("/chat")
     async def chat(request: Request) -> Response:
@@ -107,8 +109,8 @@ def vercel_command(  # noqa: PLR0915
         """
         body = await request.body()
         try:
-            data = json.loads(body)
-        except json.JSONDecodeError as e:
+            data = anyenv.load_json(body, return_type=dict)
+        except anyenv.JsonLoadError as e:
             return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
 
         # Extract messages from the request
@@ -143,48 +145,43 @@ def vercel_command(  # noqa: PLR0915
             try:
                 async for event in selected_agent.run_stream(user_text):
                     # Handle pydantic-ai streaming events
-                    if isinstance(event, PartStartEvent):
-                        # New part started - if it's text, emit it
-                        if isinstance(event.part, TextPart) and event.part.content:
-                            text = event.part.content
-                            escaped = json.dumps(text)
-                            yield f"0:{escaped}\n"
-
-                    elif isinstance(event, PartDeltaEvent):
-                        # Delta update - emit text deltas
-                        if isinstance(event.delta, TextPartDelta):
-                            text = event.delta.content_delta
-                            if text:
-                                escaped = json.dumps(text)
+                    match event:
+                        case PartStartEvent(part=TextPart() as part):
+                            # New part started - if it's text, emit it
+                            if part.content:
+                                text = part.content
+                                escaped = anyenv.dump_json(text)
                                 yield f"0:{escaped}\n"
-
-                    elif isinstance(event, StreamCompleteEvent):
-                        # Stream complete - we've received the final message
-                        # The content has already been streamed via deltas
-                        pass
+                        case PartDeltaEvent(delta=TextPartDelta(content_delta=content_delta)):
+                            # Delta update - emit text deltas
+                            if content_delta:
+                                escaped = anyenv.dump_json(content_delta)
+                                yield f"0:{escaped}\n"
+                        case StreamCompleteEvent():
+                            # Stream complete - we've received the final message
+                            # The content has already been streamed via deltas
+                            pass
 
                 # Send finish event
-                finish_data = {
-                    "finishReason": "stop",
-                    "usage": {"promptTokens": 0, "completionTokens": 0},
-                }
-                yield f"e:{json.dumps(finish_data)}\n"
+                usage = {"promptTokens": 0, "completionTokens": 0}
+                finish_data = {"finishReason": "stop", "usage": usage}
+                yield f"e:{anyenv.dump_json(finish_data)}\n"
 
                 # Send done marker
                 done_data = {"finishReason": "stop"}
-                yield f"d:{json.dumps(done_data)}\n"
+                yield f"d:{anyenv.dump_json(done_data)}\n"
 
             except Exception as e:
                 logger.exception("Error during streaming")
                 # Send error as text
                 error_msg = f"Error: {e}"
-                escaped = json.dumps(error_msg)
+                escaped = anyenv.dump_json(error_msg)
                 yield f"0:{escaped}\n"
                 # Still send finish
                 finish_data = {"finishReason": "error"}
-                yield f"e:{json.dumps(finish_data)}\n"
+                yield f"e:{anyenv.dump_json(finish_data)}\n"
                 done_data = {"finishReason": "error"}
-                yield f"d:{json.dumps(done_data)}\n"
+                yield f"d:{anyenv.dump_json(done_data)}\n"
 
         return StreamingResponse(
             generate_stream(),

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 from pathlib import Path
+import shlex
 from typing import TYPE_CHECKING, Any
 
 import anyenv
@@ -15,6 +14,8 @@ from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
+    from exxec import ExecutionEnvironment
+
     from agentpool.hooks.base import HookEvent, HookInput
 
 
@@ -41,6 +42,7 @@ class CommandHook(Hook):
         timeout: float = 60.0,
         enabled: bool = True,
         env: dict[str, str] | None = None,
+        execution_env: ExecutionEnvironment | None = None,
     ):
         """Initialize command hook.
 
@@ -51,59 +53,65 @@ class CommandHook(Hook):
             timeout: Maximum execution time in seconds.
             enabled: Whether this hook is active.
             env: Additional environment variables.
+            execution_env: Per-hook execution environment override.
+                If set, this takes priority over the agent's environment.
         """
         super().__init__(event=event, matcher=matcher, timeout=timeout, enabled=enabled)
         self.command = command
         self.env = env or {}
+        self._execution_env = execution_env
 
-    async def execute(self, input_data: HookInput) -> HookResult:
+    async def execute(
+        self,
+        input_data: HookInput,
+        env: ExecutionEnvironment | None = None,
+    ) -> HookResult:
         """Execute the shell command.
+
+        Uses the execution environment (per-hook override > agent env > local)
+        to run the command. The hook input data is passed as JSON via stdin.
 
         Args:
             input_data: The hook input data, passed as JSON to stdin.
+            env: Agent's execution environment. Used if no per-hook override is set.
 
         Returns:
             Hook result parsed from command output.
         """
-        # Prepare environment
-        env = os.environ.copy()
-        env.update(self.env)
+        from exxec.local_provider import LocalExecutionEnvironment
+
+        # Resolve execution environment: per-hook override > agent env > local fallback
+        effective_env = (
+            self._execution_env
+            or env
+            or LocalExecutionEnvironment(env_vars=self.env or None, inherit_env=True)
+        )
 
         # Expand $PROJECT_DIR if present
         command = self.command
         if "$PROJECT_DIR" in command:
-            project_dir = env.get("PROJECT_DIR", Path.cwd())
-            command = command.replace("$PROJECT_DIR", str(project_dir))
+            project_dir = self.env.get("PROJECT_DIR", str(Path.cwd()))
+            command = command.replace("$PROJECT_DIR", project_dir)
 
-        # Serialize input
-        input_json = json.dumps(dict(input_data))
+        # Serialize input and pipe via shell
+        input_json = anyenv.dump_json(dict(input_data))
+        full_command = f"echo {shlex.quote(input_json)} | {command}"
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
+            result = await asyncio.wait_for(
+                effective_env.execute_command(full_command, timeout=self.timeout),
+                timeout=self.timeout + 5,  # outer timeout as safety net
             )
+            stdout_str = (result.stdout or "").strip()
+            stderr_str = (result.stderr or "").strip()
+            exit_code = result.exit_code
 
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input_json.encode()),
-                timeout=self.timeout,
-            )
-
-            stdout_str = stdout.decode().strip()
-            stderr_str = stderr.decode().strip()
-
-            # Handle exit codes
-            if proc.returncode == 0:
+            if exit_code == 0:
                 return _parse_success_output(stdout_str)
-            if proc.returncode == 2:  # noqa: PLR2004
-                # Blocking error
+            if exit_code == 2:  # noqa: PLR2004
                 reason = stderr_str or "Hook denied the operation"
                 return HookResult(decision="deny", reason=reason)
-            # Non-blocking error
-            logger.warning("Hook command failed", returncode=proc.returncode, stderr=stderr_str)
+            logger.warning("Hook command failed", returncode=exit_code, stderr=stderr_str)
             return HookResult(decision="allow")
 
         except TimeoutError:
@@ -143,18 +151,17 @@ def _normalize_result(data: dict[str, Any]) -> HookResult:
     Returns:
         Normalized hook result.
     """
-    result: HookResult = {}
-
     # Handle decision field (support various naming conventions)
-    decision = data.get("decision") or data.get("permissionDecision")
-    if decision:
+    match data.get("decision") or data.get("permissionDecision"):
         # Normalize decision values
-        if decision in ("approve", "allow"):
-            result["decision"] = "allow"
-        elif decision in ("block", "deny"):
-            result["decision"] = "deny"
-        elif decision == "ask":
-            result["decision"] = "ask"
+        case "approve" | "allow":
+            result = HookResult(decision="allow")
+        case "block" | "deny":
+            result = HookResult(decision="deny")
+        case "ask":
+            result = HookResult(decision="ask")
+        case _ as decision:
+            raise ValueError(f"Invalid decision: {decision}")
 
     # Handle reason field
     reason = data.get("reason") or data.get("permissionDecisionReason")

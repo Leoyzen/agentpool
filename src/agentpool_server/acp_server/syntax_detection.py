@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-dot_file_map = {
+DOT_FILE_TO_LANGUAGE = {
     ".bashrc": "bash",
     ".bash_profile": "bash",
     ".bash_logout": "bash",
@@ -27,7 +27,7 @@ dot_file_map = {
     ".babelrc": "json",
 }
 
-lang_map = {
+EXT_TO_LANGUAGE = {
     # Python
     ".py": "python",
     ".pyx": "python",
@@ -140,39 +140,29 @@ def get_language_from_path(path: str | Path) -> str:  # noqa: PLR0911
     """
     path_str = str(path)
     _, ext = os.path.splitext(path_str.lower())  # noqa: PTH122
-
     # Special cases for files without extensions or specific names
     filename = os.path.basename(path_str.lower())  # noqa: PTH119
-
     # Docker files
     if filename in ("dockerfile", "dockerfile.dev", "dockerfile.prod"):
         return "dockerfile"
-
     # Build files
     if filename in ("makefile", "rakefile", "justfile"):
         return "makefile"
-
     if filename in (".rules", ".cursorrules"):
         return "markdown"
-
-    # Config files starting with dot
-
-    if filename in dot_file_map:
-        return dot_file_map[filename]
-
     # License files
     if filename in ("license", "licence", "copying", "contributing"):
         return "text"
-
+    if filename == "yarn.lock":
+        return "yaml"
+    # Config files starting with dot
+    if filename in DOT_FILE_TO_LANGUAGE:
+        return DOT_FILE_TO_LANGUAGE[filename]
     # README files
     if filename.startswith("readme") and "." not in filename:
         return "text"
-
     # Package files
-    if filename == "yarn.lock":
-        return "yaml"
-
-    return lang_map.get(ext, "")
+    return EXT_TO_LANGUAGE.get(ext, "")
 
 
 def format_code_block(content: str, language: str = "") -> str:

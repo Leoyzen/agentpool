@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import json
 from typing import TYPE_CHECKING
 import uuid
 
+import anyenv
 from exxec.events import (
     OutputEvent,
     ProcessCompletedEvent,
@@ -139,6 +139,6 @@ class ExecuteCodeTool(Tool[str]):
                 "error": error_msg,
             }
             metadata_path = f"execute_code/scripts/{timestamp}_{title}.json"
-            ctx.internal_fs.pipe(metadata_path, json.dumps(metadata, indent=2).encode("utf-8"))
+            ctx.internal_fs.pipe(metadata_path, anyenv.dump_json(metadata, indent=True).encode())
 
         return result_str

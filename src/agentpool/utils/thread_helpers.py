@@ -11,28 +11,23 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 import sys
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
+from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
 
-P = ParamSpec("P")
-R = TypeVar("R")
-T = TypeVar("T")
 
 # Detect free-threading support once at import time
 # sys._is_gil_enabled() returns False when GIL is disabled (free-threaded mode)
 FREE_THREADED = getattr(sys, "_is_gil_enabled", lambda: True)() is False
-
-
 # Minimum items threshold for parallelization to overcome thread pool overhead
 # Based on benchmarks: thread pool setup costs ~50-100ms, so only parallelize
 # when the sequential work would take longer than that
 MIN_ITEMS_FOR_PARALLEL = 10
 
 
-def parallel_map(
+def parallel_map[T, R](
     func: Callable[[T], R],
     items: Iterable[T],
     *,
@@ -89,7 +84,7 @@ def parallel_starmap[R](
     return [func(*args) for args in items]
 
 
-async def async_parallel_map(
+async def async_parallel_map[T, R](
     func: Callable[[T], R],
     items: Iterable[T],
     *,

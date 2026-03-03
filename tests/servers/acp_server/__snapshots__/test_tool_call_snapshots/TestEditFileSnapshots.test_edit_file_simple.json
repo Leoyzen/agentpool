@@ -25,7 +25,7 @@
         }
       ],
       "sessionUpdate": "tool_call_update",
-      "title": "Editing file: /test/example.py",
+      "title": "Editing file: /test/example.py (Rename function from old to new)",
       "toolCallId": "pyd_ai_tool_call_id__edit"
     },
     "type": "tool_call_update"

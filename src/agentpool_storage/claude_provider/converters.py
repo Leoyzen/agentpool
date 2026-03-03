@@ -6,7 +6,17 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 import uuid
 
-import anyenv
+from clawd_code_sdk.storage.models import (
+    ClaudeApiMessage,
+    ClaudeAssistantEntry,
+    ClaudeTextBlock,
+    ClaudeThinkingBlock,
+    ClaudeToolResultBlock,
+    ClaudeToolUseBlock,
+    ClaudeUsage,
+    ClaudeUserEntry,
+    ClaudeUserMessage,
+)
 from pydantic_ai import RunUsage
 from pydantic_ai.messages import (
     ModelRequest,
@@ -21,21 +31,12 @@ from pydantic_ai.usage import RequestUsage
 
 from agentpool.messaging import ChatMessage, TokenCost
 from agentpool.utils.time_utils import get_now, parse_iso_timestamp
-from agentpool_storage.claude_provider.models import (
-    ClaudeApiMessage,
-    ClaudeAssistantEntry,
-    ClaudeMessageContent,
-    ClaudeUsage,
-    ClaudeUserEntry,
-    ClaudeUserMessage,
-)
 
 
 if TYPE_CHECKING:
     from datetime import datetime
-    from pathlib import Path
 
-    from agentpool_storage.claude_provider.models import ClaudeJSONLEntry
+    from clawd_code_sdk.storage.models import ClaudeJSONLEntry
 
 
 def chat_message_to_entry(
@@ -64,7 +65,7 @@ def chat_message_to_entry(
         )
 
     # Assistant message
-    content_blocks = [ClaudeMessageContent(type="text", text=message.content)]
+    content_blocks = [ClaudeTextBlock(type="text", text=message.content)]
     usage = ClaudeUsage()
     if message.cost_info:
         usage = ClaudeUsage(
@@ -103,11 +104,12 @@ def extract_text_content(message: ClaudeApiMessage | ClaudeUserMessage) -> str:
 
     text_parts: list[str] = []
     for part in msg_content:
-        if part.type == "text" and part.text:
-            text_parts.append(part.text)
-        elif part.type == "thinking" and part.thinking:
-            # Include thinking in display content
-            text_parts.append(f"<thinking>\n{part.thinking}\n</thinking>")
+        match part:
+            case ClaudeTextBlock(text=text) if text:
+                text_parts.append(text)
+            case ClaudeThinkingBlock(thinking=thinking) if thinking:
+                # Include thinking in display content
+                text_parts.append(f"<thinking>\n{thinking}\n</thinking>")
     return "\n".join(text_parts)
 
 
@@ -215,20 +217,21 @@ def build_pydantic_message(
             parts.append(UserPromptPart(content=msg_content, timestamp=timestamp))
         else:
             for block in msg_content:
-                if block.type == "text" and block.text:
-                    parts.append(UserPromptPart(content=block.text, timestamp=timestamp))
-                elif block.type == "tool_result" and block.tool_use_id:
-                    # Reconstruct tool return - look up tool name from mapping
-                    tool_content = extract_tool_result_content(block)
-                    tool_name = tool_id_mapping.get(block.tool_use_id, "")
-                    parts.append(
-                        ToolReturnPart(
-                            tool_name=tool_name,
-                            content=tool_content,
-                            tool_call_id=block.tool_use_id,
-                            timestamp=timestamp,
+                match block:
+                    case ClaudeTextBlock(text=text) if text:
+                        parts.append(UserPromptPart(content=block.text, timestamp=timestamp))
+                    case ClaudeToolResultBlock(tool_use_id=tool_use_id) if tool_use_id:
+                        # Reconstruct tool return - look up tool name from mapping
+                        tool_content = block.extract_text()
+                        tool_name = tool_id_mapping.get(block.tool_use_id, "")
+                        parts.append(
+                            ToolReturnPart(
+                                tool_name=tool_name,
+                                content=tool_content,
+                                tool_call_id=block.tool_use_id,
+                                timestamp=timestamp,
+                            )
                         )
-                    )
 
         return ModelRequest(parts=parts, timestamp=timestamp) if parts else None
 
@@ -248,15 +251,16 @@ def build_pydantic_message(
         resp_parts.append(TextPart(content=msg_content))
     else:
         for block in msg_content:
-            if block.type == "text" and block.text:
-                resp_parts.append(TextPart(content=block.text))
-            elif block.type == "thinking" and block.thinking:
-                resp_parts.append(ThinkingPart(content=block.thinking, signature=block.signature))
-            elif block.type == "tool_use" and block.id and block.name:
-                args = block.input or {}
-                resp_parts.append(
-                    ToolCallPart(tool_name=block.name, args=args, tool_call_id=block.id)
-                )
+            match block:
+                case ClaudeTextBlock(text=text) if text:
+                    resp_parts.append(TextPart(content=text))
+                case ClaudeThinkingBlock(thinking=thinking, signature=signature) if thinking:
+                    resp_parts.append(ThinkingPart(content=thinking, signature=signature))
+                case ClaudeToolUseBlock(id=block_id, name=name) if block_id and name:
+                    args = block.input or {}
+                    resp_parts.append(
+                        ToolCallPart(tool_name=block.name, args=args, tool_call_id=block.id)
+                    )
 
     if not resp_parts:
         return None
@@ -264,83 +268,137 @@ def build_pydantic_message(
     return ModelResponse(parts=resp_parts, usage=usage, model_name=model, timestamp=timestamp)
 
 
-def extract_tool_result_content(block: ClaudeMessageContent) -> str:
-    """Extract content from a tool_result block."""
-    if block.content is None:
-        return ""
-    if isinstance(block.content, str):
-        return block.content
-    # List of content dicts
-    text_parts = [
-        tc.get("text", "")
-        for tc in block.content
-        if isinstance(tc, dict) and tc.get("type") == "text"
-    ]
-    return "\n".join(text_parts)
+# def convert_to_pydantic_ai(
+#     entries: list[ClaudeCodeEntry],
+#     *,
+#     include_sidechains: bool = False,
+#     follow_parent_chain: bool = True,
+# ) -> list[ModelRequest | ModelResponse]:
+#     """Convert Claude Code entries to pydantic-ai message format.
 
+#     Args:
+#         entries: List of Claude Code history entries
+#         include_sidechains: If True, include sidechain (forked) messages
+#         follow_parent_chain: If True (default), reconstruct conversation order
+#             by following parentUuid links. If False, use file order.
 
-def encode_project_path(path: str) -> str:
-    """Encode a project path to Claude's format.
+#     Returns:
+#         List of ModelRequest and ModelResponse objects
+#     """
+#     from pydantic_ai import ModelRequest, ModelResponse
 
-    Claude encodes paths by replacing / with - and prepending -.
-    Example: /home/user/project -> -home-user-project
-    """
-    return path.replace("/", "-")
+#     # Optionally reconstruct proper conversation order
+#     conversation: list[ClaudeCodeEntry] | list[ClaudeCodeMessageEntry]
+#     if follow_parent_chain:
+#         conversation = get_main_conversation(entries, include_sidechains=include_sidechains)
+#     else:
+#         conversation = entries
+#     from pydantic_ai.messages import (
+#         TextPart,
+#         ThinkingPart,
+#         ToolCallPart,
+#         ToolReturnPart,
+#         UserPromptPart,
+#     )
 
+#     messages: list[ModelRequest | ModelResponse] = []
 
-def decode_project_path(encoded: str) -> str:
-    """Decode a Claude project path back to filesystem path.
+#     for entry in conversation:
+#         match entry:
+#             case ClaudeCodeUserEntry():
+#                 parts: list[Any] = []
+#                 metadata = {
+#                     "uuid": entry.uuid,
+#                     "timestamp": entry.timestamp.isoformat(),
+#                     "sessionId": entry.session_id,
+#                     "cwd": entry.cwd,
+#                     "gitBranch": entry.git_branch,
+#                     "isSidechain": entry.is_sidechain,
+#                 }
 
-    Example: -home-user-project -> /home/user/project
-    """
-    encoded = encoded.removeprefix("-")
-    return "/" + encoded.replace("-", "/")
+#                 content = entry.message.content
+#                 if isinstance(content, str):
+#                     parts.append(UserPromptPart(content=content))
+#                 else:
+#                     for block in content:
+#                         match block:
+#                             case ClaudeCodeTextContent():
+#                                 parts.append(UserPromptPart(content=block.text))
+#                             case ClaudeCodeToolResultContent():
+#                                 # Extract text from tool result content
+#                                 if isinstance(block.content, str):
+#                                     result_content = block.content
+#                                 else:
+#                                     result_content = "\n".join(
+#                                         c.text
+#                                         for c in block.content
+#                                         if isinstance(c, ClaudeCodeTextContent)
+#                                     )
+#                                 parts.append(
+#                                     ToolReturnPart(
+#                                         tool_name="",  # Not available in history
+#                                         content=result_content,
+#                                         tool_call_id=block.tool_use_id,
+#                                     )
+#                                 )
 
+#                 if parts:
+#                     messages.append(ModelRequest(parts=parts, metadata=metadata))
 
-def extract_title(session_path: Path, max_chars: int = 60) -> str | None:
-    """Extract title from session file efficiently.
+#             case ClaudeCodeAssistantEntry():
+#                 parts = []
+#                 metadata = {
+#                     "uuid": entry.uuid,
+#                     "timestamp": entry.timestamp.isoformat(),
+#                     "sessionId": entry.session_id,
+#                     "requestId": entry.request_id,
+#                     "cwd": entry.cwd,
+#                     "gitBranch": entry.git_branch,
+#                     "isSidechain": entry.is_sidechain,
+#                 }
 
-    Looks for a summary entry first, then falls back to the first line
-    of the first user message. Stops reading as soon as a title is found.
+#                 for block in entry.message.content:
+#                     match block:
+#                         case ClaudeCodeTextContent():
+#                             parts.append(TextPart(content=block.text))
+#                         case ClaudeCodeToolUseContent():
+#                             parts.append(
+#                                 ToolCallPart(
+#                                     tool_name=block.name,
+#                                     args=block.input,
+#                                     tool_call_id=block.id,
+#                                 )
+#                             )
+#                         case ClaudeCodeThinkingContent():
+#                             parts.append(ThinkingPart(content=block.thinking))
 
-    Args:
-        session_path: Path to the JSONL session file
-        max_chars: Maximum characters for title (truncates with '...')
+#                 if parts:
+#                     messages.append(
+#                         ModelResponse(
+#                             parts=parts,
+#                             model_name=entry.message.model,
+#                             provider_response_id=entry.message.id,
+#                             metadata=metadata,
+#                         )
+#                     )
 
-    Returns:
-        Extracted title or None if no suitable content found
-    """
-    if not session_path.exists():
-        return None
+#             case ClaudeCodeSummary():
+#                 # Summaries can be added as system context if needed
+#                 metadata = {
+#                     "uuid": entry.uuid,
+#                     "timestamp": entry.timestamp.isoformat(),
+#                     "sessionId": entry.session_id,
+#                     "type": "summary",
+#                 }
+#                 messages.append(
+#                     ModelRequest(
+#                         parts=[UserPromptPart(content=f"[Summary]: {entry.summary}")],
+#                         metadata=metadata,
+#                     )
+#                 )
 
-    try:
-        with session_path.open(encoding="utf-8", errors="ignore") as fp:
-            for line in fp:
-                # Summary entries take priority
-                if '"type":"summary"' in line:
-                    try:
-                        entry = anyenv.load_json(line, return_type=dict)
-                        if summary := entry.get("summary"):
-                            return str(summary)
-                    except anyenv.JsonLoadError:
-                        pass
+#             case ClaudeCodeQueueOperation():
+#                 # Skip queue operations - they're metadata, not messages
+#                 pass
 
-                # First user message as fallback - stop here
-                if '"type":"user"' in line:
-                    try:
-                        entry = anyenv.load_json(line, return_type=dict)
-                        msg = entry.get("message", {})
-                        content = msg.get("content", "")
-                        if isinstance(content, str) and content:
-                            # Use first line only, strip whitespace
-                            first_line = content.split("\n")[0].strip()
-                            if len(first_line) > max_chars:
-                                return first_line[:max_chars] + "..."
-                            return first_line if first_line else None
-                    except anyenv.JsonLoadError:
-                        pass
-                    break  # Stop after first user message
-    except OSError:
-        pass
-
-    return None
+#     return messages

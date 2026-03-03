@@ -16,7 +16,6 @@ from yamling import FormatType
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from agentpool.sessions.store import SessionStore
     from agentpool_storage.base import StorageProvider
 
 
@@ -199,26 +198,26 @@ class ClaudeStorageConfig(BaseStorageProviderConfig):
 
 
 class OpenCodeStorageConfig(BaseStorageProviderConfig):
-    """OpenCode native storage format configuration.
+    """OpenCode SQLite storage format configuration.
 
-    Reads from OpenCode's native JSON format in ~/.local/share/opencode/storage/.
-    Useful for importing conversation history from OpenCode.
+    Reads from OpenCode's native SQLite database at ~/.local/share/opencode/opencode.db.
+    This is the current format used by OpenCode >= 1.2.
     """
 
     model_config = ConfigDict(json_schema_extra={"x-doc-title": "OpenCode Storage"})
 
     type: Literal["opencode"] = Field("opencode", init=False)
-    """OpenCode native storage configuration."""
+    """OpenCode SQLite storage configuration."""
 
     path: str = Field(
-        default="~/.local/share/opencode/storage",
-        examples=["~/.local/share/opencode/storage"],
-        title="OpenCode storage directory",
+        default="~/.local/share/opencode/opencode.db",
+        examples=["~/.local/share/opencode/opencode.db"],
+        title="OpenCode database path",
     )
-    """Path to OpenCode storage directory."""
+    """Path to OpenCode SQLite database file."""
 
     def get_provider(self) -> StorageProvider:
-        """Create an OpenCode storage provider instance."""
+        """Create an OpenCode SQLite storage provider instance."""
         from agentpool_storage.opencode_provider import OpenCodeStorageProvider
 
         return OpenCodeStorageProvider(self)
@@ -303,9 +302,6 @@ StorageProviderConfig = Annotated[
 ]
 
 
-SessionStoreType = Literal["sql", "memory"]
-
-
 class StorageConfig(Schema):
     """Global storage configuration.
 
@@ -318,17 +314,6 @@ class StorageConfig(Schema):
         examples=[[{"type": "file", "path": "/data/storage.json"}]],
     )
     """List of configured storage providers"""
-
-    session_store: SessionStoreType = Field(
-        default="sql",
-        title="Session store type",
-        examples=["sql", "memory"],
-    )
-    """Type of session store to use for session persistence.
-
-    - "sql": Persist sessions to SQL database (uses same URL as SQL provider)
-    - "memory": In-memory storage (sessions lost on restart)
-    """
 
     default_provider: str | None = Field(
         default=None,
@@ -393,24 +378,3 @@ class StorageConfig(Schema):
         if self.providers is None:
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
-
-    def get_session_store(self) -> SessionStore:
-        """Create session store based on configuration."""
-        from agentpool.sessions.store import MemorySessionStore
-        from agentpool_storage.session_store import SQLSessionStore
-
-        # Use memory store during tests
-        if is_pytest():
-            return MemorySessionStore()
-
-        match self.session_store:
-            case "memory":
-                return MemorySessionStore()
-            case "sql":
-                # Find SQL config or use default
-                sql_cfg = next(
-                    (p for p in self.effective_providers if isinstance(p, SQLStorageConfig)), None
-                )
-                if sql_cfg is None:
-                    sql_cfg = SQLStorageConfig()
-                return SQLSessionStore(sql_cfg)

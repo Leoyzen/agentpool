@@ -30,7 +30,6 @@ from pydantic_ai import (
 from agentpool.agents.agui_agent.helpers import execute_tool_calls, parse_sse_stream
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
-from agentpool.agents.events.processors import FileTracker
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     OperationNotAllowedError,
@@ -39,6 +38,7 @@ from agentpool.agents.exceptions import (
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.tools import ToolManager
+from agentpool.utils.subprocess_utils import start_process
 from agentpool.utils.token_breakdown import calculate_usage_from_parts
 
 
@@ -222,7 +222,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._client = get_client(self.headers, self.timeout)
         self._sdk_session_id = self.session_id
         if self._startup_command:  # Start server if startup command is provided
-            await self._start_server()
+            self._startup_process = await start_process(self._startup_command, self._startup_delay)
         self.log.debug("AG-UI client initialized", endpoint=self.endpoint)
         return self
 
@@ -272,30 +272,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         if self._current_stream_task and not self._current_stream_task.done():
             self._current_stream_task.cancel()
 
-    async def _start_server(self) -> None:
-        """Start the AG-UI server subprocess."""
-        if not self._startup_command:
-            return
-
-        self.log.info("Starting AG-UI server", command=self._startup_command)
-        self._startup_process = await asyncio.create_subprocess_shell(
-            self._startup_command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
-        self.log.debug("Waiting for server startup", delay=self._startup_delay)
-        await anyio.sleep(self._startup_delay)
-        # Check if process is still running
-        if self._startup_process.returncode is not None:
-            stderr = ""
-            if self._startup_process.stderr:
-                stderr = (await self._startup_process.stderr.read()).decode()
-            msg = f"Startup process exited with code {self._startup_process.returncode}: {stderr}"
-            raise RuntimeError(msg)
-
-        self.log.info("AG-UI server started")
-
     async def _stream_events(  # noqa: PLR0915
         self,
         prompts: list[UserContent],
@@ -319,8 +295,8 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             to_agui_tool,
         )
 
-        if input_provider is not None:
-            self._input_provider = input_provider
+        # Resolve input provider: explicit parameter overrides agent default
+        effective_input_provider = input_provider or self._input_provider
 
         if not self._client:
             raise AgentNotInitializedError
@@ -343,9 +319,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         # Convert existing conversation history to AG-UI format
         # AG-UI protocol expects full history with each request (stateless server)
         # Extract ModelMessages from ChatMessages
-        model_msgs: list[ModelResponse | ModelRequest] = []
-        for chat_msg in message_history.get_history():
-            model_msgs.extend(chat_msg.messages)
+        model_msgs = [m for chat_msg in message_history.get_history() for m in chat_msg.messages]
         history_messages = model_messages_to_agui(model_msgs)
         # Convert new user message content to AG-UI format
         final_content = to_agui_input_content(prompts)
@@ -353,7 +327,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         # Build messages list: history + new user message
         messages: list[Message] = [*history_messages, user_message]
         pending_tool_results: list[ToolMessage] = []
-        file_tracker = FileTracker()
         tools = await self.tools.get_tools(state="enabled")
         try:  # Loop to handle tool calls - agent may request multiple rounds
             while True:
@@ -382,7 +355,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                             response_parts=response_parts,
                             tool_calls_pending=tool_calls_pending,
                         ):
-                            file_tracker.process_event(event)
                             yield event
                 except httpx.HTTPError:
                     self.log.exception("HTTP error during AG-UI run")
@@ -395,7 +367,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     tool_calls_pending,
                     {t.name: t for t in tools},
                     confirmation_mode=self.tool_confirmation_mode,
-                    input_provider=self._input_provider,
+                    input_provider=effective_input_provider,
                     context=self.get_context(data=deps),
                 )
                 # If no results (all tools were server-side), we're done
@@ -437,7 +409,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 parent_id=user_msg.message_id,
                 messages=model_messages,
                 finish_reason="stop",
-                metadata=file_tracker.get_metadata(),
             )
             yield StreamCompleteEvent(message=final_message)
             return
@@ -448,7 +419,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         # Final drain of event queue after stream completes
         async for e in self._drain_event_queue():
-            file_tracker.process_event(e)
             yield e
         # Calculate approximate token usage from what we can observe
         usage, cost_info = await calculate_usage_from_parts(
@@ -466,7 +436,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             session_id=self.session_id,
             parent_id=user_msg.message_id,
             messages=model_messages,
-            metadata=file_tracker.get_metadata(),
             usage=usage,
             cost_info=cost_info,
         )
@@ -487,6 +456,8 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         tool_calls_pending: dict[str, tuple[str, dict[str, Any]]],
     ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         from ag_ui.core import (
+            ReasoningMessageChunkEvent,
+            ReasoningMessageContentEvent,
             TextMessageChunkEvent,
             TextMessageContentEvent,
             ThinkingTextMessageContentEvent,
@@ -514,6 +485,10 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     case TextMessageChunkEvent(delta=delta) if delta:
                         response_parts.append(TextPart(content=delta))
                     case ThinkingTextMessageContentEvent(delta=delta):
+                        response_parts.append(ThinkingPart(content=delta))
+                    case ReasoningMessageContentEvent(delta=delta):
+                        response_parts.append(ThinkingPart(content=delta))
+                    case ReasoningMessageChunkEvent(delta=str() as delta):
                         response_parts.append(ThinkingPart(content=delta))
                     case AGUIToolCallStartEvent(tool_call_id=tc_id, tool_call_name=name) if name:
                         tool_accumulator.start(tc_id, name)

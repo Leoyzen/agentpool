@@ -135,10 +135,7 @@ class ToolCallState:
 
         # Only send if there's something to update
         if kwargs:
-            await self._notifications.tool_call_update(
-                tool_call_id=self.tool_call_id,
-                **kwargs,
-            )
+            await self._notifications.tool_call_update(tool_call_id=self.tool_call_id, **kwargs)
 
     async def complete(
         self,
@@ -154,12 +151,7 @@ class ToolCallState:
             content: Optional final content
             title: Optional final title
         """
-        await self.update(
-            status="completed",
-            raw_output=raw_output,
-            content=content,
-            title=title,
-        )
+        await self.update(status="completed", raw_output=raw_output, content=content, title=title)
 
     async def fail(self, error: str | None = None, *, raw_output: Any = None) -> None:
         """Mark tool call as failed.
@@ -172,7 +164,7 @@ class ToolCallState:
 
         content = None
         if error:
-            error_content = ContentToolCallContent.text(text=f"Error: {error}")
+            error_content = ContentToolCallContent.text(f"Error: {error}")
             content = [error_content]
 
         await self.update(status="failed", content=content, raw_output=raw_output)

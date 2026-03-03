@@ -57,10 +57,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast
 import uuid
 
 import anyio
@@ -70,11 +71,8 @@ from pydantic_ai import (
     ModelRequest,
     ModelResponse,
     PartEndEvent,
-    RunUsage,
     TextPart,
-    TextPartDelta,
     ThinkingPart,
-    ThinkingPartDelta,
     ToolCallPart,
     ToolCallPartDelta,
     ToolReturnPart,
@@ -84,14 +82,16 @@ from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.claude_code_agent.converters import (
-    claude_message_to_events,
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
     convert_to_opencode_metadata,
-    to_claude_system_prompt,
-    to_output_format,
+    to_finish_reason,
+    to_prompt_input,
+    to_request_usage,
+    to_run_usage,
+    to_thinking_config,
 )
-from agentpool.agents.claude_code_agent.exceptions import raise_if_usage_limit_reached
+from agentpool.agents.claude_code_agent.slash_commands import create_claude_code_command
 from agentpool.agents.claude_code_agent.static_info import models_to_category
 from agentpool.agents.events import (
     PartDeltaEvent,
@@ -101,10 +101,8 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     ToolCallCompleteEvent,
     ToolCallStartEvent,
-    ToolResultMetadataEvent,
 )
 from agentpool.agents.events.infer_info import derive_rich_tool_info
-from agentpool.agents.events.processors import FileTracker
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -117,7 +115,7 @@ from agentpool.messaging import ChatMessage
 from agentpool.messaging.messages import TokenCost
 from agentpool.sessions.models import SessionData
 from agentpool.utils.streams import merge_queue_into_iterator
-from agentpool.utils.time_utils import get_now, parse_iso_timestamp
+from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
@@ -132,23 +130,21 @@ if TYPE_CHECKING:
         PermissionResult,
         ToolPermissionContext,
         ToolUseBlock,
-        UserMessage,
     )
+    from clawd_code_sdk.models import ReasoningEffort, StopReason, ToolInput
+    from clawd_code_sdk.models.input_types import AskUserQuestionInput
+    from clawd_code_sdk.models.permissions import ElicitationRequest, ElicitationResult
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
-    from slashed import BaseCommand, Command, CommandContext
+    from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
     from tokonomics.model_names import AnthropicMaxModelName
     from toprompt import AnyPromptType
 
-    from agentpool.agents.claude_code_agent.models import (
-        ClaudeCodeCommandInfo,
-        ClaudeCodeServerInfo,
-    )
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
-    from agentpool.common_types import AnyEventHandlerType, StrPath
+    from agentpool.common_types import AnyEventHandlerType, SimpleJsonType, StrPath
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageHistory
@@ -165,8 +161,18 @@ ThinkingMode = Literal["off", "4k", "8k", "16k", "32k"]
 _MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
 """Pattern to detect CC-provided tool names ( mcp__agentpool-{agent_name}-tools__{tool_name} )."""
 
-EXCLUDED_SLASH_COMMANDS = frozenset({"login", "logout", "release-notes", "todos"})
-"""Slash commands that don't make sense when Claude Code is used as a sub-agent"""
+ALLOWED_SLASH_COMMANDS = frozenset({
+    # Skills that invoke the LLM and produce output over the wire
+    "init",
+    "debug",
+    "pr-comments",
+    "review",
+    "security-review",
+    "insights",
+    # Side-effect commands
+    "compact",
+})
+"""Slash commands that produce useful output over the wire protocol."""
 
 THINKING_MODE_TOKENS: dict[ThinkingMode, int] = {
     "off": 0,
@@ -186,14 +192,6 @@ def _strip_mcp_prefix(tool_name: str) -> str:
     if match := _MCP_TOOL_PATTERN.match(tool_name):
         return match.group(2)  # group(1) is agent name, group(2) is tool name
     return tool_name
-
-
-def parse_command_output(msg: UserMessage) -> str | None:
-    content = msg.content if isinstance(msg.content, str) else ""
-    # Extract content from <local-command-stdout> or <local-command-stderr>
-    pattern = r"<local-command-(?:stdout|stderr)>(.*?)</local-command-(?:stdout|stderr)>"
-    match = re.search(pattern, content, re.DOTALL)
-    return match.group(1) if match else None
 
 
 class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
@@ -226,14 +224,14 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         model: AnthropicMaxModelName | str | None = "opus",
         max_turns: int | None = None,
         max_budget_usd: float | None = None,
-        max_thinking_tokens: int | None = None,
+        max_thinking_tokens: int | Literal["adaptive"] | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
         permission_mode: PermissionMode | None = None,
         mcp_servers: Sequence[MCPServerConfig] | None = None,
         env_vars: dict[str, str] | None = None,
         add_dir: list[str] | None = None,
         builtin_tools: list[str] | None = None,
         fallback_model: AnthropicMaxModelName | str | None = None,
-        dangerously_skip_permissions: bool = False,
         setting_sources: list[SettingSource] | None = None,
         use_subscription: bool = False,
         env: ExecutionEnvironment | StrPath | None = None,
@@ -264,6 +262,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             max_turns: Maximum conversation turns
             max_budget_usd: Maximum budget to consume in dollars
             max_thinking_tokens: Max tokens for extended thinking
+            reasoning_effort: Reasoning effort level
             permission_mode: Permission mode ("default", "acceptEdits", "plan", "bypassPermissions")
             mcp_servers: External MCP servers to connect to (internal format, converted at runtime)
             env_vars: Environment variables for the agent process
@@ -271,7 +270,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             builtin_tools: Available tools from built-in set. Special: "LSP" for code intelligence,
                            "Chrome" for browser control
             fallback_model: Fallback model when default is overloaded
-            dangerously_skip_permissions: Bypass all permission checks (sandboxed only)
             setting_sources: Setting sources to load ("user", "project", "local")
             use_subscription: Force Claude subscription usage instead of API key
             env: Execution environment
@@ -290,8 +288,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from agentpool.agents.claude_code_agent.hook_manager import ClaudeCodeHookManager
         from agentpool.agents.sys_prompts import SystemPrompts
         from agentpool.mcp_server.tool_bridge import ToolManagerBridge
+        from agentpool.storage import StorageManager
         from agentpool_storage.claude_provider import ClaudeStorageProvider
 
+        claude_provider = ClaudeStorageProvider()
+        claude_storage = StorageManager(providers=[claude_provider])
         super().__init__(
             name=name or "claude_code",
             description=description,
@@ -306,6 +307,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             event_handlers=event_handlers,
             commands=commands,
             hooks=hooks,
+            storage=claude_storage,
         )
         self._subagents = builtin_subagents
         self._allowed_tools = allowed_tools
@@ -323,15 +325,15 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._model = model
         self._max_turns = max_turns
         self._max_budget_usd = max_budget_usd
-        self._max_thinking_tokens = max_thinking_tokens
+        self._max_thinking_tokens: int | Literal["adaptive"] | None = max_thinking_tokens
+        self._effort: ReasoningEffort | None = reasoning_effort
         self._permission_mode: PermissionMode | None = permission_mode
-        self._thinking_mode: ThinkingMode = "off"
+        self._thinking_mode: ThinkingMode = "32k"
         self._external_mcp_servers = list(mcp_servers) if mcp_servers else []
         self._env_vars = env_vars
         self._add_dir = add_dir
         self._builtin_tools = builtin_tools
         self._fallback_model = fallback_model
-        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._setting_sources = setting_sources
         self._use_subscription = use_subscription
         self._toolsets = toolsets or []
@@ -342,17 +344,13 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # ToolBridge state for exposing toolsets via MCP
         self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
         self._mcp_servers: dict[str, McpServerConfig] = {}  # Claude SDK MCP server configs
-        # Track pending tool call for permission matching
-        self._pending_tool_call_ids: dict[str, str] = {}
-        # Create Claude storage provider for session management
-        self._claude_storage = ClaudeStorageProvider()
+        # Claude storage provider is available via self.storage
         self._hook_manager = ClaudeCodeHookManager(
             agent_name=self.name,
             agent_hooks=hooks,
-            event_queue=self._event_queue,
-            get_session_id=lambda: self.session_id,
             injection_manager=self._injection_manager,
             set_mode=self._set_mode,
+            env=self.env,
         )
 
     @classmethod
@@ -375,9 +373,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Get manifest from pool or create empty one
         manifest = agent_pool.manifest if agent_pool is not None else AgentsManifest()
         # Resolve output type from config
-        resolved_output_type: type | None = None
-        if config.output_type:
-            resolved_output_type = to_type(config.output_type, manifest.responses)
+        resolved_output_type = to_type(t, manifest.responses) if (t := config.output_type) else None
         # Merge config-level handlers with provided handlers
         config_handlers = config.get_event_handlers()
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
@@ -401,9 +397,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             mcp_servers=config.get_mcp_servers(),
             env_vars=config.env_vars,
             add_dir=config.add_dir,
+            builtin_subagents=config.get_subagent_configs(),
             builtin_tools=config.builtin_tools,
             fallback_model=config.fallback_model,
-            dangerously_skip_permissions=config.dangerously_skip_permissions,
             setting_sources=config.setting_sources,
             use_subscription=config.use_subscription,
             # Toolsets
@@ -413,7 +409,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             event_handlers=merged_handlers or None,
             input_provider=input_provider,
             agent_pool=agent_pool,
-            output_type=resolved_output_type,
+            output_type=resolved_output_type,  # type: ignore[arg-type]
             hooks=config.hooks.get_agent_hooks() if config.hooks else None,
         )
 
@@ -424,7 +420,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         and starts an MCP bridge to expose them to Claude Code via the SDK's
         native MCP support. Also converts external MCP servers to SDK format.
         """
-        from clawd_code_sdk.types import McpHttpServerConfig
+        from clawd_code_sdk.models import McpHttpServerConfig
 
         # Convert external MCP servers to SDK format first
         if self._external_mcp_servers:
@@ -444,11 +440,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # Use HTTP transport to preserve _meta field with claudecode/toolUseId
         # SDK transport drops _meta in Claude Agent SDK's query.py
-        url = f"http://127.0.0.1:{self._tool_bridge.port}/mcp"
-        mcp_config = {
-            self._tool_bridge.resolved_server_name: McpHttpServerConfig(type="http", url=url)
-        }
-
+        cfg = McpHttpServerConfig(type="http", url=self._tool_bridge.url)
+        mcp_config = {self._tool_bridge.resolved_server_name: cfg}
         self._mcp_servers.update(mcp_config)
         self.log.info("Toolsets initialized", toolset_count=len(self._toolsets))
 
@@ -478,16 +471,16 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             except Exception:  # noqa: BLE001
                 pass
             else:
-                for server in live_status.get("mcpServers", []):
-                    name = server.get("name", "unknown")
-                    status = server.get("status", "disconnected")
-                    server_info = server.get("serverInfo") or {}
+                for server in live_status.mcp_servers:
+                    name = server.name
+                    server_info = server.server_info
+                    assert server_info  # TODO: remove assert
                     result[name] = MCPServerStatus(
                         name=name,
-                        status=status,
-                        server_type=server.get("type", "unknown"),
-                        server_name=server_info.get("name"),
-                        server_version=server_info.get("version"),
+                        status=server.status,
+                        server_type=server.config.get("type", "unknown"),
+                        server_name=server_info.name,
+                        server_version=server_info.version,
                     )
                 return result
         # Fallback: report from config
@@ -509,78 +502,71 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             fork_session: Whether to fork the session
         """
         from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient
+        from clawd_code_sdk.models.options import NewSession, ResumeSession
 
-        sys_prompt = to_claude_system_prompt(system_prompt) if system_prompt else None
-        # Determine effective permission mode
-        permission_mode = self._permission_mode
-        if self._dangerously_skip_permissions and not permission_mode:
-            permission_mode = "bypassPermissions"
-        # Determine can_use_tool callback
-        bypass = permission_mode == "bypassPermissions" or self._dangerously_skip_permissions
-        can_use_tool = (
-            self._can_use_tool
-            if self._permission_mode != "bypassPermissions" and not bypass
-            else None
-        )
+        # Determine permission and elicitation callbacks
+        bypass = self._permission_mode == "bypassPermissions"
+        can_use_tool = self._can_use_tool if not bypass else None
+        on_user_question = self._on_user_question
+        on_elicitation = self._on_elicitation
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []
-        # Build extra_args for CLI flags not directly exposed
-        extra_args: dict[str, str | None] = {}
-        if "Chrome" in builtin_tools:
-            extra_args["chrome"] = None
         # Build environment variables
         env = dict(self._env_vars or {})
         env["CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"] = "1"
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         if "LSP" in builtin_tools:
-            # Enable LSP tool support
             env["ENABLE_LSP_TOOL"] = "1"
-        if self._use_subscription:
-            # Force subscription usage by clearing API key
+        if self._use_subscription:  # Force subscription usage by clearing API key
             env["ANTHROPIC_API_KEY"] = ""
+
+        # Build session config
+        session: NewSession | ResumeSession
+        if self._sdk_session_id:
+            session = ResumeSession(session_id=self._sdk_session_id, fork=fork_session)
+        else:
+            session = NewSession()
 
         opts = ClaudeAgentOptions(
             cwd=self.env.cwd,
             allowed_tools=self._allowed_tools or [],
-            disallowed_tools=self._disallowed_tools or [],
-            system_prompt=sys_prompt,
+            disallowed_tools=self._disallowed_tools,
+            system_prompt=system_prompt,
+            include_builtin_system_prompt=self._include_builtin_system_prompt,
             model=self._model,
             max_turns=self._max_turns,
             max_budget_usd=self._max_budget_usd,
-            max_thinking_tokens=self._max_thinking_tokens,
-            permission_mode=permission_mode,
+            thinking=to_thinking_config(self._max_thinking_tokens),
+            effort=self._effort,
+            permission_mode=self._permission_mode,
             env=env,
             agents=self._subagents,
-            add_dirs=self._add_dir or [],  # type: ignore[arg-type]
+            add_dirs=self._add_dir or [],
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
             can_use_tool=can_use_tool,
-            max_buffer_size=10 * 1024 * 1024,
-            output_format=to_output_format(self._output_type),
+            on_user_question=on_user_question,
+            on_elicitation=on_elicitation,
+            output_schema=self._output_type if self._output_type is not str else None,
             mcp_servers=self._mcp_servers or {},
-            include_partial_messages=True,
-            hooks=self._hook_manager.build_hooks(),  # type: ignore[arg-type]
+            hooks=self._hook_manager.build_hooks(),
             setting_sources=self._setting_sources,
-            extra_args=extra_args,
-            resume=self._sdk_session_id,
-            fork_session=fork_session,
+            chrome="Chrome" in builtin_tools,
+            session=session,
+            stderr=lambda line: logger.debug("claude_cli_stderr", output=line),
         )
         return ClaudeSDKClient(opts)
 
     async def _can_use_tool(
         self,
         tool_name: str,
-        input_data: dict[str, Any],
+        input_data: ToolInput | dict[str, Any],
         context: ToolPermissionContext,
     ) -> PermissionResult:
         """Handle tool permission requests.
 
-        This callback fires in two cases:
-        1. Tool needs approval: Claude wants to use a tool that isn't auto-approved
-        2. Claude asks a question: Claude calls the AskUserQuestion tool for clarification
-
         Args:
-            tool_name: Name of the tool being called (e.g., "Bash", "Write", "AskUserQuestion")
+            tool_name: Name of the tool being called (e.g., "Bash", "Write")
             input_data: Tool input arguments
             context: Permission context with suggestions
 
@@ -589,57 +575,113 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """
         from clawd_code_sdk import PermissionResultAllow, PermissionResultDeny
 
-        from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
-
-        # Handle AskUserQuestion specially - this is Claude asking for clarification
-        if tool_name == "AskUserQuestion":
-            agent_ctx = self.get_context()
-            return await handle_clarifying_questions(agent_ctx, input_data, context)
+        input_dict = cast(dict[str, Any], input_data)
         # Auto-grant if bypassPermissions mode is active
-        if self._permission_mode == "bypassPermissions":
-            return PermissionResultAllow()
-        # Plan mode: auto-deny all tool executions (planning only, no execution)
-        if self._permission_mode == "plan":
-            return PermissionResultDeny(message="Plan mode active - tool execution disabled")
-        # For "acceptEdits" mode: auto-allow edit/write tools only
-        if self._permission_mode == "acceptEdits":
-            # Extract the actual tool name from MCP-style names
-            # e.g., "mcp__agentpool-claude-tools__edit" -> "edit"
-            actual_tool_name = tool_name
-            if "__" in tool_name:
-                actual_tool_name = tool_name.rsplit("__", 1)[-1]
-            # Auto-allow file editing tools
-            if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
+        match self._permission_mode:
+            case "bypassPermissions":
                 return PermissionResultAllow()
+            case "plan":
+                return PermissionResultDeny(message="Plan mode active - tool execution disabled")
+            case "acceptEdits":
+                actual_tool_name = _strip_mcp_prefix(tool_name)
+                # Auto-allow file editing tools
+                if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
+                    return PermissionResultAllow()
 
         # For "default" mode and non-edit tools in "acceptEdits" mode:
         # Ask for confirmation via input provider
-        if self._input_provider:
-            # Get tool_use_id from SDK context if available (requires SDK >= 0.1.19)
-            # TODO: Remove fallback once claude-agent-sdk with tool_use_id is released
-            if tc_id := context.tool_use_id:  # pyright: ignore[reportAttributeAccessIssue]
-                tool_call_id: str | None = tc_id
-            else:
-                # Fallback: look up from streaming events or generate our own
-                tool_call_id = self._pending_tool_call_ids.get(tool_name)
-                if not tool_call_id:
-                    tool_call_id = f"perm_{uuid.uuid4().hex[:12]}"
-                    self._pending_tool_call_ids[tool_name] = tool_call_id
+        tool_call_id = context.tool_use_id
+        display_name = _strip_mcp_prefix(tool_name)
+        self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("Permission callback invoked outside of an active run")
+        ctx = replace(
+            self._tool_bridge._current_context,
+            tool_call_id=tool_call_id,
+            tool_input=input_dict,
+            tool_name=tool_name,
+        )
+        input_provider = ctx.get_input_provider()
+        result = await input_provider.get_tool_confirmation(
+            context=ctx,
+            tool_name=display_name,
+            tool_description=f"Claude Code tool: {tool_name}",
+            args=input_dict,
+        )
+        return confirmation_result_to_native(result)
 
-            display_name = _strip_mcp_prefix(tool_name)
-            self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
-            ctx = self.get_context(
-                tool_call_id=tool_call_id, tool_input=input_data, tool_name=tool_name
+    async def _on_user_question(
+        self,
+        input_data: AskUserQuestionInput,
+        context: ToolPermissionContext,
+    ) -> PermissionResult:
+        """Handle AskUserQuestion elicitation requests.
+
+        Called when Claude asks the user a clarifying question.
+
+        Args:
+            input_data: Input containing 'questions' array
+            context: Permission context with tool_use_id
+
+        Returns:
+            PermissionResult with answers or denial
+        """
+        from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
+
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("User question callback invoked outside of an active run")
+        return await handle_clarifying_questions(
+            self._tool_bridge._current_context,
+            input_data,
+            context,
+        )
+
+    async def _on_elicitation(
+        self,
+        request: ElicitationRequest,
+    ) -> ElicitationResult:
+        """Handle MCP elicitation requests.
+
+        Converts from Claude SDK's ElicitationRequest to MCP's ElicitRequestParams,
+        delegates to the input provider, and converts back.
+
+        Args:
+            request: Elicitation request from an MCP server
+
+        Returns:
+            ElicitationResult with user's response
+        """
+        from clawd_code_sdk.models.permissions import ElicitationResult
+        from mcp.types import ElicitRequestFormParams, ElicitRequestURLParams, ElicitResult
+
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("Elicitation callback invoked outside of an active run")
+        input_provider = self._tool_bridge._current_context.get_input_provider()
+
+        # Convert SDK ElicitationRequest to MCP ElicitRequestParams
+        mcp_params: ElicitRequestURLParams | ElicitRequestFormParams
+        if request.mode == "url":
+            mcp_params = ElicitRequestURLParams(
+                message=request.message,
+                url=request.url or "",
+                elicitationId=request.elicitation_id or "",
             )
-            result = await self._input_provider.get_tool_confirmation(
-                context=ctx,
-                tool_name=display_name,
-                tool_description=f"Claude Code tool: {tool_name}",
-                args=input_data,
+        else:
+            mcp_params = ElicitRequestFormParams(
+                message=request.message,
+                requestedSchema=request.requested_schema or {},
             )
-            return confirmation_result_to_native(result)
-        # Default: deny if no input provider
-        return PermissionResultDeny(message="No input provider configured")
+
+        result = await input_provider.get_elicitation(params=mcp_params)
+
+        # Convert MCP ElicitResult back to SDK ElicitationResult
+        if isinstance(result, ElicitResult):
+            return ElicitationResult(
+                action=result.action,
+                content=dict(result.content) if result.content else None,
+            )
+        # ErrorData case - treat as decline
+        return ElicitationResult(action="decline")
 
     async def __aenter__(self) -> Self:
         """Connect to Claude Code with deferred client connection."""
@@ -659,7 +701,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         try:
             await self._client.connect()
-            await self.populate_commands()
+            await self._populate_commands()
             self.log.info("Claude Code client connected")
         except Exception:
             self.log.exception("Failed to connect Claude Code client")
@@ -748,7 +790,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             self._client = None
         await super().__aexit__(exc_type, exc_val, exc_tb)
 
-    async def populate_commands(self) -> None:
+    async def _populate_commands(self) -> None:
         """Populate the command store with slash commands from Claude Code.
 
         Fetches available commands from the connected Claude Code server
@@ -758,73 +800,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         Commands that are not supported or not useful for external use
         are filtered out (e.g., login, logout, context, cost).
         """
-        server_info = await self.get_server_info()
+        await self.ensure_initialized()
+        assert self._client, "Client not connected after ensure_initialized"
+        server_info = await self._client.get_server_info()
+        assert server_info, "No server info returned (streaming mode should always provide it)"
         # Commands to skip - not useful or problematic in this context
         commands = [
-            self._create_claude_code_command(cmd_info)
+            create_claude_code_command(cmd_info)
             for cmd_info in server_info.commands
-            if cmd_info.name and cmd_info.name not in EXCLUDED_SLASH_COMMANDS
+            if cmd_info.name and cmd_info.name in ALLOWED_SLASH_COMMANDS
         ]
         for command in commands:
             self._command_store.register_command(command, replace=True)
         self.log.info("Populated command store", command_count=len(commands))
-
-    def _create_claude_code_command(self, cmd_info: ClaudeCodeCommandInfo) -> Command:
-        """Create a slashed Command from Claude Code command info.
-
-        Args:
-            cmd_info: Command info dict with 'name', 'description', 'argumentHint'
-
-        Returns:
-            A slashed Command that executes via Claude Code
-        """
-        from clawd_code_sdk.types import AssistantMessage, ResultMessage, TextBlock, UserMessage
-        from slashed import Command
-
-        name = cmd_info.name
-        # Handle MCP commands - they have " (MCP)" suffix in Claude Code
-        category = "claude_code"
-        if name.endswith(" (MCP)"):
-            name = f"mcp:{name.replace(' (MCP)', '')}"
-            category = "mcp"
-
-        async def execute_command(
-            ctx: CommandContext[Any],
-            args: list[str],
-            kwargs: dict[str, str],
-        ) -> None:
-            """Execute the Claude Code slash command."""
-            # Build command string
-            args_str = " ".join(args) if args else ""
-            if kwargs:
-                kwargs_str = " ".join(f"{k}={v}" for k, v in kwargs.items())
-                args_str = f"{args_str} {kwargs_str}".strip()
-            # Execute via agent run - slash commands go through as prompts
-            if not self._client:
-                return
-            await self._client.query(f"/{name} {args_str}".strip())
-            async for msg in self._client.receive_response():
-                match msg:
-                    case AssistantMessage():
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                await ctx.print(block.text)
-                    case UserMessage():
-                        if parsed := parse_command_output(msg):
-                            await ctx.print(parsed)
-                    case ResultMessage():
-                        if msg.result:
-                            await ctx.print(msg.result)
-                        if msg.is_error:
-                            await ctx.print(f"Error: {msg.subtype}")
-
-        return Command.from_raw(
-            execute_command,
-            name=name,
-            description=cmd_info.description or f"Claude Code command: {name}",
-            category=category,
-            usage=cmd_info.argument_hint,
-        )
 
     async def _stream_events(  # noqa: PLR0915
         self,
@@ -841,18 +829,33 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
+        from anthropic.types import (
+            InputJSONDelta,
+            RawContentBlockDeltaEvent,
+            RawContentBlockStartEvent,
+            RawContentBlockStopEvent,
+            TextBlock as AnthTextBlock,
+            TextDelta,
+            ThinkingBlock as AnthThinkingBlock,
+            ThinkingDelta,
+            ToolUseBlock as AnthToolUseBlock,
+        )
         from clawd_code_sdk import (
             AssistantMessage,
             Message,
             ResultMessage,
-            SystemMessage,
+            ResultSuccessMessage,
             TextBlock,
             ThinkingBlock,
             ToolResultBlock,
             ToolUseBlock,
             UserMessage,
         )
-        from clawd_code_sdk.types import StreamEvent
+        from clawd_code_sdk.models import StreamEvent
+        from clawd_code_sdk.models.messages import (
+            CompactBoundarySystemMessage,
+            StatusSystemMessage,
+        )
 
         await self.ensure_initialized()
         # Initialize session_id on first run and log to storage
@@ -862,22 +865,20 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         #   if hasattr(message, 'subtype') and message.subtype == 'init':
         #       session_id = message.data.get('session_id')
         # The SDK manages its own session persistence. To resume, pass:
-        #   ClaudeAgentOptions(resume=session_id)
+        #   ClaudeAgentOptions(session=ResumeSession(session_id=session_id))
         # Conversation ID initialization handled by BaseAgent
 
-        # Update input provider if provided
-        if input_provider is not None:
-            self._input_provider = input_provider
+        # Resolve input provider: explicit parameter overrides agent default
+        effective_input_provider = input_provider or self._input_provider
+        run_context = self.get_context(data=deps, input_provider=effective_input_provider)
         if not self._client:
             raise AgentNotInitializedError
         # Get pending parts from conversation (staged content)
         # Combine pending parts with new prompts, then join into single string for Claude SDK
-        #
-        prompt_text = " ".join(str(p) for p in prompts)
         run_id = str(uuid.uuid4())
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
-        request = ModelRequest(parts=[UserPromptPart(content=prompt_text)])
+        request = ModelRequest(parts=[UserPromptPart(content=prompts)])
         model_messages: list[ModelResponse | ModelRequest] = [request]
         current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         pending_tool_calls: dict[str, ToolUseBlock] = {}
@@ -885,10 +886,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         emitted_tool_starts: set[str] = set()
         tool_accumulator = ToolCallAccumulator()
         resolved_model: str | None = None
-        # Track files modified during this run
-        file_tracker = FileTracker()
-        # Accumulate metadata events by tool_call_id (workaround for SDK stripping _meta)
-        tool_metadata: dict[str, dict[str, Any]] = {}
         # Handle ephemeral execution (fork session if store_history=False)
         fork_client = None
         client = self._client
@@ -902,243 +899,226 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             await fork_client.connect()
             client = fork_client
 
-        # Set deps/input_provider on tool bridge (ContextVar doesn't work - separate task)
+        # Set run context on tool bridge (ContextVar doesn't work - separate task)
         try:
-            await client.query(prompt_text)
+            claude_prompts = [*to_prompt_input(prompts)]
+            await client.query(*claude_prompts)
             # Capture SDK session ID from init message
             stream = client.receive_response()
             first_msg = await anext(stream)
-            assert isinstance(first_msg, SystemMessage)
-            assert first_msg.subtype == "init"
-            self._sdk_session_id = first_msg.data["session_id"]
-            # Merge SDK messages with event queue for real-time tool event streaming
+            assert not isinstance(first_msg, AssistantMessage), (
+                f"invalid message type {type(first_msg)}"
+            )
+            self._sdk_session_id = first_msg.session_id
+            # Persist SDK session ID to storage for cross-referencing
+            if self.storage and self.session_id:
+                await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
             async with (
-                self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
-                merge_queue_into_iterator(stream, self._event_queue) as events,
+                self._tool_bridge.set_run_context(run_context, prompt=prompts),
+                merge_queue_into_iterator(stream, self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
             ):
-                async for event_or_message in events:
-                    # Check if it's a queued event (from tools via EventEmitter)
+                async for event_or_message in merged_events:
                     if not isinstance(event_or_message, Message):
-                        # Capture metadata events for correlation with tool results
-                        if isinstance(event_or_message, ToolResultMetadataEvent):
-                            tool_metadata[event_or_message.tool_call_id] = event_or_message.metadata
-                            # Don't yield metadata events - they're internal correlation only
-                            continue
-                        # It's an event from the queue - yield it immediately
                         yield event_or_message
                         continue
-
                     message = event_or_message
-                    # Process assistant messages - extract parts incrementally
-                    if isinstance(message, AssistantMessage):
-                        # Track resolved model from provider response
-                        if message.model:
-                            resolved_model = message.model
-                        # Check for usage limit error
-                        raise_if_usage_limit_reached(message)
-                        for block in message.content:
-                            match block:
-                                case TextBlock(text=text):
-                                    current_response_parts.append(TextPart(content=text))
-                                case ThinkingBlock(thinking=thinking):
-                                    current_response_parts.append(ThinkingPart(content=thinking))
-                                case ToolUseBlock(id=tc_id, name=name, input=input_data):
-                                    pending_tool_calls[tc_id] = block
-                                    display_name = _strip_mcp_prefix(name)
-                                    tool_call_part = ToolCallPart(
-                                        tool_name=display_name, args=input_data, tool_call_id=tc_id
-                                    )
-                                    current_response_parts.append(tool_call_part)
-                                    # Emit FunctionToolCallEvent (triggers UI notification)
-                                    # func_tool_event = FunctionToolCallEvent(part=tool_call_part)
-                                    # await event_handlers(None, func_tool_event)
-                                    # yield func_tool_event
-
-                                    # Only emit ToolCallStartEvent if not already emitted
-                                    # via streaming (emits early with partial info)
-                                    if tc_id not in emitted_tool_starts:
-                                        rich_info = derive_rich_tool_info(name, input_data)
-                                        tool_start_event = ToolCallStartEvent(
-                                            tool_call_id=tc_id,
+                    match message:
+                        case AssistantMessage(model=model, content=msg_content):
+                            # Track resolved model from provider response
+                            if model:
+                                resolved_model = model
+                            # Check for usage limit error
+                            for block in msg_content:
+                                match block:
+                                    case TextBlock(text=text):
+                                        current_response_parts.append(TextPart(content=text))
+                                    case ThinkingBlock(thinking=text):
+                                        current_response_parts.append(ThinkingPart(content=text))
+                                    case ToolUseBlock(id=tc_id, name=name, input=input_data):
+                                        pending_tool_calls[tc_id] = block
+                                        display_name = _strip_mcp_prefix(name)
+                                        tool_call_part = ToolCallPart(
                                             tool_name=display_name,
-                                            title=rich_info.title,
-                                            kind=rich_info.kind,
-                                            locations=rich_info.locations,
-                                            content=rich_info.content,
-                                            raw_input=input_data,
+                                            args=cast(dict[str, Any], input_data),
+                                            tool_call_id=tc_id,
                                         )
-                                        # Track file modifications
-                                        file_tracker.process_event(tool_start_event)
-                                        yield tool_start_event
-                                    # Already emitted ToolCallStartEvent early via streaming.
-                                    # Dont emit a progress update here - it races with
-                                    # permission requests and causes Zed to cancel the dialog.
-                                    # Just track file modifications.
-                                    elif fpath := file_tracker.extractor(display_name, input_data):
-                                        file_tracker.touched_files.add(fpath)
-                                    # Clean up from accumulator (always, both branches)
-                                    tool_accumulator.complete(tc_id)
-                                case ToolResultBlock(tool_use_id=tc_id, content=content):
-                                    # Tool result received - flush response parts and add request
+                                        current_response_parts.append(tool_call_part)
+                                        # Emit FunctionToolCallEvent (triggers UI notification)
+                                        # fn_tool_event = FunctionToolCallEvent(part=tool_call_part)
+                                        # await event_handlers(None, fn_tool_event)
+                                        # yield fn_tool_event
+                                        # Only emit ToolCallStartEvent if not already emitted
+                                        # via streaming (emits early with partial info)
+                                        if tc_id not in emitted_tool_starts:
+                                            rich_info = derive_rich_tool_info(name, input_data)
+                                            tool_start_event = ToolCallStartEvent(
+                                                tool_call_id=tc_id,
+                                                tool_name=display_name,
+                                                title=rich_info.title,
+                                                kind=rich_info.kind,
+                                                locations=rich_info.locations,
+                                                content=rich_info.content,
+                                                raw_input=cast(dict[str, Any], input_data),
+                                            )
+                                            yield tool_start_event
+                                        # Clean up from accumulator (always, both branches)
+                                        tool_accumulator.complete(tc_id)
+                                    case ToolResultBlock():
+                                        pass  # ToolResult Blocks only appear in UserMessages
+                        # Process user messages - may contain tool results
+                        case UserMessage(content=list() as user_blocks):  # TODO: handle str?
+                            # Extract tool_use_result from UserMessage for metadata conversion
+                            for user_block in user_blocks:
+                                if isinstance(user_block, ToolResultBlock):
+                                    tc_id = user_block.tool_use_id
+                                    result_content = user_block.get_parsed_content()
+                                    # Flush response parts
                                     if current_response_parts:
-                                        response = ModelResponse(parts=current_response_parts)
-                                        model_messages.append(response)
+                                        model_response = ModelResponse(parts=current_response_parts)
+                                        model_messages.append(model_response)
                                         current_response_parts = []
+
                                     # Get tool name from pending calls
-                                    tool_use = pending_tool_calls.pop(tc_id, None)
-                                    tool_name = _strip_mcp_prefix(
-                                        tool_use.name if tool_use else "unknown"
-                                    )
-                                    tool_input = tool_use.input if tool_use else {}
+                                    tool_use = pending_tool_calls.pop(tc_id)
                                     # Create ToolReturnPart for the result
                                     return_part = ToolReturnPart(
-                                        tool_name=tool_name, content=content, tool_call_id=tc_id
+                                        tool_name=_strip_mcp_prefix(tool_use.name),
+                                        content=result_content,
+                                        tool_call_id=tc_id,
                                     )
                                     # Emit FunctionToolResultEvent (for session.py to complete UI)
                                     yield FunctionToolResultEvent(result=return_part)
+                                    # Build metadata: prefer existing tool_metadata,
+                                    # then convert SDK result
+                                    tool_input = (
+                                        cast(dict[str, Any], tool_use.input) if tool_use else {}
+                                    )
+                                    metadata: dict[str, Any] | None = (
+                                        self._tool_bridge.tool_metadata.get(tc_id)
+                                    )
+                                    if not metadata and isinstance(message.tool_use_result, list):
+                                        result = (
+                                            message.tool_use_result[0]
+                                            if message.tool_use_result
+                                            else {}
+                                        )
+
+                                        # Convert Claude Code SDK's tool_use_result to OpenCode fmt
+                                        metadata = convert_to_opencode_metadata(
+                                            tool_use.name,
+                                            result,  # pyright: ignore[reportArgumentType]
+                                            tool_input,
+                                        )  # type: ignore[assignment]
+
                                     # Also emit ToolCallCompleteEvent for consumers that expect it
                                     yield ToolCallCompleteEvent(
-                                        tool_name=tool_name,
+                                        tool_name=_strip_mcp_prefix(tool_use.name),
                                         tool_call_id=tc_id,
                                         tool_input=tool_input,
-                                        tool_result=content,
+                                        tool_result=result_content,
                                         agent_name=self.name,
                                         message_id="",
-                                        metadata=tool_metadata.get(tc_id),
+                                        metadata=metadata,
                                     )
                                     # Add tool return as ModelRequest
                                     model_messages.append(ModelRequest(parts=[return_part]))
 
-                    # Process user messages - may contain tool results
-                    elif isinstance(message, UserMessage):
-                        user_content = message.content
-                        user_blocks = (
-                            [user_content] if isinstance(user_content, str) else user_content
-                        )
-                        # Extract tool_use_result from UserMessage for metadata conversion
-                        for user_block in user_blocks:
-                            if isinstance(user_block, ToolResultBlock):
-                                tc_id = user_block.tool_use_id
-                                result_content = user_block.content
-                                # Flush response parts
-                                if current_response_parts:
-                                    model_response = ModelResponse(parts=current_response_parts)
-                                    model_messages.append(model_response)
-                                    current_response_parts = []
+                        # Handle StreamEvent for real-time streaming
+                        case StreamEvent(
+                            event=RawContentBlockStartEvent(
+                                index=index, content_block=AnthTextBlock()
+                            )
+                        ):
+                            yield PartStartEvent.text(index=index, content="")
 
-                                # Get tool name from pending calls
-                                tool_use = pending_tool_calls.pop(tc_id, None)
-                                tool_name = _strip_mcp_prefix(
-                                    tool_use.name if tool_use else "unknown"
-                                )
-                                # Create ToolReturnPart for the result
-                                return_part = ToolReturnPart(
-                                    tool_name=tool_name,
-                                    content=result_content,
+                        case StreamEvent(
+                            event=RawContentBlockStartEvent(
+                                index=index, content_block=AnthThinkingBlock()
+                            )
+                        ):
+                            yield PartStartEvent.thinking(index=index, content="")
+
+                        case StreamEvent(
+                            event=RawContentBlockStartEvent(
+                                content_block=AnthToolUseBlock(id=tc_id, name=raw_tool_name)
+                            )
+                        ):
+                            # Emit ToolCallStartEvent early (args still streaming)
+                            tool_name = _strip_mcp_prefix(raw_tool_name)
+                            tool_accumulator.start(tc_id, tool_name)
+                            # Derive rich info with empty args for now
+                            rich_info = derive_rich_tool_info(raw_tool_name, {})
+                            emitted_tool_starts.add(tc_id)
+                            yield ToolCallStartEvent(
+                                tool_call_id=tc_id,
+                                tool_name=tool_name,
+                                title=rich_info.title,
+                                kind=rich_info.kind,
+                                locations=[],  # No locations yet, args not complete
+                                content=rich_info.content,
+                                raw_input={},  # Empty, will be filled when complete
+                            )
+
+                        # content_block_delta events
+                        case StreamEvent(
+                            event=RawContentBlockDeltaEvent(index=index, delta=TextDelta(text=text))
+                        ) if text:
+                            yield PartDeltaEvent.text(index=index, content=text)
+                        case StreamEvent(
+                            event=RawContentBlockDeltaEvent(
+                                index=index, delta=ThinkingDelta(thinking=thinking)
+                            )
+                        ) if thinking:
+                            yield PartDeltaEvent.thinking(index=index, content=thinking)
+                        case StreamEvent(
+                            event=RawContentBlockDeltaEvent(
+                                index=index, delta=InputJSONDelta(partial_json=partial_json)
+                            )
+                        ) if partial_json:
+                            # Accumulate tool argument JSON fragments
+                            # Find which tool call this belongs to by index
+                            for tc_id in tool_accumulator._calls:
+                                tool_accumulator.add_args(tc_id, partial_json)
+                                tool_delta = ToolCallPartDelta(
+                                    args_delta=partial_json,
                                     tool_call_id=tc_id,
                                 )
-                                # Emit FunctionToolResultEvent (for session.py to complete UI)
-                                yield FunctionToolResultEvent(result=return_part)
-                                # Build metadata: prefer existing tool_metadata,
-                                # then convert SDK result
-                                tool_input = tool_use.input if tool_use else {}
-                                metadata = tool_metadata.get(tc_id)
-                                if not metadata and message.tool_use_result is not None:
-                                    # Convert Claude Code SDK's tool_use_result to OpenCode format
-                                    metadata = convert_to_opencode_metadata(
-                                        tool_name, message.tool_use_result, tool_input
-                                    )
+                                yield PartDeltaEvent(index=index, delta=tool_delta)
+                                break  # Only one tool call streams at a time
 
-                                # Also emit ToolCallCompleteEvent for consumers that expect it
-                                yield ToolCallCompleteEvent(
-                                    tool_name=tool_name,
-                                    tool_call_id=tc_id,
-                                    tool_input=tool_input,
-                                    tool_result=result_content,
-                                    agent_name=self.name,
-                                    message_id="",
-                                    metadata=metadata,
-                                )
-                                # Add tool return as ModelRequest
-                                model_messages.append(ModelRequest(parts=[return_part]))
+                        # content_block_stop events
+                        case StreamEvent(event=RawContentBlockStopEvent(index=index)):
+                            # Emit with empty part - content was accumulated via deltas
+                            yield PartEndEvent(index=index, part=TextPart(content=""))
 
-                    # Handle StreamEvent for real-time streaming
-                    elif isinstance(message, StreamEvent):
-                        event_data = message.event
-                        event_type = event_data.get("type")
-                        index = event_data.get("index", 0)
-                        content_block = event_data.get("content_block", {})
-                        block_type = content_block.get("type")
-                        delta = event_data.get("delta", {})
-                        match event_type, block_type or delta.get("type"):
-                            # content_block_start events
-                            case "content_block_start", "text":
-                                yield PartStartEvent.text(index=index, content="")
+                        case StatusSystemMessage(status="compacting"):
+                            from agentpool.agents.events import CompactionEvent
 
-                            case "content_block_start", "thinking":
-                                yield PartStartEvent.thinking(index=index, content="")
+                            yield CompactionEvent(
+                                session_id=self.session_id or "unknown",
+                                trigger="auto",
+                                phase="starting",
+                            )
+                            continue
 
-                            case "content_block_start", "tool_use":
-                                # Emit ToolCallStartEvent early (args still streaming)
-                                tc_id = content_block.get("id", "")
-                                raw_tool_name = content_block.get("name", "")
-                                tool_name = _strip_mcp_prefix(raw_tool_name)
-                                tool_accumulator.start(tc_id, tool_name)
-                                # Track for permission matching - callback uses raw name
-                                self._pending_tool_call_ids[raw_tool_name] = tc_id
-                                # Derive rich info with empty args for now
-                                rich_info = derive_rich_tool_info(raw_tool_name, {})
-                                emitted_tool_starts.add(tc_id)
-                                yield ToolCallStartEvent(
-                                    tool_call_id=tc_id,
-                                    tool_name=tool_name,
-                                    title=rich_info.title,
-                                    kind=rich_info.kind,
-                                    locations=[],  # No locations yet, args not complete
-                                    content=rich_info.content,
-                                    raw_input={},  # Empty, will be filled when complete
-                                )
+                        case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
+                            from agentpool.agents.events import CompactionEvent
 
-                            # content_block_delta events
-                            case "content_block_delta", "text_delta":
-                                if delta := delta.get("text", ""):
-                                    text_delta = TextPartDelta(content_delta=delta)
-                                    yield PartDeltaEvent(index=index, delta=text_delta)
+                            yield CompactionEvent(
+                                session_id=self.session_id or "unknown",
+                                trigger=compact_metadata["trigger"],
+                                phase="completed",
+                                pre_tokens=compact_metadata["pre_tokens"],
+                            )
+                            continue
 
-                            case "content_block_delta", "thinking_delta":
-                                if delta := delta.get("thinking", ""):
-                                    thinking_delta = ThinkingPartDelta(content_delta=delta)
-                                    yield PartDeltaEvent(index=index, delta=thinking_delta)
+                        case StreamEvent():
+                            # Ignore other StreamEvent types (message_start, etc.)
+                            # Skip further processing - don't duplicate
+                            continue
 
-                            case "content_block_delta", "input_json_delta":
-                                # Accumulate tool argument JSON fragments
-                                if partial_json := delta.get("partial_json", ""):
-                                    # Find which tool call this belongs to by index
-                                    for tc_id in tool_accumulator._calls:
-                                        tool_accumulator.add_args(tc_id, partial_json)
-                                        tool_delta = ToolCallPartDelta(
-                                            args_delta=partial_json,
-                                            tool_call_id=tc_id,
-                                        )
-                                        yield PartDeltaEvent(index=index, delta=tool_delta)
-                                        break  # Only one tool call streams at a time
-
-                            # content_block_stop events
-                            case "content_block_stop", _:
-                                # Emit with empty part - content was accumulated via deltas
-                                yield PartEndEvent(index=index, part=TextPart(content=""))
-
-                            case _:
-                                pass  # Ignore other event types (message_start, etc.)
-
-                        # Skip further processing for StreamEvent - don't duplicate
-                        continue
-
-                    # Convert to events and yield
-                    # (skip AssistantMessage - already streamed via StreamEvent)
-                    if not isinstance(message, AssistantMessage):
-                        for event in claude_message_to_events(message, agent_name=self.name):
-                            yield event
+                        # All other message types (ResultMessage, InitSystemMessage, etc.)
+                        # fall through to post-match processing below
 
                     # Check for result (end of response) and capture usage info
                     if isinstance(message, ResultMessage):
@@ -1156,10 +1136,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via CancelledError")
             # Emit partial response on cancellation
-            # Build metadata with file tracking and SDK session ID
-            metadata = file_tracker.get_metadata()
+            # Build metadata with SDK session ID
+            msg_metadata: SimpleJsonType = {}
             if self._sdk_session_id:
-                metadata["sdk_session_id"] = self._sdk_session_id
+                msg_metadata["sdk_session_id"] = self._sdk_session_id
             content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))
             response_msg = ChatMessage[TResult](
                 content=content,  # type: ignore[arg-type]
@@ -1171,7 +1151,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 model_name=resolved_model or self.model_name,
                 messages=model_messages,
                 finish_reason="stop",
-                metadata=metadata,
+                metadata=msg_metadata,
             )
             yield StreamCompleteEvent(message=response_msg)
             # Post-processing handled by base class
@@ -1196,7 +1176,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Determine final content - use structured output if available
         content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))
         final_content: TResult
-        if self._output_type is not str and result_message and result_message.structured_output:
+        if (
+            self._output_type is not str
+            and isinstance(result_message, ResultSuccessMessage)
+            and result_message.structured_output
+        ):
             # Validate structured output against expected type
             adapter = TypeAdapter(self._output_type)
             final_content = adapter.validate_python(result_message.structured_output)
@@ -1206,30 +1190,20 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Build cost_info and usage from ResultMessage if available
         cost_info: TokenCost | None = None
         request_usage: RequestUsage | None = None
-        if result_message and result_message.usage:
-            usage_dict = result_message.usage
-            run_usage = RunUsage(
-                input_tokens=usage_dict.get("input_tokens", 0),
-                output_tokens=usage_dict.get("output_tokens", 0),
-                cache_read_tokens=usage_dict.get("cache_read_input_tokens", 0),
-                cache_write_tokens=usage_dict.get("cache_creation_input_tokens", 0),
-            )
-            total_cost = Decimal(str(result_message.total_cost_usd or 0))
+        stop_reason: StopReason | None = "end_turn"
+        if result_message:
+            run_usage = to_run_usage(result_message.usage)
+            total_cost = Decimal(str(result_message.total_cost_usd))
             cost_info = TokenCost(token_usage=run_usage, total_cost=total_cost)
-            # Also set usage for OpenCode compatibility
-            request_usage = RequestUsage(
-                input_tokens=usage_dict.get("input_tokens", 0),
-                output_tokens=usage_dict.get("output_tokens", 0),
-                cache_read_tokens=usage_dict.get("cache_read_input_tokens", 0),
-                cache_write_tokens=usage_dict.get("cache_creation_input_tokens", 0),
-            )
-
-        # Determine finish reason - check if we were cancelled
-        # Build metadata with file tracking and SDK session ID
-        metadata = file_tracker.get_metadata()
+            request_usage = to_request_usage(result_message.usage)
+            stop_reason = result_message.stop_reason
+        # Build metadata with SDK session ID
+        msg_metadata = {}
         if self._sdk_session_id:
-            metadata["sdk_session_id"] = self._sdk_session_id
-
+            msg_metadata["sdk_session_id"] = self._sdk_session_id
+        finish_reason = (
+            "stop" if self._cancelled or not stop_reason else to_finish_reason(stop_reason)
+        )
         chat_message = ChatMessage[TResult](
             content=final_content,
             role="assistant",
@@ -1242,8 +1216,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,
-            finish_reason="stop" if self._cancelled else None,
-            metadata=metadata,
+            finish_reason=finish_reason,
+            metadata=msg_metadata,
         )
 
         # Emit stream complete - post-processing handled by base class
@@ -1263,31 +1237,14 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         await self._set_mode(model, "model")
 
     async def set_permission_mode(self, mode: PermissionMode) -> None:
-        """Set permission mode.
-
-        Args:
-            mode: Permission mode - "default", "acceptEdits", "plan", or "bypassPermissions"
-        """
-        self._permission_mode = mode
-        # Update permission mode on client if connected
-        if self._client:
-            await self._client.set_permission_mode(mode)
+        """Set permission mode."""
+        await self._set_mode(mode, "mode")
 
     async def get_available_models(self) -> list[ModelInfo]:
         """Get available models for Claude Code agent (defined as static list)."""
         from agentpool.agents.claude_code_agent.static_info import MODELS
 
         return MODELS
-
-    async def get_server_info(self) -> ClaudeCodeServerInfo:
-        """Get server initialization info (models, commands, account info, ...) from Claude Code."""
-        from agentpool.agents.claude_code_agent.models import ClaudeCodeServerInfo
-
-        await self.ensure_initialized()
-        assert self._client, "Client not connected after ensure_initialized"
-        raw_info = await self._client.get_server_info()
-        assert raw_info, "No server info returned (streaming mode should always provide it)"
-        return ClaudeCodeServerInfo.model_validate(raw_info)
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for Claude Code agent.
@@ -1329,38 +1286,39 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """Handle permissions, model, and thinking_level mode switching."""
         from agentpool.agents.claude_code_agent.static_info import VALID_MODES
 
-        if category_id == "mode":
-            # Map mode_id to PermissionMode
-            if mode_id not in VALID_MODES:
-                raise UnknownModeError(mode_id, list(VALID_MODES))
-            permission_mode: PermissionMode = mode_id  # type: ignore[assignment]
-            self._permission_mode = permission_mode
-            if self._client:  # Update SDK client if initialized
-                await self.ensure_initialized()
-                await self._client.set_permission_mode(permission_mode)
-        elif category_id == "model":
-            # Validate model exists
-            if models := await self.get_available_models():
-                valid_ids = {m.id_override if m.id_override else m.id for m in models}
-                if mode_id not in valid_ids:
-                    raise UnknownModeError(mode_id, list(valid_ids))
-            # Set the model directly
-            self._model = mode_id
-            if self._client:
-                await self.ensure_initialized()
-                await self._client.set_model(mode_id)
-        elif category_id == "thought_level":
-            # Validate thinking mode
-            if mode_id not in THINKING_MODE_TOKENS:
-                raise UnknownModeError(mode_id, list(THINKING_MODE_TOKENS.keys()))
-            self._thinking_mode = mode_id  # type: ignore[assignment]
-            # Set thinking tokens via SDK
-            if self._client:
-                await self.ensure_initialized()
-                tokens = THINKING_MODE_TOKENS[self._thinking_mode]
-                await self._client.set_max_thinking_tokens(tokens)
-        else:
-            raise UnknownCategoryError(category_id)
+        match category_id:
+            case "mode":
+                # Map mode_id to PermissionMode
+                if mode_id not in VALID_MODES:
+                    raise UnknownModeError(mode_id, list(VALID_MODES))
+                permission_mode: PermissionMode = mode_id  # type: ignore[assignment]
+                self._permission_mode = permission_mode
+                if self._client:  # Update SDK client if initialized
+                    await self.ensure_initialized()
+                    await self._client.set_permission_mode(permission_mode)
+            case "model":
+                # Validate model exists
+                if models := await self.get_available_models():
+                    valid_ids = {m.id_override if m.id_override else m.id for m in models}
+                    if mode_id not in valid_ids:
+                        raise UnknownModeError(mode_id, list(valid_ids))
+                # Set the model directly
+                self._model = mode_id
+                if self._client:
+                    await self.ensure_initialized()
+                    await self._client.set_model(mode_id)
+            case "thought_level":
+                # Validate thinking mode
+                if mode_id not in THINKING_MODE_TOKENS:
+                    raise UnknownModeError(mode_id, list(THINKING_MODE_TOKENS.keys()))
+                self._thinking_mode = mode_id  # type: ignore[assignment]
+                # Set thinking tokens via SDK
+                if self._client:
+                    await self.ensure_initialized()
+                    tokens = THINKING_MODE_TOKENS[self._thinking_mode]
+                    await self._client.set_max_thinking_tokens(tokens)
+            case _:
+                raise UnknownCategoryError(category_id)
         await self.update_state(config_id=category_id, value_id=mode_id)
 
     async def list_sessions(
@@ -1369,87 +1327,69 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         cwd: str | None = None,
         limit: int | None = None,
     ) -> list[SessionData]:
-        """List sessions from Claude storage (~/.claude/projects/).
-
-        Uses fast metadata reading that only parses timestamps and message counts,
-        without loading full message content.
-        """
-        # Use fast metadata listing - avoids parsing all message content
-        metadata_list = self._claude_storage.list_session_metadata(project_path=cwd)
+        """List sessions from Claude storage (~/.claude/projects/)."""
+        storage = self.storage
+        if not storage:
+            return []
+        session_ids = await storage.list_session_ids(agent_name=self.name)
         result: list[SessionData] = []
         default_cwd = str(self.env.cwd or Path.cwd())
-        for meta in metadata_list:
-            # Parse timestamps
-            now = get_now()
-            created_at = (
-                parse_iso_timestamp(meta.first_timestamp, fallback=now)
-                if meta.first_timestamp
-                else now
-            )
-            last_active = (
-                parse_iso_timestamp(meta.last_timestamp, fallback=created_at)
-                if meta.last_timestamp
-                else created_at
-            )
-
-            session_data = SessionData(
-                session_id=meta.session_id,
-                agent_name=self.name,
-                cwd=meta.cwd or default_cwd,
-                created_at=created_at,
-                last_active=last_active,
-                metadata={"title": meta.title, "message_count": meta.message_count}
-                if meta.title
-                else {"message_count": meta.message_count},
-            )
-            result.append(session_data)
-
-        # Sort by last_active, most recent first
+        for session_id in session_ids:
+            if session_data := await storage.load_session(session_id):
+                if not session_data.cwd:
+                    session_data = session_data.model_copy(update={"cwd": default_cwd})
+                if cwd is not None and session_data.cwd != cwd:
+                    continue
+                result.append(session_data)
+                if limit is not None and len(result) >= limit:
+                    break
         result.sort(key=lambda s: s.updated_at or "", reverse=True)
-        return result if limit is None else result[:limit]
+        return result
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load and restore a session from Claude storage (requires reconnect)."""
-        try:  # Load conversation messages from Claude storage
-            messages = await self._claude_storage.get_session_messages(session_id=session_id)
+        storage = self.storage
+        if not storage:
+            return None
+        try:
+            messages = await storage.get_session_messages(session_id=session_id)
         except Exception:
             self.log.exception("Failed to load Claude session", session_id=session_id)
             return None
-        else:
-            if not messages:
-                self.log.warning("No messages found in session", session_id=session_id)
-                return None
-            # Restore to conversation history
-            self.conversation.chat_messages.clear()
-            self.conversation.chat_messages.extend(messages)
-            self.log.info("Session loaded", session_id=session_id, message_count=len(messages))
-            # Set the SDK session ID so reconnect can resume this session
-            self._sdk_session_id = session_id
-            # Reconnect to Claude SDK with the loaded session to properly resume
-            try:
-                await self.reconnect(resume_session=True)
-                self.log.info("Reconnected with loaded session", session_id=session_id)
-            except Exception:
-                error_msg = "Failed to reconnect with loaded session, continuing with local history"
-                self.log.exception(error_msg, session_id=session_id)
-                # Don't fail the load - we still have the conversation history locally
-
-            # Build SessionData from loaded messages
-            last_active = messages[-1].timestamp if messages[-1].timestamp else get_now()
-            cwd = str(self.env.cwd or Path.cwd())
-            # Try to extract cwd from message metadata
-            for msg in reversed(messages):
-                if (val := msg.metadata.get("cwd")) and isinstance(val, str):
-                    cwd = val
-                    break
-
-            return SessionData(
-                session_id=session_id,
-                agent_name=self.name,
-                cwd=cwd,
-                created_at=messages[0].timestamp if messages[0].timestamp else last_active,
-                last_active=last_active,
-            )
+        if not messages:
+            self.log.warning("No messages found in session", session_id=session_id)
+            return None
+        # Restore to conversation history
+        self.conversation.chat_messages.clear()
+        self.conversation.chat_messages.extend(messages)
+        self.log.info("Session loaded", session_id=session_id, message_count=len(messages))
+        # Set the SDK session ID so reconnect can resume this session
+        self._sdk_session_id = session_id
+        # Reconnect to Claude SDK with the loaded session to properly resume
+        try:
+            await self.reconnect(resume_session=True)
+            self.log.info("Reconnected with loaded session", session_id=session_id)
+        except Exception:
+            error_msg = "Failed to reconnect with loaded session, continuing with local history"
+            self.log.exception(error_msg, session_id=session_id)
+        # Build SessionData from storage metadata
+        session_data = await storage.load_session(session_id)
+        if session_data:
+            return session_data
+        # Fallback: build from messages
+        last_active = messages[-1].timestamp or get_now()
+        cwd = str(self.env.cwd or Path.cwd())
+        for msg in reversed(messages):
+            if (val := msg.metadata.get("cwd")) and isinstance(val, str):
+                cwd = val
+                break
+        return SessionData(
+            session_id=session_id,
+            agent_name=self.name,
+            cwd=cwd,
+            created_at=messages[0].timestamp or last_active,
+            last_active=last_active,
+        )
 
 
 if __name__ == "__main__":

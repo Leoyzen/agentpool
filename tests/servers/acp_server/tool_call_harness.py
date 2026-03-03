@@ -41,10 +41,11 @@ from agentpool_server.acp_server.session import ACPSession
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from acp.schema import SessionNotification
+    from agentpool_config import AnyToolConfig
     from agentpool_config.mcp_server import MCPServerConfig
-    from agentpool_config.tools import BaseToolConfig
-    from agentpool_config.toolsets import ToolsetConfig
 
 
 class RecordingACPClient(HeadlessACPClient):
@@ -59,10 +60,7 @@ class RecordingACPClient(HeadlessACPClient):
         dumped = params.model_dump(by_alias=True, exclude_none=True)
         update = dumped.get("update", {})
         update_type = update.get("sessionUpdate", "unknown")
-        self.wire_messages.append({
-            "type": update_type,
-            "payload": update,
-        })
+        self.wire_messages.append({"type": update_type, "payload": update})
         await super().session_update(params)
 
     def clear(self) -> None:
@@ -113,7 +111,7 @@ class ToolCallTestHarness:
         self,
         tool_name: str,
         tool_args: dict[str, Any],
-        tools: list[ToolsetConfig | BaseToolConfig] | None = None,
+        tools: Sequence[AnyToolConfig | str] | None = None,
         mcp_servers: list[MCPServerConfig] | None = None,
         prompt: str = "Execute the tool",
     ) -> list[dict[str, Any]]:
@@ -163,7 +161,7 @@ class ToolCallTestHarness:
     async def execute_tools(
         self,
         tool_calls: dict[str, dict[str, Any]],
-        tools: list[ToolsetConfig | BaseToolConfig],
+        tools: Sequence[AnyToolConfig | str] | None = None,
         prompt: str = "Execute the tools",
     ) -> list[dict[str, Any]]:
         """Execute multiple tools and return the captured messages.
@@ -181,7 +179,7 @@ class ToolCallTestHarness:
         agent_config = NativeAgentConfig(
             name="harness_test_agent",
             model=model_config,
-            tools=tools,
+            tools=tools or [],
         )
         manifest = AgentsManifest(agents={"harness_test_agent": agent_config})
         async with AgentPool(manifest) as pool:

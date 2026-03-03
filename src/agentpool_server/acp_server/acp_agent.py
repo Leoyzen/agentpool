@@ -16,7 +16,6 @@ from acp.schema import (
     NewSessionResponse,
     PromptResponse,
     ResumeSessionResponse,
-    SessionConfigOption,
     SessionMode,
     SessionModelState,
     SessionModeState,
@@ -28,7 +27,7 @@ from acp.schema import (
 )
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
-from agentpool_server.acp_server.converters import to_session_info, to_session_select_option
+from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
@@ -48,6 +47,7 @@ if TYPE_CHECKING:
         NewSessionRequest,
         PromptRequest,
         ResumeSessionRequest,
+        SessionConfigOption,
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
@@ -124,7 +124,7 @@ async def get_session_mode_state(agent: BaseAgent) -> SessionModeState | None:
     if not mode_categories:
         return None
     # Find the permissions category (not model)
-    category = next((c for c in mode_categories if c.id != "model"), None)
+    category = next((c for c in mode_categories if c.id == "mode"), None)
     if not category:
         return None
     acp_modes = [  # Convert ModeInfo to ACP SessionMode
@@ -135,33 +135,13 @@ async def get_session_mode_state(agent: BaseAgent) -> SessionModeState | None:
 
 
 async def get_session_config_options(agent: BaseAgent) -> list[SessionConfigOption]:
-    """Get SessionConfigOptions from an agent using its get_modes() method.
-
-    Converts all agentpool ModeCategories to ACP SessionConfigOption format.
-
-    Args:
-        agent: Any agent with get_modes() method
-
-    Returns:
-        List of SessionConfigOption from agent's mode categories
-    """
+    """Get SessionConfigOptions from an agent using its get_modes() method."""
     try:
         mode_categories = await agent.get_modes()
     except Exception:
         logger.exception("Failed to get modes from agent")
         return []
-    # Convert each ModeCategory to a SessionConfigOption
-    return [
-        SessionConfigOption(
-            id=category.id,
-            name=category.name,
-            description=None,
-            category=category.category,
-            current_value=category.current_mode_id,
-            options=[to_session_select_option(mode) for mode in category.available_modes],
-        )
-        for category in mode_categories
-    ]
+    return [to_session_config_option(category) for category in mode_categories]
     # for opt in options:
     #     if opt.id == config_id:
     #         opt.current_value = value_id
@@ -513,7 +493,7 @@ class AgentPoolACPAgent(ACPAgent):
             # Try to get cwd from stored session data
             cwd = "."
             try:
-                stored = await self.session_manager.session_manager.store.load(params.session_id)
+                stored = await self.session_manager.storage.load_session(params.session_id)
                 if stored and stored.cwd:
                     cwd = stored.cwd
             except Exception:  # noqa: BLE001

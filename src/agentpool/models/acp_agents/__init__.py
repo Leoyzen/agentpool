@@ -1,14 +1,20 @@
-"""ACP Agets."""
+"""ACP Agent configuration models."""
+
+from __future__ import annotations
 
 from typing import Annotated
-from .non_mcp import RegularACPAgentConfigTypes
-from .mcp_capable import MCPCapableACPAgentConfigTypes
-from .base import BaseACPAgentConfig, ACPAgentConfig
+
 from pydantic import Field
+
+from agentpool.models.acp_agents.base import (
+    ACPAgentConfig,
+    BaseACPAgentConfig,
+    RegistryACPAgentConfig,
+)
 
 # Union of all ACP agent config types (discriminated by 'provider')
 ACPAgentConfigTypes = Annotated[
-    ACPAgentConfig | RegularACPAgentConfigTypes | MCPCapableACPAgentConfigTypes,
+    ACPAgentConfig | RegistryACPAgentConfig,
     Field(discriminator="provider"),
 ]
 
@@ -16,6 +22,5 @@ __all__ = [
     "ACPAgentConfig",
     "ACPAgentConfigTypes",
     "BaseACPAgentConfig",
-    "MCPCapableACPAgentConfigTypes",
-    "RegularACPAgentConfigTypes",
+    "RegistryACPAgentConfig",
 ]

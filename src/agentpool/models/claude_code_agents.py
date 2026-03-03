@@ -14,12 +14,18 @@ from agentpool.resource_providers import StaticResourceProvider
 from agentpool_config import (
     AnyToolConfig,  # noqa: TC001
     BaseToolConfig,
+    MCPServerConfig,
+    SSEMCPServerConfig,
+    StdioMCPServerConfig,
+    StreamableHTTPMCPServerConfig,
 )
 from agentpool_config.nodes import BaseAgentConfig
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from clawd_code_sdk.models import AgentDefinition as CCAgentDefinition, McpServerConfig
 
     from agentpool.agents.claude_code_agent import ClaudeCodeAgent
     from agentpool.common_types import AnyEventHandlerType
@@ -69,6 +75,25 @@ class AgentDefinition(Schema):
     model: Literal["sonnet", "opus", "haiku", "inherit"] | None = None
     """Model to use for the agent."""
 
+    memory: SettingSource | None = None
+    """Memory type for the agent."""
+
+    disallowed_tools: list[str] | None = None
+    """List of tools the agent cannot use."""
+
+    skills: list[str] | None = None
+    """List of skills the agent can use."""
+
+    max_turns: int | None = None
+    """Maximum number of turns the agent can take."""
+
+    mcp_servers: dict[str, MCPServerConfig] | None = None
+    """Configuration for MCP servers."""
+
+    background: bool | None = None
+    """Run as background agent."""
+    # critical_system_reminder_experimental: str | None = None
+
 
 class ClaudeCodeAgentConfig(BaseAgentConfig):
     """Configuration for Claude Code agents.
@@ -112,7 +137,7 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     model: AnthropicMaxModelName | str | None = Field(
         default="opus",
         title="Model",
-        examples=["claude-sonnet-4-5", "claude-opus-4", "claude-haiku-3-5"],
+        examples=["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"],
     )
     """Model to use for this agent. Defaults to Claude's default model."""
 
@@ -146,22 +171,14 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/system_prompts_configuration/
     """
 
-    include_builtin_system_prompt: bool = Field(
-        default=True,
-        title="Include Builtin System Prompt",
-    )
+    include_builtin_system_prompt: bool = Field(default=True, title="Include Builtin System Prompt")
     """Whether to include Claude Code's builtin system prompt.
 
     - true (default): `system_prompt` is appended to the builtin
     - false: Only use `system_prompt`, discard the builtin
     """
 
-    max_turns: int | None = Field(
-        default=None,
-        title="Max Turns",
-        ge=1,
-        examples=[5, 10, 20],
-    )
+    max_turns: int | None = Field(default=None, title="Max Turns", ge=1, examples=[5, 10, 20])
     """Maximum number of conversation turns before stopping."""
 
     max_budget_usd: float | None = Field(
@@ -175,11 +192,11 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     When set, the agent will stop once the estimated cost exceeds this limit.
     """
 
-    max_thinking_tokens: int | None = Field(
+    max_thinking_tokens: int | Literal["adaptive"] | None = Field(
         default=None,
         title="Max Thinking Tokens",
         ge=1000,
-        examples=[5000, 10000, 50000],
+        examples=[5000, 10000, "adaptive"],
     )
     """Maximum tokens for extended thinking mode.
 
@@ -252,12 +269,6 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     )
     """Fallback model when default is overloaded."""
 
-    dangerously_skip_permissions: bool = Field(
-        default=False,
-        title="Dangerously Skip Permissions",
-    )
-    """Bypass all permission checks. Only for sandboxed environments."""
-
     setting_sources: list[SettingSource] | None = Field(
         default=None,
         title="Setting Sources",
@@ -315,7 +326,7 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     ) -> ClaudeCodeAgent[TDeps, Any]:
         from agentpool.agents.claude_code_agent import ClaudeCodeAgent
 
-        return ClaudeCodeAgent.from_config(
+        return ClaudeCodeAgent[TDeps, Any].from_config(
             self,
             event_handlers=event_handlers,
             input_provider=input_provider,
@@ -357,18 +368,30 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
 
         return providers
 
-    # Backward compatibility
-    def get_toolset_providers(self) -> list[ResourceProvider]:
-        """Deprecated: use get_tool_providers() instead."""
-        return [
-            p
-            for p in self.get_tool_providers()
-            if not isinstance(p, StaticResourceProvider) or p.name != "tools"
-        ]
+    def get_subagent_configs(self) -> dict[str, CCAgentDefinition]:
+        from clawd_code_sdk.models import (
+            AgentDefinition as CCAgentDefinition,
+            McpHttpServerConfig,
+            McpSSEServerConfig,
+            McpStdioServerConfig,
+        )
 
-    def get_tool_provider(self) -> ResourceProvider | None:
-        """Deprecated: use get_tool_providers() instead."""
-        for p in self.get_tool_providers():
-            if isinstance(p, StaticResourceProvider) and p.name == "tools":
-                return p
-        return None
+        dct: dict[str, CCAgentDefinition] = {}
+
+        for k, v in (self.builtin_subagents or {}).items():
+            mcp_dct: dict[str, McpServerConfig] = {}
+            for server_name, server_config in (v.mcp_servers or {}).items():
+                match server_config:
+                    case StdioMCPServerConfig(command=command, args=args):
+                        mcp_dct[server_name] = McpStdioServerConfig(
+                            type="stdio", command=command, args=args
+                        )
+                    case StreamableHTTPMCPServerConfig(url=url):
+                        mcp_dct[server_name] = McpHttpServerConfig(type="http", url=str(url))
+                    case SSEMCPServerConfig(url=url):
+                        mcp_dct[server_name] = McpSSEServerConfig(type="sse", url=str(url))
+            dumped = v.model_dump()
+            dumped["mcp_servers"] = mcp_dct
+            dct[k] = CCAgentDefinition(**dumped)
+
+        return dct

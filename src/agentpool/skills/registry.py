@@ -6,8 +6,6 @@ import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from fsspec import AbstractFileSystem
-from fsspec.asyn import AsyncFileSystem
-from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
 from upathtools import is_directory
 from upathtools.helpers import to_upath, upath_to_fs
 
@@ -65,10 +63,11 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
                       to look for skills. Defaults to root_marker if not specified.
             storage_options: Additional options to pass to the filesystem.
         """
+        from upathtools.async_ops import to_async_fs
+
         if isinstance(skills_dir, AbstractFileSystem):
             fs = skills_dir
-            if not isinstance(fs, AsyncFileSystem):
-                fs = AsyncFileSystemWrapper(fs)
+            fs = to_async_fs(fs)
             search_path = base_path if base_path is not None else fs.root_marker
             original_skills_dir: UPath | None = None
         else:

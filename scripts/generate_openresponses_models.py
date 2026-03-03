@@ -41,7 +41,7 @@ def download_openapi_spec() -> None:
     if result.returncode != 0:
         print(f"Error downloading spec: {result.stderr}", file=sys.stderr)
         sys.exit(1)
-    print(f"✓ Downloaded to {TEMP_OPENAPI}")
+    print(f"  Downloaded to {TEMP_OPENAPI}")
 
 
 def generate_models() -> None:
@@ -61,8 +61,12 @@ def generate_models() -> None:
         "openapi",
         "--output",
         str(OUTPUT_FILE),
+        "--output-model-type",
+        "pydantic_v2.BaseModel",
         "--target-python-version",
         "3.13",
+        "--target-pydantic-version",
+        "2",
         "--use-standard-collections",
         "--use-annotated",
         "--field-constraints",
@@ -72,8 +76,12 @@ def generate_models() -> None:
         "--enum-field-as-literal",
         "all",
         "--use-one-literal-as-default",
+        "--collapse-root-models",
         "--base-class",
         "agentpool.models.openresponses.base.OpenResponsesBase",
+        "--formatters",
+        "ruff-check",
+        "ruff-format",
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -86,7 +94,7 @@ def generate_models() -> None:
     if result.stderr:
         print(f"Warnings: {result.stderr}")
 
-    print(f"✓ Generated models to {OUTPUT_FILE}")
+    print(f"  Generated models to {OUTPUT_FILE}")
 
 
 def verify_output() -> None:
@@ -95,13 +103,12 @@ def verify_output() -> None:
         print(f"Error: Output file {OUTPUT_FILE} not found!", file=sys.stderr)
         sys.exit(1)
 
-    lines = OUTPUT_FILE.read_text().count("\n")
-    print(f"✓ Verified: {lines} lines generated")
-
-    # Count model classes
     content = OUTPUT_FILE.read_text()
-    model_count = content.count("class ") - content.count("class Config:")
-    print(f"✓ Generated {model_count} model classes")
+    lines = content.count("\n")
+    print(f"  Verified: {lines} lines generated")
+
+    model_count = content.count("class ")
+    print(f"  Generated {model_count} model classes")
 
 
 def main() -> None:
@@ -119,7 +126,7 @@ def main() -> None:
         verify_output()
 
         print("\n" + "=" * 60)
-        print("✓ Success! Models generated successfully.")
+        print("Success! Models generated successfully.")
         print("=" * 60)
         print(f"\nGenerated models: {OUTPUT_FILE}")
         print("\nNext steps:")

@@ -6,7 +6,7 @@ the TUI by broadcasting events that the TUI listens for via SSE.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -14,42 +14,21 @@ from pydantic import BaseModel, Field
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models.events import (
     TuiCommandExecuteEvent,
+    TuiCommandExecuteProperties,
     TuiPromptAppendEvent,
+    TuiPromptAppendProperties,
+    TuiSessionSelectEvent,
+    TuiSessionSelectProperties,
     TuiToastShowEvent,
+    TuiToastShowProperties,
 )
 
 
 router = APIRouter(prefix="/tui", tags=["tui"])
 
 
-class AppendPromptRequest(BaseModel):
-    """Request body for appending text to the prompt."""
-
-    text: str = Field(..., description="Text to append to the prompt")
-
-
-class ExecuteCommandRequest(BaseModel):
-    """Request body for executing a TUI command."""
-
-    command: str = Field(
-        ...,
-        description="Command to execute (e.g., 'prompt.submit', 'prompt.clear', 'session.new')",
-    )
-
-
-class ShowToastRequest(BaseModel):
-    """Request body for showing a toast notification."""
-
-    title: str | None = Field(None, description="Optional toast title")
-    message: str = Field(..., description="Toast message")
-    variant: Literal["info", "success", "warning", "error"] = Field(
-        "info", description="Toast variant"
-    )
-    duration: int = Field(5000, description="Duration in milliseconds")
-
-
 @router.post("/append-prompt")
-async def append_prompt(request: AppendPromptRequest, state: StateDep) -> bool:
+async def append_prompt(request: TuiPromptAppendProperties, state: StateDep) -> bool:
     """Append text to the TUI prompt.
 
     Used by external integrations (e.g., VSCode) to insert text like file
@@ -80,7 +59,7 @@ async def clear_prompt(state: StateDep) -> bool:
 
 
 @router.post("/execute-command")
-async def execute_command(request: ExecuteCommandRequest, state: StateDep) -> bool:
+async def execute_command(request: TuiCommandExecuteProperties, state: StateDep) -> bool:
     """Execute a TUI command.
 
     Available commands:
@@ -95,16 +74,15 @@ async def execute_command(request: ExecuteCommandRequest, state: StateDep) -> bo
 
 
 @router.post("/show-toast")
-async def show_toast(request: ShowToastRequest, state: StateDep) -> bool:
+async def show_toast(request: TuiToastShowProperties, state: StateDep) -> bool:
     """Show a toast notification in the TUI."""
-    await state.broadcast_event(
-        TuiToastShowEvent.create(
-            message=request.message,
-            variant=request.variant,
-            title=request.title,
-            duration=request.duration,
-        )
+    event = TuiToastShowEvent.create(
+        message=request.message,
+        variant=request.variant,
+        title=request.title,
+        duration=request.duration,
     )
+    await state.broadcast_event(event)
     return True
 
 
@@ -136,4 +114,50 @@ async def open_themes(state: StateDep) -> bool:
 async def open_models(state: StateDep) -> bool:
     """Open the model selector."""
     await state.broadcast_event(TuiCommandExecuteEvent.create("model.list"))
+    return True
+
+
+class PublishEventRequest(BaseModel):
+    """Request body for publishing an arbitrary TUI event."""
+
+    type: str = Field(..., description="Event type")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Event properties")
+
+
+@router.post("/publish")
+async def publish_event(request: PublishEventRequest, state: StateDep) -> bool:
+    """Publish an arbitrary TUI event.
+
+    Supports all TUI event types like tui.prompt.append, tui.command.execute,
+    tui.toast.show, tui.session.select.
+    """
+    match request.type:
+        case "tui.prompt.append":
+            text = request.properties.get("text", "")
+            await state.broadcast_event(TuiPromptAppendEvent.create(text))
+        case "tui.command.execute":
+            command = request.properties.get("command", "")
+            await state.broadcast_event(TuiCommandExecuteEvent.create(command))
+        case "tui.toast.show":
+            await state.broadcast_event(
+                TuiToastShowEvent.create(
+                    message=request.properties.get("message", ""),
+                    variant=request.properties.get("variant", "info"),
+                    title=request.properties.get("title"),
+                    duration=request.properties.get("duration", 5000),
+                )
+            )
+        case "tui.session.select":
+            session_id = request.properties.get("sessionID", "")
+            await state.broadcast_event(TuiSessionSelectEvent.create(session_id))
+        case _:
+            # Forward unknown event types as command execute
+            await state.broadcast_event(TuiCommandExecuteEvent.create(request.type))
+    return True
+
+
+@router.post("/select-session")
+async def select_session(request: TuiSessionSelectProperties, state: StateDep) -> bool:
+    """Navigate the TUI to display the specified session."""
+    await state.broadcast_event(TuiSessionSelectEvent.create(request.session_id))
     return True

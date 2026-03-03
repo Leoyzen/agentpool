@@ -9,12 +9,17 @@ from typing import TYPE_CHECKING
 
 import anyio
 
+from agentpool import log
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Coroutine
     from typing import Any
 
     from anyio.abc import ByteReceiveStream, Process
+
+
+logger = log.get_logger(__name__)
 
 
 @dataclass
@@ -170,3 +175,23 @@ async def run_with_process_monitor[T](
         raise SubprocessError(returncode=process.returncode, stderr=stderr_output)
     # Operation completed successfully
     return operation_task.result()
+
+
+async def start_process(
+    startup_command: str, startup_delay: float = 2.0
+) -> asyncio.subprocess.Process:
+    """Start a long-running process (+ make sure it's running)."""
+    logger.info("Starting process", command=startup_command)
+    process = await asyncio.create_subprocess_shell(
+        startup_command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    logger.debug("Waiting for startup", command=startup_command, delay=startup_delay)
+    await anyio.sleep(startup_delay)
+    if process.returncode is not None:  # Check if process is still running
+        stderr = (await process.stderr.read()).decode() if process.stderr else ""
+        raise RuntimeError(f"Startup process exited {process.returncode}: {stderr}")
+    logger.info("Process started", command=startup_command, pid=process.pid)
+    return process

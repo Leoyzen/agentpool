@@ -41,7 +41,11 @@ if TYPE_CHECKING:
     from agentpool.tools.base import ToolKind
 
 
+SubAgentType = Literal["agent", "team_parallel", "team_sequential"]
 # Lifecycle events (aligned with AG-UI protocol)
+CompactionTrigger = Literal["auto", "manual"]
+CompactionPhase = Literal["starting", "completed"]
+ToolCallStatus = Literal["pending", "in_progress", "completed", "failed"]
 
 
 class PartStartEvent(PyAIPartStartEvent):
@@ -69,9 +73,8 @@ class PartDeltaEvent(PyAIPartDeltaEvent):
 
     @classmethod
     def tool_call(cls, index: int, content: str, tool_call_id: str) -> PartDeltaEvent:
-        return cls(
-            index=index, delta=ToolCallPartDelta(args_delta=content, tool_call_id=tool_call_id)
-        )
+        delta = ToolCallPartDelta(args_delta=content, tool_call_id=tool_call_id)
+        return cls(index=index, delta=delta)
 
 
 @dataclass(kw_only=True)
@@ -237,7 +240,7 @@ class ToolCallProgressEvent:
 
     tool_call_id: str
     """The ID of the tool call."""
-    status: Literal["pending", "in_progress", "completed", "failed"] = "in_progress"
+    status: ToolCallStatus = "in_progress"
     """Current execution status."""
     title: str | None = None
     """Human-readable title describing the operation."""
@@ -486,7 +489,7 @@ class ToolCallProgressEvent:
         path: str,
         old_text: str,
         new_text: str,
-        status: Literal["in_progress", "completed", "failed"],
+        status: ToolCallStatus,
         tool_name: str | None = None,
     ) -> ToolCallProgressEvent:
         """Create event for file edit with diff.
@@ -560,30 +563,6 @@ class ToolCallCompleteEvent:
 
 
 @dataclass(kw_only=True)
-class ToolResultMetadataEvent:
-    """Sidechannel event carrying tool result metadata stripped by Claude SDK.
-
-    The Claude SDK strips the `_meta` field from MCP CallToolResult when converting
-    to ToolResultBlock, losing UI-only metadata (diffs, diagnostics, etc.).
-
-    This event provides a sidechannel to preserve that metadata:
-    - Tool returns ToolResult with metadata
-    - ToolManagerBridge emits this event with metadata before converting
-    - ClaudeCodeAgent correlates by tool_call_id and enriches ToolCallCompleteEvent
-    - Downstream consumers (OpenCode, ACP) receive complete events with metadata
-
-    This avoids polluting LLM context with UI-only data while preserving it for clients.
-    """
-
-    tool_call_id: str
-    """The ID of the tool call this metadata belongs to."""
-    metadata: dict[str, Any]
-    """Metadata for UI/client use (diffs, diagnostics, etc.)."""
-    event_kind: Literal["tool_result_metadata"] = "tool_result_metadata"
-    """Event type identifier."""
-
-
-@dataclass(kw_only=True)
 class CustomEvent[T]:
     """Generic custom event that can be emitted during tool execution."""
 
@@ -619,12 +598,14 @@ class SubAgentEvent:
 
     source_name: str
     """Name of the agent or team that produced this event."""
-    source_type: Literal["agent", "team_parallel", "team_sequential"]
+    source_type: SubAgentType
     """Type of source: agent, parallel team, or sequential team."""
     event: RichAgentStreamEvent[Any]
     """The actual event from the subagent/team."""
     depth: int = 1
     """Nesting depth (1 = direct child, 2 = grandchild, etc.)."""
+    parent_tool_call_id: str | None = None
+    """Tool call ID of the parent task tool that spawned this subagent."""
     event_kind: Literal["subagent"] = "subagent"
     """Event type identifier."""
 
@@ -640,12 +621,25 @@ class CompactionEvent:
 
     session_id: str
     """The session ID being compacted."""
-    trigger: Literal["auto", "manual"] = "auto"
+    trigger: CompactionTrigger = "auto"
     """What triggered the compaction (auto = context overflow, manual = slash command)."""
-    phase: Literal["starting", "completed"] = "starting"
+    phase: CompactionPhase = "starting"
     """Current phase of compaction."""
+    pre_tokens: int | None = None
+    """Token count before compaction (available on completed phase from Claude Code)."""
     event_kind: Literal["compaction"] = "compaction"
     """Event type identifier."""
+
+    def format(self) -> str:
+        token_info = f" ({self.pre_tokens:,} tokens)" if self.pre_tokens is not None else ""
+        if self.trigger == "auto":
+            return (
+                f"\n\n---\n\n📦 **Context compaction** triggered{token_info}."
+                " Summarizing...\n\n---\n\n"
+            )
+        return (
+            f"\n\n---\n\n📦 **Manual compaction** requested{token_info}. Summarizing...\n\n---\n\n"
+        )
 
 
 type RichAgentStreamEvent[OutputDataT] = (
@@ -659,7 +653,6 @@ type RichAgentStreamEvent[OutputDataT] = (
     | PlanUpdateEvent
     | CompactionEvent
     | SubAgentEvent
-    | ToolResultMetadataEvent
     | CustomEvent[Any]
 )
 

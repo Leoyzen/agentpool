@@ -87,9 +87,9 @@ class StreamingDiffParser:
         events: list[DiffParserEvent] = []
 
         while True:
-            if self.state == ParserState.PENDING:
-                # Look for <diff> start tag
-                if "<diff>" in self.buffer:
+            match self.state:
+                case ParserState.PENDING if "<diff>" in self.buffer:
+                    # Look for <diff> start tag
                     start_idx = self.buffer.find("<diff>")
                     self.buffer = self.buffer[start_idx + 6 :]  # Skip <diff>
                     # Strip leading newline if present
@@ -97,70 +97,70 @@ class StreamingDiffParser:
                         self.buffer = self.buffer[1:]
                     self.state = ParserState.IN_DIFF
                     self._in_hunk = True
-                # Also check for ```diff format
-                elif "```diff" in self.buffer:
+                    # Also check for ```diff format
+                case ParserState.PENDING if "```diff" in self.buffer:
                     start_idx = self.buffer.find("```diff")
                     self.buffer = self.buffer[start_idx + 7 :]  # Skip ```diff
                     if self.buffer.startswith("\n"):
                         self.buffer = self.buffer[1:]
                     self.state = ParserState.IN_DIFF
                     self._in_hunk = True
-                else:
+                case ParserState.PENDING:
                     break
 
-            elif self.state == ParserState.IN_DIFF:
-                # Check for end tag
-                end_tag = None
-                end_idx = -1
-                if "</diff>" in self.buffer:
-                    end_tag = "</diff>"
-                    end_idx = self.buffer.find("</diff>")
-                elif "```" in self.buffer and not self.buffer.strip().startswith("```diff"):
-                    # End of code block (but not start of new one)
-                    end_tag = "```"
-                    end_idx = self.buffer.find("```")
+                case ParserState.IN_DIFF:
+                    # Check for end tag
+                    end_tag = None
+                    end_idx = -1
+                    if "</diff>" in self.buffer:
+                        end_tag = "</diff>"
+                        end_idx = self.buffer.find("</diff>")
+                    elif "```" in self.buffer and not self.buffer.strip().startswith("```diff"):
+                        # End of code block (but not start of new one)
+                        end_tag = "```"
+                        end_idx = self.buffer.find("```")
 
-                # Process complete lines
-                while "\n" in self.buffer:
-                    newline_idx = self.buffer.find("\n")
+                    # Process complete lines
+                    while "\n" in self.buffer:
+                        newline_idx = self.buffer.find("\n")
 
-                    # Check if end tag is before this newline
-                    if end_idx != -1 and end_idx < newline_idx:
-                        # Process remaining content before end tag
-                        remaining = self.buffer[:end_idx]
-                        if remaining.strip():
-                            line_events = self._process_line(remaining)
-                            events.extend(line_events)
-                        # Emit final events for current hunk
-                        events.extend(self._finalize_hunk())
-                        tag_len = len(end_tag) if end_tag else 0
-                        self.buffer = self.buffer[end_idx + tag_len :]
-                        self.state = ParserState.DONE
+                        # Check if end tag is before this newline
+                        if end_idx != -1 and end_idx < newline_idx:
+                            # Process remaining content before end tag
+                            remaining = self.buffer[:end_idx]
+                            if remaining.strip():
+                                line_events = self._process_line(remaining)
+                                events.extend(line_events)
+                            # Emit final events for current hunk
+                            events.extend(self._finalize_hunk())
+                            tag_len = len(end_tag) if end_tag else 0
+                            self.buffer = self.buffer[end_idx + tag_len :]
+                            self.state = ParserState.DONE
+                            break
+
+                        line = self.buffer[:newline_idx]
+                        self.buffer = self.buffer[newline_idx + 1 :]
+
+                        # Update end_idx after consuming buffer
+                        if end_tag and end_tag in self.buffer:
+                            end_idx = self.buffer.find(end_tag)
+                        else:
+                            end_idx = -1
+
+                        line_events = self._process_line(line)
+                        events.extend(line_events)
+
+                    if self.state == ParserState.DONE:
                         break
 
-                    line = self.buffer[:newline_idx]
-                    self.buffer = self.buffer[newline_idx + 1 :]
+                    # If we have partial line and potential end tag prefix, wait for more
+                    if self._could_be_end_tag_prefix():
+                        break
 
-                    # Update end_idx after consuming buffer
-                    if end_tag and end_tag in self.buffer:
-                        end_idx = self.buffer.find(end_tag)
-                    else:
-                        end_idx = -1
-
-                    line_events = self._process_line(line)
-                    events.extend(line_events)
-
-                if self.state == ParserState.DONE:
                     break
 
-                # If we have partial line and potential end tag prefix, wait for more
-                if self._could_be_end_tag_prefix():
+                case ParserState.DONE:
                     break
-
-                break
-
-            elif self.state == ParserState.DONE:
-                break
 
         return events
 

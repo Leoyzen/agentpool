@@ -7,13 +7,14 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import ConfigDict, Field
 from pydantic_ai import (
     CodeExecutionTool,
+    FileSearchTool,
     ImageGenerationTool,
     MCPServerTool,
     MemoryTool,
     WebFetchTool,
     WebSearchTool,
 )
-from pydantic_ai.builtin_tools import WebSearchUserLocation  # noqa: TC002
+from pydantic_ai.builtin_tools import ImageAspectRatio, WebSearchUserLocation  # noqa: TC002
 
 from agentpool_config.tools import BaseToolConfig
 
@@ -129,9 +130,42 @@ class WebFetchToolConfig(BaseBuiltinToolConfig):
     builtin_type: Literal["web_fetch"] = Field("web_fetch", init=False)
     """Web fetch builtin tool."""
 
+    max_uses: int | None = Field(default=None, examples=[5, 10, 20], title="Maximum uses")
+    """Maximum number of times the tool can be used."""
+
+    allowed_domains: list[str] | None = Field(
+        default=None,
+        examples=[["wikipedia.org", "github.com"]],
+        title="Allowed domains",
+    )
+    """If provided, only these domains will be fetched."""
+
+    blocked_domains: list[str] | None = Field(
+        default=None,
+        examples=[["spam.com", "ads.example.com"]],
+        title="Blocked domains",
+    )
+    """If provided, these domains will never be fetched."""
+
+    enable_citations: bool = Field(default=False, title="Enable citations")
+    """If True, enables citations for fetched content."""
+
+    max_content_tokens: int | None = Field(
+        default=None,
+        examples=[1000, 5000],
+        title="Max content tokens",
+    )
+    """Maximum content length in tokens for fetched content."""
+
     def get_builtin_tool(self) -> WebFetchTool:
         """Convert config to WebFetchTool instance."""
-        return WebFetchTool()
+        return WebFetchTool(
+            max_uses=self.max_uses,
+            allowed_domains=self.allowed_domains,
+            blocked_domains=self.blocked_domains,
+            enable_citations=self.enable_citations,
+            max_content_tokens=self.max_content_tokens,
+        )
 
 
 class ImageGenerationToolConfig(BaseBuiltinToolConfig):
@@ -173,11 +207,11 @@ class ImageGenerationToolConfig(BaseBuiltinToolConfig):
     )
     """Moderation level for the generated image."""
 
-    output_compression: int = Field(
-        default=100,
+    output_compression: int | None = Field(
+        default=None,
         ge=0,
         le=100,
-        examples=[80, 90, 100],
+        examples=[75, 90, 100],
         title="Output compression",
     )
     """Compression level for the output image."""
@@ -204,12 +238,23 @@ class ImageGenerationToolConfig(BaseBuiltinToolConfig):
     )
     """The quality of the generated image."""
 
-    size: Literal["1024x1024", "1024x1536", "1536x1024", "auto"] = Field(
-        default="auto",
-        examples=["1024x1024", "1024x1536", "1536x1024", "auto"],
+    size: Literal["auto", "1024x1024", "1024x1536", "1536x1024", "1K", "2K", "4K"] | None = Field(
+        default=None,
+        examples=["auto", "1024x1024", "1024x1536", "1536x1024", "1K", "2K", "4K"],
         title="Image size",
     )
-    """The size of the generated image."""
+    """The size of the generated image.
+
+    OpenAI: 'auto', '1024x1024', '1024x1536', '1536x1024'.
+    Google (Gemini): '1K', '2K', '4K'.
+    """
+
+    aspect_ratio: ImageAspectRatio | None = Field(
+        default=None,
+        examples=["1:1", "16:9", "3:2"],
+        title="Aspect ratio",
+    )
+    """The aspect ratio for generated images. Supported by Google and OpenAI."""
 
     def get_builtin_tool(self) -> ImageGenerationTool:
         """Convert config to ImageGenerationTool instance."""
@@ -222,6 +267,7 @@ class ImageGenerationToolConfig(BaseBuiltinToolConfig):
             partial_images=self.partial_images,
             quality=self.quality,
             size=self.size,
+            aspect_ratio=self.aspect_ratio,
         )
 
 
@@ -244,6 +290,40 @@ class MemoryToolConfig(BaseBuiltinToolConfig):
     def get_builtin_tool(self) -> MemoryTool:
         """Convert config to MemoryTool instance."""
         return MemoryTool()
+
+
+class FileSearchToolConfig(BaseBuiltinToolConfig):
+    """Configuration for PydanticAI file search builtin tool.
+
+    Provides vector search over uploaded files (RAG). Supported by OpenAI and Google.
+
+    Example:
+        ```yaml
+        tools:
+          - type: builtin
+            builtin_type: file_search
+            file_store_ids: ["vs_abc123"]
+        ```
+    """
+
+    model_config = ConfigDict(title="File Search Tool")
+
+    builtin_type: Literal["file_search"] = Field("file_search", init=False)
+    """File search builtin tool."""
+
+    file_store_ids: list[str] = Field(
+        examples=[["vs_abc123"], ["corpora/my-corpus"]],
+        title="File store IDs",
+    )
+    """The file store IDs to search through.
+
+    For OpenAI, these are vector store IDs created via the OpenAI API.
+    For Google, these are file search store names uploaded via the Gemini Files API.
+    """
+
+    def get_builtin_tool(self) -> FileSearchTool:
+        """Convert config to FileSearchTool instance."""
+        return FileSearchTool(file_store_ids=self.file_store_ids)
 
 
 class MCPServerToolConfig(BaseBuiltinToolConfig):
@@ -315,6 +395,7 @@ BuiltinToolConfig = Annotated[
     | WebFetchToolConfig
     | ImageGenerationToolConfig
     | MemoryToolConfig
+    | FileSearchToolConfig
     | MCPServerToolConfig,
     Field(discriminator="builtin_type"),
 ]

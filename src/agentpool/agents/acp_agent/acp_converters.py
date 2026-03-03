@@ -20,6 +20,7 @@ from pydantic_ai import (
     AudioUrl,
     BinaryContent,
     BinaryImage,
+    CachePoint,
     DocumentUrl,
     ImageUrl,
     ModelRequest,
@@ -46,6 +47,7 @@ from acp.schema import (
     FileEditToolCallContent,
     ImageContentBlock,
     ResourceContentBlock,
+    SessionConfigSelectOption,
     TerminalToolCallContent,
     TextContentBlock,
     ToolCallProgress,
@@ -65,7 +67,7 @@ from agentpool.agents.events import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from pydantic_ai import FinishReason, ModelResponsePart, UserContent
+    from pydantic_ai import FinishReason, ModelMessage, ModelResponsePart, UserContent
 
     from acp.schema import (
         ContentBlock,
@@ -74,7 +76,6 @@ if TYPE_CHECKING:
         SessionConfigOption,
         SessionModelState,
         SessionModeState,
-        SessionNotification,
         SessionUpdate,
         SseMcpServer,
         StdioMcpServer,
@@ -106,7 +107,6 @@ def get_modes(
     available_modes: SessionModeState | None,
     available_models: SessionModelState | None,
 ) -> list[ModeCategory]:
-    from acp.schema import SessionConfigSelectGroup
     from agentpool.agents.modes import ModeCategory, ModeInfo
 
     categories: list[ModeCategory] = []
@@ -115,28 +115,17 @@ def get_modes(
         for config_opt in config_options:
             # Extract options from the config (ungrouped or grouped)
             mode_infos: list[ModeInfo] = []
-            if isinstance(config_opt.options, list):
-                for opt_item in config_opt.options:
-                    if isinstance(opt_item, SessionConfigSelectGroup):
-                        mode_infos.extend(
-                            ModeInfo(
-                                id=sub_opt.value,
-                                name=sub_opt.name,
-                                description=sub_opt.description or "",
-                                category_id=config_opt.id,
-                            )
-                            for sub_opt in opt_item.options
-                        )
-                    else:
-                        # Ungrouped options
-                        mode_infos.append(
-                            ModeInfo(
-                                id=opt_item.value,
-                                name=opt_item.name,
-                                description=opt_item.description or "",
-                                category_id=config_opt.id,
-                            )
-                        )
+            for i in config_opt.options:
+                opts = [i] if isinstance(i, SessionConfigSelectOption) else i.options
+                mode_infos.extend(
+                    ModeInfo(
+                        id=sub_opt.value,
+                        name=sub_opt.name,
+                        description=sub_opt.description or "",
+                        category_id=config_opt.id,
+                    )
+                    for sub_opt in opts
+                )
 
             categories.append(
                 ModeCategory(
@@ -151,7 +140,6 @@ def get_modes(
 
     # Legacy: Convert ACP SessionModeState to ModeCategory
     if available_modes:
-        acp_modes = available_modes
         modes = [
             ModeInfo(
                 id=m.id,
@@ -159,21 +147,20 @@ def get_modes(
                 description=m.description or "",
                 category_id="mode",
             )
-            for m in acp_modes.available_modes
+            for m in available_modes.available_modes
         ]
         categories.append(
             ModeCategory(
                 id="mode",
                 name="Mode",
                 available_modes=modes,
-                current_mode_id=acp_modes.current_mode_id,
+                current_mode_id=available_modes.current_mode_id,
                 category="mode",
             )
         )
 
     # Legacy: Convert ACP SessionModelState to ModeCategory
     if available_models:
-        acp_models = available_models
         models = [
             ModeInfo(
                 id=m.model_id,
@@ -181,14 +168,14 @@ def get_modes(
                 description=m.description or "",
                 category_id="model",
             )
-            for m in acp_models.available_models
+            for m in available_models.available_models
         ]
         categories.append(
             ModeCategory(
                 id="model",
                 name="Model",
                 available_modes=models,
-                current_mode_id=acp_models.current_model_id,
+                current_mode_id=available_models.current_model_id,
                 category="model",
             )
         )
@@ -226,20 +213,6 @@ def convert_acp_content(content: Sequence[ToolCallContent] | None) -> list[ToolC
     return result
 
 
-def event_to_part(
-    event: RichAgentStreamEvent[Any],
-) -> TextPart | ThinkingPart | ToolCallPart | None:
-    match event:
-        case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
-            return TextPart(content=delta)
-        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)) if delta:
-            return ThinkingPart(content=delta)
-        case ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc_name, raw_input=tc_input):
-            return ToolCallPart(tool_name=tc_name, args=tc_input, tool_call_id=tc_id)
-        case _:
-            return None
-
-
 def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]:
     """Convert pydantic-ai UserContent to ACP ContentBlock format.
 
@@ -262,63 +235,38 @@ def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]
                 encoded = base64.b64encode(data).decode("utf-8")
                 content_blocks.append(ImageContentBlock(data=encoded, mime_type=media_type))
 
-            case BinaryContent(data=data, media_type=media_type):
-                encoded = base64.b64encode(data).decode("utf-8")
+            case BinaryContent(data=data, media_type=typ):
+                encoded = base64.b64encode(data).decode()
                 # Handle different media types
-                if media_type and media_type.startswith("image/"):
-                    content_blocks.append(ImageContentBlock(data=encoded, mime_type=media_type))
-                elif media_type and media_type.startswith("audio/"):
-                    content_blocks.append(AudioContentBlock(data=encoded, mime_type=media_type))
-                elif media_type == "application/pdf":
-                    blob_resource = BlobResourceContents(
-                        blob=encoded,
-                        mime_type="application/pdf",
-                        uri=f"data:application/pdf;base64,{encoded[:50]}...",
-                    )
+                if item.is_image:
+                    content_blocks.append(ImageContentBlock(data=encoded, mime_type=typ))
+                elif item.is_audio:
+                    content_blocks.append(AudioContentBlock(data=encoded, mime_type=typ))
+                elif item.is_document:
+                    uri = f"data:application/pdf;base64,{encoded[:50]}..."
+                    blob_resource = BlobResourceContents(blob=encoded, mime_type=typ, uri=uri)
                     content_blocks.append(EmbeddedResourceContentBlock(resource=blob_resource))
                 else:
                     # Generic binary as embedded resource
-                    blob_resource = BlobResourceContents(
-                        blob=encoded,
-                        mime_type=media_type or "application/octet-stream",
-                        uri=f"data:{media_type or 'application/octet-stream'};base64,...",
-                    )
+                    uri = f"data:{typ or 'application/octet-stream'};base64,..."
+                    blob_resource = BlobResourceContents(blob=encoded, mime_type=typ, uri=uri)
                     content_blocks.append(EmbeddedResourceContentBlock(resource=blob_resource))
 
-            case ImageUrl(url=url, media_type=typ):
-                content_blocks.append(
-                    ResourceContentBlock(uri=url, name="Image", mime_type=typ or "image/jpeg")
-                )
+            case (
+                AudioUrl(url=url, media_type=typ)
+                | DocumentUrl(url=url, media_type=typ)
+                | VideoUrl(url=url, media_type=typ)
+                | ImageUrl(url=url, media_type=typ)
+                # FileUrl(url=url, media_type=typ)
+            ):
+                name = type(item).__name__.removesuffix("Url")
+                content_blocks.append(ResourceContentBlock(uri=url, name=name, mime_type=typ))
 
-            case AudioUrl(url=url, media_type=media_type):
-                content_blocks.append(
-                    ResourceContentBlock(
-                        uri=url,
-                        name="Audio",
-                        mime_type=media_type or "audio/wav",
-                        description="Audio content",
-                    )
-                )
+            case CachePoint():
+                pass
 
-            case DocumentUrl(url=url, media_type=media_type):
-                content_blocks.append(
-                    ResourceContentBlock(
-                        uri=url,
-                        name="Document",
-                        mime_type=media_type or "application/pdf",
-                        description="Document",
-                    )
-                )
-
-            case VideoUrl(url=url, media_type=media_type):
-                content_blocks.append(
-                    ResourceContentBlock(
-                        uri=url,
-                        name="Video",
-                        mime_type=media_type or "video/mp4",
-                        description="Video content",
-                    )
-                )
+            case _ as unreachable:
+                assert_never(unreachable)
 
     return content_blocks
 
@@ -449,14 +397,9 @@ def mcp_config_to_acp(config: MCPServerConfig) -> McpServer:
 
     match config:
         case StdioMCPServerConfig(command=command, args=args):
-            env_vars = config.get_env_vars() if hasattr(config, "get_env_vars") else {}
-            env_list = [EnvVariable(name=k, value=v) for k, v in env_vars.items()]
-            return StdioMcpServer(
-                name=config.name or command,
-                command=command,
-                args=list(args) if args else [],
-                env=env_list,
-            )
+            envs = [EnvVariable(name=k, value=v) for k, v in config.get_env_vars().items()]
+            args = list(args) if args else []
+            return StdioMcpServer(name=config.name or command, command=command, args=args, env=envs)
 
         case SSEMCPServerConfig(url=url):
             return SseMcpServer(name=config.name or str(url), url=url, headers=[])
@@ -550,13 +493,11 @@ class ACPMessageAccumulator:
 
     def _finalize_current_message(self) -> None:
         """Finalize the current message and add it to the messages list."""
-        if self._current_role is None:
-            return
-
         from agentpool.messaging.messages import ChatMessage
 
+        if self._current_role is None:
+            return
         message_id = str(uuid4())
-
         if self._current_role == "user":
             # Build user message
             content = "".join(self._text_buffer)
@@ -576,11 +517,8 @@ class ACPMessageAccumulator:
             # Build assistant message with proper parts
             # Structure: ModelResponse(ToolCallPart) -> ModelRequest(ToolReturnPart)
             #         -> ModelResponse(TextPart)
-            from pydantic_ai import ModelMessage  # noqa: TC002
-
             all_messages: list[ModelMessage] = []
             response_parts: list[ModelResponsePart] = []
-
             # Add thinking part if present
             if self._thinking_buffer:
                 thinking_content = "".join(self._thinking_buffer)
@@ -589,28 +527,20 @@ class ACPMessageAccumulator:
             # Process completed tool calls - each creates a response + request pair
             for tc in self._completed_tool_calls:
                 # First, a ModelResponse with the ToolCallPart
-                tool_call_response = ModelResponse(
-                    parts=[
-                        ToolCallPart(
-                            tool_name=tc.tool_name,
-                            args=tc.args,
-                            tool_call_id=tc.tool_call_id,
-                        )
-                    ],
-                    model_name=self.model_name,
+                call_part = ToolCallPart(
+                    tool_name=tc.tool_name,
+                    args=tc.args,
+                    tool_call_id=tc.tool_call_id,
                 )
+                tool_call_response = ModelResponse(parts=[call_part], model_name=self.model_name)
                 all_messages.append(tool_call_response)
-
                 # Then, a ModelRequest with the ToolReturnPart
-                tool_return_request = ModelRequest(
-                    parts=[
-                        ToolReturnPart(
-                            tool_name=tc.tool_name,
-                            content=tc.result if tc.result is not None else "",
-                            tool_call_id=tc.tool_call_id,
-                        )
-                    ],
+                return_part = ToolReturnPart(
+                    tool_name=tc.tool_name,
+                    content=tc.result if tc.result is not None else "",
+                    tool_call_id=tc.tool_call_id,
                 )
+                tool_return_request = ModelRequest(parts=[return_part])
                 all_messages.append(tool_return_request)
 
             # Add pending (incomplete) tool calls to response parts
@@ -637,9 +567,8 @@ class ACPMessageAccumulator:
                 )
                 all_messages.append(final_response)
 
-            content = "".join(self._text_buffer)
             msg = ChatMessage(
-                content=content,
+                content="".join(self._text_buffer),
                 role="assistant",
                 message_id=message_id,
                 session_id=self.session_id,
@@ -651,7 +580,6 @@ class ACPMessageAccumulator:
 
         self._messages.append(msg)
         self._last_parent_id = message_id
-
         # Clear buffers for next message
         self._text_buffer.clear()
         self._thinking_buffer.clear()
@@ -666,11 +594,7 @@ class ACPMessageAccumulator:
         self._current_role = new_role
 
     def process(self, update: SessionUpdate) -> None:
-        """Process a single ACP session update.
-
-        Args:
-            update: The session update to process
-        """
+        """Process a single ACP session update."""
         match update:
             # User message chunks → switch to user role
             case UserMessageChunk(content=content_block):
@@ -691,11 +615,7 @@ class ACPMessageAccumulator:
                     self._thinking_buffer.append(content_block.text)
 
             # Tool call start → track pending tool call
-            case ToolCallStart(
-                tool_call_id=tool_call_id,
-                title=title,
-                raw_input=raw_input,
-            ):
+            case ToolCallStart(tool_call_id=tool_call_id, title=title, raw_input=raw_input):
                 self._switch_role("assistant")
                 self._pending_tool_calls[tool_call_id] = _PendingToolCall(
                     tool_call_id=tool_call_id,
@@ -704,11 +624,7 @@ class ACPMessageAccumulator:
                 )
 
             # Tool call progress → update or complete tool call
-            case ToolCallProgress(
-                tool_call_id=tool_call_id,
-                status=status,
-                raw_output=raw_output,
-            ):
+            case ToolCallProgress(tool_call_id=tool_call_id, status=status, raw_output=raw_output):
                 self._switch_role("assistant")
                 if tool_call_id in self._pending_tool_calls:
                     tc = self._pending_tool_calls[tool_call_id]
@@ -724,31 +640,6 @@ class ACPMessageAccumulator:
                 if self._current_role is None:
                     self._current_role = "assistant"
 
-    def process_notification(self, notification: SessionNotification[SessionUpdate]) -> None:
-        """Process a SessionNotification containing an update.
-
-        Args:
-            notification: The notification containing the update
-        """
-        self.process(notification.update)
-
-    def process_all(
-        self,
-        updates: Iterable[SessionUpdate] | Iterable[SessionNotification[SessionUpdate]],
-    ) -> None:
-        """Process multiple updates or notifications.
-
-        Args:
-            updates: Iterable of SessionUpdate or SessionNotification objects
-        """
-        from acp.schema import SessionNotification
-
-        for item in updates:
-            if isinstance(item, SessionNotification):
-                self.process(item.update)
-            else:
-                self.process(item)
-
     def finalize(self) -> list[ChatMessage[str]]:
         """Finalize accumulation and return all messages.
 
@@ -761,20 +652,9 @@ class ACPMessageAccumulator:
         self._finalize_current_message()
         return list(self._messages)
 
-    def get_messages(self) -> list[ChatMessage[str]]:
-        """Get accumulated messages without finalizing.
-
-        Returns messages accumulated so far. Call finalize() when done
-        processing to include the final pending message.
-
-        Returns:
-            List of ChatMessage objects accumulated so far
-        """
-        return list(self._messages)
-
 
 def acp_notifications_to_messages(
-    notifications: Iterable[SessionNotification[SessionUpdate]] | Iterable[SessionUpdate],
+    notifications: Iterable[SessionUpdate],
     *,
     session_id: str | None = None,
     agent_name: str | None = None,
@@ -813,5 +693,6 @@ def acp_notifications_to_messages(
         agent_name=agent_name,
         model_name=model_name,
     )
-    accumulator.process_all(notifications)
+    for item in notifications:
+        accumulator.process(item)
     return accumulator.finalize()

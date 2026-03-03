@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 
-from evented_config import EventConfig
+from evented_config import EventConfig, FileWatchConfig, TimeEventConfig
 from exxec_config import E2bExecutionEnvironmentConfig, ExecutionEnvironmentConfig
-from pydantic import ConfigDict, Field, ImportString
+from pydantic import ConfigDict, Field, HttpUrl, ImportString
 from schemez import Schema
 
-from agentpool_config.event_handlers import EventHandlerConfig
-from agentpool_config.forward_targets import ForwardingTarget
+from agentpool_config.event_handlers import EventHandlerConfig, StdoutEventHandlerConfig
+from agentpool_config.forward_targets import (
+    FileConnectionConfig,
+    ForwardingTarget,
+    NodeConnectionConfig,
+)
 from agentpool_config.hooks import HooksConfig
-from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig, StdioMCPServerConfig
+from agentpool_config.mcp_server import (
+    BaseMCPServerConfig,
+    MCPServerConfig,
+    StdioMCPServerConfig,
+    StreamableHTTPMCPServerConfig,
+)
 
 
 if TYPE_CHECKING:
@@ -71,20 +81,18 @@ class NodeConfig(Schema):
         default_factory=list,
         examples=[
             [
-                {
-                    "type": "time",
-                    "name": "daily_check",
-                    "schedule": "0 9 * * *",
-                    "prompt": "Daily status update",
-                }
+                TimeEventConfig(
+                    name="daily_check",
+                    schedule="0 9 * * *",
+                    prompt="Daily status update",
+                )
             ],
             [
-                {
-                    "type": "file",
-                    "name": "code_watcher",
-                    "paths": ["./src"],
-                    "extensions": [".py"],
-                }
+                FileWatchConfig(
+                    name="code_watcher",
+                    paths=["./src"],
+                    extensions=[".py"],
+                )
             ],
         ],
         title="Event triggers",
@@ -95,31 +103,22 @@ class NodeConfig(Schema):
         default_factory=list,
         examples=[
             [
-                {
-                    "type": "node",
-                    "name": "output_agent",
-                    "connection_type": "run",
-                    "wait_for_completion": True,
-                }
+                NodeConnectionConfig(name="output_agent", wait_for_completion=True),
             ],
             [
-                {
-                    "type": "file",
-                    "path": "logs/messages.txt",
-                    "template": "{{ message.content }}",
-                }
+                FileConnectionConfig(path="logs/messages.txt", template="{{ message.content }}"),
             ],
         ],
         title="Message forwarding targets",
     )
     """Targets to forward results to."""
 
-    mcp_servers: list[str | MCPServerConfig] = Field(
+    mcp_servers: Sequence[str | MCPServerConfig] = Field(
         default_factory=list,
         title="MCP servers",
         examples=[
             ["uvx some-server"],
-            [{"type": "streamable-http", "url": "http://mcp.example.com"}],
+            [StreamableHTTPMCPServerConfig(url=HttpUrl("http://mcp.example.com"))],
         ],
     )
     """List of MCP server configurations:
@@ -127,18 +126,13 @@ class NodeConfig(Schema):
     - MCPServerConfig for full server configuration
     """
     # Any should be InputProvider, but this leads to circular import
-    input_provider: ImportString[Any] | None = Field(
-        default=None,
-        title="Input provider",
-    )
+    input_provider: ImportString[Any] | None = Field(default=None, title="Input provider")
     """Provider for human-input-handling."""
 
     event_handlers: list[EventHandlerConfig] = Field(
         default_factory=list,
         title="Event handlers",
-        examples=[
-            [{"type": "builtin", "handler": "simple"}],
-        ],
+        examples=[[StdoutEventHandlerConfig(handler="simple")]],
     )
     """Event handlers for processing agent stream events.
 

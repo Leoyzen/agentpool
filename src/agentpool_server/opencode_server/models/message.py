@@ -54,6 +54,23 @@ class MessageTime(OpenCodeBaseModel):
     completed: int | None = None
 
 
+class OutputFormatText(OpenCodeBaseModel):
+    """Text output format."""
+
+    type: Literal["text"] = Field(default="text", init=False)
+
+
+class OutputFormatJsonSchema(OpenCodeBaseModel):
+    """JSON schema output format."""
+
+    type: Literal["json_schema"] = Field(default="json_schema", init=False)
+    schema_: dict[str, Any] = Field(alias="schema")
+    retry_count: int = 2
+
+
+OutputFormat = OutputFormatText | OutputFormatJsonSchema
+
+
 class UserMessage(OpenCodeBaseModel):
     """User message."""
 
@@ -63,6 +80,7 @@ class UserMessage(OpenCodeBaseModel):
     time: TimeCreated
     agent: str = "default"
     model: ModelRef | None = None
+    format: OutputFormat | None = None
     summary: MessageSummary | None = None
     system: str | None = None
     tools: dict[str, bool] | None = None
@@ -145,8 +163,42 @@ class APIError(OpenCodeBaseModel):
     data: APIErrorData
 
 
+class StructuredOutputErrorData(OpenCodeBaseModel):
+    """Data for structured output errors."""
+
+    message: str
+    retries: int
+
+
+class StructuredOutputError(OpenCodeBaseModel):
+    """Structured output validation error."""
+
+    name: Literal["StructuredOutputError"] = Field(default="StructuredOutputError", init=False)
+    data: StructuredOutputErrorData
+
+
+class ContextOverflowErrorData(OpenCodeBaseModel):
+    """Data for context overflow errors."""
+
+    message: str
+    response_body: str | None = None
+
+
+class ContextOverflowError(OpenCodeBaseModel):
+    """Context window overflow error."""
+
+    name: Literal["ContextOverflowError"] = Field(default="ContextOverflowError", init=False)
+    data: ContextOverflowErrorData
+
+
 MessageError = (
-    ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | APIError
+    ProviderAuthError
+    | UnknownError
+    | MessageOutputLengthError
+    | MessageAbortedError
+    | APIError
+    | StructuredOutputError
+    | ContextOverflowError
 )
 
 
@@ -168,6 +220,8 @@ class AssistantMessage(OpenCodeBaseModel):
     error: MessageError | None = None
     summary: bool | None = None
     finish: str | None = None
+    structured: Any | None = None
+    variant: str | None = None
 
 
 class MessageWithParts(OpenCodeBaseModel):

@@ -1,20 +1,20 @@
-"""OpenCode storage provider.
+"""OpenCode SQLite storage provider.
 
 This package implements the storage backend compatible with OpenCode's
-normalized JSON file format.
+SQLite database format (>= 1.2).
 
-See ARCHITECTURE.md for detailed documentation of the storage format and
-design decisions.
+The database is typically at ~/.local/share/opencode/opencode.db and contains:
+- project: Project/worktree information
+- session: Conversation sessions
+- message: Messages within sessions (data stored as JSON)
+- part: Message parts (data stored as JSON)
+- todo: Session todos
 """
 
 from __future__ import annotations
 
-from agentpool_storage.opencode_provider.provider import (
-    OpenCodeSessionMetadata,
-    OpenCodeStorageProvider,
-)
+from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
 
 __all__ = [
-    "OpenCodeSessionMetadata",
     "OpenCodeStorageProvider",
 ]

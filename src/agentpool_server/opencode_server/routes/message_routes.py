@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
@@ -22,6 +22,8 @@ from agentpool_server.opencode_server.models import (
     MessageTime,
     MessageUpdatedEvent,
     MessageWithParts,
+    Part,
+    PartRemovedEvent,
     PartUpdatedEvent,
     SessionIdleEvent,
     SessionStatus,
@@ -29,7 +31,6 @@ from agentpool_server.opencode_server.models import (
     StepStartPart,
     TimeCreated,
     TimeCreatedUpdated,
-    TokenCache,
     Tokens,
     UserMessage,
 )
@@ -45,7 +46,6 @@ from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapte
 
 
 if TYPE_CHECKING:
-    from agentpool_server.opencode_server.models.parts import Part
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -116,12 +116,9 @@ async def persist_message_to_storage(
         msg: OpenCode message to persist
         session_id: Session/conversation ID
     """
-    if state.pool.storage is None:
-        return
-
     chat_msg = opencode_to_chat_message(msg, session_id=session_id)
     with contextlib.suppress(Exception):
-        await state.pool.storage.log_message(chat_msg)
+        await state.storage.log_message(chat_msg)
 
 
 router = APIRouter(prefix="/session/{session_id}", tags=["message"])
@@ -208,7 +205,6 @@ async def _process_message(  # noqa: PLR0915
     # --- Create assistant message ---
     assistant_msg_id = identifier.ascending("message")
     now = now_ms()
-    tokens = Tokens(cache=TokenCache(read=0, write=0))
     assistant_msg = AssistantMessage(
         id=assistant_msg_id,
         session_id=session_id,
@@ -218,9 +214,7 @@ async def _process_message(  # noqa: PLR0915
         mode=request.agent or "default",
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-        time=MessageTime(created=now, completed=None),
-        tokens=tokens,
-        cost=0.0,
+        time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
@@ -257,10 +251,10 @@ async def _process_message(  # noqa: PLR0915
     response_time = now_ms()
     preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
     logger.info("Response text", text_preview=preview)
-    token_cache = TokenCache(read=0, write=0)
-    tokens = Tokens(cache=token_cache, input=adapter.input_tokens, output=adapter.output_tokens)
+    tokens = Tokens.from_pydantic_ai(adapter.usage)
+    cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
     msg_time = MessageTime(created=now, completed=response_time)
-    update = {"time": msg_time, "tokens": tokens, "cost": adapter.total_cost}
+    update = {"time": msg_time, "tokens": tokens, "cost": cost}
     updated_assistant = assistant_msg.model_copy(update=update)
     assistant_msg_with_parts.info = updated_assistant
     await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
@@ -309,11 +303,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 
 
 @router.get("/message/{message_id}")
-async def get_message(
-    session_id: str,
-    message_id: str,
-    state: StateDep,
-) -> MessageWithParts:
+async def get_message(session_id: str, message_id: str, state: StateDep) -> MessageWithParts:
     """Get a specific message."""
     session = await get_or_load_session(state, session_id)
     if session is None:
@@ -323,4 +313,57 @@ async def get_message(
         if msg.info.id == message_id:
             return msg
 
+    raise HTTPException(status_code=404, detail="Message not found")
+
+
+@router.delete("/message/{message_id}/part/{part_id}")
+async def delete_part(
+    session_id: str,
+    message_id: str,
+    part_id: str,
+    state: StateDep,
+) -> bool:
+    """Delete a part from a message."""
+    for msg in state.messages.get(session_id, []):
+        if msg.info.id != message_id:
+            continue
+        for i, part in enumerate(msg.parts):
+            if part.id == part_id:
+                msg.parts.pop(i)
+                await state.broadcast_event(
+                    PartRemovedEvent.create(
+                        session_id=session_id,
+                        message_id=message_id,
+                        part_id=part_id,
+                    )
+                )
+                return True
+        raise HTTPException(status_code=404, detail="Part not found")
+    raise HTTPException(status_code=404, detail="Message not found")
+
+
+@router.patch("/message/{message_id}/part/{part_id}")
+async def update_part(
+    session_id: str,
+    message_id: str,
+    part_id: str,
+    body: dict[str, Any],
+    state: StateDep,
+) -> Part:
+    """Update a part in a message.
+
+    Accepts the full part object and replaces the existing part.
+    Returns the updated part.
+    """
+    for msg in state.messages.get(session_id, []):
+        if msg.info.id != message_id:
+            continue
+        for i, part in enumerate(msg.parts):
+            if part.id == part_id:
+                # Update the part fields from the body
+                updated = part.model_copy(update=body)
+                msg.parts[i] = updated
+                await state.broadcast_event(PartUpdatedEvent.create(updated))
+                return updated
+        raise HTTPException(status_code=404, detail="Part not found")
     raise HTTPException(status_code=404, detail="Message not found")

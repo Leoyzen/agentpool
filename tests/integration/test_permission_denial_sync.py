@@ -13,9 +13,10 @@ claude_code_agent.py's module docstring.
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from dataclasses import dataclass, field
 import shutil
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.types import ElicitResult
 import pytest
@@ -23,6 +24,10 @@ import pytest
 from acp.schema import ToolCallStart
 from agentpool.agents.claude_code_agent import ClaudeCodeAgent
 from agentpool_server.acp_server.event_converter import ACPEventConverter
+
+
+if TYPE_CHECKING:
+    from agentpool import AgentContext, ChatMessage
 
 
 @dataclass
@@ -51,11 +56,11 @@ class DenyingInputProvider:
 
     async def get_tool_confirmation(
         self,
-        context: Any,
+        context: AgentContext[Any],
         tool_name: str,
         tool_description: str,
         args: dict[str, Any],
-        message_history: list[Any] | None = None,
+        message_history: list[ChatMessage[Any]] | None = None,
     ) -> str:
         """Deny all tool calls after a small delay."""
         tool_call_id = getattr(context, "tool_call_id", "unknown")
@@ -89,7 +94,7 @@ async def test_tool_call_event_ordering():
     trace = EventTrace()
     input_provider = DenyingInputProvider(trace)
     # Track events per tool_call_id
-    tool_call_events: dict[str, list[str]] = {}
+    tool_call_events = defaultdict[str, list[str]](list)
 
     async with ClaudeCodeAgent(
         name="test-agent",
@@ -112,8 +117,7 @@ async def test_tool_call_event_ordering():
                 tool_call_id = event.part.tool_call_id
 
             if tool_call_id:
-                if tool_call_id not in tool_call_events:
-                    tool_call_events[tool_call_id] = []
+                assert isinstance(tool_call_id, str)
                 tool_call_events[tool_call_id].append(event_type)
 
         # Verify event ordering for each tool call

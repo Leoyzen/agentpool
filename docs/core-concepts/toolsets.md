@@ -20,7 +20,7 @@ Enables agents to discover, coordinate with, and manage other agents:
 agents:
   coordinator:
     tools:
-      - type: agent_management
+      - type: agent_cli
 ```
 
 **Provides tools:**
@@ -191,7 +191,7 @@ agents:
   coordinator:
     model: openai:gpt-4
     tools:
-      - type: agent_management
+      - type: agent_cli
       - type: history
     system_prompt: You coordinate tasks across multiple agents
 ```

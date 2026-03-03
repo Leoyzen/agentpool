@@ -6,7 +6,7 @@ similar to how ToolManagerBridge creates in-process MCP servers for ACP agents.
 
 from __future__ import annotations
 
-from codex_adapter import CodexClient, HttpMcpServer, StdioMcpServer
+from codex_adapter import CodexClient, HttpMcpServer, StdioMcpServer, get_text_delta
 
 
 async def example_with_http_mcp_server():
@@ -24,12 +24,11 @@ async def example_with_http_mcp_server():
     async with CodexClient(mcp_servers=mcp_servers) as client:
         thread = await client.thread_start(cwd="/path/to/project")
         print(f"Started thread: {thread.thread.id}")
-
         # Now the Codex agent has access to all tools exposed by the MCP server
         async for event in client.turn_stream(
             thread.thread.id, "List available tools and show what they can do"
         ):
-            if text := event.get_text_delta():
+            if text := get_text_delta(event):
                 print(text, end="", flush=True)
         print()
 
@@ -46,9 +45,8 @@ async def example_with_stdio_mcp_server():
     async with CodexClient(mcp_servers=mcp_servers) as client:
         thread = await client.thread_start(cwd="/tmp")
         print(f"Started thread: {thread.thread.id}")
-
         async for event in client.turn_stream(thread.thread.id, "List files in current directory"):
-            if text := event.get_text_delta():
+            if text := get_text_delta(event):
                 print(text, end="", flush=True)
         print()
 
@@ -77,13 +75,10 @@ async def example_with_multiple_mcp_servers():
     async with CodexClient(mcp_servers=mcp_servers) as client:
         thread = await client.thread_start(cwd="/path/to/project")
         print(f"Started thread with {len(mcp_servers)} MCP servers: {thread.thread.id}")
-
         # The agent now has access to tools from all three MCP servers
-        async for event in client.turn_stream(
-            thread.thread.id,
-            "Show me all available tools and their sources",
-        ):
-            if text := event.get_text_delta():
+        prompt = "Show me all available tools and their sources"
+        async for event in client.turn_stream(thread.thread.id, prompt):
+            if text := get_text_delta(event):
                 print(text, end="", flush=True)
         print()
 
@@ -98,10 +93,8 @@ async def example_integration_with_agentpool():
     # bridge = ToolManagerBridge(node, config)
     # await bridge.start()
     # mcp_config = bridge.get_claude_mcp_server_config()
-
     # Simulating what that would return:
     mcp_config = {"agentpool-tools": {"type": "http", "url": "http://localhost:8765/mcp"}}
-
     # Convert to CodexClient format
     mcp_servers = {
         name: HttpMcpServer(url=config["url"])
@@ -112,13 +105,10 @@ async def example_integration_with_agentpool():
     async with CodexClient(mcp_servers=mcp_servers) as client:
         thread = await client.thread_start()
         print(f"Codex agent with AgentPool tools: {thread.thread.id}")
-
         # Now the Codex agent can use tools from AgentPool!
-        async for event in client.turn_stream(
-            thread.thread.id,
-            "Use the available tools to analyze this project",
-        ):
-            if text := event.get_text_delta():
+        prompt = "Use the available tools to analyze this project"
+        async for event in client.turn_stream(thread.thread.id, prompt):
+            if text := get_text_delta(event):
                 print(text, end="", flush=True)
         print()
 

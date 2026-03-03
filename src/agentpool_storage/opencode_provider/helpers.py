@@ -1,161 +1,108 @@
-"""Helper functions for OpenCode storage provider.
+"""Helper functions for OpenCode SQLite storage provider.
 
-Stateless conversion and utility functions for working with OpenCode format.
+Stateless conversion and utility functions for working with OpenCode's
+SQLite-based format. Converts between raw database rows and domain models.
 """
 
 from __future__ import annotations
 
 import base64
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-import anyenv
+from pydantic import TypeAdapter
 from pydantic_ai import (
-    AudioUrl,
     BinaryContent,
-    DocumentUrl,
-    ImageUrl,
     ModelRequest,
     ModelResponse,
     RequestUsage,
     RunUsage,
-    TextPart,
+    TextPart as PydanticTextPart,
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
-    VideoUrl,
 )
 
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, TokenCost
+from agentpool.utils.pydantic_ai_helpers import to_user_content
 from agentpool.utils.time_utils import ms_to_datetime
-from agentpool_server.opencode_server.models import (
+from agentpool_server.opencode_server.models.message import (
     AssistantMessage,
-    FilePart as OpenCodeFilePart,
-    ReasoningPart as OpenCodeReasoningPart,
-    Session,
-    TextPart as OpenCodeTextPart,
-    TokenCache,
-    Tokens,
-    ToolPart as OpenCodeToolPart,
-    ToolStateCompleted,
-    ToolStateError,
-    ToolStatePending,
-    ToolStateRunning,
+    MessageInfo,
     UserMessage,
+)
+from agentpool_server.opencode_server.models.parts import (
+    FilePart,
+    Part,
+    ReasoningPart,
+    TextPart,
+    ToolPart,
+    ToolStateCompleted,
 )
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from datetime import datetime
-    from pathlib import Path
 
-    from pydantic_ai import MultiModalContent
     from pydantic_ai.messages import UserContent
-
-    from agentpool_server.opencode_server.models import (
-        MessageInfo as OpenCodeMessage,
-        Part as OpenCodePart,
-    )
 
 
 logger = get_logger(__name__)
 
-
-def to_user_content(url: str, mime: str) -> MultiModalContent:
-    if mime.startswith("image/"):
-        mime_typ = mime if mime != "image/*" else None
-        return ImageUrl(url=url, media_type=mime_typ)
-    if mime.startswith("audio/"):
-        mime_typ = mime if mime != "audio/*" else None
-        return AudioUrl(url=url, media_type=mime_typ)
-    if mime.startswith("video/"):
-        mime_typ = mime if mime != "video/*" else None
-        return VideoUrl(url=url, media_type=mime_typ)
-    if mime == "application/pdf" or mime.startswith("application/"):
-        return DocumentUrl(url=url, media_type=mime)
-    # Unknown MIME type - treat as document
-    return DocumentUrl(url=url, media_type=mime)
+_message_info_adapter: TypeAdapter[MessageInfo] = TypeAdapter(MessageInfo)
+_part_adapter: TypeAdapter[Part] = TypeAdapter(Part)
 
 
-def convert_user_content_to_parts(
-    content: str | Sequence[UserContent],
-    message_id: str,
-    session_id: str,
-    part_counter_start: int,
-) -> list[OpenCodeTextPart | OpenCodeFilePart]:
-    """Convert UserContent to OpenCode parts.
+def parse_message_info(data: dict[str, Any], *, message_id: str, session_id: str) -> MessageInfo:
+    """Parse a message JSON data dict into a typed MessageInfo model.
+
+    Injects the DB column fields (id, sessionID) into the data dict before
+    validation, matching how OpenCode itself reconstructs messages from DB rows.
 
     Args:
-        content: User content (str or Sequence[UserContent])
-        message_id: Message ID
-        session_id: Session ID
-        part_counter_start: Starting counter for part IDs
+        data: The JSON 'data' field from the message table
+        message_id: Message ID from the DB id column
+        session_id: Session ID from the DB session_id column
 
     Returns:
-        List of OpenCode parts (TextPart for text/strings, FilePart for media)
-
-    Note:
-        CachePoint markers are lost in conversion (no OpenCode equivalent)
+        Validated UserMessage or AssistantMessage
     """
-    parts: list[OpenCodeTextPart | OpenCodeFilePart] = []
-    part_counter = part_counter_start
-    content_items = [content] if isinstance(content, str) else content
-    # Sequence of UserContent
-    for content_item in content_items:
-        part_id = f"{message_id}-{part_counter}"
-        part_counter += 1
-        match content_item:
-            case str():
-                text_part = OpenCodeTextPart(
-                    id=part_id,
-                    session_id=session_id,
-                    message_id=message_id,
-                    type="text",
-                    text=content_item,
-                )
-                parts.append(text_part)
-            case (
-                ImageUrl(media_type=media_type, url=url)
-                | AudioUrl(media_type=media_type, url=url)
-                | DocumentUrl(media_type=media_type, url=url)
-                | VideoUrl(media_type=media_type, url=url)
-            ):
-                file_part = OpenCodeFilePart(
-                    id=part_id,
-                    session_id=session_id,
-                    message_id=message_id,
-                    type="file",
-                    mime=media_type,
-                    url=url,
-                )
-                parts.append(file_part)
-            case BinaryContent(media_type=media_type, data=data):
-                # Binary content - convert to data URL
-                b64_data = base64.b64encode(data).decode("ascii")
-                file_part = OpenCodeFilePart(
-                    id=part_id,
-                    session_id=session_id,
-                    message_id=message_id,
-                    type="file",
-                    mime=media_type,
-                    url=f"data:{media_type};base64,{b64_data}",
-                )
-                parts.append(file_part)
-        # CachePoint is just a marker for prompt caching - no data to store
-    return parts
+    data["id"] = message_id
+    data["sessionID"] = session_id
+    return _message_info_adapter.validate_python(data)
 
 
-def extract_text_content(parts: list[OpenCodePart]) -> str:
-    """Extract text content from parts for display.
+def parse_part(data: dict[str, Any], *, part_id: str, message_id: str, session_id: str) -> Part:
+    """Parse a part JSON data dict into a typed Part model.
+
+    Injects the DB column fields (id, messageID, sessionID) into the data dict
+    before validation, matching how OpenCode itself reconstructs parts from DB rows.
+
+    Args:
+        data: The JSON 'data' field from the part table
+        part_id: Part ID from the DB id column
+        message_id: Message ID from the DB message_id column
+        session_id: Session ID from the DB session_id column
+
+    Returns:
+        Validated Part (TextPart, ToolPart, ReasoningPart, etc.)
+    """
+    data["id"] = part_id
+    data["messageID"] = message_id
+    data["sessionID"] = session_id
+    return _part_adapter.validate_python(data)
+
+
+def extract_text_content(parts: list[Part]) -> str:
+    """Extract text content from typed parts for display.
 
     Groups consecutive reasoning parts into a single <thinking> block
     and only wraps them if there are also non-reasoning parts present.
 
     Args:
-        parts: List of OpenCode parts
+        parts: List of typed Part models
 
     Returns:
         Combined text content from all text and reasoning parts
@@ -165,17 +112,17 @@ def extract_text_content(parts: list[OpenCodePart]) -> str:
     has_text = False
 
     for part in parts:
-        match part:
-            case OpenCodeTextPart(text=text) if text:
+        if isinstance(part, TextPart):
+            if part.text:
                 has_text = True
                 # Flush any accumulated reasoning before this text
                 if reasoning_segments:
                     combined = "\n".join(reasoning_segments)
                     text_segments.append(f"<thinking>\n{combined}\n</thinking>")
                     reasoning_segments.clear()
-                text_segments.append(text)
-            case OpenCodeReasoningPart(text=text) if text:
-                reasoning_segments.append(text)
+                text_segments.append(part.text)
+        elif isinstance(part, ReasoningPart) and part.text:
+            reasoning_segments.append(part.text)
 
     # Flush remaining reasoning
     if reasoning_segments:
@@ -189,100 +136,77 @@ def extract_text_content(parts: list[OpenCodePart]) -> str:
     return "\n".join(text_segments)
 
 
-def user_message_to_pydantic(
-    msg: UserMessage, parts: list[OpenCodePart], ts: datetime
-) -> ModelRequest | None:
+def _build_user_pydantic_messages(
+    parts: list[Part],
+    timestamp: datetime,
+) -> list[ModelRequest | ModelResponse]:
+    """Build ModelRequest from user message parts."""
     user_content: list[UserContent] = []
     for part in parts:
-        match part:
-            case OpenCodeTextPart() if part.text:
+        if isinstance(part, TextPart):
+            if part.text:
                 user_content.append(part.text)
-            case OpenCodeFilePart(url=url, mime=mime):
-                # Detect data URLs for BinaryContent
-                if url.startswith("data:"):
-                    # Parse data URL: data:mime;base64,data
-                    if ";base64," in url:
-                        mime_part, b64_data = url.split(";base64,", 1)
-                        media_type = mime_part.replace("data:", "")
-                        data = base64.b64decode(b64_data)
-                        user_content.append(BinaryContent(data=data, media_type=media_type))
-                    continue
-                # Convert to appropriate URL type based on MIME
+        elif isinstance(part, FilePart):
+            url = part.url
+            mime = part.mime
+            if url.startswith("data:") and ";base64," in url:
+                mime_part, b64_data = url.split(";base64,", 1)
+                media_type = mime_part.replace("data:", "")
+                data = base64.b64decode(b64_data)
+                user_content.append(BinaryContent(data=data, media_type=media_type))
+            elif url:
                 content_item = to_user_content(url, mime)
                 user_content.append(content_item)
     if user_content:
-        user_part = UserPromptPart(content=user_content, timestamp=ts)
-        return ModelRequest(parts=[user_part], timestamp=ts)
-    return None
+        user_part = UserPromptPart(content=user_content, timestamp=timestamp)
+        return [ModelRequest(parts=[user_part], timestamp=timestamp)]
+    return []
 
 
-def build_pydantic_messages(
-    msg: OpenCodeMessage,
-    parts: list[OpenCodePart],
+def _build_assistant_pydantic_messages(
+    msg: AssistantMessage,
+    parts: list[Part],
     timestamp: datetime,
 ) -> list[ModelRequest | ModelResponse]:
-    """Build pydantic-ai ModelRequest and/or ModelResponse from OpenCode data.
-
-    In OpenCode's model, assistant messages contain both tool calls AND their
-    results in the same message. We split these into:
-    - ModelResponse with ToolCallPart (the call)
-    - ModelRequest with ToolReturnPart (the result)
-
-    Args:
-        msg: OpenCode message metadata
-        parts: OpenCode message parts
-        timestamp: Message timestamp
-
-    Returns:
-        List of pydantic-ai messages (ModelRequest and/or ModelResponse)
-    """
-    if isinstance(msg, UserMessage):
-        if py_msg := user_message_to_pydantic(msg, parts, timestamp):
-            return [py_msg]
-        return []
+    """Build ModelResponse (+ optional ModelRequest for tool returns) from assistant parts."""
     result: list[ModelRequest | ModelResponse] = []
-    # Assistant message - may contain both tool calls and results
-    response_parts: list[TextPart | ToolCallPart | ThinkingPart] = []
+    response_parts: list[PydanticTextPart | ToolCallPart | ThinkingPart] = []
     tool_return_parts: list[ToolReturnPart] = []
+
+    tokens = msg.tokens
+    cache = tokens.cache
     usage = RequestUsage(
-        input_tokens=msg.tokens.input,
-        output_tokens=msg.tokens.output,
-        cache_read_tokens=msg.tokens.cache.read,
-        cache_write_tokens=msg.tokens.cache.write,
+        input_tokens=tokens.input,
+        output_tokens=tokens.output,
+        cache_read_tokens=cache.read,
+        cache_write_tokens=cache.write,
     )
+
     for part in parts:
-        match part:
-            case OpenCodeTextPart(text=text) if text:
-                response_parts.append(TextPart(content=text))
-            case OpenCodeReasoningPart(text=text) if text:
-                response_parts.append(ThinkingPart(content=text))
-            case OpenCodeToolPart(
-                call_id=call_id,
-                tool=tool,
-                state=ToolStateCompleted(output=output, input=input) as state,
-            ) if output:
-                # Add tool call to response
-                tc_part = ToolCallPart(tool_name=tool, args=input or {}, tool_call_id=call_id)
-                response_parts.append(tc_part)
+        if isinstance(part, TextPart):
+            if part.text:
+                response_parts.append(PydanticTextPart(content=part.text))
+        elif isinstance(part, ReasoningPart):
+            if part.text:
+                response_parts.append(ThinkingPart(content=part.text))
+        elif isinstance(part, ToolPart):
+            tc_part = ToolCallPart(
+                tool_name=part.tool,
+                args=part.state.input,
+                tool_call_id=part.call_id,
+            )
+            response_parts.append(tc_part)
+
+            if isinstance(part.state, ToolStateCompleted) and part.state.output:
                 return_part = ToolReturnPart(
-                    tool_name=tool,
-                    content=state.output,
-                    tool_call_id=call_id,
+                    tool_name=part.tool,
+                    content=part.state.output,
+                    tool_call_id=part.call_id,
                     timestamp=timestamp,
                 )
                 tool_return_parts.append(return_part)
-            case OpenCodeToolPart(
-                call_id=call_id,
-                tool=tool,
-                state=ToolStatePending(input=input)
-                | ToolStateRunning(input=input)
-                | ToolStateError(input=input),
-            ):
-                tc_part = ToolCallPart(tool_name=tool, args=input or {}, tool_call_id=call_id)
-                response_parts.append(tc_part)
-    # Add the response if we have parts
+
     if response_parts:
-        # AssistantMessage only has model_id, not model
         model_response = ModelResponse(
             parts=response_parts,
             usage=usage,
@@ -290,71 +214,89 @@ def build_pydantic_messages(
             timestamp=timestamp,
         )
         result.append(model_response)
-    # Add tool returns as a separate request (simulating user sending results back)
+
     if tool_return_parts:
         result.append(ModelRequest(parts=tool_return_parts, timestamp=timestamp))
+
     return result
 
 
-def read_session(session_path: Path) -> Session | None:
-    """Read session metadata from session JSON file. Returns None if read/parse fails."""
-    if not session_path.exists():
-        return None
-    try:
-        content = session_path.read_text(encoding="utf-8")
-        return anyenv.load_json(content, return_type=Session)
-    except anyenv.JsonLoadError as e:
-        logger.warning("Failed to parse session", path=str(session_path), error=str(e))
-        return None
+def build_pydantic_messages(
+    msg: MessageInfo,
+    parts: list[Part],
+    timestamp: datetime,
+) -> list[ModelRequest | ModelResponse]:
+    """Build pydantic-ai messages from typed OpenCode models.
+
+    In OpenCode's model, assistant messages contain both tool calls AND their
+    results in the same message. We split these into:
+    - ModelResponse with ToolCallPart (the call)
+    - ModelRequest with ToolReturnPart (the result)
+
+    Args:
+        msg: Typed UserMessage or AssistantMessage
+        parts: List of typed Part models
+        timestamp: Message timestamp
+
+    Returns:
+        List of pydantic-ai messages (ModelRequest and/or ModelResponse)
+    """
+    if isinstance(msg, UserMessage):
+        return _build_user_pydantic_messages(parts, timestamp)
+    return _build_assistant_pydantic_messages(msg, parts, timestamp)
 
 
 def to_chat_message(
-    msg: OpenCodeMessage,
-    parts: list[OpenCodePart],
-    session_id: str,
+    *,
+    msg: MessageInfo,
+    parts: list[Part],
 ) -> ChatMessage[str]:
-    """Convert OpenCode message + parts to ChatMessage."""
+    """Convert typed OpenCode message + parts to ChatMessage.
+
+    Args:
+        msg: Typed UserMessage or AssistantMessage
+        parts: List of typed Part models
+
+    Returns:
+        ChatMessage with content, pydantic messages, cost info etc.
+    """
     timestamp = ms_to_datetime(msg.time.created)
     content = extract_text_content(parts)
     pydantic_messages = build_pydantic_messages(msg, parts, timestamp)
+
     cost_info = None
-    provider_details = {}
-    match msg:
-        case AssistantMessage(
-            tokens=Tokens(input=input, output=output, cache=TokenCache(read=read)),
-        ):
-            if (input_tokens := input + read) or output:
-                usage = RunUsage(input_tokens=input_tokens, output_tokens=output)
-                cost = Decimal(str(msg.cost)) if msg.cost else Decimal(0)
-                cost_info = TokenCost(token_usage=usage, total_cost=cost)
-            if msg.finish:
-                provider_details["finish_reason"] = msg.finish
+    provider_details: dict[str, Any] = {}
+    parent_id: str | None = None
+    model_name: str | None = None
+    agent_name: str | None = msg.agent if msg.agent != "default" else None
 
-            return ChatMessage[str](
-                content=content,
-                session_id=session_id,
-                role=msg.role,
-                message_id=msg.id,
-                name=msg.agent,
-                model_name=msg.model_id,
-                cost_info=cost_info,
-                timestamp=timestamp,
-                parent_id=msg.parent_id,
-                messages=pydantic_messages,
-                provider_details=provider_details,
-            )
+    if isinstance(msg, AssistantMessage):
+        tokens = msg.tokens
+        cache = tokens.cache
+        input_tokens = tokens.input + cache.read
+        output_tokens = tokens.output
+        if input_tokens or output_tokens:
+            usage = RunUsage(input_tokens=input_tokens, output_tokens=output_tokens)
+            cost = Decimal(str(msg.cost))
+            cost_info = TokenCost(token_usage=usage, total_cost=cost)
+        if msg.finish:
+            provider_details["finish_reason"] = msg.finish
+        parent_id = msg.parent_id
+        model_name = msg.model_id
+        agent_name = msg.agent if msg.agent != "default" else None
+    elif isinstance(msg, UserMessage) and msg.model is not None:
+        model_name = msg.model.model_id
 
-        case UserMessage(role=role, id=msg_id, agent=agent, model=model):
-            return ChatMessage[str](
-                content=content,
-                session_id=session_id,
-                role=role,
-                message_id=msg_id,
-                name=agent,
-                model_name=model.model_id if model else None,
-                cost_info=cost_info,
-                timestamp=timestamp,
-                parent_id=None,
-                messages=pydantic_messages,
-                provider_details=provider_details,
-            )
+    return ChatMessage[str](
+        content=content,
+        session_id=msg.session_id,
+        role=msg.role,
+        message_id=msg.id,
+        name=agent_name,
+        model_name=model_name,
+        cost_info=cost_info,
+        timestamp=timestamp,
+        parent_id=parent_id,
+        messages=pydantic_messages,
+        provider_details=provider_details,
+    )

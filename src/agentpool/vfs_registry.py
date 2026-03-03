@@ -244,10 +244,10 @@ class VFSRegistry:
 
 
 if __name__ == "__main__":
-    from fsspec.implementations.memory import MemoryFileSystem
+    from upathtools.filesystems.isolated_memory_fs import IsolatedMemoryFileSystem
 
     registry = VFSRegistry()
-    fs1 = MemoryFileSystem()
+    fs1 = IsolatedMemoryFileSystem()
     registry.register("test", fs1)
     union = registry.get_fs()
     print(union.ls(""))

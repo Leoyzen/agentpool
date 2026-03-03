@@ -157,14 +157,14 @@ class Talk[TTransmittedData = Any]:
         from agentpool.talk import TeamTalk
 
         match other:
-            case Callable():
-                other = Agent.from_callback(other)
+            case Callable():  # ty: ignore[invalid-match-pattern]
+                other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 if pool := self.source.agent_pool:
                     other.agent_pool = pool
                     pool.register(other.name, other)
                 return self.__rshift__(other)
             case Sequence():
-                team_talks = [self.__rshift__(o) for o in other]
+                team_talks = [self.__rshift__(o) for o in other]  # ty: ignore[no-matching-overload]
                 return TeamTalk([self, *team_talks])
             case MessageNode():
                 talks = [t.__rshift__(other) for t in self.targets]
@@ -258,7 +258,7 @@ class Talk[TTransmittedData = Any]:
         if self.transform_fn:
             processed_message = await execute(self.transform_fn, message)
         # 6. First pass: Determine target list
-        target_list: list[MessageNode[Any, Any]] = [
+        target_list = [
             target
             for target in self.targets
             if await self._evaluate_condition(
@@ -318,7 +318,7 @@ class Talk[TTransmittedData = Any]:
                         case BaseTeam():
                             # Add context to all team members
                             for agent in target.iter_agents():
-                                agent.staged_content.add_text(str(message.content))
+                                agent.staged_content.add_text(str(message.content))  # ty: ignore[unresolved-attribute]
                         case BaseAgent():
                             target.staged_content.add_text(str(message.content))
 
@@ -445,7 +445,7 @@ class Talk[TTransmittedData = Any]:
                 data: ChatMessage[TTransmittedData],
             ) -> ChatMessage[TNewData]:
                 intermediate = await execute(oldtransform_fn, data)
-                return await execute(transformer, intermediate)
+                return await execute(transformer, intermediate)  # ty: ignore[invalid-return-type]
 
             new_talk.transform_fn = chainedtransform_fn  # type: ignore[assignment]
         else:
@@ -502,8 +502,8 @@ class TeamTalk[TTransmittedData = Any](list["Talk | TeamTalk"]):
         from agentpool.talk import TeamTalk
 
         match other:
-            case Callable():
-                other = Agent.from_callback(other)
+            case Callable():  # ty: ignore[invalid-match-pattern]
+                other = Agent.from_callback(other)  # ty: ignore[no-matching-overload]
                 for talk_ in self.iter_talks():
                     if pool := talk_.source.agent_pool:
                         other.agent_pool = pool
@@ -511,7 +511,7 @@ class TeamTalk[TTransmittedData = Any](list["Talk | TeamTalk"]):
                         break
                 return self.__rshift__(other)
             case Sequence():
-                team_talks = [self.__rshift__(o) for o in other]
+                team_talks = [self.__rshift__(o) for o in other]  # ty: ignore[invalid-argument-type]
                 return TeamTalk([self, *team_talks])
             case MessageNode():
                 talks = [t.connect_to(other) for t in self.targets]

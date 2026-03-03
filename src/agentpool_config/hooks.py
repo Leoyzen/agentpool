@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+from exxec_config import ExecutionEnvironmentConfig
 from pydantic import ConfigDict, Field
 from schemez import Schema
 
 
 if TYPE_CHECKING:
+    from exxec import ExecutionEnvironment
+
     from agentpool.hooks.base import Hook, HookEvent
 
 
@@ -53,6 +56,11 @@ class CommandHookConfig(BaseHookConfig):
 
     The command receives hook input as JSON via stdin and should return
     JSON output via stdout. Exit code 0 = success, exit code 2 = block.
+
+    By default, command hooks run in the agent's execution environment
+    (e.g. Docker, E2B sandbox) so they operate on the same filesystem
+    as the agent's tools. Use the ``environment`` field to override with
+    a specific environment, or set it to a local path to force local execution.
     """
 
     model_config = ConfigDict(json_schema_extra={"x-doc-title": "Command Hook"})
@@ -77,6 +85,18 @@ class CommandHookConfig(BaseHookConfig):
     )
     """Additional environment variables for the command."""
 
+    environment: ExecutionEnvironmentConfig | str | None = Field(
+        default=None,
+        title="Execution environment",
+        examples=["docker"],
+    )
+    """Per-hook execution environment override.
+
+    If set, the hook command runs in this environment instead of the agent's.
+    Accepts an ExecutionEnvironmentConfig or a string path for local execution.
+    If None (default), uses the agent's execution environment.
+    """
+
     def get_hook(self, event: HookEvent) -> Hook:
         """Create runtime command hook."""
         from agentpool.hooks import CommandHook
@@ -88,7 +108,25 @@ class CommandHookConfig(BaseHookConfig):
             timeout=self.timeout,
             enabled=self.enabled,
             env=self.env,
+            execution_env=self._resolve_execution_env(),
         )
+
+    def _resolve_execution_env(self) -> ExecutionEnvironment | None:
+        """Resolve the per-hook execution environment if configured.
+
+        Returns:
+            ExecutionEnvironment instance, or None to use agent's env.
+        """
+        from exxec.local_provider import LocalExecutionEnvironment
+        from exxec_config import BaseExecutionEnvironmentConfig
+
+        match self.environment:
+            case BaseExecutionEnvironmentConfig() as cfg:
+                return cfg.get_provider()
+            case str() as path:
+                return LocalExecutionEnvironment(cwd=path)
+            case None:
+                return None
 
 
 class CallableHookConfig(BaseHookConfig):

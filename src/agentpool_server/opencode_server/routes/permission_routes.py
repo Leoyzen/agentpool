@@ -6,18 +6,30 @@ from fastapi import APIRouter, HTTPException
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models.events import PermissionResolvedEvent
-from agentpool_server.opencode_server.routes.session_routes import PermissionResponse
+from agentpool_server.opencode_server.models.events import (
+    PermissionAskedProperties,
+    PermissionReplyRequest,
+    PermissionResolvedEvent,
+)
 
 
 router = APIRouter(prefix="/permission", tags=["permission"])
 logger = log.get_logger(__name__)
 
 
+@router.get("")
+async def list_permissions(state: StateDep) -> list[PermissionAskedProperties]:
+    """List all pending permission requests across all sessions."""
+    result: list[PermissionAskedProperties] = []
+    for input_provider in state.input_providers.values():
+        result.extend(input_provider.get_pending_permissions())
+    return result
+
+
 @router.post("/{permission_id}/reply")
 async def reply_to_permission(
     permission_id: str,
-    body: PermissionResponse,
+    body: PermissionReplyRequest,
     state: StateDep,
 ) -> bool:
     """Respond to a pending permission request (OpenCode TUI compatibility).
