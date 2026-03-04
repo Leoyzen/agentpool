@@ -65,7 +65,7 @@ class AuthMethodAgent(AnnotatedObject):
 
 
 class AuthEnvVar(AnnotatedObject):
-    """**UNSTABLE**: Describes a single environment variable for an env-var authentication method."""
+    """**UNSTABLE**: Describes a single environment variable for an env-var auth method."""
 
     name: str
     """The environment variable name (e.g. ``"OPENAI_API_KEY"``)."""
