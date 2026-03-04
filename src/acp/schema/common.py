@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal
+
+from pydantic import Discriminator, Field, Tag
 
 from acp.schema.base import AnnotatedObject, Schema
 
@@ -40,17 +43,114 @@ class Implementation(Schema):
     Can be displayed to the user or used for debugging or metrics purposes."""
 
 
-class AuthMethod(AnnotatedObject):
-    """Describes an available authentication method."""
+class AuthMethodAgent(AnnotatedObject):
+    """Agent handles authentication itself.
 
-    description: str | None = None
-    """Optional description providing more details about this authentication method."""
+    This is the default authentication method type.
+    When no ``type`` field is present, the method is treated as ``agent``.
+    """
+
+    type: Literal["agent"] = Field(default="agent", exclude=True)
+    """Discriminator field.  Defaults to ``"agent"`` and is excluded from serialization
+    for backward compatibility."""
 
     id: str
     """Unique identifier for this authentication method."""
 
     name: str
     """Human-readable name of the authentication method."""
+
+    description: str | None = None
+    """Optional description providing more details about this authentication method."""
+
+
+class AuthEnvVar(AnnotatedObject):
+    """**UNSTABLE**: Describes a single environment variable for an env-var authentication method."""
+
+    name: str
+    """The environment variable name (e.g. ``"OPENAI_API_KEY"``)."""
+
+    label: str | None = None
+    """Human-readable label for this variable, displayed in client UI."""
+
+    secret: bool = True
+    """Whether this value is a secret (e.g. API key, token).
+
+    Clients should use a password-style input for secret vars.
+    Defaults to ``True``."""
+
+    optional: bool = False
+    """Whether this variable is optional.  Defaults to ``False``."""
+
+
+class AuthMethodEnvVar(AnnotatedObject):
+    """**UNSTABLE**: Environment variable authentication method.
+
+    The user provides credentials that the client passes to the agent
+    as environment variables.
+    """
+
+    type: Literal["env_var"] = "env_var"
+    """Discriminator field."""
+
+    id: str
+    """Unique identifier for this authentication method."""
+
+    name: str
+    """Human-readable name of the authentication method."""
+
+    description: str | None = None
+    """Optional description providing more details about this authentication method."""
+
+    vars: Sequence[AuthEnvVar]
+    """The environment variables the client should set."""
+
+    link: str | None = None
+    """Optional link to a page where the user can obtain their credentials."""
+
+
+class AuthMethodTerminal(AnnotatedObject):
+    """**UNSTABLE**: Terminal authentication method.
+
+    Client runs an interactive terminal for the user to authenticate via a TUI.
+    """
+
+    type: Literal["terminal"] = "terminal"
+    """Discriminator field."""
+
+    id: str
+    """Unique identifier for this authentication method."""
+
+    name: str
+    """Human-readable name of the authentication method."""
+
+    description: str | None = None
+    """Optional description providing more details about this authentication method."""
+
+    args: Sequence[str] = ()
+    """Additional arguments to pass when running the agent binary for terminal auth."""
+
+    env: dict[str, str] = Field(default_factory=dict)
+    """Additional environment variables to set when running the agent binary for terminal auth."""
+
+
+def _auth_method_discriminator(v: Any) -> str:
+    if isinstance(v, dict):
+        return v.get("type", "agent")
+    return getattr(v, "type", "agent")
+
+
+AuthMethod = Annotated[
+    Annotated[AuthMethodAgent, Tag("agent")]
+    | Annotated[AuthMethodEnvVar, Tag("env_var")]
+    | Annotated[AuthMethodTerminal, Tag("terminal")],
+    Discriminator(_auth_method_discriminator),
+]
+"""Describes an available authentication method.
+
+The ``type`` field acts as the discriminator.  When no ``type`` is present,
+the method is treated as ``agent``.
+"""
 
 
 class Error(Schema):
@@ -78,4 +178,11 @@ class Error(Schema):
     """A string providing a short description of the error.
 
     The message should be limited to a concise single sentence.
+    """
+
+    auth_methods: Sequence[AuthMethod] = ()
+    """**UNSTABLE**: Authentication methods relevant to this error.
+
+    Typically included with ``AUTH_REQUIRED`` errors to narrow down which
+    authentication methods are applicable from those shared during initialization.
     """

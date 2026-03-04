@@ -31,6 +31,7 @@ from acp.schema.agent_responses import (
 )
 from acp.schema.capabilities import (
     AgentCapabilities,
+    AuthCapabilities,
     ClientCapabilities,
     FileSystemCapability,
     McpCapabilities,
@@ -68,7 +69,15 @@ from acp.schema.client_responses import (
     WaitForTerminalExitResponse,
     WriteTextFileResponse,
 )
-from acp.schema.common import AuthMethod, EnvVariable, Implementation
+from acp.schema.common import (
+    AuthEnvVar,
+    AuthMethod,
+    AuthMethodAgent,
+    AuthMethodEnvVar,
+    AuthMethodTerminal,
+    EnvVariable,
+    Implementation,
+)
 from acp.schema.content_blocks import (
     Annotations,
     AudioContentBlock,
@@ -163,7 +172,12 @@ __all__ = [
     "Annotations",
     "Audience",
     "AudioContentBlock",
+    "AuthCapabilities",
+    "AuthEnvVar",
     "AuthMethod",
+    "AuthMethodAgent",
+    "AuthMethodEnvVar",
+    "AuthMethodTerminal",
     "AuthenticateRequest",
     "AuthenticateResponse",
     "AvailableCommand",

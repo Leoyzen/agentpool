@@ -8,6 +8,12 @@ from acp.client.protocol import Client
 from acp.terminal_handle import TerminalHandle
 from acp.tool_call_state import ToolCallState
 from acp.schema import (
+    AuthCapabilities,
+    AuthEnvVar,
+    AuthMethod,
+    AuthMethodAgent,
+    AuthMethodEnvVar,
+    AuthMethodTerminal,
     AuthenticateRequest,
     AuthenticateResponse,
     CancelNotification,
@@ -102,6 +108,13 @@ __all__ = [  # noqa: RUF022
     # literal types
     "AgentMethod",
     "ClientMethod",
+    # auth
+    "AuthCapabilities",
+    "AuthEnvVar",
+    "AuthMethod",
+    "AuthMethodAgent",
+    "AuthMethodEnvVar",
+    "AuthMethodTerminal",
     # types
     "Annotations",
     "AvailableCommand",

@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
+
+
+if TYPE_CHECKING:
+    from acp.schema.common import AuthMethod
 
 
 class RequestError(Exception):
     """Raised when a JSON-RPC request fails."""
 
-    def __init__(self, code: int, message: str, data: Any | None = None) -> None:
+    def __init__(
+        self,
+        code: int,
+        message: str,
+        data: Any | None = None,
+        auth_methods: list[AuthMethod] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.data = data
+        self.auth_methods: list[AuthMethod] = auth_methods or []
 
     @classmethod
     def parse_error(cls, data: dict[str, Any] | None = None) -> Self:
@@ -39,8 +50,25 @@ class RequestError(Exception):
         return cls(-32002, "Resource not found", data)
 
     @classmethod
-    def auth_required(cls, data: dict[str, Any] | None = None) -> Self:
-        return cls(-32000, "Authentication required", data)
+    def auth_required(
+        cls,
+        data: dict[str, Any] | None = None,
+        auth_methods: list[AuthMethod] | None = None,
+    ) -> Self:
+        return cls(-32000, "Authentication required", data, auth_methods=auth_methods)
 
     def to_error_obj(self) -> dict[str, Any]:
-        return {"code": self.code, "message": str(self), "data": self.data}
+        result: dict[str, Any] = {"code": self.code, "message": str(self), "data": self.data}
+        if self.auth_methods:
+            from acp.schema.common import (
+                AuthMethodAgent,
+                AuthMethodEnvVar,
+                AuthMethodTerminal,
+            )
+
+            result["authMethods"] = [
+                m.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for m in self.auth_methods
+                if isinstance(m, AuthMethodAgent | AuthMethodEnvVar | AuthMethodTerminal)
+            ]
+        return result

@@ -22,6 +22,17 @@ class FileSystemCapability(AnnotatedObject):
     """Whether the Client supports `fs/write_text_file` requests."""
 
 
+class AuthCapabilities(AnnotatedObject):
+    """**UNSTABLE**: Authentication capabilities supported by the client.
+
+    Advertised during initialization to inform the agent which authentication
+    method types the client can handle.
+    """
+
+    terminal: bool = False
+    """Whether the client supports ``terminal`` authentication methods."""
+
+
 class ClientCapabilities(AnnotatedObject):
     """Capabilities supported by the client.
 
@@ -30,6 +41,9 @@ class ClientCapabilities(AnnotatedObject):
 
     See protocol docs: [Client Capabilities](https://agentclientprotocol.com/protocol/initialization#client-capabilities)
     """
+
+    auth: AuthCapabilities | None = None
+    """**UNSTABLE**: Authentication capabilities supported by the client."""
 
     fs: FileSystemCapability | None = Field(default_factory=FileSystemCapability)
     """File system capabilities supported by the client.
@@ -46,6 +60,7 @@ class ClientCapabilities(AnnotatedObject):
         read_text_file: bool | None = False,
         write_text_file: bool | None = False,
         terminal: bool | None = False,
+        auth: AuthCapabilities | None = None,
     ) -> Self:
         """Create a new instance of ClientCapabilities.
 
@@ -53,12 +68,13 @@ class ClientCapabilities(AnnotatedObject):
             read_text_file: Whether the Client supports `fs/read_text_file` requests.
             write_text_file: Whether the Client supports `fs/write_text_file` requests.
             terminal: Whether the Client supports all `terminal/*` methods.
+            auth: Authentication capabilities supported by the client.
 
         Returns:
             A new instance of ClientCapabilities.
         """
         fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
-        return cls(fs=fs, terminal=terminal)
+        return cls(fs=fs, terminal=terminal, auth=auth)
 
 
 class PromptCapabilities(AnnotatedObject):
