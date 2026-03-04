@@ -25,6 +25,7 @@ from pydantic_ai import (
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
+    UploadedFile,
     UserPromptPart,
 )
 
@@ -213,7 +214,7 @@ def user_content_to_codex(content: list[UserContent]) -> list[TurnInputItem]:
                 result.append(ImageInputItem(url=url))
             case BinaryContent(data=data, media_type=media_type, is_image=is_image) if is_image:
                 result.append(ImageInputItem.from_bytes(data=data, media_type=media_type))
-            case FileUrl() | BinaryContent() | CachePoint():
+            case FileUrl() | BinaryContent() | CachePoint() | UploadedFile():
                 pass
             case _ as unreachable:
                 assert_never(unreachable)

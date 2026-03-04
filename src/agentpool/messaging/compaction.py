@@ -67,13 +67,13 @@ from pydantic_ai import (
     ToolReturnPart,
     UserPromptPart,
 )
+from tokonomics.model_names import ModelId  # noqa: TC002
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pydantic_ai import ModelRequestPart, ModelResponsePart
-    from tokonomics.model_names import ModelId
 
     from agentpool.messaging.message_history import MessageHistory
 
@@ -118,7 +118,7 @@ class CompactionPipeline(CompactionStep):
 
     async def apply(self, messages: MessageSequence) -> list[ModelMessage]:
         """Apply all steps in sequence."""
-        result: list[ModelMessage] = list(messages)
+        result = list(messages)
         for step in self.steps:
             result = await step.apply(result)
         return result
@@ -515,7 +515,7 @@ class Summarize(CompactionStep):
     summarized into a single message while recent ones are kept intact.
     """
 
-    model: str = "openai:gpt-4o-mini"
+    model: ModelId | str = "openai:gpt-4o-mini"
     """Model to use for summarization."""
 
     threshold: int = 15

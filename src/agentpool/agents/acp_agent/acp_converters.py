@@ -32,6 +32,7 @@ from pydantic_ai import (
     UserPromptPart,
     VideoUrl,
 )
+from pydantic_ai.messages import UploadedFile
 
 from acp.schema import (
     AgentMessageChunk,
@@ -260,7 +261,7 @@ def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]
                 name = type(item).__name__.removesuffix("Url")
                 content_blocks.append(ResourceContentBlock(uri=url, name=name, mime_type=typ))
 
-            case CachePoint():
+            case CachePoint() | UploadedFile():
                 pass
 
             case _ as unreachable:

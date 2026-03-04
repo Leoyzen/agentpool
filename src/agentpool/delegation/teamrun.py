@@ -200,9 +200,8 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         """Yield messages from the execution chain."""
         async for item in self.execute_iter(*prompts, **kwargs):
             match item:
-                case AgentResponse():
-                    if item.message:
-                        yield item.message
+                case AgentResponse(message=message) if message:
+                    yield message
                 case Talk():
                     pass
 
@@ -275,6 +274,14 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
         current_message = prompts
         for node in self.nodes:
+            match node:
+                case Team():
+                    source_type: SubAgentType = "team_parallel"
+                case BaseTeam():
+                    source_type = "team_sequential"
+                case _:
+                    source_type = "agent"
+
             try:
                 if not isinstance(node, SupportsRunStream):
                     raise TypeError(f"Node {node.name} does not support streaming")  # noqa: TRY301
@@ -289,14 +296,6 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                             depth=event.depth + 1,
                         )
                     else:
-                        # Determine source type based on node type
-                        if isinstance(node, Team):
-                            source_type: SubAgentType = "team_parallel"
-                        elif isinstance(node, BaseTeam):
-                            source_type = "team_sequential"
-                        else:
-                            source_type = "agent"
-
                         yield SubAgentEvent(
                             source_name=node.name,
                             source_type=source_type,

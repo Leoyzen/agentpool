@@ -136,7 +136,7 @@ class AuthMethodTerminal(AnnotatedObject):
 
 def _auth_method_discriminator(v: Any) -> str:
     if isinstance(v, dict):
-        return v.get("type", "agent")
+        return v.get("type", "agent")  # type: ignore[no-any-return]
     return getattr(v, "type", "agent")
 
 
