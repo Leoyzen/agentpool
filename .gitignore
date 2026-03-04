@@ -1,3 +1,6 @@
+# E2E test artifacts
+tests/e2e/artifacts/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -55,4 +58,3 @@ test_configs/
 # LanceDB internal files (keep data/, ignore versioning)
 **/_transactions/
 **/_versions/
-
