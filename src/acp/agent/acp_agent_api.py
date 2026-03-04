@@ -66,6 +66,8 @@ class ACPAgentAPI:
         terminal: bool = True,
         read_text_file: bool = True,
         write_text_file: bool = True,
+        terminal_auth: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> InitializeResponse:
         """Initialize the ACP connection."""
         request = InitializeRequest.create(
@@ -76,6 +78,8 @@ class ACPAgentAPI:
             terminal=terminal,
             read_text_file=read_text_file,
             write_text_file=write_text_file,
+            terminal_auth=terminal_auth,
+            metadata=metadata,
         )
         return await self.connection.initialize(request)
 
@@ -98,21 +102,25 @@ class ACPAgentAPI:
         session_id: str,
         cwd: str,
         mcp_servers: Sequence[McpServer] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> LoadSessionResponse:
         """Load an existing session."""
         request = LoadSessionRequest(
             session_id=session_id,
             cwd=cwd,
             mcp_servers=list(mcp_servers) if mcp_servers else None,
+            field_meta=metadata,
         )
         return await self.connection.load_session(request)
 
     async def list_sessions(
         self,
         cwd: str | None = None,
+        cursor: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ListSessionsResponse:
         """List available sessions."""
-        request = ListSessionsRequest(cwd=cwd)
+        request = ListSessionsRequest(cwd=cwd, cursor=cursor, field_meta=metadata)
         return await self.connection.list_sessions(request)
 
     async def fork_session(
@@ -120,12 +128,14 @@ class ACPAgentAPI:
         session_id: str,
         cwd: str,
         mcp_servers: Sequence[McpServer] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ForkSessionResponse:
         """Fork an existing session."""
         request = ForkSessionRequest(
             session_id=session_id,
             cwd=cwd,
             mcp_servers=list(mcp_servers) if mcp_servers else [],
+            field_meta=metadata,
         )
         return await self.connection.fork_session(request)
 
@@ -134,12 +144,15 @@ class ACPAgentAPI:
         session_id: str,
         cwd: str,
         mcp_servers: Sequence[McpServer] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ResumeSessionResponse:
         """Resume a paused session."""
+        servers = list(mcp_servers) if mcp_servers else []
         request = ResumeSessionRequest(
             session_id=session_id,
             cwd=cwd,
-            mcp_servers=list(mcp_servers) if mcp_servers else [],
+            mcp_servers=servers,
+            field_meta=metadata,
         )
         return await self.connection.resume_session(request)
 
@@ -147,9 +160,16 @@ class ACPAgentAPI:
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],
+        message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> PromptResponse:
         """Send a prompt to the agent."""
-        request = PromptRequest(session_id=session_id, prompt=list(prompt))
+        request = PromptRequest(
+            session_id=session_id,
+            prompt=list(prompt),
+            message_id=message_id,
+            field_meta=metadata,
+        )
         return await self.connection.prompt(request)
 
     async def cancel(self, session_id: str) -> None:

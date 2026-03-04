@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -11,17 +10,13 @@ from agentpool.messaging.context import NodeContext
 
 
 if TYPE_CHECKING:
-    from mcp import types
+    from mcp.types import ElicitRequestParams, ElicitResult, ErrorData
     from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import Agent
     from agentpool.agents.events import StreamEventEmitter
     from agentpool.tools.base import Tool
 
-
-# ContextVar for passing deps through async call boundaries (e.g., MCP tool bridge)
-# This allows run_stream() to set deps that are accessible in tool invocations
-_current_deps: ContextVar[Any] = ContextVar("current_deps", default=None)
 
 ConfirmationResult = Literal["allow", "skip", "abort_run", "abort_chain"]
 
@@ -55,10 +50,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         assert isinstance(self.node, Agent)
         return self.node  # ty: ignore[invalid-return-type]
 
-    async def handle_elicitation(
-        self,
-        params: types.ElicitRequestParams,
-    ) -> types.ElicitResult | types.ErrorData:
+    async def handle_elicitation(self, params: ElicitRequestParams) -> ElicitResult | ErrorData:
         """Handle elicitation request for additional information."""
         provider = self.get_input_provider()
         return await provider.get_elicitation(params)
@@ -105,10 +97,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         mode = getattr(self.agent, "tool_confirmation_mode", "per_tool")
         if (mode == "per_tool" and not tool.requires_confirmation) or mode == "never":
             return "allow"
-        history = self.agent.conversation.get_history() if self.pool else []
-        return await provider.get_tool_confirmation(
-            self, tool.name, tool.description or "", args, history
-        )
+        return await provider.get_tool_confirmation(self, tool.name, tool.description or "", args)
 
     @property
     def internal_fs(self) -> IsolatedMemoryFileSystem:

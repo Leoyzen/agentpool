@@ -497,16 +497,15 @@ class ACPNotifications:
                                     last_modified=annots.last_modified if annots else None,
                                     priority=annots.priority if annots else None,
                                 )
-                            case EmbeddedResourceContentBlock() as embedded_block:
-                                # Handle embedded resources with proper
-                                # pattern matching
-                                match embedded_block.resource:
+                            case EmbeddedResourceContentBlock(resource=resource):
+                                # Handle embedded resources with proper pattern matching
+                                match resource:
                                     case TextResourceContents(text=text):
                                         await self.send_user_message(text)
-                                    case BlobResourceContents() as blob_resource:
-                                        blob_size = len(blob_resource.blob) * 3 // 4
+                                    case BlobResourceContents(blob=blob, mime_type=mime_type):
+                                        blob_size = len(blob) * 3 // 4
                                         size_mb = blob_size / (1024 * 1024)
-                                        mime = blob_resource.mime_type or "unknown"
+                                        mime = mime_type or "unknown"
                                         msg = f"Embedded resource: {mime} ({size_mb:.2f} MB)"
                                         await self.send_user_message(msg)
                                     case _ as unreachable:

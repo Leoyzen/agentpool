@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from mcp import types
 
     from agentpool.agents.context import AgentContext, ConfirmationResult
-    from agentpool.messaging import ChatMessage
     from agentpool.messaging.context import NodeContext
 
 InputMethod = Literal["get_input", "get_tool_confirmation", "get_elicitation"]
@@ -48,9 +47,8 @@ class MockInputProvider(InputProvider):
         context: NodeContext,
         prompt: str,
         output_type: type | None = None,
-        message_history: list[ChatMessage[Any]] | None = None,
     ) -> Any:
-        kwargs = {"output_type": output_type, "message_history": message_history}
+        kwargs = {"output_type": output_type}
         call = InputCall("get_input", (context, prompt), kwargs, result=self.input_response)
         self.calls.append(call)
         return self.input_response
@@ -61,14 +59,12 @@ class MockInputProvider(InputProvider):
         tool_name: str,
         tool_description: str,
         args: dict[str, Any],
-        message_history: list[ChatMessage[Any]] | None = None,
     ) -> ConfirmationResult:
-        kwargs = {"message_history": message_history}
         result = self.tool_confirmation
         call = InputCall(
             "get_tool_confirmation",
             (context, tool_name, tool_description, args),
-            kwargs,
+            {},
             result=result,
         )
         self.calls.append(call)

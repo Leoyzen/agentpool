@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from agentpool.agents.context import AgentContext, ConfirmationResult
-    from agentpool.messaging import ChatMessage
     from agentpool.messaging.context import NodeContext
 
 
@@ -25,7 +24,6 @@ class InputProvider(ABC):
         context: NodeContext,
         prompt: str,
         output_type: type[BaseModel] | None = None,
-        message_history: list[ChatMessage[Any]] | None = None,
     ) -> Any:
         """Get normal input (used by HumanProvider).
 
@@ -36,15 +34,10 @@ class InputProvider(ABC):
             message_history: Optional conversation history
         """
         if output_type:
-            return await self.get_structured_input(context, prompt, output_type, message_history)
-        return await self.get_text_input(context, prompt, message_history)
+            return await self.get_structured_input(context, prompt, output_type)
+        return await self.get_text_input(context, prompt)
 
-    async def get_text_input(
-        self,
-        context: NodeContext[Any],
-        prompt: str,
-        message_history: list[ChatMessage[Any]] | None = None,
-    ) -> str:
+    async def get_text_input(self, context: NodeContext[Any], prompt: str) -> str:
         """Get normal text input."""
         raise NotImplementedError
 
@@ -53,7 +46,6 @@ class InputProvider(ABC):
         context: NodeContext[Any],
         prompt: str,
         output_type: type[BaseModel],
-        message_history: list[ChatMessage[Any]] | None = None,
     ) -> BaseModel:
         """Get structured input."""
         raise NotImplementedError
@@ -65,7 +57,6 @@ class InputProvider(ABC):
         tool_name: str,
         tool_description: str,
         args: dict[str, Any],
-        message_history: list[ChatMessage[Any]] | None = None,
     ) -> Coroutine[Any, Any, ConfirmationResult]:
         """Get tool execution confirmation.
 

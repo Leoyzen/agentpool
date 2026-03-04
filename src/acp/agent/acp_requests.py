@@ -184,7 +184,7 @@ class ACPRequests:
         tool_call_id: str,
         *,
         title: str | None = None,
-        raw_input: Any | None = None,
+        raw_input: dict[str, Any] | None = None,
         options: Sequence[PermissionOption] | None = None,
     ) -> RequestPermissionResponse:
         """Request permission from user before executing a tool call.
@@ -205,9 +205,5 @@ class ACPRequests:
             ]
 
         tool_call = ToolCall(tool_call_id=tool_call_id, title=title, raw_input=raw_input)
-        request = RequestPermissionRequest(
-            session_id=self.id,
-            tool_call=tool_call,
-            options=options,
-        )
+        request = RequestPermissionRequest(session_id=self.id, tool_call=tool_call, options=options)
         return await self.client.request_permission(request)

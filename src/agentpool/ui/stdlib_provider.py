@@ -28,12 +28,7 @@ logger = get_logger(__name__)
 class StdlibInputProvider(InputProvider):
     """Input provider using only Python stdlib functionality."""
 
-    async def get_text_input(
-        self,
-        context: NodeContext,
-        prompt: str,
-        message_history: list[ChatMessage[Any]] | None = None,
-    ) -> str:
+    async def get_text_input(self, context: NodeContext, prompt: str) -> str:
         print(f"{prompt}\n> ", end="", file=sys.stderr, flush=True)
         return input()
 
@@ -42,7 +37,6 @@ class StdlibInputProvider(InputProvider):
         context: NodeContext,
         prompt: str,
         output_type: type[BaseModel],
-        message_history: list[ChatMessage[Any]] | None = None,
     ) -> BaseModel:
         """Get structured input, with promptantic and fallback handling."""
         if result := await _get_promptantic_result(output_type):
@@ -50,7 +44,7 @@ class StdlibInputProvider(InputProvider):
 
         # Fallback: Get raw input and validate
         prompt = f"{prompt}\n(Please provide response as {output_type.__name__})"
-        raw_input = await self.get_input(context, prompt, message_history=message_history)
+        raw_input = await self.get_input(context, prompt)
         try:
             return output_type.model_validate_json(raw_input)
         except Exception as e:

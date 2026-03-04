@@ -79,49 +79,28 @@ class QuestionTool(Tool[ToolResult]):
 
         schema = response_schema or {"type": "string"}
         params = ElicitRequestFormParams(message=prompt, requestedSchema=schema)
-        result = await ctx.handle_elicitation(params)
-
-        match result:
-            case ElicitResult(action="accept", content=content):
+        match await ctx.handle_elicitation(params):
+            case ElicitResult(action="accept", content={"value": list() as value}):
                 # Content is a dict with "value" key per MCP spec
-                if isinstance(content, dict) and "value" in content:
-                    value = content["value"]
-                    # Handle list responses (multi-select)
-                    if isinstance(value, list):
-                        answer_str = ", ".join(str(v) for v in value)
-                        # OpenCode expects array of arrays (one per question)
-                        return ToolResult(
-                            content=answer_str,
-                            metadata={
-                                "answers": [value]
-                            },  # Single question, array of selected values
-                        )
-                    # Single answer
-                    answer_str = str(value)
-                    return ToolResult(
-                        content=answer_str,
-                        metadata={"answers": [[answer_str]]},  # Single question, single answer
-                    )
+                # Handle list responses (multi-select)
+                answer_str = ", ".join(str(v) for v in value)
+                # OpenCode expects array of arrays (one per question)
+                # Single question, array of selected values
+                return ToolResult(content=answer_str, metadata={"answers": [value]})
+            case ElicitResult(action="accept", content={"value": value}):
+                # Single answer
+                answer_str = str(value)
+                # Single question, single answer
+                return ToolResult(content=answer_str, metadata={"answers": [[answer_str]]})
+            case ElicitResult(action="accept", content=content):
                 # Fallback for plain content
                 answer_str = str(content)
-                return ToolResult(
-                    content=answer_str,
-                    metadata={"answers": [[answer_str]]},
-                )
+                return ToolResult(content=answer_str, metadata={"answers": [[answer_str]]})
             case ElicitResult(action="cancel"):
-                return ToolResult(
-                    content="User cancelled the request",
-                    metadata={"answers": []},
-                )
+                return ToolResult(content="User cancelled the request", metadata={"answers": []})
             case ElicitResult():
-                return ToolResult(
-                    content="User declined to answer",
-                    metadata={"answers": []},
-                )
+                return ToolResult(content="User declined to answer", metadata={"answers": []})
             case ErrorData(message=message):
-                return ToolResult(
-                    content=f"Error: {message}",
-                    metadata={"answers": []},
-                )
+                return ToolResult(content=f"Error: {message}", metadata={"answers": []})
             case _ as unreachable:
                 assert_never(unreachable)
