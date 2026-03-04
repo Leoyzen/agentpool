@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence  # noqa: TC003
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import Field
 
@@ -17,11 +17,8 @@ from acp.schema.session_state import (  # noqa: TC001
 from acp.schema.session_updates import Usage  # noqa: TC001
 
 
-class CustomResponse(Response):
-    """Response for custom/extension methods."""
-
-    data: dict[str, Any] | None = None
-    """The method result data."""
+if TYPE_CHECKING:
+    from acp.schema import ModelInfo, SessionMode
 
 
 StopReason = Literal[
@@ -31,6 +28,13 @@ StopReason = Literal[
     "refusal",
     "cancelled",
 ]
+
+
+class CustomResponse(Response):
+    """Response for custom/extension methods."""
+
+    data: dict[str, Any] | None = None
+    """The method result data."""
 
 
 class SetSessionModelResponse(Response):
@@ -122,6 +126,36 @@ class ForkSessionResponse(Response):
     config_options: Sequence[SessionConfigOption] = []
     """The full list of config options with updated values."""
 
+    @classmethod
+    def create(
+        cls,
+        session_id: str,
+        config_options: Sequence[SessionConfigOption] | None = None,
+        models: Sequence[ModelInfo] | None = None,
+        current_model: str | None = None,
+        modes: Sequence[SessionMode] | None = None,
+        current_mode: str | None = None,
+    ) -> Self:
+        """Create a response with the given session ID and config options."""
+        from acp.schema import SessionModelState, SessionModeState
+
+        model_state = (
+            SessionModelState(available_models=models, current_model_id=current_model)
+            if models and current_model
+            else None
+        )
+        mode_state = (
+            SessionModeState(available_modes=modes, current_mode_id=current_mode)
+            if modes and current_mode
+            else None
+        )
+        return cls(
+            session_id=session_id,
+            config_options=config_options or [],
+            models=model_state,
+            modes=mode_state,
+        )
+
 
 class ResumeSessionResponse(Response):
     """**UNSTABLE**: This capability is not part of the spec yet.
@@ -145,6 +179,34 @@ class ResumeSessionResponse(Response):
 
     config_options: Sequence[SessionConfigOption] = []
     """The full list of config options with updated values."""
+
+    @classmethod
+    def create(
+        cls,
+        config_options: Sequence[SessionConfigOption] | None = None,
+        models: Sequence[ModelInfo] | None = None,
+        current_model: str | None = None,
+        modes: Sequence[SessionMode] | None = None,
+        current_mode: str | None = None,
+    ) -> Self:
+        """Create a response with the given session ID and config options."""
+        from acp.schema import SessionModelState, SessionModeState
+
+        model_state = (
+            SessionModelState(available_models=models, current_model_id=current_model)
+            if models and current_model
+            else None
+        )
+        mode_state = (
+            SessionModeState(available_modes=modes, current_mode_id=current_mode)
+            if modes and current_mode
+            else None
+        )
+        return cls(
+            config_options=config_options or [],
+            models=model_state,
+            modes=mode_state,
+        )
 
 
 class SetSessionModeResponse(Response):
