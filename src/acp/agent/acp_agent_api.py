@@ -83,11 +83,13 @@ class ACPAgentAPI:
         self,
         cwd: str | None = None,
         mcp_servers: Sequence[McpServer] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> NewSessionResponse:
         """Create a new ACP session."""
         request = NewSessionRequest(
             cwd=cwd or str(Path.cwd()),
             mcp_servers=list(mcp_servers) if mcp_servers else None,
+            field_meta=metadata,
         )
         return await self.connection.new_session(request)
 

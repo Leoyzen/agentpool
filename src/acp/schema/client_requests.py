@@ -8,7 +8,7 @@ from typing import Any, Self
 from pydantic import Field
 
 from acp.schema.base import Request
-from acp.schema.capabilities import ClientCapabilities, FileSystemCapability
+from acp.schema.capabilities import AuthCapabilities, ClientCapabilities, FileSystemCapability
 from acp.schema.common import Implementation
 from acp.schema.content_blocks import ContentBlock  # noqa: TC001
 from acp.schema.mcp import McpServer  # noqa: TC001
@@ -218,12 +218,20 @@ class InitializeRequest(Request):
         read_text_file: bool = True,
         write_text_file: bool = True,
         protocol_version: int = 1,
+        terminal_auth: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> Self:
         """Create a new InitializeRequest instance."""
         fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
-        caps = ClientCapabilities(terminal=terminal, fs=fs)
+        auth = AuthCapabilities(terminal=terminal_auth) if terminal_auth else None
+        caps = ClientCapabilities(terminal=terminal, fs=fs, auth=auth)
         impl = Implementation(title=title, name=name, version=version)
-        return cls(client_capabilities=caps, client_info=impl, protocol_version=protocol_version)
+        return cls(
+            client_capabilities=caps,
+            client_info=impl,
+            protocol_version=protocol_version,
+            field_meta=metadata,
+        )
 
     @classmethod
     def create_for_package(
@@ -231,11 +239,13 @@ class InitializeRequest(Request):
         package_name: str,
         allow_terminal: bool = True,
         allow_file_operations: bool = True,
+        terminal_auth: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> InitializeRequest:
         """Create ACP initialize request for app with given name (based on pkg metadata)."""
-        from importlib.metadata import metadata
+        from importlib.metadata import metadata as _metadata
 
-        pkg_meta = metadata(package_name)
+        pkg_meta = _metadata(package_name)
         return cls.create(
             title=pkg_meta["Name"],
             version=pkg_meta["Version"],
@@ -244,6 +254,8 @@ class InitializeRequest(Request):
             terminal=allow_terminal,
             read_text_file=allow_file_operations,
             write_text_file=allow_file_operations,
+            terminal_auth=terminal_auth,
+            metadata=metadata,
         )
 
 
