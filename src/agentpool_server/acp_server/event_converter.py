@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, assert_never
+import uuid
 
 from pydantic_ai import (
     BuiltinToolCallPart,
@@ -140,6 +141,9 @@ class ACPEventConverter:
     _subagent_content: dict[str, list[str]] = field(default_factory=dict)
     """Accumulated content per subagent (for tool_box mode)."""
 
+    _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    """Message ID for the current agent response."""
+
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
 
@@ -149,6 +153,7 @@ class ACPEventConverter:
         self._current_tool_inputs.clear()
         self._subagent_headers.clear()
         self._subagent_content.clear()
+        self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
@@ -210,14 +215,14 @@ class ACPEventConverter:
                 PartStartEvent(part=TextPart(content=delta))
                 | PartDeltaEvent(delta=TextPartDelta(content_delta=delta))
             ):
-                yield AgentMessageChunk.text(delta)
+                yield AgentMessageChunk.text(delta, message_id=self._current_message_id)
 
             # Thinking/reasoning
             case (
                 PartStartEvent(part=ThinkingPart(content=delta))
                 | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
             ):
-                yield AgentThoughtChunk.text(delta or "\n")
+                yield AgentThoughtChunk.text(delta or "\n", message_id=self._current_message_id)
 
             # Builtin tool call started (e.g., WebSearchTool, CodeExecutionTool)
             case PartStartEvent(part=BuiltinToolCallPart() as part):
@@ -458,7 +463,7 @@ class ACPEventConverter:
 
             case CompactionEvent(phase="starting"):
                 text = event.format()
-                yield AgentMessageChunk.text(text)
+                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case SubAgentEvent(
                 source_name=source_name,
@@ -481,7 +486,7 @@ class ACPEventConverter:
                 # Display error as agent text with formatting
                 agent_prefix = f"[{agent_name}] " if agent_name else ""
                 error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
-                yield AgentMessageChunk.text(error_text)
+                yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
 
             case _:
                 logger.debug("Unhandled event", event_type=type(event).__name__)
@@ -505,18 +510,22 @@ class ACPEventConverter:
                 header_key = f"{source_name}:{depth}"
                 if header_key not in self._subagent_headers:
                     self._subagent_headers.add(header_key)
-                    yield AgentMessageChunk.text(f"\n{indent}{icon} **{source_name}**: ")
-                yield AgentMessageChunk.text(delta)
+                    yield AgentMessageChunk.text(
+                        f"\n{indent}{icon} **{source_name}**: ", message_id=self._current_message_id
+                    )
+                yield AgentMessageChunk.text(delta, message_id=self._current_message_id)
 
             case (
                 PartStartEvent(part=ThinkingPart(content=delta))
                 | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta))
             ):
-                yield AgentThoughtChunk.text(f"{indent}[{source_name}] {delta or ''}")
+                yield AgentThoughtChunk.text(
+                    f"{indent}[{source_name}] {delta or ''}", message_id=self._current_message_id
+                )
 
             case FunctionToolCallEvent(part=part):
                 text = f"\n{indent}🔧 [{source_name}] Using tool: {part.tool_name}\n"
-                yield AgentMessageChunk.text(text)
+                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case FunctionToolResultEvent(
                 result=ToolReturnPart(content=content, tool_name=tool_name),
@@ -525,17 +534,19 @@ class ACPEventConverter:
                 if len(result_str) > 200:  # noqa: PLR2004
                     result_str = result_str[:200] + "..."
                 text = f"{indent}✅ [{source_name}] {tool_name}: {result_str}\n"
-                yield AgentMessageChunk.text(text)
+                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case FunctionToolResultEvent(result=RetryPromptPart(tool_name=tool_name) as result):
                 error_msg = result.model_response()
                 text = f"{indent}❌ [{source_name}] {tool_name}: {error_msg}\n"
-                yield AgentMessageChunk.text(text)
+                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case StreamCompleteEvent():
                 header_key = f"{source_name}:{depth}"
                 self._subagent_headers.discard(header_key)
-                yield AgentMessageChunk.text(f"\n{indent}---\n")
+                yield AgentMessageChunk.text(
+                    f"\n{indent}---\n", message_id=self._current_message_id
+                )
 
             case (
                 BuiltinToolCallEvent()  # ty: ignore[deprecated]

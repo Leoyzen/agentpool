@@ -57,6 +57,7 @@ class BaseChunk(AnnotatedObject):
         cls,
         text: str,
         *,
+        message_id: str | None = None,
         audience: Audience | None = None,
         last_modified: datetime | str | None = None,
         priority: float | None = None,
@@ -65,6 +66,7 @@ class BaseChunk(AnnotatedObject):
 
         Args:
             text: The text content.
+            message_id: Unique identifier for the message this chunk belongs to.
             audience: The audience for the text.
             last_modified: The last modified date of the text.
             priority: The priority of the text.
@@ -74,7 +76,10 @@ class BaseChunk(AnnotatedObject):
             last_modified=last_modified,
             priority=priority,
         )
-        return cls(content=TextContentBlock(text=text, annotations=annotations))
+        return cls(
+            content=TextContentBlock(text=text, annotations=annotations),
+            message_id=message_id,
+        )
 
     @classmethod
     def image(
@@ -82,6 +87,8 @@ class BaseChunk(AnnotatedObject):
         data: str | bytes,
         mime_type: str,
         uri: str | None = None,
+        *,
+        message_id: str | None = None,
         audience: Audience | None = None,
         last_modified: datetime | str | None = None,
         priority: float | None = None,
@@ -92,6 +99,7 @@ class BaseChunk(AnnotatedObject):
             data: The image data.
             mime_type: The MIME type of the image.
             uri: The URI of the image.
+            message_id: Unique identifier for the message this chunk belongs to.
             audience: The audience for the image.
             last_modified: The last modified date of the image.
             priority: The priority of the image.
@@ -109,13 +117,15 @@ class BaseChunk(AnnotatedObject):
             uri=uri,
             annotations=annotations,
         )
-        return cls(content=image)
+        return cls(content=image, message_id=message_id)
 
     @classmethod
     def audio(
         cls,
         data: str | bytes,
         mime_type: str,
+        *,
+        message_id: str | None = None,
         audience: Audience | None = None,
         last_modified: datetime | str | None = None,
         priority: float | None = None,
@@ -125,6 +135,7 @@ class BaseChunk(AnnotatedObject):
         Args:
             data: The audio data.
             mime_type: The MIME type of the audio data.
+            message_id: Unique identifier for the message this chunk belongs to.
             audience: The audience for the audio chunk.
             last_modified: The last modified date of the audio chunk.
             priority: The priority of the audio chunk.
@@ -141,7 +152,7 @@ class BaseChunk(AnnotatedObject):
             mime_type=mime_type,
             annotations=annotations,
         )
-        return cls(content=content)
+        return cls(content=content, message_id=message_id)
 
     @classmethod
     def resource(
@@ -152,6 +163,8 @@ class BaseChunk(AnnotatedObject):
         mime_type: str | None = None,
         size: int | None = None,
         title: str | None = None,
+        *,
+        message_id: str | None = None,
         audience: Audience | None = None,
         last_modified: datetime | str | None = None,
         priority: float | None = None,
@@ -165,6 +178,7 @@ class BaseChunk(AnnotatedObject):
             mime_type: The MIME type of the resource.
             size: The size of the resource.
             title: The title of the resource.
+            message_id: Unique identifier for the message this chunk belongs to.
             audience: The audience of the resource.
             last_modified: The last modified date of the resource.
             priority: The priority of the resource.
@@ -183,7 +197,7 @@ class BaseChunk(AnnotatedObject):
             title=title,
             annotations=annotations,
         )
-        return cls(content=block)
+        return cls(content=block, message_id=message_id)
 
     @classmethod
     def embedded_text_resource(
@@ -191,6 +205,8 @@ class BaseChunk(AnnotatedObject):
         text: str,
         uri: str,
         mime_type: str | None = None,
+        *,
+        message_id: str | None = None,
         audience: Audience | None = None,
         last_modified: datetime | str | None = None,
         priority: float | None = None,
@@ -201,6 +217,7 @@ class BaseChunk(AnnotatedObject):
             text: The text to embed.
             uri: The URI of the resource.
             mime_type: The MIME type of the resource.
+            message_id: Unique identifier for the message this chunk belongs to.
             audience: The audience to apply to the resource.
             last_modified: The last modified date of the resource.
             priority: The priority of the resource.
@@ -212,7 +229,7 @@ class BaseChunk(AnnotatedObject):
         )
         contents = TextResourceContents(text=text, mime_type=mime_type, uri=uri)
         content = EmbeddedResourceContentBlock(annotations=annotations, resource=contents)
-        return cls(content=content)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        return cls(content=content, message_id=message_id)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
     @classmethod
     def embedded_blob_resource(
@@ -220,6 +237,8 @@ class BaseChunk(AnnotatedObject):
         data: bytes | str,
         uri: str,
         mime_type: str | None = None,
+        *,
+        message_id: str | None = None,
         audience: Audience | None = None,
         last_modified: datetime | str | None = None,
         priority: float | None = None,
@@ -230,6 +249,7 @@ class BaseChunk(AnnotatedObject):
             data: The data to embed.
             uri: The URI of the resource.
             mime_type: The MIME type of the resource.
+            message_id: Unique identifier for the message this chunk belongs to.
             audience: The audience to apply to the resource.
             last_modified: The last modified date of the resource.
             priority: The priority of the resource.
@@ -243,7 +263,7 @@ class BaseChunk(AnnotatedObject):
         )
         resource = BlobResourceContents(blob=data, mime_type=mime_type, uri=uri)
         content = EmbeddedResourceContentBlock(annotations=annotations, resource=resource)
-        return cls(content=content)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        return cls(content=content, message_id=message_id)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
 
 class UserMessageChunk(BaseChunk):
