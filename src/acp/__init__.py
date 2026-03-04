@@ -1,5 +1,8 @@
 """Agent Client protocol (ACP) implementation."""
 
+# Last synced commit from https://github.com/agentclientprotocol/agent-client-protocol
+SPEC_SYNCED_COMMIT = "dee87428eecc496d3456fe7b0c67c15208e7b5f2"
+
 from acp.client import DefaultACPClient, HeadlessACPClient, NoOpClient, ClientSideConnection
 from acp.agent import AgentSideConnection
 from acp.bridge import ACPBridge, BridgeSettings
