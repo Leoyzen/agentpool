@@ -16,9 +16,8 @@ if TYPE_CHECKING:
     from ag_ui.core import Event, ToolMessage
     import httpx
 
-    from agentpool.agents.context import AgentContext, ConfirmationResult
+    from agentpool.agents.context import AgentContext
     from agentpool.tools import Tool
-    from agentpool.ui.base import InputProvider
     from agentpool_config.nodes import ToolConfirmationMode
 
 
@@ -46,119 +45,70 @@ async def _should_confirm_tool(tool: Tool, confirmation_mode: ToolConfirmationMo
             assert_never(unreachable)
 
 
-async def _get_tool_confirmation(
-    tool_name: str,
-    tool_description: str,
-    args: dict[str, Any],
-    input_provider: InputProvider,
+async def execute_tool_call(
+    tool: Tool,
     context: AgentContext[Any],
-) -> ConfirmationResult:
-    """Get confirmation for tool execution.
-
-    Args:
-        tool_name: Name of the tool to confirm
-        tool_description: Human-readable description of the tool
-        args: Tool arguments
-        input_provider: Provider for confirmation UI
-        context: Node context
-
-    Returns:
-        Confirmation result
-    """
-    return await input_provider.get_tool_confirmation(
-        context=context,
-        tool_name=tool_name,
-        tool_description=tool_description,
-        args=args,
-    )
-
-
-async def execute_tool_calls(
-    tool_calls: dict[str, tuple[str, dict[str, Any]]],
-    tools_by_name: dict[str, Tool],
     *,
     confirmation_mode: ToolConfirmationMode = "never",
-    input_provider: InputProvider | None = None,
-    context: AgentContext[Any] | None = None,
-) -> list[ToolMessage]:
-    """Execute tool calls locally and return results.
+) -> ToolMessage:
+    """Execute a single tool call locally and return the result.
+
+    Tool call details (tool_call_id, tool_input) are read from the context.
 
     Args:
-        tool_calls: Dictionary mapping tool_call_id to (tool_name, args) tuples
-        tools_by_name: Dictionary mapping tool names to Tool instances
+        tool: The tool to execute
+        context: Node context with tool_call_id and tool_input set
         confirmation_mode: Tool confirmation mode
-        input_provider: Optional input provider for confirmation requests
-        context: Optional node context for confirmation
 
     Returns:
-        List of ToolMessage with execution results
+        ToolMessage with execution result
     """
     from ag_ui.core import ToolMessage as AGUIToolMessage
 
-    results: list[AGUIToolMessage] = []
-    for tc_id, (tool_name, args) in tool_calls.items():
-        if tool_name not in tools_by_name:
-            # Tool not registered locally - this is a server-side tool, skip it
-            logger.debug("Skipping server-side tool", tool=tool_name)
-            continue
+    tool_call_id = context.tool_call_id or ""
+    args = context.tool_input
 
-        tool = tools_by_name[tool_name]
-        # Check if confirmation is required
-        if await _should_confirm_tool(tool, confirmation_mode):
-            if input_provider is None or context is None:
-                logger.warning("Tool needs confirmation but no input provider set", tool=tool_name)
-                result_msg = AGUIToolMessage(
+    # Check if confirmation is required
+    if await _should_confirm_tool(tool, confirmation_mode):
+        confirmation = await context.get_input_provider().get_tool_confirmation(
+            context=context,
+            tool_name=tool.name,
+            tool_description=tool.description or "",
+            args=args,
+        )
+        match confirmation:
+            case "skip":
+                logger.info("Tool execution skipped by user", tool=tool.name)
+                return AGUIToolMessage(
                     id=str(uuid4()),
-                    tool_call_id=tc_id,
-                    content="Error: Tool requires confirmation but no provider available",
-                    error="No input provider for confirmation",
-                )
-                results.append(result_msg)
-                continue
-
-            confirmation = await _get_tool_confirmation(
-                tool.name, tool.description or "", args, input_provider, context
-            )
-            if confirmation == "skip":
-                logger.info("Tool execution skipped by user", tool=tool_name)
-                result_msg = AGUIToolMessage(
-                    id=str(uuid4()),
-                    tool_call_id=tc_id,
+                    tool_call_id=tool_call_id,
                     content="Tool execution was skipped by user",
                     error=None,
                 )
-                results.append(result_msg)
-                continue
-            if confirmation in ("abort_run", "abort_chain"):
-                logger.info("Tool execution aborted by user", tool=tool_name, action=confirmation)
-                result_msg = AGUIToolMessage(
+            case "abort_run" | "abort_chain":
+                logger.info("Tool execution aborted by user", tool=tool.name, action=confirmation)
+                return AGUIToolMessage(
                     id=str(uuid4()),
-                    tool_call_id=tc_id,
+                    tool_call_id=tool_call_id,
                     content="Tool execution was aborted by user",
                     error="Execution aborted",
                 )
-                results.append(result_msg)
-                # Could raise an exception here to abort the entire run
-                continue
 
-        # Execute the tool
-        logger.info("Executing tool", tool=tool_name, args=args)
-        try:
-            result = await tool.execute(**args)
-            result_str = str(result) if not isinstance(result, str) else result
-            id_ = str(uuid4())
-            result_msg = AGUIToolMessage(id=id_, tool_call_id=tc_id, content=result_str)
-            logger.debug("Tool executed", tool=tool_name, result=result_str[:100])
-        except Exception as e:
-            logger.exception("Tool execution failed", tool=tool_name)
-            result_msg = AGUIToolMessage(
-                id=str(uuid4()),
-                tool_call_id=tc_id,
-                content=f"Error executing tool: {e}",
-                error=str(e),
-            )
-        results.append(result_msg)
-    return results
+    # Execute the tool
+    logger.info("Executing tool", tool=tool.name, args=args)
+    try:
+        result = await tool.execute(**args)
+        result_str = str(result) if not isinstance(result, str) else result
+        logger.debug("Tool executed", tool=tool.name, result=result_str[:100])
+        return AGUIToolMessage(id=str(uuid4()), tool_call_id=tool_call_id, content=result_str)
+    except Exception as e:
+        logger.exception("Tool execution failed", tool=tool.name)
+        return AGUIToolMessage(
+            id=str(uuid4()),
+            tool_call_id=tool_call_id,
+            content=f"Error executing tool: {e}",
+            error=str(e),
+        )
 
 
 async def parse_sse_stream(response: httpx.Response) -> AsyncIterator[Event]:

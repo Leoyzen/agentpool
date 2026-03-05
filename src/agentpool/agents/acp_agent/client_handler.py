@@ -204,7 +204,8 @@ class ACPClientHandler(Client):
         self, params: RequestPermissionRequest
     ) -> RequestPermissionResponse:
         """Handle permission requests via InputProvider."""
-        name = params.tool_call.title or "operation"
+        tc = params.tool_call
+        name = tc.title or "operation"
         logger.info("Permission requested", tool_name=name)
         # Check auto_approve FIRST, before any forwarding
         # This ensures "bypass permissions" mode works even for nested ACP agents
@@ -227,11 +228,10 @@ class ACPClientHandler(Client):
                 return response
 
         if self._input_provider:
-            tc = params.tool_call
             args = tc.raw_input if isinstance(tc.raw_input, dict) else {}
             ctx = self._agent.get_context(
                 tool_call_id=tc.tool_call_id,
-                tool_name=tc.title,
+                tool_name=name,
                 tool_input=args,
             )
             try:

@@ -11,6 +11,7 @@ locally and results sent back.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 from uuid import uuid4
 
@@ -27,7 +28,7 @@ from pydantic_ai import (
     UserPromptPart,
 )
 
-from agentpool.agents.agui_agent.helpers import execute_tool_calls, parse_sse_stream
+from agentpool.agents.agui_agent.helpers import execute_tool_call, parse_sse_stream
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import (
@@ -363,13 +364,26 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 if self._cancelled or not tool_calls_pending:
                     break
                 # Execute pending tool calls locally and collect results
-                pending_tool_results = await execute_tool_calls(
-                    tool_calls_pending,
-                    {t.name: t for t in tools},
-                    confirmation_mode=self.tool_confirmation_mode,
-                    input_provider=effective_input_provider,
-                    context=self.get_context(data=deps),
-                )
+                tools_by_name = {t.name: t for t in tools}
+                base_ctx = self.get_context(data=deps, input_provider=effective_input_provider)
+                pending_tool_results = []
+                for tc_id, (tool_name, args) in tool_calls_pending.items():
+                    tool = tools_by_name.get(tool_name)
+                    if tool is None:
+                        logger.debug("Skipping server-side tool", tool=tool_name)
+                        continue
+                    ctx = replace(
+                        base_ctx,
+                        tool_call_id=tc_id,
+                        tool_name=tool_name,
+                        tool_input=args,
+                    )
+                    result = await execute_tool_call(
+                        tool,
+                        ctx,
+                        confirmation_mode=self.tool_confirmation_mode,
+                    )
+                    pending_tool_results.append(result)
                 # If no results (all tools were server-side), we're done
                 if not pending_tool_results:
                     break
