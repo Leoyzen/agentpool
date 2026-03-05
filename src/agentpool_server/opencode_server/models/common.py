@@ -23,6 +23,8 @@ class TimeCreatedUpdated(OpenCodeBaseModel):
 
     created: int
     updated: int
+    archived: int | None = None
+    """Timestamp when archived (ms since epoch), or None if not archived."""
 
 
 class TimeCreated(OpenCodeBaseModel):

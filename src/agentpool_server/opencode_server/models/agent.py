@@ -141,3 +141,41 @@ class AuthInfo(OpenCodeBaseModel):
 
     expires: int | None = None
     """Token expiry timestamp."""
+
+
+class WorkspaceInfo(OpenCodeBaseModel):
+    """Workspace information matching OpenCode SDK type."""
+
+    id: str
+    """Workspace identifier."""
+
+    type: str
+    """Workspace type (e.g. 'local', 'container')."""
+
+    branch: str | None = None
+    """Git branch associated with the workspace."""
+
+    name: str | None = None
+    """Workspace display name."""
+
+    directory: str | None = None
+    """Directory path of the workspace."""
+
+    extra: Any | None = None
+    """Additional workspace-specific data."""
+
+    project_id: str
+    """ID of the project this workspace belongs to."""
+
+
+class WorkspaceCreateRequest(OpenCodeBaseModel):
+    """Request to create a workspace."""
+
+    type: str
+    """Workspace type."""
+
+    branch: str | None = None
+    """Git branch for the workspace."""
+
+    extra: Any | None = None
+    """Additional workspace-specific data."""
