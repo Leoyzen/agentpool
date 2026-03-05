@@ -22,11 +22,22 @@ from clawd_code_sdk.models import (
     EditOutput,
     ReadOutput,
     TodoWriteOutput,
+    UserFilePrompt,
     UserImagePrompt,
     UserTextPrompt,
     WriteOutput,
 )
-from pydantic_ai import BinaryContent, FileUrl, ImageUrl, RequestUsage, RunUsage
+from pydantic_ai import (
+    AudioUrl,
+    BinaryContent,
+    CachePoint,
+    DocumentUrl,
+    ImageUrl,
+    RequestUsage,
+    RunUsage,
+    UploadedFile,
+    VideoUrl,
+)
 
 from agentpool.utils.diffs import compute_unified_diff
 from agentpool_server.opencode_server.models.tool_metadata import (
@@ -84,10 +95,25 @@ def to_prompt_input(content: Sequence[UserContent]) -> Iterator[UserPrompt]:
                 yield UserDocumentPrompt(document_data=b64, media_type=mime)  # type: ignore[arg-type]
             case ImageUrl(url=url):
                 yield UserImageURLPrompt(url=url)
-            case FileUrl(url=url, identifier=identifier):
+            case (
+                AudioUrl(url=url, identifier=identifier)
+                | VideoUrl(url=url, identifier=identifier)
+                | DocumentUrl(url=url, identifier=identifier)
+            ):
                 yield UserDocumentURLPrompt(url=url, title=identifier)
-            case _ as other_content:
-                yield UserTextPrompt(str(other_content))
+            case UploadedFile(provider_name="anthropic", file_id=file_id):
+                yield UserFilePrompt(file_id=file_id)
+            case UploadedFile(file_id=file_id, provider_name=provider_name):
+                raise ValueError(f"Unsupported UploadedFile: {provider_name=} {file_id=}")
+            case str() as text:
+                yield UserTextPrompt(text=text)
+            case BinaryContent():
+                pass  # video/audio not handled yet
+            case CachePoint():
+                pass  # can get ignored
+            case _ as unreachable:
+                assert_never(unreachable)
+                # yield UserTextPrompt(str(other_content))
 
 
 def to_run_usage(usage: Usage) -> RunUsage:
