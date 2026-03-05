@@ -32,10 +32,12 @@ from agentpool_server.opencode_server.models import (
     CommandRequest,
     FileDiff,
     MessagePath,
+    MessageRemovedEvent,
     MessageTime,
     MessageUpdatedEvent,
     MessageWithParts,
     OpenCodeBaseModel,
+    PartRemovedEvent,
     PartUpdatedEvent,
     PermissionAskedProperties,
     PermissionReplyRequest,
@@ -75,6 +77,7 @@ class RevertRequest(OpenCodeBaseModel):
 @router.get("")
 async def list_sessions(
     state: StateDep,
+    directory: str | None = None,
     roots: bool | None = None,
     start: int | None = None,
     search: str | None = None,
@@ -86,6 +89,7 @@ async def list_sessions(
     from the appropriate storage (pool storage, Claude storage, ACP server, etc.).
 
     Query params:
+        directory: Filter sessions by project directory
         roots: Only return root sessions (no parentID)
         start: Filter sessions updated on or after this timestamp (ms since epoch)
         search: Filter sessions by title (case-insensitive)
@@ -93,7 +97,8 @@ async def list_sessions(
     """
     # Convert to OpenCode Session format and cache
     sessions: list[Session] = []
-    for data in await state.agent.list_sessions(cwd=state.agent.env.cwd):
+    cwd = directory or state.agent.env.cwd
+    for data in await state.agent.list_sessions(cwd=cwd):
         session = session_data_to_opencode(data)
         # Cache in state for later use
         state.sessions[data.session_id] = session
@@ -182,8 +187,17 @@ async def update_session(
     updates: dict[str, Any] = {}
     if request.title is not None:
         updates["title"] = request.title
-    # Always update the 'updated' timestamp
-    updates["time"] = TimeCreatedUpdated(created=session.time.created, updated=now_ms())
+    # Handle archiving via time.archived
+    if request.time is not None and request.time.archived is not None:
+        current_time = session.time
+        updates["time"] = TimeCreatedUpdated(
+            created=current_time.created,
+            updated=now_ms(),
+            archived=request.time.archived if request.time.archived > 0 else None,
+        )
+    else:
+        # Always update the 'updated' timestamp
+        updates["time"] = TimeCreatedUpdated(created=session.time.created, updated=now_ms())
     session = session.model_copy(update=updates)
     state.sessions[session_id] = session  # Update cache
     id_ = state.pool.manifest.config_file_path
@@ -806,8 +820,6 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     Removes messages from the revert point onwards and restores files to their
     state before the specified message's changes.
     """
-    from agentpool_server.opencode_server.models import MessageRemovedEvent, PartRemovedEvent
-
     session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -879,8 +891,6 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
 
     Re-applies the messages and changes that were previously reverted.
     """
-    from agentpool_server.opencode_server.models import MessageUpdatedEvent, PartUpdatedEvent
-
     session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -931,7 +941,7 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
 
 
 @router.delete("/{session_id}/share")
-async def unshare_session(session_id: str, state: StateDep) -> bool:
+async def unshare_session(session_id: str, state: StateDep) -> Session:
     """Remove share link from a session.
 
     Note: This only removes the link from the session metadata.
@@ -947,7 +957,7 @@ async def unshare_session(session_id: str, state: StateDep) -> bool:
     state.sessions[session_id] = updated_session
     # Broadcast session update
     await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
-    return True
+    return updated_session
 
 
 @router.post("/{session_id}/command")

@@ -106,6 +106,7 @@ Last audited against OpenCode source: **2026-02-24**
 | [x] | GET | `/session/{id}/message` | List messages in session (supports `limit` query) |
 | [x] | POST | `/session/{id}/message` | Send message (wait for response) |
 | [x] | GET | `/session/{id}/message/{messageID}` | Get message details |
+| [x] | DELETE | `/session/{id}/message/{messageID}` | Delete a message and all its parts |
 | [x] | DELETE | `/session/{id}/message/{messageID}/part/{partID}` | Delete a message part |
 | [x] | PATCH | `/session/{id}/message/{messageID}/part/{partID}` | Update a message part |
 | [x] | POST | `/session/{id}/prompt_async` | Send message async (no wait) |
@@ -177,10 +178,13 @@ Last audited against OpenCode source: **2026-02-24**
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
-| [-] | POST | `/experimental/worktree` | Create git worktree (not needed) |
-| [-] | GET | `/experimental/worktree` | List worktrees (not needed) |
-| [-] | DELETE | `/experimental/worktree` | Remove worktree (not needed) |
-| [-] | POST | `/experimental/worktree/reset` | Reset worktree (not needed) |
+| [x] | POST | `/experimental/worktree` | Create git worktree |
+| [x] | GET | `/experimental/worktree` | List worktrees |
+| [x] | DELETE | `/experimental/worktree` | Remove worktree |
+| [x] | POST | `/experimental/worktree/reset` | Reset worktree |
+| [x] | POST | `/experimental/workspace` | Create workspace |
+| [x] | GET | `/experimental/workspace` | List workspaces |
+| [x] | DELETE | `/experimental/workspace/{id}` | Remove workspace |
 
 ---
 

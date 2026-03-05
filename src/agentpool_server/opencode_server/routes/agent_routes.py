@@ -32,6 +32,8 @@ from agentpool_server.opencode_server.models import (
     ProviderAuthMethod,
     Session,
     SkillInfo,
+    WorkspaceCreateRequest,
+    WorkspaceInfo,
     WorktreeCreateRequest,
     WorktreeInfo,
     WorktreeRemoveRequest,
@@ -45,6 +47,9 @@ router = APIRouter(tags=["agent"])
 class AddMCPServerRequest(BaseModel):
     """Request to add an MCP server dynamically."""
 
+    name: str | None = None
+    """Name for the server (used as client_id)."""
+
     command: str | None = None
     """Command to run (for stdio servers)."""
 
@@ -56,6 +61,30 @@ class AddMCPServerRequest(BaseModel):
 
     env: dict[str, str] | None = None
     """Environment variables for the server."""
+
+
+class OAuthAuthorizeRequest(BaseModel):
+    """Request body for OAuth authorize."""
+
+    method: int = 0
+    """Auth method index into the provider's methods list."""
+
+
+class OAuthCallbackRequest(BaseModel):
+    """Request body for OAuth callback."""
+
+    method: int = 0
+    """Auth method index."""
+
+    code: str | None = None
+    """OAuth authorization code."""
+
+
+class McpAuthCallbackRequest(BaseModel):
+    """Request body for MCP auth callback."""
+
+    code: str
+    """Authorization code from OAuth callback."""
 
 
 def _find_mcp_manager(state: Any) -> MCPManager | None:
@@ -228,10 +257,10 @@ async def start_mcp_auth(name: str, state: StateDep) -> McpAuthorizationResponse
 async def mcp_auth_callback(
     name: str,
     state: StateDep,
-    code: str | None = None,
+    body: McpAuthCallbackRequest | None = None,
 ) -> MCPStatus:
     """Complete OAuth authentication for an MCP server."""
-    _ = state, code
+    _ = state, body
     raise HTTPException(status_code=501, detail=f"MCP OAuth not yet supported for: {name}")
 
 
@@ -340,6 +369,44 @@ async def reset_worktree(request: WorktreeResetRequest, state: StateDep) -> bool
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return True
+
+
+@router.post("/experimental/workspace")
+async def create_workspace(request: WorkspaceCreateRequest, state: StateDep) -> WorkspaceInfo:
+    """Create a new workspace for the current project.
+
+    Workspaces allow running agents in isolated environments.
+    """
+    from agentpool.utils import identifiers
+
+    workspace_id = identifiers.ascending("workspace")
+    workspace = WorkspaceInfo(
+        id=workspace_id,
+        type=request.type,
+        branch=request.branch,
+        name=None,
+        directory=state.working_dir,
+        extra=request.extra,
+        project_id="default",
+    )
+    # Store in state
+    state.workspaces[workspace_id] = workspace
+    return workspace
+
+
+@router.get("/experimental/workspace")
+async def list_workspaces(state: StateDep) -> list[WorkspaceInfo]:
+    """List all workspaces."""
+    return list(state.workspaces.values())
+
+
+@router.delete("/experimental/workspace/{workspace_id}")
+async def remove_workspace(workspace_id: str, state: StateDep) -> WorkspaceInfo | None:
+    """Remove a workspace."""
+    workspace = state.workspaces.pop(workspace_id, None)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace
 
 
 @router.get("/experimental/session")
@@ -468,13 +535,18 @@ async def get_provider_auth(state: StateDep) -> dict[str, list[ProviderAuthMetho
 
 
 @router.post("/provider/{provider_id}/oauth/authorize")
-async def oauth_authorize(provider_id: str, state: StateDep) -> ProviderAuthAuthorization:
+async def oauth_authorize(
+    provider_id: str,
+    state: StateDep,
+    body: OAuthAuthorizeRequest | None = None,
+) -> ProviderAuthAuthorization:
     """Start OAuth authorization flow for a provider.
 
     Returns URL and instructions for the user to complete authorization.
     """
+    method = body.method if body else 0
     try:
-        return await state.auth_service.authorize(provider_id)
+        return await state.auth_service.authorize(provider_id, method)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -483,14 +555,14 @@ async def oauth_authorize(provider_id: str, state: StateDep) -> ProviderAuthAuth
 async def oauth_callback(
     provider_id: str,
     state: StateDep,
-    code: str | None = None,
-    device_code: str | None = None,
-    verifier: str | None = None,
+    body: OAuthCallbackRequest | None = None,
 ) -> bool:
     """Handle OAuth callback/code exchange."""
+    code = body.code if body else None
     try:
         return await state.auth_service.callback(
-            provider_id, code=code, device_code=device_code, verifier=verifier
+            provider_id,
+            code=code,
         )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
