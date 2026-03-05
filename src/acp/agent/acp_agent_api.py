@@ -202,12 +202,8 @@ class ACPAgentAPI:
         value: str,
     ) -> SetSessionConfigOptionResponse | None:
         """Set a session configuration option."""
-        request = SetSessionConfigOptionRequest(
-            session_id=session_id,
-            config_id=config_id,
-            value=value,  # pyright: ignore[reportCallIssue]
-        )
-        return await self.connection.set_session_config_option(request)
+        req = SetSessionConfigOptionRequest(session_id=session_id, config_id=config_id, value=value)
+        return await self.connection.set_session_config_option(req)
 
     async def authenticate(
         self,

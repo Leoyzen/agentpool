@@ -8,7 +8,13 @@ from typing import Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
 from fastapi import APIRouter, HTTPException
-from pydantic_ai import FileUrl
+from pydantic_ai import (
+    FileUrl,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart as PydanticTextPart,
+    TextPartDelta,
+)
 
 from agentpool.repomap import RepoMap, find_src_files
 from agentpool.utils import identifiers as identifier
@@ -610,13 +616,6 @@ async def summarize_session(  # noqa: PLR0915
     then streams an LLM-generated summary/continuation prompt to the user.
     The summary message is marked with summary=true for UI display.
     """
-    from pydantic_ai.messages import (
-        PartDeltaEvent,
-        PartStartEvent,
-        TextPart as PydanticTextPart,
-        TextPartDelta,
-    )
-
     from agentpool.agents.events import StreamCompleteEvent
     from agentpool.messaging.compaction import compact_conversation, summarizing_context
 
