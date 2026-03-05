@@ -14,13 +14,7 @@ def test_thinking_events_create_reasoning_part():
     mock_msg = MagicMock()
     mock_msg.parts = []
 
-    adapter = OpenCodeStreamAdapter(
-        session_id="test-session",
-        assistant_msg_id="msg-1",
-        assistant_msg=mock_msg,
-        working_dir=".",
-    )
-
+    adapter = OpenCodeStreamAdapter(assistant_msg=mock_msg, working_dir=".")
     # Use the adapter's _handle_event method directly
     events = list(adapter._handle_event(PartStartEvent.thinking(index=0, content="Thinking...")))
     events.extend(list(adapter._handle_event(PartDeltaEvent.thinking(index=0, content=" more..."))))
