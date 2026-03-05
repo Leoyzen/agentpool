@@ -21,7 +21,6 @@ from agentpool_server.opencode_server.models import (
     Agent,
     AuthInfo,
     Command,
-    ConnectionStatus,
     FormatterStatus,
     LogRequest,
     LspStatus,
@@ -426,13 +425,11 @@ async def list_sessions_global(
     """
     from agentpool_server.opencode_server.converters import session_data_to_opencode
 
-    effective_limit = limit or 100
-    sessions: list[Session] = []
-    for data in await state.agent.list_sessions(
-        cwd=directory or state.agent.env.cwd, limit=effective_limit
-    ):
-        session = session_data_to_opencode(data)
-        sessions.append(session)
+    limit = limit or 100
+    cwd = directory or state.agent.env.cwd
+    sessions = [
+        session_data_to_opencode(i) for i in await state.agent.list_sessions(cwd=cwd, limit=limit)
+    ]
     # Apply filters
     if roots:
         sessions = [s for s in sessions if s.parent_id is None]
@@ -454,8 +451,7 @@ async def list_tool_ids(state: StateDep) -> list[str]:
     OpenCode expects: Array<string>
     """
     try:
-        tools = await state.agent.tools.get_tools()
-        return [tool.name for tool in tools]
+        return [tool.name for tool in await state.agent.tools.get_tools()]
     except Exception:  # noqa: BLE001
         return []
 
@@ -488,12 +484,14 @@ async def list_tools_with_schemas(  # noqa: D417
     _ = provider, model  # Currently unused, for future filtering
 
     try:
-        result = []
-        for tool in await state.agent.tools.get_tools():
-            # Extract parameters schema from the OpenAI function schema
-            params = tool.schema["function"]["parameters"]
-            item = ToolListItem(id=tool.name, description=tool.description or "", parameters=params)
-            result.append(item)
+        result = [
+            ToolListItem(
+                id=t.name,
+                description=t.description or "",
+                parameters=t.schema["function"]["parameters"],
+            )
+            for t in await state.agent.tools.get_tools()
+        ]
     except Exception:  # noqa: BLE001
         return []
     else:
@@ -506,13 +504,15 @@ async def get_lsp_status(state: StateDep) -> list[LspStatus]:
 
     Returns status of all running LSP servers.
     """
-    servers: list[LspStatus] = []
-    for server_id, server_state in state.lsp_manager._servers.items():
-        status: ConnectionStatus = "connected" if server_state.initialized else "error"
-        servers.append(
-            LspStatus(id=server_id, name=server_id, status=status, root=server_state.root_uri or "")
+    return [
+        LspStatus(
+            id=server_id,
+            name=server_id,
+            status="connected" if server_state.initialized else "error",
+            root=server_state.root_uri or "",
         )
-    return servers
+        for server_id, server_state in state.lsp_manager._servers.items()
+    ]
 
 
 @router.get("/formatter")
@@ -560,10 +560,7 @@ async def oauth_callback(
     """Handle OAuth callback/code exchange."""
     code = body.code if body else None
     try:
-        return await state.auth_service.callback(
-            provider_id,
-            code=code,
-        )
+        return await state.auth_service.callback(provider_id, code=code)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
