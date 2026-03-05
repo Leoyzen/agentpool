@@ -59,6 +59,13 @@ from agentpool_server.opencode_server.models import (
 router = APIRouter(prefix="/session", tags=["session"])
 
 
+class RevertRequest(OpenCodeBaseModel):
+    """Request body for reverting a message."""
+
+    message_id: str
+    part_id: str | None = None
+
+
 @router.get("")
 async def list_sessions(
     state: StateDep,
@@ -784,21 +791,13 @@ async def share_session(
     # Share via OpenCode API
     async with OpenCodeSharer() as sharer:
         result = await sharer.share_conversation(opencode_messages, title=session.title)
-        share_url = result.url
     # Store the share URL in the session
-    share_info = SessionShare(url=share_url)
+    share_info = SessionShare(url=result.url)
     updated_session = session.model_copy(update={"share": share_info})
     state.sessions[session_id] = updated_session
     # Broadcast session update
     await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
     return updated_session
-
-
-class RevertRequest(OpenCodeBaseModel):
-    """Request body for reverting a message."""
-
-    message_id: str
-    part_id: str | None = None
 
 
 @router.post("/{session_id}/revert")
@@ -820,18 +819,13 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
         raise HTTPException(status_code=400, detail="No messages to revert")
 
     # Find the revert message index
-    revert_index = None
-    for i, msg in enumerate(messages):
-        if msg.info.id == request.message_id:
-            revert_index = i
-            break
-
-    if revert_index is None:
+    revert_idx = next((i for i, m in enumerate(messages) if m.info.id == request.message_id), None)
+    if revert_idx is None:
         raise HTTPException(status_code=404, detail=f"Message {request.message_id} not found")
 
     # Split messages: keep messages before revert point, remove from revert point onwards
-    messages_to_keep = messages[:revert_index]
-    messages_to_remove = messages[revert_index:]
+    messages_to_keep = messages[:revert_idx]
+    messages_to_remove = messages[revert_idx:]
 
     if not messages_to_remove:
         raise HTTPException(status_code=400, detail="No messages to revert")
@@ -844,7 +838,6 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     for msg in messages_to_remove:
         # Emit message.removed event
         await state.broadcast_event(MessageRemovedEvent.create(session_id, msg.info.id))
-
         # Emit part.removed events for all parts
         for part in msg.parts:
             await state.broadcast_event(PartRemovedEvent.create(session_id, msg.info.id, part.id))
@@ -871,10 +864,8 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     revert_info = SessionRevert(message_id=request.message_id, part_id=request.part_id)
     updated_session = session.model_copy(update={"revert": revert_info})
     state.sessions[session_id] = updated_session
-
     # Broadcast session update
     await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
-
     # Broadcast session.diff event with current file diffs
     file_ops = state.pool.file_ops
     diffs = [FileDiff.from_file_change(change) for change in file_ops.changes]
@@ -1015,10 +1006,9 @@ async def execute_command(  # noqa: PLR0915
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # Get prompt content and execute through the agent
     try:
-        prompt_parts = await prompt.get_components(arguments)
         # Extract text content from parts
         prompt_texts = []
-        for part in prompt_parts:
+        for part in await prompt.get_components(arguments):
             match part.content:
                 case str():
                     prompt_texts.append(part.content)
