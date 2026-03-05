@@ -149,8 +149,8 @@ class WorkspaceInfo(OpenCodeBaseModel):
     id: str
     """Workspace identifier."""
 
-    type: str
-    """Workspace type (e.g. 'local', 'container')."""
+    type: Literal["worktree"] | str  # noqa: PYI051
+    """Workspace type."""
 
     branch: str | None = None
     """Git branch associated with the workspace."""
@@ -171,7 +171,7 @@ class WorkspaceInfo(OpenCodeBaseModel):
 class WorkspaceCreateRequest(OpenCodeBaseModel):
     """Request to create a workspace."""
 
-    type: str
+    type: Literal["worktree"] | str  # noqa: PYI051
     """Workspace type."""
 
     branch: str | None = None
