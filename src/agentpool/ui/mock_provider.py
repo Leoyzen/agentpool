@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 InputMethod = Literal["get_input", "get_tool_confirmation", "get_elicitation"]
 
 
-@dataclass
+@dataclass(kw_only=True)
 class InputCall:
     """Record of an input provider call."""
 
@@ -49,7 +49,12 @@ class MockInputProvider(InputProvider):
         output_type: type | None = None,
     ) -> Any:
         kwargs = {"output_type": output_type}
-        call = InputCall("get_input", (context, prompt), kwargs, result=self.input_response)
+        call = InputCall(
+            method="get_input",
+            args=(context, prompt),
+            kwargs=kwargs,
+            result=self.input_response,
+        )
         self.calls.append(call)
         return self.input_response
 
@@ -60,9 +65,9 @@ class MockInputProvider(InputProvider):
     ) -> ConfirmationResult:
         result = self.tool_confirmation
         call = InputCall(
-            "get_tool_confirmation",
-            (context, tool_description),
-            {},
+            method="get_tool_confirmation",
+            args=(context, tool_description),
+            kwargs={},
             result=result,
         )
         self.calls.append(call)
@@ -75,6 +80,6 @@ class MockInputProvider(InputProvider):
         from mcp import types
 
         result = types.ElicitResult(action="accept", content=self.elicitation_response)
-        call = InputCall("get_elicitation", (params,), {}, result=result)
+        call = InputCall(method="get_elicitation", args=(params,), kwargs={}, result=result)
         self.calls.append(call)
         return result
