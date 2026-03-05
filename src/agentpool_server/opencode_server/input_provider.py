@@ -19,7 +19,6 @@ from agentpool_server.opencode_server.models.events import (
 
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
-    from agentpool.messaging import ChatMessage
     from agentpool_server.opencode_server.models.events import PermissionReply
     from agentpool_server.opencode_server.state import ServerState
 
@@ -69,10 +68,7 @@ class OpenCodeInputProvider(InputProvider):
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],
-        tool_name: str,
-        tool_description: str,
-        args: dict[str, Any],
-        message_history: list[ChatMessage[Any]] | None = None,
+        tool_description: str = "",
     ) -> ConfirmationResult:
         """Get tool execution confirmation via OpenCode permission request.
 
@@ -80,15 +76,14 @@ class OpenCodeInputProvider(InputProvider):
         for the client to respond via POST /session/{id}/permissions/{permissionID}.
 
         Args:
-            context: Current node context
-            tool_name: Name of the tool to be executed
+            context: Current node context with tool_name, tool_call_id, tool_input set
             tool_description: Human-readable description of the tool
-            args: Tool arguments that will be passed to the tool
-            message_history: Optional conversation history
 
         Returns:
             Confirmation result indicating whether to allow, skip, or abort
         """
+        tool_name = context.tool_name or "unknown"
+        args = context.tool_input
         try:
             # Check if we have a standing approval/rejection for this tool
             if tool_name in self._tool_approvals:

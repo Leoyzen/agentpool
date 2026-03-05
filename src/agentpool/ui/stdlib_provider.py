@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from agentpool.agents.context import AgentContext, ConfirmationResult
-    from agentpool.messaging import ChatMessage
     from agentpool.messaging.context import NodeContext
 
 
@@ -53,12 +52,11 @@ class StdlibInputProvider(InputProvider):
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],
-        tool_name: str,
-        tool_description: str,
-        args: dict[str, Any],
-        message_history: list[ChatMessage[Any]] | None = None,
+        tool_description: str = "",
     ) -> ConfirmationResult:
         agent_name = context.node_name
+        tool_name = context.tool_name or "unknown"
+        args = context.tool_input
         prompt = dedent(f"""
             Tool Execution Confirmation
             -------------------------

@@ -97,7 +97,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         mode = getattr(self.agent, "tool_confirmation_mode", "per_tool")
         if (mode == "per_tool" and not tool.requires_confirmation) or mode == "never":
             return "allow"
-        return await provider.get_tool_confirmation(self, tool.name, tool.description or "", args)
+        return await provider.get_tool_confirmation(self, tool.description or "")
 
     @property
     def internal_fs(self) -> IsolatedMemoryFileSystem:

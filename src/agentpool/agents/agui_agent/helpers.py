@@ -72,9 +72,7 @@ async def execute_tool_call(
     if await _should_confirm_tool(tool, confirmation_mode):
         confirmation = await context.get_input_provider().get_tool_confirmation(
             context=context,
-            tool_name=tool.name,
             tool_description=tool.description or "",
-            args=args,
         )
         match confirmation:
             case "skip":

@@ -54,18 +54,15 @@ class InputProvider(ABC):
     def get_tool_confirmation(
         self,
         context: AgentContext[Any],
-        tool_name: str,
-        tool_description: str,
-        args: dict[str, Any],
+        tool_description: str = "",
     ) -> Coroutine[Any, Any, ConfirmationResult]:
         """Get tool execution confirmation.
 
+        Tool name and arguments are read from context.tool_name and context.tool_input.
+
         Args:
-            context: Current node context
-            tool_name: Name of the tool to be executed
+            context: Current node context with tool_name, tool_call_id, tool_input set
             tool_description: Human-readable description of the tool
-            args: Tool arguments
-            message_history: Optional conversation history
         """
 
     @abstractmethod

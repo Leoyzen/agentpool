@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from acp import RequestPermissionResponse
     from agentpool import AgentContext
     from agentpool.agents.context import ConfirmationResult
-    from agentpool.messaging import ChatMessage
     from agentpool_server.acp_server.session import ACPSession
 
 logger = get_logger(__name__)
@@ -97,10 +96,7 @@ class ACPInputProvider(InputProvider):
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],
-        tool_name: str,
-        tool_description: str,
-        args: dict[str, Any],
-        message_history: list[ChatMessage[Any]] | None = None,
+        tool_description: str = "",
     ) -> ConfirmationResult:
         """Get tool execution confirmation via ACP request permission.
 
@@ -108,15 +104,14 @@ class ACPInputProvider(InputProvider):
         the client for confirmation before executing the tool.
 
         Args:
-            context: Current node context
-            tool_name: Name of the tool to be executed
+            context: Current node context with tool_name, tool_call_id, tool_input set
             tool_description: Human-readable description of the tool
-            args: Tool arguments that will be passed to the tool
-            message_history: Optional conversation history
 
         Returns:
             Confirmation result indicating whether to allow, skip, or abort
         """
+        tool_name = context.tool_name or "unknown"
+        args = context.tool_input
         from acp.utils import generate_tool_title
 
         try:

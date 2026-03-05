@@ -56,14 +56,12 @@ class MockInputProvider(InputProvider):
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],
-        tool_name: str,
-        tool_description: str,
-        args: dict[str, Any],
+        tool_description: str = "",
     ) -> ConfirmationResult:
         result = self.tool_confirmation
         call = InputCall(
             "get_tool_confirmation",
-            (context, tool_name, tool_description, args),
+            (context, tool_description),
             {},
             result=result,
         )

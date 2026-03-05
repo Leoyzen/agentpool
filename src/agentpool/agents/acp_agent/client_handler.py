@@ -237,9 +237,7 @@ class ACPClientHandler(Client):
             try:
                 result = await self._input_provider.get_tool_confirmation(
                     ctx,
-                    tool_name=tc.tool_call_id,
                     tool_description=name,
-                    args=args,
                 )
                 # Map confirmation result to ACP response
                 if result == "allow":

@@ -604,14 +604,12 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             self._tool_bridge._current_context,
             tool_call_id=tool_call_id,
             tool_input=input_dict,
-            tool_name=tool_name,
+            tool_name=display_name,
         )
         input_provider = ctx.get_input_provider()
         result = await input_provider.get_tool_confirmation(
             context=ctx,
-            tool_name=display_name,
             tool_description=f"Claude Code tool: {tool_name}",
-            args=input_dict,
         )
         return confirmation_result_to_native(result)
 

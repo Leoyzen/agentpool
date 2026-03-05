@@ -27,7 +27,7 @@ from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentContext, ChatMessage
+    from agentpool import AgentContext
 
 
 @dataclass
@@ -57,13 +57,11 @@ class DenyingInputProvider:
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],
-        tool_name: str,
-        tool_description: str,
-        args: dict[str, Any],
-        message_history: list[ChatMessage[Any]] | None = None,
+        tool_description: str = "",
     ) -> str:
         """Deny all tool calls after a small delay."""
-        tool_call_id = getattr(context, "tool_call_id", "unknown")
+        tool_name = context.tool_name or "unknown"
+        tool_call_id = context.tool_call_id or "unknown"
         self.trace.log_permission_request(tool_name, tool_call_id)
         await asyncio.sleep(self.delay)
         self.denial_count += 1

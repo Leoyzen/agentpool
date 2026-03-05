@@ -142,7 +142,13 @@ def wrap_tool[TReturn](  # noqa: PLR0915
         async def wrapped(  # pyright: ignore[reportRedeclaration]
             ctx: RunContext, *args: Any, **kwargs: Any
         ) -> TReturn | None | ToolReturn:  # pyright: ignore
-            result = await agent_ctx.handle_confirmation(tool, kwargs)
+            confirm_ctx = replace(
+                agent_ctx,
+                tool_name=ctx.tool_name,
+                tool_call_id=ctx.tool_call_id,
+                tool_input=kwargs.copy(),
+            )
+            result = await confirm_ctx.handle_confirmation(tool, kwargs)
             if result == "allow":
                 # Populate AgentContext with RunContext data if needed
                 if agent_ctx.data is None:
@@ -183,7 +189,12 @@ def wrap_tool[TReturn](  # noqa: PLR0915
     else:
         # Tool has no context - normal function call
         async def wrapped(*args: Any, **kwargs: Any) -> TReturn | None | ToolReturn:  # type: ignore[misc]
-            result = await agent_ctx.handle_confirmation(tool, kwargs)
+            confirm_ctx = replace(
+                agent_ctx,
+                tool_name=tool.name,
+                tool_input=kwargs.copy(),
+            )
+            result = await confirm_ctx.handle_confirmation(tool, kwargs)
             if result == "allow":
                 tool_input = kwargs.copy()
                 return await _execute_with_hooks(
