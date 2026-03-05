@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         QuestionInfo,
         Session,
         Todo,
+        WorkspaceInfo,
     )
     from agentpool_server.opencode_server.models.question import QuestionToolInfo
     from agentpool_server.opencode_server.provider_auth import ProviderAuthService
@@ -118,6 +119,9 @@ class ServerState:
 
     auth_service: ProviderAuthService = field(default_factory=create_default_auth_service)
     """Provider authentication service."""
+
+    workspaces: dict[str, WorkspaceInfo] = field(default_factory=dict)
+    """Active workspaces."""
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
