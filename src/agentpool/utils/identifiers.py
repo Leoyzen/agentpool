@@ -60,14 +60,7 @@ def ascending(prefix: PrefixType, given: str | None = None) -> str:
 
 
 def descending(prefix: PrefixType) -> str:
-    """Generate a descending (reverse chronologically sortable) ID.
-
-    Args:
-        prefix: The type prefix for the ID
-
-    Returns:
-        A reverse-sortable ID
-    """
+    """Generate a descending (reverse chronologically sortable) ID."""
     return _create(prefix, descending=True)
 
 
@@ -84,7 +77,6 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
     global _last_timestamp, _counter  # noqa: PLW0603
 
     current_timestamp = int(time.time() * 1000)  # milliseconds
-
     if current_timestamp != _last_timestamp:
         _last_timestamp = current_timestamp
         _counter = 0
@@ -92,7 +84,6 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
 
     # Combine timestamp and counter
     now = current_timestamp * 0x1000 + _counter
-
     if descending:
         now = ~now & 0xFFFFFFFFFFFF  # Invert for descending order (48 bits)
 
@@ -102,19 +93,11 @@ def _create(prefix: PrefixType, *, descending: bool = False) -> str:
         time_bytes[i] = (now >> (40 - 8 * i)) & 0xFF
 
     time_hex = time_bytes.hex()
-
     # Add random suffix (14 chars for 26 total after prefix)
     random_suffix = _random_base62(ID_LENGTH - 12)
-
     return f"{PREFIXES[prefix]}_{time_hex}{random_suffix}"
 
 
 def generate_session_id() -> str:
-    """Generate a unique, chronologically sortable session ID.
-
-    Convenience function for the common case.
-
-    Returns:
-        A session ID like 'ses_b71310fdf001ZHcn6VSpkaBcHi'
-    """
+    """Generate a unique, chronologically sortable session ID ('ses_b71310fdf0...')."""
     return ascending("session")

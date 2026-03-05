@@ -77,10 +77,12 @@ class ACPSessionManager:
         Returns:
             Session ID for the created session
         """
+        from agentpool.utils.identifiers import generate_session_id
+
         async with self._lock:
             # Generate session ID if not provided
             if session_id is None:
-                session_id = self.storage.generate_session_id()
+                session_id = generate_session_id()
 
             # Check for existing session
             if session_id in self._active:

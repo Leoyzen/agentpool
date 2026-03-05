@@ -837,18 +837,6 @@ class StorageManager:
                     project_id=project_id,
                 )
 
-    # Session data methods
-
-    def generate_session_id(self) -> str:
-        """Generate a unique, chronologically sortable session ID.
-
-        Uses OpenCode-compatible format: ses_{hex_timestamp}{random_base62}
-        IDs are lexicographically sortable by creation time.
-        """
-        from agentpool.utils.identifiers import generate_session_id
-
-        return generate_session_id()
-
     @method_spawner
     async def save_session(self, data: SessionData) -> None:
         """Save or update session data in the primary provider.
