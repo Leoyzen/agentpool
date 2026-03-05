@@ -81,7 +81,6 @@ async def execute_tool_call(
                     id=str(uuid4()),
                     tool_call_id=tool_call_id,
                     content="Tool execution was skipped by user",
-                    error=None,
                 )
             case "abort_run" | "abort_chain":
                 logger.info("Tool execution aborted by user", tool=tool.name, action=confirmation)
@@ -120,7 +119,7 @@ async def parse_sse_stream(response: httpx.Response) -> AsyncIterator[Event]:
     """
     from ag_ui.core import Event
 
-    event_adapter: TypeAdapter[Event] = TypeAdapter(Event)
+    event_adapter = TypeAdapter[Event](Event)
     buffer = ""
     async for chunk in response.aiter_text():
         buffer += chunk
