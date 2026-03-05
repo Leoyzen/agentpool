@@ -6,7 +6,6 @@ SQLite-based format. Converts between raw database rows and domain models.
 
 from __future__ import annotations
 
-import base64
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -143,20 +142,13 @@ def _build_user_pydantic_messages(
     """Build ModelRequest from user message parts."""
     user_content: list[UserContent] = []
     for part in parts:
-        if isinstance(part, TextPart):
-            if part.text:
-                user_content.append(part.text)
-        elif isinstance(part, FilePart):
-            url = part.url
-            mime = part.mime
-            if url.startswith("data:") and ";base64," in url:
-                mime_part, b64_data = url.split(";base64,", 1)
-                media_type = mime_part.replace("data:", "")
-                data = base64.b64decode(b64_data)
-                user_content.append(BinaryContent(data=data, media_type=media_type))
-            elif url:
-                content_item = to_user_content(url, mime)
-                user_content.append(content_item)
+        match part:
+            case TextPart(text=text) if text:
+                user_content.append(text)
+            case FilePart(url=url) if url.startswith("data:") and ";base64," in url:
+                user_content.append(BinaryContent.from_data_uri(url))
+            case FilePart(url=url, mime=mime) if url:
+                user_content.append(to_user_content(url, mime))
     if user_content:
         user_part = UserPromptPart(content=user_content, timestamp=timestamp)
         return [ModelRequest(parts=[user_part], timestamp=timestamp)]
