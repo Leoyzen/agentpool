@@ -577,12 +577,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             return result.data
 
         # Set the correct return annotation dynamically
-        wrapped_tool.__annotations__ = {"prompt": str, "return": self._output_type or Any}
-        normalized_name = self.name.replace("_", " ").title()
-        docstring = f"Get expert answer from specialized agent: {normalized_name}"
+        docstring = f"Get expert answer from specialized agent: {self.name}"
         if desc := (description or self.description):
             docstring = f"{docstring}\n\n{desc}"
         tool_name = name or f"ask_{self.name}"
+        wrapped_tool.__annotations__ = {"prompt": str, "return": self._output_type or Any}
         wrapped_tool.__doc__ = docstring
         wrapped_tool.__name__ = tool_name
         return FunctionTool.from_callable(wrapped_tool, source="agent")
@@ -877,21 +876,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     async def _set_mode(self, mode_id: str, category_id: str) -> None:
         """Handle permissions and model mode switching."""
-        if category_id == "mode":
-            # Use native ToolConfirmationMode values directly
-            if mode_id not in VALID_MODES:
-                raise UnknownModeError(mode_id, VALID_MODES)
-            self.tool_confirmation_mode = mode_id  # type: ignore[assignment]
-            await self.update_state(config_id="mode", value_id=mode_id)
-
-        elif category_id == "model":
-            # Set the model directly
-            self._model, settings = self._resolve_model_string(mode_id)
-            if settings:
-                self.model_settings = settings
-            await self.update_state(config_id="model", value_id=mode_id)
-        else:
-            raise UnknownCategoryError(category_id, ["mode", "model"])
+        match category_id:
+            case "mode":
+                if mode_id not in VALID_MODES:
+                    raise UnknownModeError(mode_id, VALID_MODES)
+                self.tool_confirmation_mode = mode_id  # type: ignore[assignment]
+            case "model":
+                self._model, settings = self._resolve_model_string(mode_id)
+                if settings:
+                    self.model_settings = settings
+            case _:
+                raise UnknownCategoryError(category_id, ["mode", "model"])
+        await self.update_state(config_id=category_id, value_id=mode_id)
 
     async def list_sessions(
         self,

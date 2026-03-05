@@ -473,16 +473,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 async for native_event in convert_codex_stream(capture_metadata(raw_stream)):
                     yield native_event
 
-                    # Handle plan updates - sync to pool.todos
-                    if isinstance(native_event, PlanUpdateEvent) and self.agent_pool:
-                        # Replace all entries in pool.todos with Codex plan
-                        self.agent_pool.todos.replace_all(native_event.entries)
-
-                    # Accumulate text for final message
-                    if isinstance(native_event, PartDeltaEvent) and isinstance(
-                        native_event.delta, TextPartDelta
-                    ):
-                        accumulated_text.append(native_event.delta.content_delta)
+                    match native_event:
+                        case PlanUpdateEvent() if self.agent_pool:
+                            self.agent_pool.todos.replace_all(native_event.entries)
+                        case PartDeltaEvent(delta=TextPartDelta(content_delta=content)):
+                            accumulated_text.append(content)
 
         except Exception as e:
             self.log.exception("Error during Codex turn", error=str(e))
