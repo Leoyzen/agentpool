@@ -67,10 +67,12 @@ def chat_message_to_entry(
     # Assistant message
     content_blocks = [ClaudeTextBlock(type="text", text=message.content)]
     usage = ClaudeUsage()
-    if message.cost_info:
+    if message.usage:
         usage = ClaudeUsage(
-            input_tokens=message.cost_info.token_usage.input_tokens,
-            output_tokens=message.cost_info.token_usage.output_tokens,
+            input_tokens=message.usage.input_tokens,
+            output_tokens=message.usage.output_tokens,
+            cache_read_input_tokens=message.usage.cache_read_tokens,
+            cache_creation_input_tokens=message.usage.cache_write_tokens,
         )
     assistant_msg = ClaudeApiMessage(
         model=message.model_name or "unknown",
