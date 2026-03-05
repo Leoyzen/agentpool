@@ -1,4 +1,5 @@
-from typing import cast
+from __future__ import annotations
+
 from unittest.mock import MagicMock
 
 from agentpool.agents.events import PartDeltaEvent, PartStartEvent
@@ -28,8 +29,9 @@ def test_thinking_events_create_reasoning_part():
                 reasoning_events.append(e)
 
     assert len(reasoning_events) >= 1, "ReasoningPart should be created from thinking events"
-    # Cast to narrow type since we've already checked it's a ReasoningPart
-    first_part = cast(ReasoningPart, reasoning_events[0].properties.part)
-    last_part = cast(ReasoningPart, reasoning_events[-1].properties.part)
+    first_part = reasoning_events[0].properties.part
+    last_part = reasoning_events[-1].properties.part
+    assert isinstance(first_part, ReasoningPart)
+    assert isinstance(last_part, ReasoningPart)
     assert "Thinking..." in first_part.text
     assert " more..." in last_part.text
