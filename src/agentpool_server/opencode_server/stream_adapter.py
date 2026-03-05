@@ -85,12 +85,6 @@ class OpenCodeStreamAdapter:
     counters). Yields OpenCode ``Event`` objects ready for broadcasting.
     """
 
-    session_id: str
-    """The OpenCode session ID."""
-
-    assistant_msg_id: str
-    """The assistant message ID."""
-
     assistant_msg: MessageWithParts
     """The mutable assistant message to append parts to."""
 
@@ -117,6 +111,14 @@ class OpenCodeStreamAdapter:
         self._stream_start_ms = now_ms()
 
     # --- public read-only accessors ---
+
+    @property
+    def session_id(self) -> str:
+        return self.assistant_msg.info.session_id
+
+    @property
+    def assistant_msg_id(self) -> str:
+        return self.assistant_msg.info.id
 
     @property
     def response_text(self) -> str:
@@ -170,7 +172,10 @@ class OpenCodeStreamAdapter:
                 text=self._response_text,
                 time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
             )
-            self.assistant_msg.parts.append(text_part)
+            text_part = self.assistant_msg.add_text_part(
+                text=self._response_text,
+                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
+            )
             yield PartUpdatedEvent.create(text_part)
         elif self._text_part is not None:
             # Update streamed text part with final timing

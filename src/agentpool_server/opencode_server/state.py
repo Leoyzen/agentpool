@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any
 
 from agentpool.diagnostics.lsp_manager import LSPManager
-from agentpool_server.opencode_server.models import Config
+from agentpool.log import get_logger
+from agentpool_server.opencode_server.converters import (
+    chat_message_to_opencode,
+    opencode_to_chat_message,
+    session_data_to_opencode,
+)
+from agentpool_server.opencode_server.models import (
+    Config,
+    LspUpdatedEvent,
+    SessionStatus,
+)
 from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 
 
@@ -26,7 +37,6 @@ if TYPE_CHECKING:
         MessageWithParts,
         QuestionInfo,
         Session,
-        SessionStatus,
         Todo,
     )
     from agentpool_server.opencode_server.models.question import QuestionToolInfo
@@ -34,6 +44,7 @@ if TYPE_CHECKING:
 
 # Type alias for async callback
 OnFirstSubscriberCallback = Callable[[], Coroutine[Any, Any, None]]
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -165,3 +176,105 @@ class ServerState:
         print(f"Broadcasting event: {event.type} to {len(self.event_subscribers)} subscribers")
         for queue in self.event_subscribers:
             await queue.put(event)
+
+    def _warmup_lsp_for_files(self, file_paths: list[str]) -> None:
+        """Warm up LSP servers for the given file paths.
+
+        This starts LSP servers asynchronously based on file extensions.
+        Like OpenCode's LSP.touchFile(), this triggers server startup without waiting.
+
+        Args:
+            file_paths: List of file paths that were accessed
+        """
+        logger.info("_warmup_lsp_for_files called with", file_paths=file_paths)
+        lsp_manager = self.lsp_manager
+
+        async def warmup_files() -> None:
+            """Start LSP servers for each file path."""
+            logger.info("warmup_files task started")
+
+            servers_started = False
+            for path in file_paths:
+                # Find appropriate server for this file
+                server_info = lsp_manager.get_server_for_file(path)
+                if server_info is None:
+                    continue
+                server_id = server_info.id
+                if lsp_manager.is_running(server_id):
+                    logger.info("Server with same id already running", server_id=server_id)
+                    continue
+
+                # Start server for workspace root
+                root_uri = f"file://{self.working_dir}"
+                logger.info("Starting server...", server_id=server_id)
+                try:
+                    await lsp_manager.start_server(server_id, root_uri)
+                    servers_started = True
+                    logger.info("Server started successfully", server_id=server_id)
+                except Exception as e:  # noqa: BLE001
+                    # Don't fail on LSP startup errors
+                    logger.info("Failed to start server", error=e, server_id=server_id)
+
+            # Emit lsp.updated event if any servers started
+            if servers_started:
+                logger.info("Broadcasting LspUpdatedEvent")
+                await self.broadcast_event(LspUpdatedEvent())
+            logger.info("warmup_files task completed")
+
+        # Run warmup in background (don't block the event handler)
+        logger.info("Creating background task for warmup")
+        self.create_background_task(warmup_files(), name="lsp-warmup")
+
+    async def persist_message_to_storage(
+        self,
+        msg: MessageWithParts,
+        session_id: str,
+    ) -> None:
+        """Persist an OpenCode message to storage.
+
+        Converts the OpenCode MessageWithParts to ChatMessage and saves it.
+
+        Args:
+            msg: OpenCode message to persist
+            session_id: Session/conversation ID
+        """
+        chat_msg = opencode_to_chat_message(msg, session_id=session_id)
+        with contextlib.suppress(Exception):
+            await self.storage.log_message(chat_msg)
+
+    async def get_or_load_session(self, session_id: str) -> Session | None:
+        """Get session from cache or load via agent.
+
+        Returns None if session not found.
+        Uses agent.load_session() which handles loading from the appropriate
+        storage (pool storage, Claude storage, ACP server, Codex, etc.).
+        """
+        # Check if session AND messages are already loaded
+        if session_id in self.sessions and session_id in self.messages:
+            return self.sessions[session_id]
+
+        # Load via agent - this populates agent.conversation.chat_messages
+        data = await self.agent.load_session(session_id)
+        if data is None:
+            return None
+
+        # Convert SessionData to OpenCode Session
+        session = session_data_to_opencode(data)
+        # Cache the session
+        self.sessions[session_id] = session
+        # Initialize runtime state
+        if session_id not in self.session_status:
+            self.session_status[session_id] = SessionStatus(type="idle")
+        # Convert agent's conversation history to OpenCode format
+        self.messages[session_id] = [
+            chat_message_to_opencode(
+                chat_msg,
+                session_id=session_id,
+                working_dir=self.working_dir,
+                agent_name=self.agent.name,
+                model_id=chat_msg.model_name or "sonnet",
+                provider_id=chat_msg.provider_name or "claude-code",
+            )
+            for chat_msg in self.agent.conversation.chat_messages
+        ]
+        return session

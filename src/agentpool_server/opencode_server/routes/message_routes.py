@@ -3,23 +3,19 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.converters import (
-    extract_user_prompt_from_parts,
-    opencode_to_chat_message,
-)
+from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
     FilePartInput,
-    LspUpdatedEvent,
     MessagePath,
     MessageRequest,
     MessageTime,
@@ -31,7 +27,6 @@ from agentpool_server.opencode_server.models import (
     SessionIdleEvent,
     SessionStatus,
     SessionStatusEvent,
-    StepStartPart,
     SubtaskPartInput,
     TextPartInput,
     TimeCreated,
@@ -39,84 +34,10 @@ from agentpool_server.opencode_server.models import (
     Tokens,
     UserMessage,
 )
-from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
-if TYPE_CHECKING:
-    from agentpool_server.opencode_server.state import ServerState
-
-
 logger = get_logger(__name__)
-
-
-def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
-    """Warm up LSP servers for the given file paths.
-
-    This starts LSP servers asynchronously based on file extensions.
-    Like OpenCode's LSP.touchFile(), this triggers server startup without waiting.
-
-    Args:
-        state: Server state with LSP manager
-        file_paths: List of file paths that were accessed
-    """
-    logger.info("_warmup_lsp_for_files called with", file_paths=file_paths)
-    lsp_manager = state.lsp_manager
-
-    async def warmup_files() -> None:
-        """Start LSP servers for each file path."""
-        logger.info("warmup_files task started")
-
-        servers_started = False
-        for path in file_paths:
-            # Find appropriate server for this file
-            server_info = lsp_manager.get_server_for_file(path)
-            if server_info is None:
-                continue
-            server_id = server_info.id
-            if lsp_manager.is_running(server_id):
-                logger.info("Server with same id already running", server_id=server_id)
-                continue
-
-            # Start server for workspace root
-            root_uri = f"file://{state.working_dir}"
-            logger.info("Starting server...", server_id=server_id)
-            try:
-                await lsp_manager.start_server(server_id, root_uri)
-                servers_started = True
-                logger.info("Server started successfully", server_id=server_id)
-            except Exception as e:  # noqa: BLE001
-                # Don't fail on LSP startup errors
-                logger.info("Failed to start server", error=e, server_id=server_id)
-
-        # Emit lsp.updated event if any servers started
-        if servers_started:
-            logger.info("Broadcasting LspUpdatedEvent")
-            await state.broadcast_event(LspUpdatedEvent())
-        logger.info("warmup_files task completed")
-
-    # Run warmup in background (don't block the event handler)
-    logger.info("Creating background task for warmup")
-    state.create_background_task(warmup_files(), name="lsp-warmup")
-
-
-async def persist_message_to_storage(
-    state: ServerState,
-    msg: MessageWithParts,
-    session_id: str,
-) -> None:
-    """Persist an OpenCode message to storage.
-
-    Converts the OpenCode MessageWithParts to ChatMessage and saves it.
-
-    Args:
-        state: Server state with pool reference
-        msg: OpenCode message to persist
-        session_id: Session/conversation ID
-    """
-    chat_msg = opencode_to_chat_message(msg, session_id=session_id)
-    with contextlib.suppress(Exception):
-        await state.storage.log_message(chat_msg)
 
 
 router = APIRouter(prefix="/session/{session_id}", tags=["message"])
@@ -129,7 +50,7 @@ async def list_messages(
     limit: int | None = Query(default=None),
 ) -> list[MessageWithParts]:
     """List messages in a session."""
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -147,7 +68,7 @@ async def _process_message(  # noqa: PLR0915
     This does the actual work of creating messages, running the agent,
     and broadcasting events. Used by both sync and async endpoints.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     # --- Create user message ---
@@ -188,7 +109,7 @@ async def _process_message(  # noqa: PLR0915
                 assert_never(unreachable)
         await state.broadcast_event(PartUpdatedEvent.create(created))
     state.messages[session_id].append(user_msg_with_parts)
-    await persist_message_to_storage(state, user_msg_with_parts, session_id)
+    await state.persist_message_to_storage(user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
     # --- Mark session busy ---
     busy = SessionStatus(type="busy")
@@ -218,9 +139,7 @@ async def _process_message(  # noqa: PLR0915
     state.messages[session_id].append(assistant_msg_with_parts)
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_msg))
     # Step-start part
-    part_id = identifier.ascending("part")
-    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
-    assistant_msg_with_parts.parts.append(step_start)
+    step_start = assistant_msg_with_parts.add_step_start_part()
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # --- Resolve agent and variant ---
     agent = state.agent
@@ -232,11 +151,9 @@ async def _process_message(  # noqa: PLR0915
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
-        session_id=session_id,
-        assistant_msg_id=assistant_msg_id,
         assistant_msg=assistant_msg_with_parts,
         working_dir=state.working_dir,
-        on_file_paths=lambda paths: _warmup_lsp_for_files(state, paths),
+        on_file_paths=state._warmup_lsp_for_files,
     )
     iterator = agent.run_stream(user_prompt, session_id=session_id)
     async for oc_event in adapter.process_stream(iterator):
@@ -256,7 +173,7 @@ async def _process_message(  # noqa: PLR0915
     updated_assistant = assistant_msg.model_copy(update=update)
     assistant_msg_with_parts.info = updated_assistant
     await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
-    await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+    await state.persist_message_to_storage(assistant_msg_with_parts, session_id)
     # --- Mark session idle ---
     status = SessionStatus(type="idle")
     state.session_status[session_id] = status
@@ -303,7 +220,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 @router.get("/message/{message_id}")
 async def get_message(session_id: str, message_id: str, state: StateDep) -> MessageWithParts:
     """Get a specific message."""
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 

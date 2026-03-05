@@ -92,12 +92,10 @@ async def create_pty(request: PtyCreateRequest, state: StateDep) -> PtyInfo:
     title = request.title or f"Terminal {pty_id[-4:]}"
     # Create session tracker for WebSocket subscribers
     task = asyncio.create_task(_read_pty_output(manager, pty_id, state))
-    session = PtySession(pty_id=pty_id, read_task=task)
-    _pty_sessions[pty_id] = session
+    _pty_sessions[pty_id] = PtySession(pty_id=pty_id, read_task=task)
     logger.info("PTY session registered", pty_id=pty_id, total_sessions=len(_pty_sessions))
     # Start background task to read output and distribute to subscribers
     pty_info = PtyInfo.from_exxec(info, title=title)
-    # Broadcast PTY created event
     event = PtyCreatedEvent.create(info=pty_info)
     await state.broadcast_event(event)
     return pty_info

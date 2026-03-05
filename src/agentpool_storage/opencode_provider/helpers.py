@@ -183,28 +183,22 @@ def _build_assistant_pydantic_messages(
     )
 
     for part in parts:
-        if isinstance(part, TextPart):
-            if part.text:
-                response_parts.append(PydanticTextPart(content=part.text))
-        elif isinstance(part, ReasoningPart):
-            if part.text:
-                response_parts.append(ThinkingPart(content=part.text))
-        elif isinstance(part, ToolPart):
-            tc_part = ToolCallPart(
-                tool_name=part.tool,
-                args=part.state.input,
-                tool_call_id=part.call_id,
-            )
-            response_parts.append(tc_part)
-
-            if isinstance(part.state, ToolStateCompleted) and part.state.output:
-                return_part = ToolReturnPart(
-                    tool_name=part.tool,
-                    content=part.state.output,
-                    tool_call_id=part.call_id,
-                    timestamp=timestamp,
-                )
-                tool_return_parts.append(return_part)
+        match part:
+            case TextPart(text=text) if text:
+                response_parts.append(PydanticTextPart(content=text))
+            case ReasoningPart(text=text) if text:
+                response_parts.append(ThinkingPart(content=text))
+            case ToolPart(tool=tool, call_id=call_id, state=state):
+                tc_part = ToolCallPart(tool_name=tool, args=state.input, tool_call_id=call_id)
+                response_parts.append(tc_part)
+                if isinstance(state, ToolStateCompleted) and state.output:
+                    tr_part = ToolReturnPart(
+                        tool_name=tool,
+                        content=state.output,
+                        tool_call_id=call_id,
+                        timestamp=timestamp,
+                    )
+                    tool_return_parts.append(tr_part)
 
     if response_parts:
         model_response = ModelResponse(

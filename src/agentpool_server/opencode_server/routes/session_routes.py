@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
 from fastapi import APIRouter, HTTPException
@@ -15,7 +15,6 @@ from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.command_validation import validate_command
 from agentpool_server.opencode_server.converters import (
-    chat_message_to_opencode,
     opencode_to_session_data,
     session_data_to_opencode,
 )
@@ -49,56 +48,12 @@ from agentpool_server.opencode_server.models import (
     SessionUpdatedEvent,
     SessionUpdateRequest,
     ShellRequest,
-    StepFinishPart,
-    StepStartPart,
     SummarizeRequest,
     TextPart,
     TimeCreatedUpdated,
     Todo,
     Tokens,
 )
-
-
-if TYPE_CHECKING:
-    from agentpool_server.opencode_server.state import ServerState
-
-
-async def get_or_load_session(state: ServerState, session_id: str) -> Session | None:
-    """Get session from cache or load via agent.
-
-    Returns None if session not found.
-    Uses agent.load_session() which handles loading from the appropriate
-    storage (pool storage, Claude storage, ACP server, Codex, etc.).
-    """
-    # Check if session AND messages are already loaded
-    if session_id in state.sessions and session_id in state.messages:
-        return state.sessions[session_id]
-
-    # Load via agent - this populates agent.conversation.chat_messages
-    data = await state.agent.load_session(session_id)
-    if data is None:
-        return None
-
-    # Convert SessionData to OpenCode Session
-    session = session_data_to_opencode(data)
-    # Cache the session
-    state.sessions[session_id] = session
-    # Initialize runtime state
-    if session_id not in state.session_status:
-        state.session_status[session_id] = SessionStatus(type="idle")
-    # Convert agent's conversation history to OpenCode format
-    state.messages[session_id] = [
-        chat_message_to_opencode(
-            chat_msg,
-            session_id=session_id,
-            working_dir=state.working_dir,
-            agent_name=state.agent.name,
-            model_id=chat_msg.model_name or "sonnet",  # Normalized name from Claude storage
-            provider_id=chat_msg.provider_name or "claude-code",
-        )
-        for chat_msg in state.agent.conversation.chat_messages
-    ]
-    return session
 
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -191,7 +146,7 @@ async def get_session(session_id: str, state: StateDep) -> Session:
 
     Loads from storage if not in memory cache.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
@@ -207,7 +162,7 @@ async def update_session(
 
     Supports updating title and archiving via time.archived.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -229,7 +184,7 @@ async def update_session(
 async def delete_session(session_id: str, state: StateDep) -> bool:
     """Delete a session from both cache and storage."""
     # Check if session exists (in cache or storage)
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -251,7 +206,7 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
 @router.get("/{session_id}/children")
 async def get_session_children(session_id: str, state: StateDep) -> list[Session]:
     """Get all child sessions that were forked from the specified parent session."""
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     # Search all cached sessions for children
@@ -261,7 +216,7 @@ async def get_session_children(session_id: str, state: StateDep) -> list[Session
 @router.post("/{session_id}/abort")
 async def abort_session(session_id: str, state: StateDep) -> bool:
     """Abort a running session by interrupting the agent."""
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -302,7 +257,7 @@ async def fork_session(  # noqa: D417
         The newly created forked session
     """
     # Get the original session
-    original_session = await get_or_load_session(state, session_id)
+    original_session = await state.get_or_load_session(session_id)
     if original_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -387,7 +342,7 @@ async def init_session(  # noqa: D417
     Returns:
         True when the init task has been started (runs async)
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -475,7 +430,7 @@ async def get_session_todos(session_id: str, state: StateDep) -> list[Todo]:
 
     Returns todos from the agent pool's TodoTracker.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -495,7 +450,7 @@ async def get_session_diff(
     Returns a list of file changes with unified diffs.
     Optionally filter to changes since a specific message.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -514,7 +469,7 @@ async def run_shell_command(
     state: StateDep,
 ) -> MessageWithParts:
     """Run a shell command directly."""
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -544,9 +499,7 @@ async def run_shell_command(
     state.session_status[session_id] = SessionStatus(type="busy")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
     # Add step-start part
-    part_id = identifier.ascending("part")
-    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
-    assistant_msg_with_parts.parts.append(step_start)
+    step_start = assistant_msg_with_parts.add_step_start_part()
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # Execute the command
     output_text = ""
@@ -563,17 +516,9 @@ async def run_shell_command(
 
     response_time = now_ms()
     # Create text part with output
-    text_part = TextPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-        text=f"$ {request.command}\n{output_text}",
-    )
-    assistant_msg_with_parts.parts.append(text_part)
+    text_part = assistant_msg_with_parts.add_text_part(text=f"$ {request.command}\n{output_text}")
     await state.broadcast_event(PartUpdatedEvent.create(text_part))
-    part_id = identifier.ascending("part")
-    step_finish = StepFinishPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
-    assistant_msg_with_parts.parts.append(step_finish)
+    step_finish = assistant_msg_with_parts.add_step_finish_part()
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time
     time_ = MessageTime(created=now, completed=response_time)
@@ -594,7 +539,7 @@ async def get_pending_permissions(
 
     Returns a list of pending permissions awaiting user response.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -620,7 +565,7 @@ async def respond_to_permission(
     - "always": Always allow this tool (remembered for session)
     - "reject": Reject this tool execution
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -668,7 +613,7 @@ async def summarize_session(  # noqa: PLR0915
     from agentpool.agents.events import StreamCompleteEvent
     from agentpool.messaging.compaction import compact_conversation, summarizing_context
 
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if not state.messages.get(session_id):
@@ -702,9 +647,7 @@ async def summarize_session(  # noqa: PLR0915
     state.session_status[session_id] = SessionStatus(type="busy")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
     # Add step-start part
-    part_id = identifier.ascending("part")
-    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
-    assistant_msg_with_parts.parts.append(step_start)
+    step_start = assistant_msg_with_parts.add_step_start_part()
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # Step 1: Stream LLM summary generation FIRST (while we have full history)
     # The LLM sees the complete conversation and generates a continuation prompt.
@@ -720,13 +663,7 @@ async def summarize_session(  # noqa: PLR0915
                 # Text streaming start
                 case PartStartEvent(part=PydanticTextPart(content=delta)):
                     response_text = delta
-                    text_part = TextPart(
-                        id=identifier.ascending("part"),
-                        message_id=assistant_msg_id,
-                        session_id=session_id,
-                        text=delta,
-                    )
-                    assistant_msg_with_parts.parts.append(text_part)
+                    text_part = assistant_msg_with_parts.add_text_part(delta)
                     await state.broadcast_event(PartUpdatedEvent.create(text_part, delta=delta))
 
                 # Text streaming delta
@@ -757,13 +694,7 @@ async def summarize_session(  # noqa: PLR0915
     response_time = now_ms()
     # Create/update text part with final response
     if text_part is None:
-        text_part = TextPart(
-            id=identifier.ascending("part"),
-            message_id=assistant_msg_id,
-            session_id=session_id,
-            text=response_text,
-        )
-        assistant_msg_with_parts.parts.append(text_part)
+        text_part = assistant_msg_with_parts.add_text_part(response_text)
         await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
     # Step 2: Run compaction pipeline AFTER summary is generated
@@ -794,14 +725,7 @@ async def summarize_session(  # noqa: PLR0915
         pass
     tokens = Tokens.from_pydantic_ai(usage) if usage else Tokens()
     # Add step-finish part
-    step_finish = StepFinishPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-        tokens=tokens,
-        cost=cost,
-    )
-    assistant_msg_with_parts.parts.append(step_finish)
+    step_finish = assistant_msg_with_parts.add_step_finish_part(tokens=tokens, cost=cost)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time and tokens
     msg_time = MessageTime(created=now, completed=response_time)
@@ -812,12 +736,10 @@ async def summarize_session(  # noqa: PLR0915
     # Mark session as idle
     state.session_status[session_id] = SessionStatus(type="idle")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
-
     # Broadcast session.diff event after summarization
     file_ops = state.pool.file_ops
     diffs = [FileDiff.from_file_change(change) for change in file_ops.changes]
     await state.broadcast_event(SessionDiffEvent.create(session_id, diffs))
-
     return assistant_msg_with_parts
 
 
@@ -834,7 +756,7 @@ async def share_session(
 
     Returns the updated session with the share URL.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     messages = state.messages.get(session_id, [])
@@ -888,7 +810,7 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     """
     from agentpool_server.opencode_server.models import MessageRemovedEvent, PartRemovedEvent
 
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -969,7 +891,7 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
     """
     from agentpool_server.opencode_server.models import MessageUpdatedEvent, PartUpdatedEvent
 
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -1025,7 +947,7 @@ async def unshare_session(session_id: str, state: StateDep) -> bool:
     Note: This only removes the link from the session metadata.
     The shared content may still exist on the provider's servers.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.share is None:
@@ -1049,7 +971,7 @@ async def execute_command(  # noqa: PLR0915
     Commands are mapped to MCP prompts. The command name is used to find
     the matching prompt, and arguments are parsed and passed to it.
     """
-    session = await get_or_load_session(state, session_id)
+    session = await state.get_or_load_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     prompts = await state.agent.tools.list_prompts()
@@ -1072,9 +994,8 @@ async def execute_command(  # noqa: PLR0915
 
     now = now_ms()
     # Create assistant message
-    assistant_msg_id = identifier.ascending("message")
     assistant_message = AssistantMessage(
-        id=assistant_msg_id,
+        id=identifier.ascending("message"),
         session_id=session_id,
         parent_id="",
         model_id=request.model or "default",
@@ -1090,25 +1011,20 @@ async def execute_command(  # noqa: PLR0915
     # Mark session as busy
     state.session_status[session_id] = SessionStatus(type="busy")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
-    # Add step-start part
-    part_id = identifier.ascending("part")
-    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
-    assistant_msg_with_parts.parts.append(step_start)
+    step_start = assistant_msg_with_parts.add_step_start_part()
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
-
     # Get prompt content and execute through the agent
     try:
         prompt_parts = await prompt.get_components(arguments)
         # Extract text content from parts
         prompt_texts = []
         for part in prompt_parts:
-            if hasattr(part, "content"):
-                content = part.content
-                if isinstance(content, str):
-                    prompt_texts.append(content)
-                elif isinstance(content, list):
+            match part.content:
+                case str():
+                    prompt_texts.append(part.content)
+                case list() as content_list:
                     # Handle Sequence[UserContent]
-                    for item in content:
+                    for item in content_list:
                         if isinstance(item, FileUrl):
                             prompt_texts.append(item.url)
                         elif isinstance(item, str):
@@ -1123,20 +1039,9 @@ async def execute_command(  # noqa: PLR0915
 
     response_time = now_ms()
     # Create text part with output
-    text_part = TextPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-        text=output_text,
-    )
-    assistant_msg_with_parts.parts.append(text_part)
+    text_part = assistant_msg_with_parts.add_text_part(text=output_text)
     await state.broadcast_event(PartUpdatedEvent.create(text_part))
-    step_finish = StepFinishPart(
-        id=identifier.ascending("part"),
-        message_id=assistant_msg_id,
-        session_id=session_id,
-    )
-    assistant_msg_with_parts.parts.append(step_finish)
+    step_finish = assistant_msg_with_parts.add_step_finish_part()
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time
     time_ = MessageTime(created=now, completed=response_time)
@@ -1148,13 +1053,11 @@ async def execute_command(  # noqa: PLR0915
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
 
     # Broadcast command.executed event
-    await state.broadcast_event(
-        CommandExecutedEvent.create(
-            name=request.command,
-            session_id=session_id,
-            arguments=request.arguments or "",
-            message_id=assistant_msg_id,
-        )
+    executed_event = CommandExecutedEvent.create(
+        name=request.command,
+        session_id=session_id,
+        arguments=request.arguments or "",
+        message_id=assistant_message.id,
     )
-
+    await state.broadcast_event(executed_event)
     return assistant_msg_with_parts
