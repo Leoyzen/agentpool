@@ -6,7 +6,7 @@ import fnmatch
 import os
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 import ripgrep_rs
@@ -260,10 +260,12 @@ async def find_files(
     state: StateDep,
     query: str = Query(),
     dirs: str = Query(default="false"),
+    type: Literal["file", "directory"] | None = Query(default=None),
+    limit: int | None = Query(default=None),
 ) -> list[str]:
     """Find files by name pattern (glob-style matching)."""
-    include_dirs = dirs.lower() == "true"
-    max_results = 100
+    include_dirs = dirs.lower() != "false" or type == "directory"
+    max_results = min(limit, 200) if limit is not None else 100
     fs = state.fs
     base_path = state.base_path
     # Fast path: use ripgrep-rs library for local filesystems
