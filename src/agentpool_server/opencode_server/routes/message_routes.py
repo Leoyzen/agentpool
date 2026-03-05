@@ -17,6 +17,7 @@ from agentpool_server.opencode_server.models import (
     AssistantMessage,
     FilePartInput,
     MessagePath,
+    MessageRemovedEvent,
     MessageRequest,
     MessageTime,
     MessageUpdatedEvent,
@@ -228,6 +229,36 @@ async def get_message(session_id: str, message_id: str, state: StateDep) -> Mess
         if msg.info.id == message_id:
             return msg
 
+    raise HTTPException(status_code=404, detail="Message not found")
+
+
+@router.delete("/message/{message_id}")
+async def delete_message(
+    session_id: str,
+    message_id: str,
+    state: StateDep,
+) -> bool:
+    """Delete a message and all its parts from a session."""
+    session = await state.get_or_load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = state.messages.get(session_id, [])
+    for i, msg in enumerate(messages):
+        if msg.info.id == message_id:
+            for part in msg.parts:
+                await state.broadcast_event(
+                    PartRemovedEvent.create(
+                        session_id=session_id,
+                        message_id=message_id,
+                        part_id=part.id,
+                    )
+                )
+            messages.pop(i)
+            await state.broadcast_event(
+                MessageRemovedEvent.create(session_id=session_id, message_id=message_id)
+            )
+            return True
     raise HTTPException(status_code=404, detail="Message not found")
 
 
