@@ -13,6 +13,8 @@ def test_thinking_events_create_reasoning_part():
     """Verify ThinkingPart/ThinkingPartDelta events create ReasoningPart."""
     # Create a mock MessageWithParts
     mock_msg = MagicMock()
+    mock_msg.info.id = "msg-1"
+    mock_msg.info.session_id = "session-1"
     mock_msg.parts = []
 
     adapter = OpenCodeStreamAdapter(assistant_msg=mock_msg, working_dir=".")
