@@ -10,7 +10,7 @@ from mcp import types
 
 from agentpool.log import get_logger
 from agentpool.ui.base import InputProvider
-from agentpool_server.opencode_server.models.events import (
+from agentpool_server.opencode_server.models import (
     PermissionAskedProperties,
     PermissionRequestEvent,
     PermissionToolInfo,
@@ -19,7 +19,7 @@ from agentpool_server.opencode_server.models.events import (
 
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
-    from agentpool_server.opencode_server.models.events import PermissionReply
+    from agentpool_server.opencode_server.models import PermissionReply
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)

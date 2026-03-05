@@ -174,7 +174,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         from watchfiles import Change
 
         from agentpool.utils.file_watcher import FileWatcher, GitBranchWatcher
-        from agentpool_server.opencode_server.models.events import (
+        from agentpool_server.opencode_server.models import (
             FileWatcherUpdatedEvent,
             VcsBranchUpdatedEvent,
         )

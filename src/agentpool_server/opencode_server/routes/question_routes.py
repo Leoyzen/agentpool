@@ -6,11 +6,12 @@ from fastapi import APIRouter, HTTPException
 
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-from agentpool_server.opencode_server.models.events import (
+from agentpool_server.opencode_server.models import (
     QuestionRejectedEvent,
     QuestionRepliedEvent,
+    QuestionReply,
+    QuestionRequest,
 )
-from agentpool_server.opencode_server.models.question import QuestionReply, QuestionRequest
 
 
 router = APIRouter(prefix="/question", tags=["question"])

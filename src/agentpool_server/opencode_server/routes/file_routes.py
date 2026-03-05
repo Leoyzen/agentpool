@@ -12,8 +12,13 @@ from fastapi import APIRouter, HTTPException, Query
 import ripgrep_rs
 
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import FileContent, FileNode, FindMatch, Symbol
-from agentpool_server.opencode_server.models.file import SubmatchInfo
+from agentpool_server.opencode_server.models import (
+    FileContent,
+    FileNode,
+    FindMatch,
+    SubmatchInfo,
+    Symbol,
+)
 
 
 router = APIRouter(tags=["file"])

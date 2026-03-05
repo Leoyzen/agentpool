@@ -12,12 +12,13 @@ import os
 from fastapi import APIRouter, HTTPException, Query
 
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models.diagnostics import (
+from agentpool_server.opencode_server.models import (
     Diagnostic,
     DiagnosticRange,
     FormatterStatus,
+    LspStatus,
+    LspUpdatedEvent,
 )
-from agentpool_server.opencode_server.models.events import LspStatus, LspUpdatedEvent
 
 
 router = APIRouter(tags=["lsp"])

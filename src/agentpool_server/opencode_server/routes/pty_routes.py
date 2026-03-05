@@ -14,7 +14,15 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect  # 
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import PtyCreateRequest, PtyInfo, PtyUpdateRequest
+from agentpool_server.opencode_server.models import (
+    PtyCreatedEvent,
+    PtyCreateRequest,
+    PtyDeletedEvent,
+    PtyExitedEvent,
+    PtyInfo,
+    PtyUpdatedEvent,
+    PtyUpdateRequest,
+)
 
 
 if TYPE_CHECKING:
@@ -59,8 +67,6 @@ async def list_ptys(state: StateDep) -> list[PtyInfo]:
 @router.post("")
 async def create_pty(request: PtyCreateRequest, state: StateDep) -> PtyInfo:
     """Create a new PTY session."""
-    from agentpool_server.opencode_server.models.events import PtyCreatedEvent
-
     manager = _get_pty_manager(state)
     # Limit number of PTY sessions to prevent resource exhaustion
     sessions = await manager.list_sessions()
@@ -99,8 +105,6 @@ async def create_pty(request: PtyCreateRequest, state: StateDep) -> PtyInfo:
 
 async def _read_pty_output(manager: PtyManagerProtocol, pty_id: str, state: ServerState) -> None:
     """Background task to read PTY output and distribute to subscribers."""
-    from agentpool_server.opencode_server.models.events import PtyExitedEvent
-
     session = _pty_sessions.get(pty_id)
     if not session:
         return
@@ -152,8 +156,6 @@ async def update_pty(pty_id: str, request: PtyUpdateRequest, state: StateDep) ->
     """Update PTY session (title, resize)."""
     from exxec.pty_manager import PtySize
 
-    from agentpool_server.opencode_server.models.events import PtyUpdatedEvent
-
     manager = _get_pty_manager(state)
     info = await manager.get_info(pty_id)
     if not info:
@@ -179,8 +181,6 @@ async def update_pty(pty_id: str, request: PtyUpdateRequest, state: StateDep) ->
 @router.delete("/{pty_id}")
 async def remove_pty(pty_id: str, state: StateDep) -> dict[str, bool]:
     """Remove/kill PTY session."""
-    from agentpool_server.opencode_server.models.events import PtyDeletedEvent
-
     manager = _get_pty_manager(state)
     # Kill the PTY session
     success = await manager.kill(pty_id)

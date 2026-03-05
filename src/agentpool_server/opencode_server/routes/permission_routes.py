@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models.events import (
+from agentpool_server.opencode_server.models import (
     PermissionAskedProperties,
     PermissionReplyRequest,
     PermissionResolvedEvent,

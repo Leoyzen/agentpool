@@ -320,7 +320,7 @@ def truncate_lines(
     return result_lines, False
 
 
-def _format_size(size: int) -> str:
+def format_size(size: int) -> str:
     """Format byte size as human-readable string."""
     if size < 1024:  # noqa: PLR2004
         return f"{size} B"
@@ -364,7 +364,7 @@ def format_directory_listing(
 
     # Then files (sorted)
     for f in sorted(files, key=lambda x: x["name"]):
-        size_str = _format_size(f.get("size", 0))
+        size_str = format_size(f.get("size", 0))
         lines.append(f"| {f['name']} | file | {size_str} |")
 
     lines.append("")

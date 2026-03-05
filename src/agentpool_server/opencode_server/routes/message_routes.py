@@ -16,7 +16,10 @@ from agentpool_server.opencode_server.converters import (
 )
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
+    AgentPartInput,
     AssistantMessage,
+    FilePartInput,
+    LspUpdatedEvent,
     MessagePath,
     MessageRequest,
     MessageTime,
@@ -29,17 +32,12 @@ from agentpool_server.opencode_server.models import (
     SessionStatus,
     SessionStatusEvent,
     StepStartPart,
+    SubtaskPartInput,
+    TextPartInput,
     TimeCreated,
     TimeCreatedUpdated,
     Tokens,
     UserMessage,
-)
-from agentpool_server.opencode_server.models.events import LspUpdatedEvent
-from agentpool_server.opencode_server.models.message import (
-    AgentPartInput,
-    FilePartInput,
-    SubtaskPartInput,
-    TextPartInput,
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter

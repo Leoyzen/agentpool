@@ -21,7 +21,10 @@ from agentpool_server.opencode_server.models import (
     Agent,
     AuthInfo,
     Command,
+    ConnectionStatus,
+    FormatterStatus,
     LogRequest,
+    LspStatus,
     McpAuthorizationResponse,
     McpResource,
     MCPStatus,
@@ -34,8 +37,6 @@ from agentpool_server.opencode_server.models import (
     WorktreeRemoveRequest,
     WorktreeResetRequest,
 )
-from agentpool_server.opencode_server.models.diagnostics import FormatterStatus
-from agentpool_server.opencode_server.models.events import ConnectionStatus, LspStatus
 
 
 router = APIRouter(tags=["agent"])

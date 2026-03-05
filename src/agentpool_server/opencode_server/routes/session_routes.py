@@ -23,17 +23,23 @@ from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
+    CommandExecutedEvent,
     CommandRequest,
     FileDiff,
     MessagePath,
     MessageTime,
     MessageUpdatedEvent,
     MessageWithParts,
+    OpenCodeBaseModel,
     PartUpdatedEvent,
+    PermissionAskedProperties,
+    PermissionReplyRequest,
+    PermissionResolvedEvent,
     Session,
     SessionCreatedEvent,
     SessionCreateRequest,
     SessionDeletedEvent,
+    SessionDiffEvent,
     SessionForkRequest,
     SessionInitRequest,
     SessionRevert,
@@ -50,14 +56,6 @@ from agentpool_server.opencode_server.models import (
     TimeCreatedUpdated,
     Todo,
     Tokens,
-)
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.events import (
-    CommandExecutedEvent,
-    PermissionAskedProperties,
-    PermissionReplyRequest,
-    PermissionResolvedEvent,
-    SessionDiffEvent,
 )
 
 

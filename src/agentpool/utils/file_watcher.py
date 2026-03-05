@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Set as AbstractSet
 import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 import anyenv
-from watchfiles import Change, awatch
 
 from agentpool import log
 
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Set as AbstractSet
+
+    from watchfiles import Change
+
+    FileChangeCallback = Callable[[AbstractSet[tuple[Change, str]]], Awaitable[None]]
+
+
 logger = log.get_logger(__name__)
-
-
-# Callback type for file change notifications
-FileChangeCallback = Callable[[AbstractSet[tuple[Change, str]]], Awaitable[None]]
 
 
 @dataclass
@@ -82,6 +84,8 @@ class FileWatcher:
 
     async def _watch_loop(self) -> None:
         """Internal watch loop."""
+        from watchfiles import awatch
+
         str_paths = [str(p) for p in self.paths]
         # Filter to only existing paths
         existing_paths = [p for p in str_paths if Path(p).exists()]

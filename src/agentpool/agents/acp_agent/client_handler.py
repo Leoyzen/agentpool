@@ -441,11 +441,9 @@ class ACPClientHandler(Client):
                 args_str = f"{args_str} {kwargs_str}".strip()
             # Execute via agent run_stream - the slash command goes as a prompt
             async for event in self._agent.run_stream(f"/{cmd.name} {args_str}".strip()):
-                # Extract text from PartDeltaEvent with TextPartDelta
-                if isinstance(event, PartDeltaEvent):
-                    delta = event.delta
-                    if isinstance(delta, TextPartDelta):
-                        await ctx.print(delta.content_delta)
+                match event:
+                    case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+                        await ctx.print(delta)
 
         return Command.from_raw(
             run_cmd,
@@ -465,7 +463,6 @@ if __name__ == "__main__":
         cwd = str(Path.cwd())
         async with ACPAgent(command="uv", args=args, cwd=cwd, event_handlers=["detailed"]) as agent:
             print("Response (streaming): ", end="", flush=True)
-            async for chunk in agent.run_stream("Say hello briefly."):
-                print(chunk, end="", flush=True)
+            await agent.run("Say hello briefly.")
 
     anyio.run(main)
