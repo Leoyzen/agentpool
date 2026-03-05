@@ -20,10 +20,35 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.builtin_tools import AbstractBuiltinTool
+    from pydantic_ai.models import Model
     from tokonomics.model_discovery import ModelInfo
 
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool_config.nodes import ToolConfirmationMode
+
+logger = __import__("logging").getLogger(__name__)
+
+
+def filter_builtin_tools(
+    tools: list[AbstractBuiltinTool],
+    model: Model,
+) -> list[AbstractBuiltinTool]:
+    """Filter builtin tools to those supported by the model.
+
+    Args:
+        tools: Builtin tools to filter
+        model: Resolved model instance
+
+    Returns:
+        Filtered list containing only tools the model supports
+    """
+    supported = model.profile.supported_builtin_tools
+    filtered = [t for t in tools if isinstance(t, tuple(supported))]
+    if len(filtered) != len(tools):
+        dropped = [type(t).__name__ for t in tools if not isinstance(t, tuple(supported))]
+        logger.info("Dropping unsupported builtin tools for %s: %s", model.model_name, dropped)
+    return filtered
 
 
 def process_tool_event(

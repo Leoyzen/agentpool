@@ -481,7 +481,7 @@ async def list_tools_with_schemas(  # noqa: D417
     - description: string
     - parameters: unknown (JSON schema)
     """
-    _ = provider, model  # Currently unused, for future filtering
+    _ = provider, model  # Builtin tool filtering by provider/model happens in Agent.get_agentlet
 
     try:
         result = [

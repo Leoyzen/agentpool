@@ -594,6 +594,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         input_provider: InputProvider | None = None,
     ) -> PydanticAgent[TDeps, AgentOutputType]:
         """Create pydantic-ai agent from current state."""
+        from agentpool.agents.native_agent.helpers import filter_builtin_tools
         from agentpool.agents.native_agent.tool_wrapping import wrap_tool
 
         tools = await self.tools.get_tools(state="enabled")
@@ -603,7 +604,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             model_, _settings = self._resolve_model_string(actual_model)
         else:
             model_ = actual_model
-
+        # Filter builtin tools to those supported by the resolved model
+        builtin_tools = filter_builtin_tools(self._builtin_tools, model_)
         agent = PydanticAgent(
             name=self.name,
             model=model_,
@@ -614,7 +616,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             output_retries=self._output_retries,
             deps_type=self.deps_type or NoneType,
             output_type=final_type,
-            builtin_tools=self._builtin_tools,
+            builtin_tools=builtin_tools,
             history_processors=self._history_processors or None,
         )
 
