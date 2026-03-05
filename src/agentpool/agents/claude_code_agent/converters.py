@@ -77,13 +77,15 @@ def to_thinking_config(
 ) -> ThinkingConfig | None:
     from clawd_code_sdk import ThinkingConfigAdaptive, ThinkingConfigDisabled, ThinkingConfigEnabled
 
-    if max_thinking_tokens == "adaptive":
-        return ThinkingConfigAdaptive()
-    if max_thinking_tokens == 0:
-        return ThinkingConfigDisabled()
-    if max_thinking_tokens:
-        return ThinkingConfigEnabled(budget_tokens=max_thinking_tokens)
-    return None
+    match max_thinking_tokens:
+        case "adaptive":
+            return ThinkingConfigAdaptive()
+        case 0:
+            return ThinkingConfigDisabled()
+        case int(tokens):
+            return ThinkingConfigEnabled(budget_tokens=tokens)
+        case None:
+            return None
 
 
 def to_prompt_input(content: Sequence[UserContent]) -> Iterator[UserPrompt]:
@@ -113,7 +115,6 @@ def to_prompt_input(content: Sequence[UserContent]) -> Iterator[UserPrompt]:
                 pass  # can get ignored
             case _ as unreachable:
                 assert_never(unreachable)
-                # yield UserTextPrompt(str(other_content))
 
 
 def to_run_usage(usage: Usage) -> RunUsage:
@@ -212,6 +213,8 @@ def convert_mcp_servers_to_sdk_format(
                 config = {"type": "http", "url": str(url)}
                 if server.headers:
                     config["headers"] = server.headers
+            case _ as unreachable:
+                assert_never(unreachable)
 
         result[name] = cast(McpServerConfig, config)
 
@@ -270,8 +273,8 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata:
     additions, deletions = _count_diff_changes(structured_patch)
     filediff = FileDiff(
         file=file_path,
-        before=original_file or "",
-        after=after_content or "",
+        before=original_file,
+        after=after_content,
         additions=additions,
         deletions=deletions,
     )
@@ -280,14 +283,16 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata:
 
 def _convert_read_result(result: ReadOutput) -> ReadMetadata:
     """Convert Read tool result to OpenCode metadata."""
-    # Only text reads have meaningful content for preview
-    if result["type"] != "text":
-        return ReadMetadata(preview="", truncated=False, loaded=[])
-    file_info = result["file"]
-    lines = file_info["content"].splitlines()
-    preview = "\n".join(lines[:20])  # Build preview from first ~20 lines
-    truncated = file_info["numLines"] < file_info["totalLines"]
-    return ReadMetadata(preview=preview, truncated=truncated, loaded=[])
+    match result:
+        case {
+            "type": "text",
+            "file": {"content": str(content), "numLines": int(num), "totalLines": int(total)},
+        }:
+            lines = content.splitlines()
+            preview = "\n".join(lines[:20])
+            return ReadMetadata(preview=preview, truncated=num < total, loaded=[])
+        case _:  # Only text reads have metadata support for Opencode
+            return ReadMetadata(preview="", truncated=False, loaded=[])
 
 
 def _convert_bash_result(result: BashOutput, tool_input: BashInput) -> BashMetadata:
@@ -393,24 +398,13 @@ def _structured_patch_to_diff(file_path: str, structured_patch: list[StructuredP
 
     The lines array uses prefixes: " " (context), "+" (added), "-" (removed)
     """
-    from pathlib import Path
-
     name = Path(file_path).name
     lines = [f"--- a/{name}", f"+++ b/{name}"]
-
-    for hunk in structured_patch:
-        old_start = hunk.get("oldStart", 1)
-        old_lines = hunk.get("oldLines", 0)
-        new_start = hunk.get("newStart", 1)
-        new_lines = hunk.get("newLines", 0)
-        hunk_lines = hunk.get("lines", [])
-
+    for p in structured_patch:
         # Add hunk header
-        lines.append(f"@@ -{old_start},{old_lines} +{new_start},{new_lines} @@")
-
+        lines.append(f"@@ -{p['oldStart']},{p['oldLines']} +{p['newStart']},{p['newLines']} @@")
         # Add the diff lines (already prefixed with ' ', '+', or '-')
-        lines.extend(hunk_lines)
-
+        lines.extend(p["lines"])
     return "\n".join(lines) + "\n" if lines else ""
 
 
@@ -420,7 +414,7 @@ def _count_diff_changes(structured_patch: list[StructuredPatchHunk]) -> tuple[in
     deletions = 0
 
     for hunk in structured_patch:
-        for line in hunk.get("lines", []):
+        for line in hunk["lines"]:
             if line.startswith("+"):
                 additions += 1
             elif line.startswith("-"):

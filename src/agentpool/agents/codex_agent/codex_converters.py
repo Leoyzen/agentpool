@@ -41,6 +41,7 @@ from codex_adapter.models import (
     ThreadItemPlan,
     ThreadItemReasoning,
     ThreadItemUserMessage,
+    ThreadItemWebSearch,
 )
 
 
@@ -254,6 +255,8 @@ async def _format_tool_result(
             return await from_mcp_content(result.content)
         case ThreadItemMcpToolCall(error=error) if error:
             return f"Error: {error.message}"
+        case ThreadItemWebSearch():
+            return ""
         case _:
             return ""
 
@@ -414,15 +417,12 @@ async def convert_codex_stream(  # noqa: PLR0915
                 # We already emitted the actual diff content in item/started
                 pass
 
-            # === Stateless: Text deltas from agent messages ===
             case AgentMessageDeltaEvent(data=data):
                 yield PartDeltaEvent.text(index=0, content=data.delta)
 
-            # === Stateless: Reasoning/thinking deltas ===
             case ReasoningTextDeltaEvent(data=data):
                 yield PartDeltaEvent.thinking(index=0, content=data.delta)
 
-            # === Stateless: Tool/command started ===
             case ItemStartedEvent(data=data):
                 if part := _thread_item_to_tool_call_part(data.item):
                     # Extract title based on tool type
@@ -720,7 +720,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
     if not user_content:
         return []  # Skip turns with no user content
     result: list[ChatMessage[list[UserContent]]] = []
-    user_msg: ChatMessage[list[UserContent]] = ChatMessage(
+    user_msg = ChatMessage[list[UserContent]](
         content=user_content,
         role="user",
         message_id=f"{turn.id}-user",
@@ -732,7 +732,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
     if assistant_responses:
         display_text = "\n\n".join(assistant_display_parts) if assistant_display_parts else ""
         content: list[UserContent] = [display_text] if display_text else []
-        assistant_msg: ChatMessage[list[UserContent]] = ChatMessage(
+        assistant_msg = ChatMessage[list[UserContent]](
             content=content,
             role="assistant",
             message_id=f"{turn.id}-assistant",
