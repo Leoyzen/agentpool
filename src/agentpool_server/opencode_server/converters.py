@@ -297,8 +297,6 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             for p in m.parts
                             if isinstance(p, RetryPromptPart)
                         )
-                        error_message = p.model_response()
-                        is_retryable = True
                         if isinstance(retry_content, list):
                             error_type = "validation_error"
                         elif tool_name:
@@ -308,9 +306,9 @@ def chat_message_to_opencode(  # noqa: PLR0915
 
                         result.add_retry_part(
                             attempt=retry_count,
-                            message=error_message,
+                            message=p.model_response(),
                             created=int(ts.timestamp() * 1000),
-                            is_retryable=is_retryable,
+                            is_retryable=True,
                             metadata={"error_type": error_type} if error_type else None,
                         )
                     case PydanticToolReturnPart(
@@ -377,17 +375,19 @@ def opencode_to_chat_message(
     info = msg.info
     message_id = info.id
     session_id = info.session_id
+    created_ms = info.time.created
+    timestamp = ms_to_datetime(created_ms)
+    model_messages: list[ModelRequest | ModelResponse] = []
     # Determine role and extract timing
     if isinstance(info, UserMessage):
-        role = "user"
-        created_ms = info.time.created
         model_name = info.model.model_id if info.model else None
         provider_name = info.model.provider_id if info.model else None
         usage = RequestUsage()
         finish_reason = None
+        text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]
+        content = "\n".join(text_content) if text_content else ""
+        model_messages.append(ModelRequest(parts=[UserPromptPart(content=content)]))
     else:
-        role = "assistant"
-        created_ms = info.time.created
         model_name = info.model_id
         provider_name = info.provider_id
         usage = RequestUsage(
@@ -397,16 +397,6 @@ def opencode_to_chat_message(
             cache_write_tokens=info.tokens.cache.write,
         )
         finish_reason = info.finish
-
-    timestamp = ms_to_datetime(created_ms)
-    # Build model messages from parts
-    model_messages: list[ModelRequest | ModelResponse] = []
-    if role == "user":
-        # Collect text parts into a user prompt
-        text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]
-        content = "\n".join(text_content) if text_content else ""
-        model_messages.append(ModelRequest(parts=[UserPromptPart(content=content)]))
-    else:
         # Assistant message - collect response parts and tool interactions
         response_parts: list[Any] = []
         tool_returns: list[PydanticToolReturnPart] = []
@@ -457,7 +447,7 @@ def opencode_to_chat_message(
     content = next((p.text for p in msg.parts if isinstance(p, TextPart)), "")
     return ChatMessage(
         content=content,
-        role=role,  # type: ignore[arg-type]
+        role=info.role,
         message_id=message_id,
         session_id=session_id or session_id,
         timestamp=timestamp,
