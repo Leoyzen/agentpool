@@ -238,6 +238,8 @@ class OpenCodeInputProvider(InputProvider):
                 requestedSchema=({"enum": _} | {"type": "array", "items": {"enum": _}}) as schema
             ):
                 return await self._handle_question_elicitation(params, schema)
+            case types.ElicitRequestFormParams(requestedSchema={"type": "string"}):
+                return await self._handle_text_elicitation(params)
             case types.ElicitRequestFormParams(requestedSchema=schema, message=msg):
                 # For other form elicitation, we don't have UI support yet
                 logger.info("Form elicitation request (not supported)", message=msg, schema=schema)
@@ -322,6 +324,60 @@ class OpenCodeInputProvider(InputProvider):
             return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")  # Generic err code
         finally:
             # Clean up pending question
+            self.state.pending_questions.pop(question_id, None)
+
+    async def _handle_text_elicitation(
+        self,
+        params: types.ElicitRequestFormParams,
+    ) -> types.ElicitResult | types.ErrorData:
+        """Handle free-form text elicitation via OpenCode question system.
+
+        Creates a question with a single "Other" option, which triggers
+        the free-text input in the OpenCode UI.
+
+        Args:
+            params: Form elicitation parameters with {"type": "string"} schema
+
+        Returns:
+            Elicit result with user's text response
+        """
+        from agentpool_server.opencode_server.models.events import QuestionAskedEvent
+        from agentpool_server.opencode_server.models.question import QuestionInfo, QuestionOption
+        from agentpool_server.opencode_server.state import PendingQuestion
+
+        question_id = self._generate_permission_id()
+        question_info = QuestionInfo(
+            question=params.message,
+            header=params.message[:12],
+            options=[
+                QuestionOption(label="Other", description="Type your answer"),
+            ],
+        )
+        future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
+        self.state.pending_questions[question_id] = PendingQuestion(
+            session_id=self.session_id,
+            questions=[question_info],
+            future=future,
+        )
+        event = QuestionAskedEvent.create(
+            request_id=question_id,
+            session_id=self.session_id,
+            questions=[question_info],
+        )
+        await self.state.broadcast_event(event)
+        logger.info("Text input question asked", question_id=question_id, message=params.message)
+        try:
+            answers = await future
+            answer = answers[0][0] if answers and answers[0] else ""
+            content: dict[str, str] = {"value": answer}
+            return types.ElicitResult(action="accept", content=content)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        except asyncio.CancelledError:
+            logger.info("Question cancelled", question_id=question_id)
+            return types.ElicitResult(action="cancel")
+        except Exception as e:
+            logger.exception("Question failed", question_id=question_id)
+            return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")
+        finally:
             self.state.pending_questions.pop(question_id, None)
 
     def clear_tool_approvals(self) -> None:
