@@ -52,14 +52,11 @@ def ascending(prefix: PrefixType, given: str | None = None) -> str:
     Raises:
         ValueError: If given ID doesn't start with expected prefix
     """
-    if given is not None:
-        expected_prefix = PREFIXES[prefix]
-        if not given.startswith(expected_prefix):
-            msg = f"ID {given} does not start with {expected_prefix}"
-            raise ValueError(msg)
-        return given
-
-    return _create(prefix, descending=False)
+    if given is None:
+        return _create(prefix, descending=False)
+    if not given.startswith(expected_prefix := PREFIXES[prefix]):
+        raise ValueError(f"ID {given} does not start with {expected_prefix}")
+    return given
 
 
 def descending(prefix: PrefixType) -> str:
