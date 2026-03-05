@@ -10,12 +10,15 @@ from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
 from agentpool_server.opencode_server.models.common import FileDiffStatus  # noqa: TC001
 
 
+FileType = Literal["file", "directory"]
+
+
 class FileNode(OpenCodeBaseModel):
     """File or directory node."""
 
     name: str
     path: str
-    type: Literal["file", "directory"]
+    type: FileType
     size: int | None = None
 
 

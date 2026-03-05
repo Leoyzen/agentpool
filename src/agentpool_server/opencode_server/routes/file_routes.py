@@ -6,7 +6,7 @@ import fnmatch
 import os
 from pathlib import Path
 import re
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 import ripgrep_rs
@@ -19,6 +19,7 @@ from agentpool_server.opencode_server.models import (
     SubmatchInfo,
     Symbol,
 )
+from agentpool_server.opencode_server.models.file import FileType
 
 
 router = APIRouter(tags=["file"])
@@ -260,11 +261,11 @@ async def find_files(
     state: StateDep,
     query: str = Query(),
     dirs: str = Query(default="false"),
-    type: Literal["file", "directory"] | None = Query(default=None),
+    entry_type: FileType | None = Query(default=None, alias="type"),  # noqa: B008
     limit: int | None = Query(default=None),
 ) -> list[str]:
     """Find files by name pattern (glob-style matching)."""
-    include_dirs = dirs.lower() != "false" or type == "directory"
+    include_dirs = dirs.lower() != "false" or entry_type == "directory"
     max_results = min(limit, 200) if limit is not None else 100
     fs = state.fs
     base_path = state.base_path

@@ -116,6 +116,7 @@ from agentpool_server.opencode_server.models.file import (
     FindMatch,
     Symbol,
     SubmatchInfo,
+    FileType,
 )
 from agentpool_server.opencode_server.models.agent import (
     Agent,
@@ -238,6 +239,7 @@ __all__ = [
     "FilePart",
     "FilePartInput",
     "FileStatus",
+    "FileType",
     "FileWatcherUpdatedEvent",
     "FindMatch",
     "FormatterStatus",
