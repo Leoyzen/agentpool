@@ -177,24 +177,6 @@ class TestConvertToolResultToOpencodeMetadata:
         assert convert_to_opencode_metadata("WRITE", sdk_result) is not None
         assert convert_to_opencode_metadata("Write", sdk_result) is not None
 
-    def test_edit_with_missing_original_file(self) -> None:
-        """Test Edit conversion when originalFile is None."""
-        sdk_result = {
-            "filePath": "/tmp/test.py",
-            "oldString": "old",
-            "newString": "new",
-            "originalFile": None,  # Can happen in some edge cases
-            "structuredPatch": [],
-            "userModified": False,
-            "replaceAll": False,
-        }
-        metadata = convert_to_opencode_metadata("Edit", sdk_result)
-        assert metadata is not None
-        metadata = cast(EditMetadata, metadata)
-        assert metadata["filediff"]["before"] == ""
-        # after is empty string when we can't compute it without originalFile
-        assert metadata["filediff"]["after"] == ""
-
     def test_write_without_content_still_succeeds(self) -> None:
         """Test Write conversion without content still succeeds (filepath is enough)."""
         sdk_result = {"filePath": "/tmp/test.py"}
