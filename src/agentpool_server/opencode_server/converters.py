@@ -320,12 +320,15 @@ def chat_message_to_opencode(  # noqa: PLR0915
                         timestamp=tool_ts,
                     ):
                         end_ms = datetime_to_ms(tool_ts)
-                        if isinstance(tool_content, str):
-                            output = tool_content
-                        elif isinstance(tool_content, dict):
-                            output = anyenv.dump_json(tool_content, indent=True)
-                        else:
-                            output = str(tool_content) if tool_content is not None else ""
+                        match tool_content:
+                            case str():
+                                output = tool_content
+                            case dict():
+                                output = anyenv.dump_json(tool_content, indent=True)
+                            case None:
+                                output = ""
+                            case _:
+                                output = str(tool_content)
                         if existing := tool_calls.get(call_id):
                             existing_input = _get_input_from_state(existing.state)
                             if isinstance(tool_content, dict) and "error" in tool_content:

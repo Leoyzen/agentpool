@@ -272,13 +272,12 @@ def _response_parts_to_a2a(parts: Sequence[ModelResponsePart]) -> list[Part]:
     """
     a2a_parts: list[Part] = []
     for part in parts:
-        if isinstance(part, TextPart):
-            a2a_parts.append(A2ATextPart(kind="text", text=part.content))
-        elif isinstance(part, ThinkingPart):
-            # Convert thinking to text with metadata
-            meta = {"type": "thinking", "thinking_id": part.id, "signature": part.signature}
-            a2a_parts.append(A2ATextPart(kind="text", text=part.content, metadata=meta))
-        elif isinstance(part, ToolCallPart):
-            # Skip tool calls - they're internal to agent execution
-            pass
+        match part:
+            case TextPart(content=content):
+                a2a_parts.append(A2ATextPart(kind="text", text=content))
+            case ThinkingPart(content=content, id=thinking_id, signature=signature):
+                meta = {"type": "thinking", "thinking_id": thinking_id, "signature": signature}
+                a2a_parts.append(A2ATextPart(kind="text", text=content, metadata=meta))
+            case ToolCallPart():
+                pass
     return a2a_parts
