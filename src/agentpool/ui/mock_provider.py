@@ -38,7 +38,7 @@ class MockInputProvider(InputProvider):
         elicitation_response: dict[str, Any] | None = None,
     ) -> None:
         self.input_response = input_response
-        self.tool_confirmation = tool_confirmation
+        self.tool_confirmation: ConfirmationResult = tool_confirmation
         self.elicitation_response = elicitation_response or {"response": "mock response"}
         self.calls: list[InputCall] = []
 
@@ -48,11 +48,10 @@ class MockInputProvider(InputProvider):
         prompt: str,
         output_type: type | None = None,
     ) -> Any:
-        kwargs = {"output_type": output_type}
         call = InputCall(
             method="get_input",
             args=(context, prompt),
-            kwargs=kwargs,
+            kwargs={"output_type": output_type},
             result=self.input_response,
         )
         self.calls.append(call)
@@ -63,15 +62,14 @@ class MockInputProvider(InputProvider):
         context: AgentContext[Any],
         tool_description: str = "",
     ) -> ConfirmationResult:
-        result = self.tool_confirmation
         call = InputCall(
             method="get_tool_confirmation",
             args=(context, tool_description),
             kwargs={},
-            result=result,
+            result=self.tool_confirmation,
         )
         self.calls.append(call)
-        return result  # pyright: ignore
+        return self.tool_confirmation
 
     async def get_elicitation(
         self,
