@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
+from annotated_types import Predicate
 from pydantic import Field
 
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
 from agentpool_server.opencode_server.models.common import ModelRef  # noqa: TC001
 
 
+ThemeColor = Literal["primary", "secondary", "accent", "success", "warning", "error", "info"]
+"""Predefined theme color names."""
+
+HexColor = Annotated[
+    str,
+    Predicate(
+        lambda s: len(s) == 7 and s[0] == "#" and all(c in "0123456789abcdefABCDEF" for c in s[1:])  # noqa: PLR2004
+    ),
+]
+"""Hex color code in #RRGGBB format."""
+
+AgentColor = HexColor | ThemeColor
+"""Agent color: hex code (#FF5733) or theme color name."""
 PermissionBehavior = Literal["ask", "allow", "deny"]
 AgentMode = Literal["subagent", "primary", "all"]
 
@@ -36,7 +50,7 @@ class Agent(OpenCodeBaseModel):
     default: bool | None = None
     top_p: float | None = None
     temperature: float | None = None
-    color: str | None = None
+    color: AgentColor | None = None
     permission: AgentPermission = Field(default_factory=AgentPermission)
     model: ModelRef | None = None
     prompt: str | None = None
@@ -127,20 +141,53 @@ class WorktreeResetRequest(OpenCodeBaseModel):
     """Worktree directory path to reset."""
 
 
-class AuthInfo(OpenCodeBaseModel):
-    """Authentication credential info."""
+class OAuthAuthInfo(OpenCodeBaseModel):
+    """OAuth authentication credentials."""
 
-    type: str = "api_key"
-    """Auth type (e.g., 'api_key', 'oauth')."""
+    type: Literal["oauth"]
+    """Auth type discriminator."""
 
-    token: str | None = None
-    """API key or access token."""
+    refresh: str
+    """Refresh token."""
 
-    refresh: str | None = None
-    """Refresh token (for OAuth)."""
+    access: str
+    """Access token."""
 
-    expires: int | None = None
+    expires: int
     """Token expiry timestamp."""
+
+    account_id: str | None = None
+    """Optional account identifier."""
+
+    enterprise_url: str | None = None
+    """Optional enterprise URL."""
+
+
+class ApiAuthInfo(OpenCodeBaseModel):
+    """API key authentication credentials."""
+
+    type: Literal["api"]
+    """Auth type discriminator."""
+
+    key: str
+    """API key."""
+
+
+class WellKnownAuthInfo(OpenCodeBaseModel):
+    """Well-known authentication credentials."""
+
+    type: Literal["wellknown"]
+    """Auth type discriminator."""
+
+    key: str
+    """Key identifier."""
+
+    token: str
+    """Authentication token."""
+
+
+AuthInfo = OAuthAuthInfo | ApiAuthInfo | WellKnownAuthInfo
+"""Authentication credentials (discriminated union on 'type')."""
 
 
 class WorkspaceInfo(OpenCodeBaseModel):

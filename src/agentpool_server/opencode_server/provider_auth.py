@@ -21,6 +21,7 @@ from llmling_models.auth.anthropic_auth import (
 )
 
 from agentpool_server.opencode_server.models.agent import (
+    OAuthAuthInfo,
     ProviderAuthAuthorization,
     ProviderAuthMethod,
 )
@@ -129,13 +130,13 @@ class AnthropicAuthBackend(ProviderAuthBackend):
         return True
 
     async def set_credentials(self, info: AuthInfo) -> bool:
-        if not info.token:
+        if not isinstance(info, OAuthAuthInfo):
             return False
         store = AnthropicTokenStore()
         token = AnthropicOAuthToken(
-            access_token=info.token,
-            refresh_token=info.refresh or "",
-            expires_at=info.expires or 0,
+            access_token=info.access,
+            refresh_token=info.refresh,
+            expires_at=info.expires,
         )
         store.save(token)
         return True
