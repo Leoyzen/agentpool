@@ -58,6 +58,7 @@ from agentpool.agents.events import (
     PartDeltaEvent,
     PlanUpdateEvent,
     TerminalContentItem,
+    ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
@@ -321,8 +322,6 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
         ):
             # If completed, return ToolCallCompleteEvent for metadata injection
             if status == "completed":
-                from agentpool.agents.events import ToolCallCompleteEvent
-
                 return ToolCallCompleteEvent(
                     tool_call_id=tool_call_id,
                     tool_name=title or "unknown",

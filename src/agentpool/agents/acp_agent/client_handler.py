@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from asyncio import Event
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 import anyio
 from pydantic_ai import PartDeltaEvent, TextPartDelta
@@ -240,12 +240,16 @@ class ACPClientHandler(Client):
                     tool_description=name,
                 )
                 # Map confirmation result to ACP response
-                if result == "allow":
-                    option_id = params.options[0].option_id if params.options else "allow"
-                    return RequestPermissionResponse.allowed(option_id)
-                if result == "skip":
-                    return RequestPermissionResponse.denied()
-                return RequestPermissionResponse.denied()  # abort_run
+                match result:
+                    case "allow":
+                        option_id = params.options[0].option_id if params.options else "allow"
+                        return RequestPermissionResponse.allowed(option_id)
+                    case "skip":
+                        return RequestPermissionResponse.denied()
+                    case "abort_chain" | "abort_run":
+                        return RequestPermissionResponse.denied()
+                    case _ as unreachable:
+                        assert_never(unreachable)  # ty:ignore[type-assertion-failure]
             except Exception:
                 logger.exception("Failed to get permission via input provider")
                 return RequestPermissionResponse.denied()

@@ -26,6 +26,7 @@ from pydantic_ai import (
     ToolCallPart,
     ToolReturnPart,
     UploadedFile,
+    UserContent,
     UserPromptPart,
 )
 
@@ -48,7 +49,7 @@ from codex_adapter.models import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from pydantic_ai import FinishReason, UserContent
+    from pydantic_ai import FinishReason
     from tokonomics.model_discovery.model_info import Modality, ModelInfo as TokoModelInfo
 
     from agentpool.agents.events import RichAgentStreamEvent
