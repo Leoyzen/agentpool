@@ -115,6 +115,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 path_for_loading = config_path
             case AgentsManifest():
                 manifest_obj = manifest
+                # Extract config_file_path from pre-loaded manifest for path resolution
+                if manifest.config_file_path is not None:
+                    config_path = to_upath(manifest.config_file_path)
             case _:
                 raise ValueError(f"Invalid config type: {type(manifest)}")
 
