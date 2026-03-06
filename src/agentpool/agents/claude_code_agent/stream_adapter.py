@@ -1,0 +1,334 @@
+"""Stream adapter for converting Claude SDK messages to agentpool events.
+
+Tool Call Event Flow
+--------------------
+The SDK streams events in a specific order. Understanding this is critical for
+avoiding race conditions with permission dialogs:
+
+1. **content_block_start** (StreamEvent)
+   - Contains tool_use_id, tool name
+   - We emit ToolCallStartEvent here (early, with empty args)
+   - ACP converter sends `tool_call` notification to client
+
+2. **content_block_delta** (StreamEvent, multiple)
+   - Contains input_json_delta with partial JSON args
+   - We emit PartDeltaEvent(ToolCallPartDelta) for streaming
+   - ACP converter accumulates args, doesn't send notifications
+
+3. **AssistantMessage** with ToolUseBlock
+   - Contains complete tool call info (id, name, full args)
+   - We do NOT emit events here (would race with permission)
+   - Just track file modifications silently
+
+4. **content_block_stop**, **message_delta**, **message_stop** (StreamEvent)
+   - Signal completion of the message
+
+5. **can_use_tool callback** (~100ms after message_stop)
+   - SDK calls our permission callback
+   - We send permission request to ACP client
+   - Client shows permission dialog to user
+   - IMPORTANT: No notifications should be sent while dialog is open!
+
+6. **Tool execution or denial**
+   - If allowed: tool runs, emits ToolCallCompleteEvent
+   - If denied: SDK receives denial, continues with next turn
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import re
+from typing import TYPE_CHECKING, Any, cast
+
+from pydantic_ai import (
+    FunctionToolResultEvent,
+    ModelRequest,
+    ModelResponse,
+    PartEndEvent,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolCallPartDelta,
+    ToolReturnPart,
+)
+
+from agentpool.agents.claude_code_agent.converters import (
+    convert_to_opencode_metadata,
+)
+from agentpool.agents.events import (
+    PartDeltaEvent,
+    PartStartEvent,
+    ToolCallCompleteEvent,
+    ToolCallProgressEvent,
+    ToolCallStartEvent,
+)
+from agentpool.agents.events.infer_info import derive_rich_tool_info
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from clawd_code_sdk import ResultMessage, ToolUseBlock
+    from clawd_code_sdk.models import StopReason
+
+    from agentpool.agents.events import RichAgentStreamEvent
+
+_MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
+"""Pattern to detect CC-provided tool names."""
+
+
+def _strip_mcp_prefix(tool_name: str) -> str:
+    """Strip MCP server prefix from tool names for cleaner UI display."""
+    if match := _MCP_TOOL_PATTERN.match(tool_name):
+        return match.group(2)
+    return tool_name
+
+
+@dataclass
+class StreamAdapterResult:
+    """Accumulated state from processing the Claude SDK stream.
+
+    Populated during stream processing and consumed by the caller
+    to build the final ChatMessage.
+    """
+
+    result_message: ResultMessage | None = None
+    """The SDK ResultMessage captured at end of stream (contains usage, cost, etc.)."""
+
+    resolved_model: str | None = None
+    """Model identifier resolved from AssistantMessage responses."""
+
+    model_messages: list[ModelResponse | ModelRequest] = field(default_factory=list)
+    """Accumulated pydantic-ai model messages (for ChatMessage.messages)."""
+
+    response_parts: list[TextPart | ThinkingPart | ToolCallPart] = field(default_factory=list)
+    """Current turn's response parts (text, thinking, tool calls)."""
+
+    @property
+    def stop_reason(self) -> StopReason | None:
+        """Extract stop reason from result message."""
+        return self.result_message.stop_reason if self.result_message else None
+
+
+async def adapt_claude_stream(  # noqa: PLR0915
+    merged_stream: AsyncIterator[Any],
+    tool_metadata: dict[str, dict[str, Any]],
+    agent_name: str,
+    session_id: str | None,
+) -> AsyncIterator[RichAgentStreamEvent[Any] | StreamAdapterResult]:
+    """Convert a Claude SDK message stream into agentpool events.
+
+    Takes an already-merged stream (SDK messages + injected events) and
+    converts SDK message types into agentpool's RichAgentStreamEvent types.
+    As the final yielded item, produces a StreamAdapterResult containing
+    accumulated state needed for building the final ChatMessage.
+
+    Args:
+        merged_stream: Pre-merged async iterator of SDK Messages and injected events.
+        tool_metadata: Metadata dict from tool bridge, keyed by tool_call_id.
+        agent_name: Name of the agent (for event attribution).
+        session_id: Current session ID.
+
+    Yields:
+        RichAgentStreamEvent instances, followed by a final StreamAdapterResult.
+    """
+    from anthropic.types import (
+        InputJSONDelta,
+        RawContentBlockDeltaEvent,
+        RawContentBlockStartEvent,
+        RawContentBlockStopEvent,
+        TextBlock as AnthTextBlock,
+        TextDelta,
+        ThinkingBlock as AnthThinkingBlock,
+        ThinkingDelta,
+        ToolUseBlock as AnthToolUseBlock,
+    )
+    from clawd_code_sdk import (
+        AssistantMessage,
+        Message,
+        ResultMessage,
+        TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+    from clawd_code_sdk.models import (
+        CompactBoundarySystemMessage,
+        StatusSystemMessage,
+        StreamEvent,
+    )
+
+    result = StreamAdapterResult()
+    pending_tool_calls: dict[str, ToolUseBlock] = {}
+    streaming_tc_id: str | None = None
+
+    async for event_or_message in merged_stream:
+        if not isinstance(event_or_message, Message):
+            yield event_or_message
+            continue
+        message = event_or_message
+        match message:
+            case AssistantMessage(model=model, content=msg_content):
+                if model:
+                    result.resolved_model = model
+                for block in msg_content:
+                    match block:
+                        case TextBlock(text=text):
+                            result.response_parts.append(TextPart(content=text))
+                        case ThinkingBlock(thinking=text):
+                            result.response_parts.append(ThinkingPart(content=text))
+                        case ToolUseBlock(id=tc_id, name=name, input=input_data):
+                            pending_tool_calls[tc_id] = block
+                            display_name = _strip_mcp_prefix(name)
+                            tool_call_part = ToolCallPart(
+                                tool_name=display_name,
+                                args=cast(dict[str, Any], input_data),
+                                tool_call_id=tc_id,
+                            )
+                            result.response_parts.append(tool_call_part)
+                            # Emit progress update with complete args
+                            # (ToolCallStartEvent was already emitted via streaming
+                            # with empty args; now we have the full picture)
+                            rich_info = derive_rich_tool_info(name, input_data)
+                            yield ToolCallProgressEvent(
+                                tool_call_id=tc_id,
+                                tool_name=display_name,
+                                title=rich_info.title,
+                                tool_input=cast(dict[str, Any], input_data),
+                            )
+                        case ToolResultBlock():
+                            pass  # ToolResult Blocks only appear in UserMessages
+
+            case UserMessage(content=list() as user_blocks):
+                for user_block in user_blocks:
+                    if not isinstance(user_block, ToolResultBlock):
+                        continue
+                    tc_id = user_block.tool_use_id
+                    result_content = user_block.get_parsed_content()
+                    # Flush response parts into model messages
+                    if result.response_parts:
+                        model_response = ModelResponse(parts=result.response_parts)
+                        result.model_messages.append(model_response)
+                        result.response_parts = []
+
+                    tool_use = pending_tool_calls.pop(tc_id)
+                    return_part = ToolReturnPart(
+                        tool_name=_strip_mcp_prefix(tool_use.name),
+                        content=result_content,
+                        tool_call_id=tc_id,
+                    )
+                    yield FunctionToolResultEvent(result=return_part)
+                    tool_input = cast(dict[str, Any], tool_use.input) if tool_use else {}
+                    metadata: dict[str, Any] | None = tool_metadata.get(tc_id)
+                    if not metadata and isinstance(message.tool_use_result, list):
+                        tool_use_result = (
+                            message.tool_use_result[0] if message.tool_use_result else {}
+                        )
+                        metadata = convert_to_opencode_metadata(
+                            tool_use.name,
+                            tool_use_result,  # pyright: ignore[reportArgumentType]
+                            tool_input,
+                        )  # type: ignore[assignment]
+
+                    yield ToolCallCompleteEvent(
+                        tool_name=_strip_mcp_prefix(tool_use.name),
+                        tool_call_id=tc_id,
+                        tool_input=tool_input,
+                        tool_result=result_content,
+                        agent_name=agent_name,
+                        message_id="",
+                        metadata=metadata,
+                    )
+                    result.model_messages.append(ModelRequest(parts=[return_part]))
+
+            # Real-time streaming: content_block_start
+            case StreamEvent(
+                event=RawContentBlockStartEvent(index=index, content_block=AnthTextBlock())
+            ):
+                yield PartStartEvent.text(index=index, content="")
+
+            case StreamEvent(
+                event=RawContentBlockStartEvent(index=index, content_block=AnthThinkingBlock())
+            ):
+                yield PartStartEvent.thinking(index=index, content="")
+
+            case StreamEvent(
+                event=RawContentBlockStartEvent(
+                    content_block=AnthToolUseBlock(id=tc_id, name=raw_tool_name)
+                )
+            ):
+                tool_name = _strip_mcp_prefix(raw_tool_name)
+                streaming_tc_id = tc_id
+                rich_info = derive_rich_tool_info(raw_tool_name, {})
+                yield ToolCallStartEvent(
+                    tool_call_id=tc_id,
+                    tool_name=tool_name,
+                    title=rich_info.title,
+                    kind=rich_info.kind,
+                    locations=[],
+                    content=rich_info.content,
+                    raw_input={},
+                )
+
+            # content_block_delta events
+            case StreamEvent(
+                event=RawContentBlockDeltaEvent(index=index, delta=TextDelta(text=text))
+            ) if text:
+                yield PartDeltaEvent.text(index=index, content=text)
+
+            case StreamEvent(
+                event=RawContentBlockDeltaEvent(index=index, delta=ThinkingDelta(thinking=thinking))
+            ) if thinking:
+                yield PartDeltaEvent.thinking(index=index, content=thinking)
+
+            case StreamEvent(
+                event=RawContentBlockDeltaEvent(
+                    index=index, delta=InputJSONDelta(partial_json=partial_json)
+                )
+            ) if partial_json and streaming_tc_id:
+                tool_delta = ToolCallPartDelta(
+                    args_delta=partial_json,
+                    tool_call_id=streaming_tc_id,
+                )
+                yield PartDeltaEvent(index=index, delta=tool_delta)
+
+            # content_block_stop
+            case StreamEvent(event=RawContentBlockStopEvent(index=index)):
+                streaming_tc_id = None
+                yield PartEndEvent(index=index, part=TextPart(content=""))
+
+            case StatusSystemMessage(status="compacting"):
+                from agentpool.agents.events import CompactionEvent
+
+                yield CompactionEvent(
+                    session_id=session_id or "unknown",
+                    trigger="auto",
+                    phase="starting",
+                )
+                continue
+
+            case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
+                from agentpool.agents.events import CompactionEvent
+
+                yield CompactionEvent(
+                    session_id=session_id or "unknown",
+                    trigger=compact_metadata["trigger"],
+                    phase="completed",
+                    pre_tokens=compact_metadata["pre_tokens"],
+                )
+                continue
+
+            case StreamEvent():
+                continue
+
+        # Check for result (end of response)
+        if isinstance(message, ResultMessage):
+            result.result_message = message
+            break
+
+    # Flush remaining response parts
+    if result.response_parts:
+        result.model_messages.append(ModelResponse(parts=result.response_parts))
+
+    yield result

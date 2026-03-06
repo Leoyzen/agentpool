@@ -1,57 +1,4 @@
-"""ClaudeCodeAgent - Native Claude Agent SDK integration.
-
-This module provides an agent implementation that wraps the Claude Agent SDK's
-ClaudeSDKClient for native integration with agentpool.
-
-The ClaudeCodeAgent acts as a client to the Claude Code CLI, enabling:
-- Bidirectional streaming communication
-- Tool permission handling via callbacks
-- Integration with agentpool's event system
-
-Tool Call Event Flow
---------------------
-The SDK streams events in a specific order. Understanding this is critical for
-avoiding race conditions with permission dialogs:
-
-1. **content_block_start** (StreamEvent)
-   - Contains tool_use_id, tool name
-   - We emit ToolCallStartEvent here (early, with empty args)
-   - ACP converter sends `tool_call` notification to client
-
-2. **content_block_delta** (StreamEvent, multiple)
-   - Contains input_json_delta with partial JSON args
-   - We emit PartDeltaEvent(ToolCallPartDelta) for streaming
-   - ACP converter accumulates args, doesn't send notifications
-
-3. **AssistantMessage** with ToolUseBlock
-   - Contains complete tool call info (id, name, full args)
-   - We do NOT emit events here (would race with permission)
-   - Just track file modifications silently
-
-4. **content_block_stop**, **message_delta**, **message_stop** (StreamEvent)
-   - Signal completion of the message
-
-5. **can_use_tool callback** (~100ms after message_stop)
-   - SDK calls our permission callback
-   - We send permission request to ACP client
-   - Client shows permission dialog to user
-   - IMPORTANT: No notifications should be sent while dialog is open!
-
-6. **Tool execution or denial**
-   - If allowed: tool runs, emits ToolCallCompleteEvent
-   - If denied: SDK receives denial, continues with next turn
-
-Example:
-    ```python
-    async with ClaudeCodeAgent(
-        name="claude_coder",
-        env="/path/to/project",
-        allowed_tools=["Read", "Write", "Bash"],
-    ) as agent:
-        async for event in agent.run_stream("Write a hello world program"):
-            print(event)
-    ```
-"""
+"""ClaudeCodeAgent - Native Claude Agent SDK integration."""
 
 from __future__ import annotations
 
@@ -66,25 +13,13 @@ import uuid
 
 import anyio
 from pydantic import TypeAdapter
-from pydantic_ai import (
-    FunctionToolResultEvent,
-    ModelRequest,
-    ModelResponse,
-    PartEndEvent,
-    TextPart,
-    ThinkingPart,
-    ToolCallPart,
-    ToolCallPartDelta,
-    ToolReturnPart,
-    UserPromptPart,
-)
+from pydantic_ai import TextPart
 from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.claude_code_agent.converters import (
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
-    convert_to_opencode_metadata,
     to_finish_reason,
     to_prompt_input,
     to_request_usage,
@@ -93,22 +28,12 @@ from agentpool.agents.claude_code_agent.converters import (
 )
 from agentpool.agents.claude_code_agent.slash_commands import create_claude_code_command
 from agentpool.agents.claude_code_agent.static_info import models_to_category
-from agentpool.agents.events import (
-    PartDeltaEvent,
-    PartStartEvent,
-    RunErrorEvent,
-    RunStartedEvent,
-    StreamCompleteEvent,
-    ToolCallCompleteEvent,
-    ToolCallStartEvent,
-)
-from agentpool.agents.events.infer_info import derive_rich_tool_info
+from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
     UnknownModeError,
 )
-from agentpool.agents.tool_call_accumulator import ToolCallAccumulator
 from agentpool.common_types import MCPServerStatus
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -129,7 +54,6 @@ if TYPE_CHECKING:
         PermissionMode,
         PermissionResult,
         ToolPermissionContext,
-        ToolUseBlock,
     )
     from clawd_code_sdk.models import (
         AskUserQuestionInput,
@@ -832,77 +756,34 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
-        from anthropic.types import (
-            InputJSONDelta,
-            RawContentBlockDeltaEvent,
-            RawContentBlockStartEvent,
-            RawContentBlockStopEvent,
-            TextBlock as AnthTextBlock,
-            TextDelta,
-            ThinkingBlock as AnthThinkingBlock,
-            ThinkingDelta,
-            ToolUseBlock as AnthToolUseBlock,
-        )
-        from clawd_code_sdk import (
-            AssistantMessage,
-            Message,
-            ResultMessage,
-            ResultSuccessMessage,
-            TextBlock,
-            ThinkingBlock,
-            ToolResultBlock,
-            ToolUseBlock,
-            UserMessage,
-        )
-        from clawd_code_sdk.models import (
-            CompactBoundarySystemMessage,
-            StatusSystemMessage,
-            StreamEvent,
+        from clawd_code_sdk import AssistantMessage, ResultSuccessMessage
+
+        from agentpool.agents.claude_code_agent.stream_adapter import (
+            StreamAdapterResult,
+            adapt_claude_stream,
         )
 
         await self.ensure_initialized()
-        # Initialize session_id on first run and log to storage
-        # Use passed session_id if provided (e.g., from chained agents)
-        # TODO: decide whether we should store CC sessions ourselves
-        # For Claude Code, session_id comes from the SDK's init message:
-        #   if hasattr(message, 'subtype') and message.subtype == 'init':
-        #       session_id = message.data.get('session_id')
-        # The SDK manages its own session persistence. To resume, pass:
-        #   ClaudeAgentOptions(session=ResumeSession(session_id=session_id))
-        # Conversation ID initialization handled by BaseAgent
-
         # Resolve input provider: explicit parameter overrides agent default
         effective_input_provider = input_provider or self._input_provider
         run_context = self.get_context(data=deps, input_provider=effective_input_provider)
         if not self._client:
             raise AgentNotInitializedError
-        # Get pending parts from conversation (staged content)
-        # Combine pending parts with new prompts, then join into single string for Claude SDK
         run_id = str(uuid.uuid4())
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
-        request = ModelRequest(parts=[UserPromptPart(content=prompts)])
-        model_messages: list[ModelResponse | ModelRequest] = [request]
-        current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
-        pending_tool_calls: dict[str, ToolUseBlock] = {}
-        # Track tool calls that already had ToolCallStartEvent emitted (via StreamEvent)
-        emitted_tool_starts: set[str] = set()
-        tool_accumulator = ToolCallAccumulator()
-        resolved_model: str | None = None
+
         # Handle ephemeral execution (fork session if store_history=False)
         fork_client = None
         client = self._client
-        result_message: ResultMessage | None = None
-
         if not store_history and self._sdk_session_id:
             # Create fork client that shares parent's context but has separate session ID
             # See: src/agentpool/agents/claude_code_agent/FORKING.md
-            # Build options using same method as main client
             fork_client = self._get_client(fork_session=True)
             await fork_client.connect()
             client = fork_client
 
-        # Set run context on tool bridge (ContextVar doesn't work - separate task)
+        adapter_result: StreamAdapterResult | None = None
         try:
             claude_prompts = [*to_prompt_input(prompts)]
             await client.query(*claude_prompts)
@@ -916,234 +797,33 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Persist SDK session ID to storage for cross-referencing
             if self.storage and self.session_id:
                 await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
+
             async with (
                 self._tool_bridge.set_run_context(run_context, prompt=prompts),
                 merge_queue_into_iterator(stream, self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
             ):
-                async for event_or_message in merged_events:
-                    if not isinstance(event_or_message, Message):
-                        yield event_or_message
-                        continue
-                    message = event_or_message
-                    match message:
-                        case AssistantMessage(model=model, content=msg_content):
-                            # Track resolved model from provider response
-                            if model:
-                                resolved_model = model
-                            # Check for usage limit error
-                            for block in msg_content:
-                                match block:
-                                    case TextBlock(text=text):
-                                        current_response_parts.append(TextPart(content=text))
-                                    case ThinkingBlock(thinking=text):
-                                        current_response_parts.append(ThinkingPart(content=text))
-                                    case ToolUseBlock(id=tc_id, name=name, input=input_data):
-                                        pending_tool_calls[tc_id] = block
-                                        display_name = _strip_mcp_prefix(name)
-                                        tool_call_part = ToolCallPart(
-                                            tool_name=display_name,
-                                            args=cast(dict[str, Any], input_data),
-                                            tool_call_id=tc_id,
-                                        )
-                                        current_response_parts.append(tool_call_part)
-                                        # Emit FunctionToolCallEvent (triggers UI notification)
-                                        # fn_tool_event = FunctionToolCallEvent(part=tool_call_part)
-                                        # await event_handlers(None, fn_tool_event)
-                                        # yield fn_tool_event
-                                        # Only emit ToolCallStartEvent if not already emitted
-                                        # via streaming (emits early with partial info)
-                                        if tc_id not in emitted_tool_starts:
-                                            rich_info = derive_rich_tool_info(name, input_data)
-                                            tool_start_event = ToolCallStartEvent(
-                                                tool_call_id=tc_id,
-                                                tool_name=display_name,
-                                                title=rich_info.title,
-                                                kind=rich_info.kind,
-                                                locations=rich_info.locations,
-                                                content=rich_info.content,
-                                                raw_input=cast(dict[str, Any], input_data),
-                                            )
-                                            yield tool_start_event
-                                        # Clean up from accumulator (always, both branches)
-                                        tool_accumulator.complete(tc_id)
-                                    case ToolResultBlock():
-                                        pass  # ToolResult Blocks only appear in UserMessages
-                        # Process user messages - may contain tool results
-                        case UserMessage(content=list() as user_blocks):  # TODO: handle str?
-                            # Extract tool_use_result from UserMessage for metadata conversion
-                            for user_block in user_blocks:
-                                if isinstance(user_block, ToolResultBlock):
-                                    tc_id = user_block.tool_use_id
-                                    result_content = user_block.get_parsed_content()
-                                    # Flush response parts
-                                    if current_response_parts:
-                                        model_response = ModelResponse(parts=current_response_parts)
-                                        model_messages.append(model_response)
-                                        current_response_parts = []
-
-                                    # Get tool name from pending calls
-                                    tool_use = pending_tool_calls.pop(tc_id)
-                                    # Create ToolReturnPart for the result
-                                    return_part = ToolReturnPart(
-                                        tool_name=_strip_mcp_prefix(tool_use.name),
-                                        content=result_content,
-                                        tool_call_id=tc_id,
-                                    )
-                                    # Emit FunctionToolResultEvent (for session.py to complete UI)
-                                    yield FunctionToolResultEvent(result=return_part)
-                                    # Build metadata: prefer existing tool_metadata,
-                                    # then convert SDK result
-                                    tool_input = (
-                                        cast(dict[str, Any], tool_use.input) if tool_use else {}
-                                    )
-                                    metadata: dict[str, Any] | None = (
-                                        self._tool_bridge.tool_metadata.get(tc_id)
-                                    )
-                                    if not metadata and isinstance(message.tool_use_result, list):
-                                        result = (
-                                            message.tool_use_result[0]
-                                            if message.tool_use_result
-                                            else {}
-                                        )
-
-                                        # Convert Claude Code SDK's tool_use_result to OpenCode fmt
-                                        metadata = convert_to_opencode_metadata(
-                                            tool_use.name,
-                                            result,  # pyright: ignore[reportArgumentType]
-                                            tool_input,
-                                        )  # type: ignore[assignment]
-
-                                    # Also emit ToolCallCompleteEvent for consumers that expect it
-                                    yield ToolCallCompleteEvent(
-                                        tool_name=_strip_mcp_prefix(tool_use.name),
-                                        tool_call_id=tc_id,
-                                        tool_input=tool_input,
-                                        tool_result=result_content,
-                                        agent_name=self.name,
-                                        message_id="",
-                                        metadata=metadata,
-                                    )
-                                    # Add tool return as ModelRequest
-                                    model_messages.append(ModelRequest(parts=[return_part]))
-
-                        # Handle StreamEvent for real-time streaming
-                        case StreamEvent(
-                            event=RawContentBlockStartEvent(
-                                index=index, content_block=AnthTextBlock()
-                            )
-                        ):
-                            yield PartStartEvent.text(index=index, content="")
-
-                        case StreamEvent(
-                            event=RawContentBlockStartEvent(
-                                index=index, content_block=AnthThinkingBlock()
-                            )
-                        ):
-                            yield PartStartEvent.thinking(index=index, content="")
-
-                        case StreamEvent(
-                            event=RawContentBlockStartEvent(
-                                content_block=AnthToolUseBlock(id=tc_id, name=raw_tool_name)
-                            )
-                        ):
-                            # Emit ToolCallStartEvent early (args still streaming)
-                            tool_name = _strip_mcp_prefix(raw_tool_name)
-                            tool_accumulator.start(tc_id, tool_name)
-                            # Derive rich info with empty args for now
-                            rich_info = derive_rich_tool_info(raw_tool_name, {})
-                            emitted_tool_starts.add(tc_id)
-                            yield ToolCallStartEvent(
-                                tool_call_id=tc_id,
-                                tool_name=tool_name,
-                                title=rich_info.title,
-                                kind=rich_info.kind,
-                                locations=[],  # No locations yet, args not complete
-                                content=rich_info.content,
-                                raw_input={},  # Empty, will be filled when complete
-                            )
-
-                        # content_block_delta events
-                        case StreamEvent(
-                            event=RawContentBlockDeltaEvent(index=index, delta=TextDelta(text=text))
-                        ) if text:
-                            yield PartDeltaEvent.text(index=index, content=text)
-                        case StreamEvent(
-                            event=RawContentBlockDeltaEvent(
-                                index=index, delta=ThinkingDelta(thinking=thinking)
-                            )
-                        ) if thinking:
-                            yield PartDeltaEvent.thinking(index=index, content=thinking)
-                        case StreamEvent(
-                            event=RawContentBlockDeltaEvent(
-                                index=index, delta=InputJSONDelta(partial_json=partial_json)
-                            )
-                        ) if partial_json:
-                            # Accumulate tool argument JSON fragments
-                            # Find which tool call this belongs to by index
-                            for tc_id in tool_accumulator._calls:
-                                tool_accumulator.add_args(tc_id, partial_json)
-                                tool_delta = ToolCallPartDelta(
-                                    args_delta=partial_json,
-                                    tool_call_id=tc_id,
-                                )
-                                yield PartDeltaEvent(index=index, delta=tool_delta)
-                                break  # Only one tool call streams at a time
-
-                        # content_block_stop events
-                        case StreamEvent(event=RawContentBlockStopEvent(index=index)):
-                            # Emit with empty part - content was accumulated via deltas
-                            yield PartEndEvent(index=index, part=TextPart(content=""))
-
-                        case StatusSystemMessage(status="compacting"):
-                            from agentpool.agents.events import CompactionEvent
-
-                            yield CompactionEvent(
-                                session_id=self.session_id or "unknown",
-                                trigger="auto",
-                                phase="starting",
-                            )
-                            continue
-
-                        case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
-                            from agentpool.agents.events import CompactionEvent
-
-                            yield CompactionEvent(
-                                session_id=self.session_id or "unknown",
-                                trigger=compact_metadata["trigger"],
-                                phase="completed",
-                                pre_tokens=compact_metadata["pre_tokens"],
-                            )
-                            continue
-
-                        case StreamEvent():
-                            # Ignore other StreamEvent types (message_start, etc.)
-                            # Skip further processing - don't duplicate
-                            continue
-
-                        # All other message types (ResultMessage, InitSystemMessage, etc.)
-                        # fall through to post-match processing below
-
-                    # Check for result (end of response) and capture usage info
-                    if isinstance(message, ResultMessage):
-                        result_message = message
-                        break
-
-                    # Note: We do NOT return early on cancellation here.
-                    # The SDK docs warn against using break/return to exit receive_response()
-                    # early as it can cause asyncio cleanup issues. Instead, we let the
-                    # interrupt() call cause the SDK to send a ResultMessage that will
-                    # naturally terminate the stream via the isinstance(message, ResultMessage)
-                    # check above. The _cancelled flag is checked in process_prompt() to
-                    # return the correct stop reason.
+                async for event in adapt_claude_stream(
+                    merged_stream=merged_events,
+                    tool_metadata=self._tool_bridge.tool_metadata,
+                    agent_name=self.name,
+                    session_id=self.session_id,
+                ):
+                    if isinstance(event, StreamAdapterResult):
+                        adapter_result = event
+                    else:
+                        yield event
 
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via CancelledError")
-            # Emit partial response on cancellation
-            # Build metadata with SDK session ID
             msg_metadata: SimpleJsonType = {}
             if self._sdk_session_id:
                 msg_metadata["sdk_session_id"] = self._sdk_session_id
-            content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))
+            parts = adapter_result.response_parts if adapter_result else []
+            content = "".join(i.content for i in parts if isinstance(i, TextPart))
+            messages = adapter_result.model_messages if adapter_result else []
+            resolved = (
+                adapter_result.resolved_model if adapter_result else None
+            ) or self.model_name
             response_msg = ChatMessage[TResult](
                 content=content,  # type: ignore[arg-type]
                 role="assistant",
@@ -1151,13 +831,12 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 message_id=message_id or str(uuid.uuid4()),
                 session_id=self.session_id,
                 parent_id=user_msg.message_id,
-                model_name=resolved_model or self.model_name,
-                messages=model_messages,
+                model_name=resolved,
+                messages=messages,
                 finish_reason="stop",
                 metadata=msg_metadata,
             )
             yield StreamCompleteEvent(message=response_msg)
-            # Post-processing handled by base class
             return
 
         except Exception as e:
@@ -1165,26 +844,26 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             raise
 
         finally:
-            # Disconnect fork client if we created one
             if fork_client:
                 try:
                     await fork_client.disconnect()
                 except Exception as e:  # noqa: BLE001
                     self.log.warning("Error disconnecting fork client", error=e)
 
-        # Flush any remaining response parts
-        if current_response_parts:
-            model_messages.append(ModelResponse(parts=current_response_parts))
+        if not adapter_result:
+            raise RuntimeError("Stream completed without producing adapter result")
 
         # Determine final content - use structured output if available
-        content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))
+        result_message = adapter_result.result_message
+        content = "".join(
+            i.content for i in adapter_result.response_parts if isinstance(i, TextPart)
+        )
         final_content: TResult
         if (
             self._output_type is not str
             and isinstance(result_message, ResultSuccessMessage)
             and result_message.structured_output
         ):
-            # Validate structured output against expected type
             adapter = TypeAdapter(self._output_type)
             final_content = adapter.validate_python(result_message.structured_output)
         else:
@@ -1218,8 +897,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             message_id=message_id or str(uuid.uuid4()),
             session_id=self.session_id,
             parent_id=user_msg.message_id,
-            model_name=resolved_model or self.model_name,
-            messages=model_messages,
+            model_name=adapter_result.resolved_model or self.model_name,
+            messages=adapter_result.model_messages,
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,
