@@ -1039,7 +1039,7 @@ wheels = [
 
 [[package]]
 name = "clawd-code-sdk"
-version = "0.6.2"
+version = "0.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -1048,9 +1048,9 @@ dependencies = [
     { name = "mcp" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/63/c1/30664bab6c6452810c1516e2114569341fdf0e6dc5ded81e632edde92d87/clawd_code_sdk-0.6.2.tar.gz", hash = "sha256:e46b59bc3951189ea052487c08f5a9f39db07084ea008f46f0e72702a3a71fad", size = 141209, upload-time = "2026-03-05T02:49:27.998Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/e9/f0d98b0bd8d96d2e8910ef148820d11c0cfd558d555999610622cd649d88/clawd_code_sdk-0.6.3.tar.gz", hash = "sha256:1c4e355053b5ec6e0fe643c3f57ff28e7c7ff30b83de06c3c04d87dbee42523f", size = 142355, upload-time = "2026-03-06T02:15:28.357Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/98/00bc436a44c9e431d4f95883a63e3869acc6c0bf13aec22c676787bed299/clawd_code_sdk-0.6.2-py3-none-any.whl", hash = "sha256:081e020c295814ff7c56fa2390bbf8df2fc7aa48834bd5d1addbfa50a98c90f7", size = 112609, upload-time = "2026-03-05T02:49:22.761Z" },
+    { url = "https://files.pythonhosted.org/packages/21/09/219349045318d2be629613bf18b2152b75a2945473af4e9c53ca4a97b3c2/clawd_code_sdk-0.6.3-py3-none-any.whl", hash = "sha256:670c8c25ba01fa58ddef978b1beaa64194e1fd833f3a02fd57791cef63540733", size = 113658, upload-time = "2026-03-06T02:15:37.064Z" },
 ]
 
 [[package]]
