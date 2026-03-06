@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 # revision identifiers, used by Alembic.
 revision: str = "2f5ee67f43ce"
-down_revision: str | Sequence[str] | None = "2d23eda297fa"
+down_revision: str | Sequence[str] | None = "b2c3d4e5f6a7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

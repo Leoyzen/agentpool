@@ -289,3 +289,8 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     """Protocol-specific or custom metadata stored as JSON."""
 
     model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
+
+
+
+# Alias for RFC-0011 compatibility (Session -> Conversation)
+Session = Conversation
