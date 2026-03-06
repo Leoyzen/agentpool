@@ -117,6 +117,43 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             raise ToolError(f"Expected Skill instance, got {type(item)}")
         return item
 
+    def _parse_skill(self, skill_dir_path: JoinablePathLike) -> Skill:
+        """Parse a skill from its directory path.
+
+        Args:
+            skill_dir_path: Path to the skill directory containing SKILL.md
+
+        Returns:
+            Parsed Skill instance
+
+        Raises:
+            ToolError: If skill cannot be parsed
+        """
+        from upathtools import to_upath
+
+        path = to_upath(skill_dir_path)
+        skill_file = path / "SKILL.md"
+
+        if not skill_file.exists():
+            raise ToolError(f"SKILL.md not found in {path}")
+
+        # Parse the skill markdown file
+        content = skill_file.read_text()
+
+        # Extract name from directory name
+        name = path.name
+
+        # Use first line as description (or metadata if available)
+        lines = content.strip().split("\n")
+        description = lines[0].lstrip("# ").strip() if lines else name
+
+        # Create skill instance with lazy loading
+        return Skill(
+            name=name,
+            path=str(path),
+            description=description,
+        )
+
     def get_skill_instructions(self, skill_name: str) -> str:
         """Lazy load full instructions for a skill."""
         skill = self.get(skill_name)
