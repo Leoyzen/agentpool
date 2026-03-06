@@ -13,6 +13,11 @@ from pydantic import BaseModel
 
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
+from agentpool.utils.identifiers import generate_session_id
+from agentpool.utils.tasks import TaskManager
+from agentpool_config.session import SessionQuery
+from agentpool_config.storage import StorageConfig
+from agentpool.messaging import ChatMessage
 from agentpool.utils.tasks import TaskManager
 from agentpool_config.session import SessionQuery
 from agentpool_config.storage import StorageConfig
@@ -88,6 +93,15 @@ class StorageManager:
         self.task_manager = TaskManager()
         self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
         self._session_logged: set[str] = set()  # Track logged conversations for idempotency
+
+    @staticmethod
+    def generate_session_id() -> str:
+        """Generate a unique session ID.
+
+        Returns:
+            A unique session ID string.
+        """
+        return generate_session_id()
 
     async def __aenter__(self) -> Self:
         """Initialize all providers."""
