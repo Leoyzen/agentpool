@@ -102,7 +102,7 @@ class SessionStore(Protocol):
         ...
 
 
-class MemorySessionStore:
+class MemorySessionStore(SessionStore):
     """In-memory session store for testing and development."""
 
     def __init__(self) -> None:
