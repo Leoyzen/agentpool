@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool.utils.time_utils import now_ms
-
+from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 
 if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
@@ -91,6 +91,8 @@ class ServerState:
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     # Event managers for subagent event routing (session_id -> event_manager)
     event_managers: dict[str, Any] = field(default_factory=dict)
+    # Provider authentication service
+    auth_service: Any = field(default_factory=create_default_auth_service)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
@@ -101,6 +103,19 @@ class ServerState:
     def fs(self) -> AsyncFileSystem:
         """Get the fsspec filesystem from the agent's environment."""
         return self.agent.env.get_fs()
+
+    @property
+    def storage(self) -> Any:
+        """Get the storage manager from the agent's pool.
+
+        Returns:
+            StorageManager: The storage manager for session persistence.
+
+        Raises:
+            RuntimeError: If agent storage is not initialized.
+        """
+        assert self.agent.storage is not None, "Agent storage is not initialized"
+        return self.agent.storage
 
     @property
     def base_path(self) -> str:
@@ -122,6 +137,19 @@ class ServerState:
             msg = "Agent has no agent_pool set"
             raise RuntimeError(msg)
         return self.agent.agent_pool
+
+    @property
+    def storage(self) -> StorageManager:
+        """Get the storage manager from the agent's pool.
+
+        Returns:
+            StorageManager: The storage manager for session persistence.
+
+        Raises:
+            RuntimeError: If agent storage is not initialized.
+        """
+        assert self.agent.storage is not None, "Agent storage is not initialized"
+        return self.agent.storage
 
     def create_background_task(self, coro: Any, *, name: str | None = None) -> asyncio.Task[Any]:
         """Create and track a background task."""

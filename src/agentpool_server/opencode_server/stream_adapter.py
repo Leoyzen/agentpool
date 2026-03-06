@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import FunctionToolCallEvent
+from pydantic_ai import FunctionToolCallEvent, RequestUsage
 from pydantic_ai.messages import (
     PartDeltaEvent,
     PartStartEvent,
@@ -134,6 +134,14 @@ class OpenCodeStreamAdapter:
     @property
     def output_tokens(self) -> int:
         return self.main_context.output_tokens
+
+    @property
+    def usage(self) -> RequestUsage:
+        """Return usage statistics for the current response."""
+        return RequestUsage(
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+        )
 
     @property
     def total_cost(self) -> float:

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     from agentpool.common_types import JsonValue
     from agentpool.messaging import ChatMessage
-    from agentpool.sessions.models import ProjectData
+    from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import ConversationData, StatsFilters
 
@@ -673,3 +673,42 @@ class SQLModelProvider(StorageProvider):
             )
             await session.execute(stmt)
             await session.commit()
+
+    # Session persistence methods
+
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data."""
+        from agentpool_storage.session_store import SQLSessionStore
+
+        store = SQLSessionStore(self.config)
+        async with store:
+            await store.save(data)
+
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data by ID."""
+        from agentpool_storage.session_store import SQLSessionStore
+
+        store = SQLSessionStore(self.config)
+        async with store:
+            return await store.load(session_id)
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session."""
+        from agentpool_storage.session_store import SQLSessionStore
+
+        store = SQLSessionStore(self.config)
+        async with store:
+            return await store.delete(session_id)
+
+    async def list_session_ids(
+        self,
+        *,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs, optionally filtered."""
+        from agentpool_storage.session_store import SQLSessionStore
+
+        store = SQLSessionStore(self.config)
+        async with store:
+            return await store.list_sessions(pool_id=pool_id, agent_name=agent_name)

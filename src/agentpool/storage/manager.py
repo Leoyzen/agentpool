@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from agentpool.common_types import JsonValue
-    from agentpool.sessions.models import ProjectData
+    from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.storage import BaseStorageProviderConfig
     from agentpool_storage.base import StorageProvider
 
@@ -262,26 +262,23 @@ class StorageManager:
         # Skip during tests to avoid external API calls
         if not initial_prompt or os.environ.get("PYTEST_CURRENT_TEST"):
             return
-        prompt_length = len(initial_prompt)
-        logger.info(
-            "log_session title decision",
-            session_id=session_id,
-            prompt_length=prompt_length,
-            has_model=bool(self.config.title_generation_model),
-        )
+        if not initial_prompt or os.environ.get("PYTEST_CURRENT_TEST"):
+            return
 
-        # For short prompts, use them directly as title (like Claude Code)
-        if prompt_length < 60:  # noqa: PLR2004
-            logger.info("Using short prompt as title", session_id=session_id, title=initial_prompt)
-            await self.update_session_title(session_id, initial_prompt)
-        # For longer prompts, generate semantic title if model configured
-        elif self.config.title_generation_model:
-            logger.info("Creating title generation task for long prompt", session_id=session_id)
-            self.task_manager.create_task(
-                self._generate_title_from_prompt(session_id, initial_prompt, on_title_generated),
-                name=f"title_gen_{session_id[:8]}",
-            )
+    @method_spawner
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data in the primary provider.
 
+        Args:
+            data: Session data to persist
+        """
+        provider = self.get_project_provider()  # Reuses first provider
+        await provider.save_session(data)
+        # Mark as logged so log_session() becomes a no-op for this session
+        # Mark as logged so log_session() becomes a no-op for this session
+        self._session_logged.add(data.session_id)
+
+    @method_spawner
     @method_spawner
     async def log_command(
         self,

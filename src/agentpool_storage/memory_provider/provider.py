@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     from agentpool.common_types import JsonValue
     from agentpool.messaging import ChatMessage
-    from agentpool.sessions.models import ProjectData
+    from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import QueryFilters, StatsFilters, TokenUsage
 
@@ -32,6 +32,7 @@ class MemoryStorageProvider(StorageProvider):
         self.conversations: list[dict[str, Any]] = []
         self.commands: list[dict[str, Any]] = []
         self.projects: dict[str, ProjectData] = {}
+        self.sessions: dict[str, SessionData] = {}
 
     def cleanup(self) -> None:
         """Clear all stored data."""
@@ -39,6 +40,7 @@ class MemoryStorageProvider(StorageProvider):
         self.conversations.clear()
         self.commands.clear()
         self.projects.clear()
+        self.sessions.clear()
 
     async def filter_messages(self, query: SessionQuery) -> list[ChatMessage[str]]:
         """Filter messages from memory."""
@@ -377,6 +379,40 @@ class MemoryStorageProvider(StorageProvider):
         self.messages = [m for m in self.messages if m.session_id != session_id]
         return original_count - len(self.messages)
 
+    # Session persistence methods
+
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data."""
+        self.sessions[data.session_id] = data
+
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data by ID."""
+        return self.sessions.get(session_id)
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session."""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            return True
+        return False
+
+    async def list_session_ids(
+        self,
+        *,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs, optionally filtered."""
+        result = []
+        for session_id, data in self.sessions.items():
+            if pool_id is not None and data.pool_id != pool_id:
+                continue
+            if agent_name is not None and data.agent_name != agent_name:
+                continue
+            result.append(session_id)
+        return result
+
+    # Project methods
     # Project methods
 
     async def save_project(self, project: ProjectData) -> None:
