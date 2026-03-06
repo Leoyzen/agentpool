@@ -43,7 +43,7 @@ from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
-from agentpool.agents.acp_agent.acp_converters import event_to_part
+from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.acp_agent.session_state import ACPSessionState
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
@@ -52,7 +52,7 @@ from agentpool.agents.events import (
     ToolCallCompleteEvent,
     ToolResultMetadataEvent,
 )
-from agentpool.agents.events.processors import FileTracker
+
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -432,7 +432,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         model_messages.append(initial_request)
         current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         text_chunks: list[str] = []
-        file_tracker = FileTracker()
+
         assert self.session_id is not None
         yield RunStartedEvent(
             session_id=self.session_id,
@@ -477,7 +477,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
                 merge_queue_into_iterator(poll_acp_events(), self._event_queue) as merged_events,
             ):
-                async for event in file_tracker(merged_events):
+                async for event in merged_events:
                     if isinstance(event, ToolResultMetadataEvent):
                         tool_metadata[event.tool_call_id] = event.metadata
                         continue
@@ -516,7 +516,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 parent_id=user_msg.message_id,
                 model_name=self.model_name,
                 messages=model_messages,
-                metadata=file_tracker.get_metadata(),
+                metadata=None,
                 finish_reason="stop",
             )
             yield StreamCompleteEvent(message=message)
@@ -553,7 +553,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             parent_id=user_msg.message_id,
             model_name=self.model_name,
             messages=model_messages,
-            metadata=file_tracker.get_metadata(),
+            metadata=None,
             finish_reason=finish_reason,
             usage=usage,
             cost_info=cost_info,

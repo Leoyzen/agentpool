@@ -84,12 +84,10 @@ from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.claude_code_agent.converters import (
-    claude_message_to_events,
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
     convert_to_opencode_metadata,
-    to_claude_system_prompt,
-    to_output_format,
+    
     to_thinking_config,
 )
 from agentpool.agents.claude_code_agent.exceptions import raise_if_usage_limit_reached
@@ -105,7 +103,6 @@ from agentpool.agents.events import (
     ToolResultMetadataEvent,
 )
 from agentpool.agents.events.infer_info import derive_rich_tool_info
-from agentpool.agents.events.processors import FileTracker
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -893,7 +890,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         tool_accumulator = ToolCallAccumulator()
         resolved_model: str | None = None
         # Track files modified during this run
-        file_tracker = FileTracker()
         # Accumulate metadata events by tool_call_id (workaround for SDK stripping _meta)
         tool_metadata: dict[str, dict[str, Any]] = {}
         # Handle ephemeral execution (fork session if store_history=False)
@@ -975,14 +971,12 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                             raw_input=input_data,
                                         )
                                         # Track file modifications
-                                        file_tracker.process_event(tool_start_event)
+                                        # File tracking removed
                                         yield tool_start_event
                                     # Already emitted ToolCallStartEvent early via streaming.
                                     # Dont emit a progress update here - it races with
                                     # permission requests and causes Zed to cancel the dialog.
                                     # Just track file modifications.
-                                    elif fpath := file_tracker.extractor(display_name, input_data):
-                                        file_tracker.touched_files.add(fpath)
                                     # Clean up from accumulator (always, both branches)
                                     tool_accumulator.complete(tc_id)
                                 case ToolResultBlock(tool_use_id=tc_id, content=content):
@@ -1164,7 +1158,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             self.log.info("Stream cancelled via CancelledError")
             # Emit partial response on cancellation
             # Build metadata with file tracking and SDK session ID
-            metadata = file_tracker.get_metadata()
+            metadata = {}
             if self._sdk_session_id:
                 metadata["sdk_session_id"] = self._sdk_session_id
             content = "".join(i.content for i in current_response_parts if isinstance(i, TextPart))
@@ -1233,7 +1227,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # Determine finish reason - check if we were cancelled
         # Build metadata with file tracking and SDK session ID
-        metadata = file_tracker.get_metadata()
+        metadata = {}
         if self._sdk_session_id:
             metadata["sdk_session_id"] = self._sdk_session_id
 

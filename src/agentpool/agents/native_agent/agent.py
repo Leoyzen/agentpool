@@ -20,7 +20,6 @@ from pydantic_ai.tools import ToolDefinition
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
-from agentpool.agents.events.processors import FileTracker
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
@@ -208,9 +207,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from agentpool_config.session import MemoryConfig
 
         self.model_settings = model_settings
-        memory_cfg = (
-            session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
-        )
+        memory_cfg = session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
         # Collect MCP servers from config
         all_mcp_servers = list(mcp_servers) if mcp_servers else []
         if agent_config and agent_config.mcp_servers:
@@ -316,10 +313,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if len(params) == two_params:
             last_param_name = params[1].name.lower()
             if last_param_name not in ("messages", "msgs", "history"):
-                msg = (
-                    f"Second parameter of history processor must be "
-                    f"messages/msgs/history, got {params[1].name}"
-                )
+                msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
                 raise ValueError(msg)
 
     def _resolve_history_processors(self) -> list[Callable[..., Any]]:
@@ -452,10 +446,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from llmling_models_config import StringModelConfig
 
         model_config = config.model
-        if (
-            isinstance(model_config, StringModelConfig)
-            and model_config.identifier in manifest.model_variants
-        ):
+        if isinstance(model_config, StringModelConfig) and model_config.identifier in manifest.model_variants:
             # The identifier is a model_variants key, use the variant config
             model_config = manifest.model_variants[model_config.identifier]
 
@@ -752,7 +743,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self,
         node_stream: AsyncIterator[Any],
         *,
-        file_tracker: FileTracker,
         pending_tcs: dict[str, BaseToolCallPart],
         message_id: str,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
@@ -760,7 +750,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Args:
             node_stream: Stream of events from the node
-            file_tracker: Tracker for file operations
+
             pending_tcs: Dictionary of pending tool calls
             message_id: Current message ID
 
@@ -768,7 +758,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             Processed stream events
         """
         async with merge_queue_into_iterator(node_stream, self._event_queue) as merged:
-            async for event in file_tracker(merged):
+            async for event in merged:
                 if self._cancelled:
                     break
                 yield event
@@ -810,7 +800,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         response_msg: ChatMessage[Any] | None = None
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
         # Track tool call starts to combine with results later
-        file_tracker = FileTracker()
         # Create AgentContext with user deps stored in .data
         agent_deps = self.get_context(input_provider=input_provider)
         if deps is not None:
@@ -842,21 +831,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                     node.stream(agent_run.ctx) as stream,
                                     merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
                                 ):
-                                    async for event in file_tracker(merged):
+                                    async for event in merged:
                                         if self._cancelled:
                                             break
                                         yield event
-                                        if combined := process_tool_event(
-                                            self.name, event, pending_tcs, message_id
-                                        ):
+                                        if combined := process_tool_event(self.name, event, pending_tcs, message_id):
                                             yield combined
                             except GeneratorExit:
                                 # Consumer stopped iteration early (e.g., by break)
                                 # Avoid re-raising to prevent cleanup in wrong context
                                 self._cancelled = True
-                                self.log.debug(
-                                    "GeneratorExit caught in node stream, cancelling gracefully"
-                                )
+                                self.log.debug("GeneratorExit caught in node stream, cancelling gracefully")
                                 # Do not re-raise - let finally blocks clean up normally
                 except asyncio.CancelledError:
                     self.log.info("Stream cancelled via task cancellation")
@@ -865,9 +850,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 # Build response message
                 response_time = time.perf_counter() - start_time
                 if self._cancelled:
-                    partial_content = extract_text_from_messages(
-                        agent_run.all_messages(), include_interruption_note=True
-                    )
+                    partial_content = extract_text_from_messages(agent_run.all_messages(), include_interruption_note=True)
                     response_msg = ChatMessage(
                         content=partial_content,
                         role="assistant",
@@ -889,7 +872,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         session_id=self.session_id,
                         parent_id=user_msg.message_id,
                         response_time=response_time,
-                        metadata=file_tracker.get_metadata(),
+                        metadata=None,
                     )
                 else:
                     raise RuntimeError("Stream completed without producing a result")
@@ -974,14 +957,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self.to_structured(output_type)
         async with AsyncExitStack() as stack:
             if tools is not None:  # Tools
-                await stack.enter_async_context(
-                    self.tools.temporary_tools(tools, exclusive=replace_tools)
-                )
+                await stack.enter_async_context(self.tools.temporary_tools(tools, exclusive=replace_tools))
 
             if history is not None:  # History
-                await stack.enter_async_context(
-                    self.conversation.temporary_state(history, replace_history=replace_history)
-                )
+                await stack.enter_async_context(self.conversation.temporary_state(history, replace_history=replace_history))
 
             if pause_routing:  # Routing
                 await stack.enter_async_context(self.connections.paused_routing())
@@ -1090,11 +1069,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     if cwd is not None and session_data.cwd != cwd:
                         continue
                     # Fetch title from conversation storage if not in metadata
-                    if (
-                        not session_data.title
-                        and (storage := self.agent_pool.storage)
-                        and (title := await storage.get_session_title(session_data.session_id))
-                    ):
+                    if not session_data.title and (storage := self.agent_pool.storage) and (title := await storage.get_session_title(session_data.session_id)):
                         session_data = session_data.with_metadata(title=title)
                     result.append(session_data)
                     # Check limit
