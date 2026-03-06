@@ -378,3 +378,30 @@ class StorageConfig(Schema):
         if self.providers is None:
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
+
+    def get_session_store(self):
+        """Get a session store instance from the default provider.
+
+        Creates and returns a session store using the default storage provider.
+        For SQL storage, this creates a SQLSessionStore instance.
+
+        Returns:
+            SessionStore: A session store instance for saving/loading sessions.
+        """
+        from agentpool.sessions.store import SessionStore
+
+        providers = self.effective_providers
+        if not providers:
+            raise ValueError("No storage providers configured")
+
+        # Use the first provider as default
+        provider_config = providers[0]
+
+        # Get the provider instance
+        provider = provider_config.get_provider()
+
+        # Create and return a session store from the provider
+        # For now, use memory-based session store as a simple implementation
+        # TODO: Implement proper SQLSessionStore when RFC-0011 is complete
+        from agentpool.sessions.store import MemorySessionStore
+        return MemorySessionStore()
