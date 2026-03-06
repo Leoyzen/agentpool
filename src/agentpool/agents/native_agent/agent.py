@@ -1060,11 +1060,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Get sessions from session store
         try:
             # Get session IDs from store
-            session_ids = await self.agent_pool.sessions.store.list_sessions(agent_name=self.name)
+            session_ids = await self.agent_pool.storage.list_session_ids(agent_name=self.name)
             # Load each session to get full SessionData
             result: list[SessionData] = []
             for session_id in session_ids:
-                if session_data := await self.agent_pool.sessions.store.load(session_id):
+                if session_data := await self.agent_pool.storage.load_session(session_id):
                     # Filter by cwd if specified
                     if cwd is not None and session_data.cwd != cwd:
                         continue
@@ -1098,7 +1098,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         try:
             # Load session data from session store
-            session_data = await self.agent_pool.sessions.store.load(session_id)
+            session_data = await self.agent_pool.storage.load_session(session_id)
             if not session_data:
                 return None
             # Load conversation history if available from storage providers

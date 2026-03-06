@@ -218,7 +218,7 @@ class ServerState:
         # Persist to storage
         id_ = self.pool.manifest.config_file_path
         session_data = opencode_to_session_data(session, agent_name=self.agent.name, pool_id=id_)
-        await self.pool.sessions.store.save(session_data)
+        await self.pool.storage.save_session(session_data)
 
         # Cache in memory
         self.sessions[session_id] = session

@@ -20,7 +20,7 @@ def create_mock_agent() -> MagicMock:
     agent.name = "test_agent"
     agent.agent_pool = MagicMock()
     agent.agent_pool.manifest.config_file_path = "test_config.yml"
-    agent.agent_pool.sessions.store.save = AsyncMock()
+    agent.agent_pool.storage.save_session = AsyncMock()
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"
     return agent
@@ -112,7 +112,7 @@ async def test_ensure_session_persists_to_storage(mock_state: ServerState) -> No
     assert kwargs["agent_name"] == "test_agent"
     assert kwargs["pool_id"] == "test_config.yml"
 
-    mock_state.agent.agent_pool.sessions.store.save.assert_awaited_once_with(mock_session_data)
+    mock_state.agent.agent_pool.storage.save_session.assert_awaited_once_with(mock_session_data)
 
 
 @pytest.mark.asyncio
@@ -195,4 +195,4 @@ async def test_ensure_session_is_idempotent(mock_state: ServerState) -> None:
         result2 = await mock_state.ensure_session(session_id)
 
     assert result1 is result2
-    mock_state.agent.agent_pool.sessions.store.save.assert_awaited_once()
+    mock_state.agent.agent_pool.storage.save_session.assert_awaited_once()
