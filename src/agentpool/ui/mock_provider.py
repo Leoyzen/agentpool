@@ -39,7 +39,9 @@ class MockInputProvider(InputProvider):
     ) -> None:
         self.input_response = input_response
         self.tool_confirmation: ConfirmationResult = tool_confirmation
-        self.elicitation_response = elicitation_response or {"response": "mock response"}
+        self.elicitation_response: dict[str, Any] = elicitation_response or {
+            "response": "mock response"
+        }
         self.calls: list[InputCall] = []
 
     async def get_input(

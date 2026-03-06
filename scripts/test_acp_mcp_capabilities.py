@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import sys
+from typing import Any
 
 from acp.client.implementations import NoOpClient
 from acp.schema import InitializeRequest
@@ -53,7 +54,7 @@ async def test_agent_capabilities(config: AgentTestConfig) -> dict:
     Returns:
         Dict with agent info and capabilities
     """
-    result = {
+    result: dict[str, Any] = {
         "name": config.name,
         "command": config.command,
         "status": "unknown",
