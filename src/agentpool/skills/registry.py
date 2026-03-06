@@ -132,27 +132,14 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
         from upathtools import to_upath
 
         path = to_upath(skill_dir_path)
-        skill_file = path / "SKILL.md"
 
-        if not skill_file.exists():
-            raise ToolError(f"SKILL.md not found in {path}")
-
-        # Parse the skill markdown file
-        content = skill_file.read_text()
-
-        # Extract name from directory name
-        name = path.name
-
-        # Use first line as description (or metadata if available)
-        lines = content.strip().split("\n")
-        description = lines[0].lstrip("# ").strip() if lines else name
-
-        # Create skill instance with lazy loading
-        return Skill(
-            name=name,
-            path=str(path),
-            description=description,
-        )
+        try:
+            # Use the Skill class method to properly parse SKILL.md with frontmatter
+            return Skill.from_skill_dir(path)
+        except FileNotFoundError as e:
+            raise ToolError(f"SKILL.md not found in {path}") from e
+        except (ValueError, TypeError) as e:
+            raise ToolError(f"Failed to parse skill: {e}") from e
 
     def get_skill_instructions(self, skill_name: str) -> str:
         """Lazy load full instructions for a skill."""
