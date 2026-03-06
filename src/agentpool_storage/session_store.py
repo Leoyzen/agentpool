@@ -79,14 +79,14 @@ class SQLSessionStore:
     def _to_db_model(self, data: SessionData) -> Session:
         """Convert SessionData to database model."""
         return Session(
-            session_id=data.session_id,
+            id=data.session_id,  # id is the primary key
             agent_name=data.agent_name,
             pool_id=data.pool_id,
             project_id=data.project_id,
             parent_id=data.parent_id,
             version=data.version,
             cwd=data.cwd,
-            created_at=data.created_at,
+            created_at=data.created_at,  # Maps to start_time in DB
             last_active=data.last_active,
             metadata_json=data.metadata,
         )
@@ -94,14 +94,14 @@ class SQLSessionStore:
     def _from_db_model(self, row: Session) -> SessionData:
         """Convert database model to SessionData."""
         return SessionData(
-            session_id=row.session_id,
+            session_id=row.id,  # id is the primary key
             agent_name=row.agent_name,
             pool_id=row.pool_id,
             project_id=row.project_id,
             parent_id=row.parent_id,
             version=row.version,
             cwd=row.cwd,
-            created_at=row.created_at,
+            created_at=row.start_time,  # start_time in DB is created_at in SessionData
             last_active=row.last_active,
             metadata=row.metadata_json or {},
         )
@@ -121,7 +121,7 @@ class SQLSessionStore:
 
         async with AsyncSession(engine) as session:
             # Delete existing if present (upsert via delete+insert)
-            stmt = delete(Session).where(Session.session_id == data.session_id)  # type: ignore[arg-type]
+            stmt = delete(Session).where(Session.id == data.session_id)  # id is the primary key
             await session.execute(stmt)
 
             # Insert new/updated
@@ -145,7 +145,7 @@ class SQLSessionStore:
         engine = self._get_engine()
 
         async with AsyncSession(engine) as session:
-            stmt = select(Session).where(Session.session_id == session_id)  # type: ignore[arg-type]
+            stmt = select(Session).where(Session.id == session_id)  # id is the primary key
             result = await session.execute(stmt)
             row = result.scalars().first()
 
@@ -169,7 +169,7 @@ class SQLSessionStore:
         engine = self._get_engine()
 
         async with AsyncSession(engine) as session:
-            stmt = delete(Session).where(Session.session_id == session_id)  # type: ignore[arg-type]
+            stmt = delete(Session).where(Session.id == session_id)  # id is the primary key
             result = await session.execute(stmt)
             await session.commit()
 
@@ -200,7 +200,7 @@ class SQLSessionStore:
         engine = self._get_engine()
 
         async with AsyncSession(engine) as session:
-            stmt = select(Session.session_id)  # type: ignore[call-overload]
+            stmt = select(Session.id)  # type: ignore[call-overload]  # id is the primary key
 
             if pool_id is not None:
                 stmt = stmt.where(Session.pool_id == pool_id)

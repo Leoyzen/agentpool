@@ -46,14 +46,6 @@ from acp.schema import (
     Usage,
     UsageUpdate,
 )
-    AgentMessageChunk,
-    AgentPlanUpdate,
-    AgentThoughtChunk,
-    ContentToolCallContent,
-    ToolCallLocation,
-    ToolCallProgress,
-    ToolCallStart,
-)
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
     CompactionEvent,

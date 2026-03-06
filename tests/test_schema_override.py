@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-<<<<<<< HEAD
 from pydantic_ai.tools import ToolDefinition
-=======
 import pytest
->>>>>>> 8f5db780 (feat(tools): implement extended tool definitions with native PydanticAI integration)
 
 from agentpool.agents.native_agent.agent import Agent
 from agentpool.tools.base import Tool

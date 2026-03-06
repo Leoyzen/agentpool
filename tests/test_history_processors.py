@@ -6,9 +6,18 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent
-from agentpool.models.agents import NativeAgentConfig, _validate_processor_signature
+from agentpool.models.agents import NativeAgentConfig
 from agentpool.utils.inspection import get_fn_name
 from agentpool_config.session import MemoryConfig
+
+
+# Helper to access the validation method from Agent class
+def _validate_processor_signature(processor):
+    """Validate processor signature using Agent's validation method."""
+    # Create a minimal agent instance to access the method
+    from agentpool.agents.native_agent.agent import Agent as NativeAgent
+    # Access as unbound method and call with self=None (internal use only)
+    return NativeAgent._validate_processor_signature(None, processor)
 
 
 @pytest.fixture
