@@ -403,13 +403,13 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 for server in live_status.mcp_servers:
                     name = server.name
                     server_info = server.server_info
-                    assert server_info  # TODO: remove assert
+                    typ = server.config.get("type", "stdio") if server.config else "unknown"
                     result[name] = MCPServerStatus(
                         name=name,
                         status=server.status,
-                        server_type=server.config.get("type", "unknown"),
-                        server_name=server_info.name,
-                        server_version=server_info.version,
+                        server_type=typ,
+                        server_name=server_info.name if server_info else None,
+                        server_version=server_info.version if server_info else None,
                     )
                 return result
         # Fallback: report from config
