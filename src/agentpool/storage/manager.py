@@ -288,11 +288,62 @@ class StorageManager:
         """
         provider = self.get_project_provider()  # Reuses first provider
         await provider.save_session(data)
-        # Mark as logged so log_session() becomes a no-op for this session
-        # Mark as logged so log_session() becomes a no-op for this session
         self._session_logged.add(data.session_id)
 
     @method_spawner
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data by ID.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            Session data if found, None otherwise
+        """
+        provider = self.get_project_provider()
+        return await provider.load_session(session_id)
+
+    @method_spawner
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session from all providers.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            True if session was deleted from at least one provider
+        """
+        deleted = False
+        for provider in self.providers:
+            try:
+                if await provider.delete_session(session_id):
+                    deleted = True
+            except Exception:
+                logger.exception(
+                    "Error deleting session",
+                    provider=provider.__class__.__name__,
+                    session_id=session_id,
+                )
+        return deleted
+
+    @method_spawner
+    async def list_session_ids(
+        self,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs, optionally filtered.
+
+        Args:
+            pool_id: Filter by pool/manifest ID
+            agent_name: Filter by agent name
+
+        Returns:
+            List of session IDs
+        """
+        provider = self.get_project_provider()
+        return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
+
     @method_spawner
     async def log_command(
         self,
