@@ -111,6 +111,7 @@ class OpenCodeStreamAdapter:
     # Event processor and context for stream processing
     processor: EventProcessor = field(default_factory=EventProcessor, init=False)
     main_context: EventProcessorContext = field(init=False)
+    _cost_info: Any = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.main_context = EventProcessorContext(
@@ -146,6 +147,15 @@ class OpenCodeStreamAdapter:
     @property
     def total_cost(self) -> float:
         return self.main_context.total_cost
+
+    @property
+    def cost_info(self) -> Any:
+        """Return cost information for the current response."""
+        # Use main_context's cost tracking
+        class SimpleCostInfo:
+            def __init__(self, total):
+                self.total_cost = total
+        return SimpleCostInfo(self.main_context.total_cost) if self.main_context.total_cost else None
 
     @property
     def text_part(self) -> TextPart | None:
