@@ -10,7 +10,7 @@ from psygnal.containers import EventedList
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.chat_filesystem import ChatMessageFileSystem
-from agentpool.utils.count_tokens import batch_count_tokens
+from agentpool.utils.count_tokens import count_tokens
 
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ class ChatMessageList(EventedList[ChatMessage[Any]]):
             else:
                 model_name = next((m.model_name for m in self if m.model_name), DEFAULT_TOKEN_MODEL)
             contents = [str(msg.content) for msg in msgs]
-            total += sum(batch_count_tokens(contents, model_name))
+            total += count_tokens("\n".join(contents), model_name)
 
         return total
 

@@ -171,11 +171,9 @@ class ToolManager:
         # Get prompts from all external providers (check if they're MCP providers)
         for provider in self.external_providers:
             if isinstance(provider, MCPManager):
+                agg_provider = provider.get_aggregating_provider()
                 try:
-                    # Get prompts from MCP providers via the aggregating provider
-                    agg_provider = provider.get_aggregating_provider()
                     prompts = await agg_provider.get_prompts()
-                    # Filter to only MCPClientPrompt instances
                     mcp_prompts = [p for p in prompts if isinstance(p, MCPPrompt)]
                     all_prompts.extend(mcp_prompts)
                 except Exception:

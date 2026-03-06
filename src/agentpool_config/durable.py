@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, field_validator
 from schemez import Schema
 
-from agentpool.utils.parse_time import parse_time_period
+from agentpool.utils.time_utils import parse_time_period
 
 
 class BaseDurableExecutionConfig(Schema):

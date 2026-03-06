@@ -169,8 +169,7 @@ class SessionQuery(Schema):
 
     def get_time_cutoff(self) -> datetime | None:
         """Get datetime from time period string."""
-        from agentpool.utils.parse_time import parse_time_period
-        from agentpool.utils.time_utils import get_now
+        from agentpool.utils.time_utils import get_now, parse_time_period
 
         if not self.since:
             return None

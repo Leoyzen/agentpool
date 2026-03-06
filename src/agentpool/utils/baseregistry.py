@@ -4,18 +4,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import MutableMapping
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from psygnal.containers import EventedDict
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
     from psygnal.containers import DictEvents
-
-
-TKey = TypeVar("TKey", str, int)
 
 
 class AgentPoolError(Exception):
@@ -75,11 +72,9 @@ class BaseRegistry[TKey, TItem](MutableMapping[TKey, TItem], ABC):
     def register(self, key: TKey, item: TItem | Any, replace: bool = False) -> None:
         """Register an item."""
         if key in self._items and not replace:
-            msg = f"Item already registered: {key}"
-            raise self._error_class(msg)
+            raise self._error_class(f"Item already registered: {key}")
 
-        validated_item = self._validate_item(item)
-        self._items[key] = validated_item
+        self._items[key] = self._validate_item(item)
 
     def get(self, key: TKey) -> TItem:  # type: ignore
         """Get an item by key."""
@@ -99,35 +94,13 @@ class BaseRegistry[TKey, TItem](MutableMapping[TKey, TItem], ABC):
         """Initialize all registered items."""
         if self._initialized:
             return
-
-        try:
-            for item in self._items.values():
-                await self._initialize_item(item)
-            self._initialized = True
-        except Exception as exc:
-            await self.shutdown()
-            msg = f"Registry startup failed: {exc}"
-            raise self._error_class(msg) from exc
+        self._initialized = True
 
     async def shutdown(self) -> None:
         """Cleanup all registered items."""
         if not self._initialized:
             return
-
-        errors: list[tuple[TKey, Exception]] = []
-
-        for key, item in self._items.items():
-            try:
-                await self._cleanup_item(item)
-            except Exception as exc:  # noqa: BLE001
-                errors.append((key, exc))
-
         self._initialized = False
-
-        if errors:
-            error_msgs = [f"{key}: {exc}" for key, exc in errors]
-            msg = f"Errors during shutdown: {', '.join(error_msgs)}"
-            raise self._error_class(msg)
 
     @property
     def _error_class(self) -> type[AgentPoolError]:
@@ -137,16 +110,6 @@ class BaseRegistry[TKey, TItem](MutableMapping[TKey, TItem], ABC):
     @abstractmethod
     def _validate_item(self, item: Any) -> TItem:
         """Validate and possibly transform item before registration."""
-
-    async def _initialize_item(self, item: TItem) -> None:
-        """Initialize an item during startup."""
-        if hasattr(item, "startup") and callable(item.startup):  # pyright: ignore
-            await item.startup()  # pyright: ignore  # ty: ignore
-
-    async def _cleanup_item(self, item: TItem) -> None:
-        """Clean up an item during shutdown."""
-        if hasattr(item, "shutdown") and callable(item.shutdown):  # pyright: ignore
-            await item.shutdown()  # pyright: ignore  # ty: ignore
 
     # Implementing MutableMapping methods
     def __getitem__(self, key: TKey) -> TItem:
@@ -171,13 +134,6 @@ class BaseRegistry[TKey, TItem](MutableMapping[TKey, TItem], ABC):
 
     def __iter__(self) -> Iterator[TKey]:
         return iter(self._items)
-
-    async def __aiter__(self) -> AsyncIterator[tuple[TKey, TItem]]:
-        """Async iterate over items, ensuring they're initialized."""
-        if not self._initialized:
-            await self.startup()
-        for key, item in self._items.items():
-            yield key, item
 
     def __len__(self) -> int:
         return len(self._items)

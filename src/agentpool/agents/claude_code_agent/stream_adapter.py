@@ -56,6 +56,7 @@ from agentpool.agents.claude_code_agent.converters import (
     convert_to_opencode_metadata,
 )
 from agentpool.agents.events import (
+    CompactionEvent,
     PartDeltaEvent,
     PartStartEvent,
     ToolCallCompleteEvent,
@@ -299,8 +300,6 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 yield PartEndEvent(index=index, part=TextPart(content=""))
 
             case StatusSystemMessage(status="compacting"):
-                from agentpool.agents.events import CompactionEvent
-
                 yield CompactionEvent(
                     session_id=session_id or "unknown",
                     trigger="auto",
@@ -309,8 +308,6 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 continue
 
             case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
-                from agentpool.agents.events import CompactionEvent
-
                 yield CompactionEvent(
                     session_id=session_id or "unknown",
                     trigger=compact_metadata["trigger"],

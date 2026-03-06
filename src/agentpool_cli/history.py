@@ -137,7 +137,7 @@ def show_stats(
     """
     import anyio
 
-    from agentpool.utils.parse_time import parse_time_period
+    from agentpool.utils.time_utils import parse_time_period
     from agentpool_storage.formatters import format_stats
     from agentpool_storage.models import StatsFilters
 
