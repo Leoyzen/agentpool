@@ -48,7 +48,6 @@ from pydantic_ai import (
     TextPart,
     ThinkingPart,
     ToolCallPart,
-    ToolCallPartDelta,
     ToolReturnPart,
 )
 
@@ -115,7 +114,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
     merged_stream: AsyncIterator[Any],
     tool_metadata: dict[str, dict[str, Any]],
     agent_name: str,
-    session_id: str | None,
+    session_id: str,
 ) -> AsyncIterator[RichAgentStreamEvent[Any] | StreamAdapterResult]:
     """Convert a Claude SDK message stream into agentpool events.
 
@@ -284,15 +283,9 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 yield PartDeltaEvent.thinking(index=index, content=thinking)
 
             case StreamEvent(
-                event=RawContentBlockDeltaEvent(
-                    index=index, delta=InputJSONDelta(partial_json=partial_json)
-                )
-            ) if partial_json and streaming_tc_id:
-                tool_delta = ToolCallPartDelta(
-                    args_delta=partial_json,
-                    tool_call_id=streaming_tc_id,
-                )
-                yield PartDeltaEvent(index=index, delta=tool_delta)
+                event=RawContentBlockDeltaEvent(index=idx, delta=InputJSONDelta(partial_json=json_))
+            ) if json_ and streaming_tc_id:
+                yield PartDeltaEvent.tool_call(idx, content=json_, tool_call_id=streaming_tc_id)
 
             # content_block_stop
             case StreamEvent(event=RawContentBlockStopEvent(index=index)):
@@ -300,16 +293,12 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 yield PartEndEvent(index=index, part=TextPart(content=""))
 
             case StatusSystemMessage(status="compacting"):
-                yield CompactionEvent(
-                    session_id=session_id or "unknown",
-                    trigger="auto",
-                    phase="starting",
-                )
+                yield CompactionEvent(session_id=session_id, trigger="auto", phase="starting")
                 continue
 
             case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
                 yield CompactionEvent(
-                    session_id=session_id or "unknown",
+                    session_id=session_id,
                     trigger=compact_metadata["trigger"],
                     phase="completed",
                     pre_tokens=compact_metadata["pre_tokens"],
