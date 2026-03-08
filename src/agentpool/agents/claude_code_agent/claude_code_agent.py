@@ -1054,8 +1054,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             error_msg = "Failed to reconnect with loaded session, continuing with local history"
             self.log.exception(error_msg, session_id=session_id)
         # Build SessionData from storage metadata
-        session_data = await storage.load_session(session_id)
-        if session_data:
+        if session_data := await storage.load_session(session_id):
             return session_data
         # Fallback: build from messages
         last_active = messages[-1].timestamp or get_now()
@@ -1074,10 +1073,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
 
 if __name__ == "__main__":
-    import os
     import time
-
-    os.environ["ANTHROPIC_API_KEY"] = ""
 
     async def main() -> None:
         """Demo: Basic call to Claude Code."""

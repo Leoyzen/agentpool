@@ -867,11 +867,7 @@ class CodexClient:
         Returns:
             ReviewStartResponse with turn and review thread ID
         """
-        params = ReviewStartParams(
-            thread_id=thread_id,
-            target=target,
-            delivery=delivery,
-        )
+        params = ReviewStartParams(thread_id=thread_id, target=target, delivery=delivery)
         result = await self._send_request("review/start", params)
         return ReviewStartResponse.model_validate(result)
 
@@ -1063,11 +1059,7 @@ class CodexClient:
         Returns:
             Response with authorization URL
         """
-        params = McpServerOauthLoginParams(
-            name=name,
-            scopes=scopes,
-            timeout_secs=timeout_secs,
-        )
+        params = McpServerOauthLoginParams(name=name, scopes=scopes, timeout_secs=timeout_secs)
         result = await self._send_request("mcpServer/oauth/login", params)
         return McpServerOauthLoginResponse.model_validate(result)
 
@@ -1379,10 +1371,7 @@ class CodexClient:
         future: asyncio.Future[Any] = asyncio.Future()
         self._pending_requests[request_id] = future
         # Serialize params to dict if provided
-        params_dict: dict[str, Any] = {}
-        if params is not None:
-            params_dict = params.model_dump(by_alias=True, exclude_none=True)
-
+        params_dict = params.model_dump(by_alias=True, exclude_none=True) if params else {}
         request = JsonRpcRequest(id=request_id, method=method, params=params_dict)
         try:
             data = request.model_dump_json(by_alias=True, exclude_none=True)
