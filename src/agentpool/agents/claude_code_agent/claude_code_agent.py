@@ -8,7 +8,7 @@ from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, assert_never, cast
 import uuid
 
 import anyio
@@ -448,14 +448,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             env["ENABLE_LSP_TOOL"] = "1"
         if self._use_subscription:  # Force subscription usage by clearing API key
             env["ANTHROPIC_API_KEY"] = ""
-
-        # Build session config
-        session: NewSession | ResumeSession
-        if self._sdk_session_id:
-            session = ResumeSession(session_id=self._sdk_session_id, fork=fork_session)
-        else:
-            session = NewSession()
-
+        session = (
+            ResumeSession(session_id=self._sdk_session_id, fork=fork_session)
+            if self._sdk_session_id
+            else NewSession()
+        )
         opts = ClaudeAgentOptions(
             cwd=self.env.cwd,
             allowed_tools=self._allowed_tools or [],
@@ -519,22 +516,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # For "default" mode and non-edit tools in "acceptEdits" mode:
         # Ask for confirmation via input provider
-        tool_call_id = context.tool_use_id
+        tc_id = context.tool_use_id
         display_name = _strip_mcp_prefix(tool_name)
-        self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
+        self.log.debug("Permission request", tool_name=display_name, tool_call_id=tc_id)
         if self._tool_bridge._current_context is None:
             raise RuntimeError("Permission callback invoked outside of an active run")
         ctx = replace(
             self._tool_bridge._current_context,
-            tool_call_id=tool_call_id,
+            tool_call_id=tc_id,
             tool_input=input_dict,
             tool_name=display_name,
         )
         input_provider = ctx.get_input_provider()
-        result = await input_provider.get_tool_confirmation(
-            context=ctx,
-            tool_description=f"Claude Code tool: {tool_name}",
-        )
+        result = await input_provider.get_tool_confirmation(context=ctx)
         return confirmation_result_to_native(result)
 
     async def _on_user_question(
@@ -555,13 +549,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """
         from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
 
-        if self._tool_bridge._current_context is None:
+        ctx = self._tool_bridge._current_context
+        if ctx is None:
             raise RuntimeError("User question callback invoked outside of an active run")
-        return await handle_clarifying_questions(
-            self._tool_bridge._current_context,
-            input_data,
-            context,
-        )
+        return await handle_clarifying_questions(ctx, input_data, context)
 
     async def _on_elicitation(
         self,
@@ -579,36 +570,39 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             ElicitationResult with user's response
         """
         from clawd_code_sdk.models import ElicitationResult
-        from mcp.types import ElicitRequestFormParams, ElicitRequestURLParams, ElicitResult
+        from mcp.types import (
+            ElicitRequestFormParams,
+            ElicitRequestURLParams,
+            ElicitResult,
+            ErrorData,
+        )
 
         if self._tool_bridge._current_context is None:
             raise RuntimeError("Elicitation callback invoked outside of an active run")
         input_provider = self._tool_bridge._current_context.get_input_provider()
 
-        # Convert SDK ElicitationRequest to MCP ElicitRequestParams
-        mcp_params: ElicitRequestURLParams | ElicitRequestFormParams
-        if request.mode == "url":
-            mcp_params = ElicitRequestURLParams(
-                message=request.message,
-                url=request.url or "",
-                elicitationId=request.elicitation_id or "",
-            )
-        else:
-            mcp_params = ElicitRequestFormParams(
-                message=request.message,
-                requestedSchema=request.requested_schema or {},
-            )
+        match request.mode:
+            case "url":
+                params: ElicitRequestURLParams | ElicitRequestFormParams = ElicitRequestURLParams(
+                    message=request.message,
+                    url=request.url or "",
+                    elicitationId=request.elicitation_id or "",
+                )
+            case "form":
+                schema = request.requested_schema or {}
+                params = ElicitRequestFormParams(message=request.message, requestedSchema=schema)
+            case None:
+                raise ValueError("Elicitation request mode must be 'url' or 'form'")
+            case _ as unreachable:
+                assert_never(unreachable)
 
-        result = await input_provider.get_elicitation(params=mcp_params)
-
-        # Convert MCP ElicitResult back to SDK ElicitationResult
-        if isinstance(result, ElicitResult):
-            return ElicitationResult(
-                action=result.action,
-                content=dict(result.content) if result.content else None,
-            )
-        # ErrorData case - treat as decline
-        return ElicitationResult(action="decline")
+        match await input_provider.get_elicitation(params=params):
+            case ElicitResult(action=action, content=content):
+                return ElicitationResult(action=action, content=dict(content) if content else None)
+            case ErrorData():
+                return ElicitationResult(action="decline")
+            case _ as unreachable_:
+                assert_never(unreachable_)  # ty:ignore[type-assertion-failure]
 
     async def __aenter__(self) -> Self:
         """Connect to Claude Code with deferred client connection."""
