@@ -38,8 +38,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
+from clawd_code_sdk.models import (
+    AuthStatusMessage,
+    ElicitationCompleteMessage,
+    FilesPersistedSystemMessage,
+    HookProgressSystemMessage,
+    HookResponseSystemMessage,
+    HookStartedSystemMessage,
+    InitSystemMessage,
+    LocalCommandOutputMessage,
+    PromptSuggestionMessage,
+    RateLimitMessage,
+    ResultErrorMessage,
+    ResultSuccessMessage,
+    StatusSystemMessage,
+    TaskNotificationSystemMessage,
+    TaskProgressSystemMessage,
+    TaskStartedSystemMessage,
+    ToolProgressMessage,
+    ToolUseSummaryMessage,
+)
 from pydantic_ai import (
     FunctionToolResultEvent,
     ModelRequest,
@@ -51,9 +71,7 @@ from pydantic_ai import (
     ToolReturnPart,
 )
 
-from agentpool.agents.claude_code_agent.converters import (
-    convert_to_opencode_metadata,
-)
+from agentpool.agents.claude_code_agent.converters import convert_to_opencode_metadata
 from agentpool.agents.events import (
     CompactionEvent,
     PartDeltaEvent,
@@ -70,6 +88,7 @@ if TYPE_CHECKING:
 
     from clawd_code_sdk import ResultMessage, ToolUseBlock
     from clawd_code_sdk.models import StopReason
+    from pydantic_ai import ModelMessage
 
     from agentpool.agents.events import RichAgentStreamEvent
 
@@ -98,7 +117,7 @@ class StreamAdapterResult:
     resolved_model: str | None = None
     """Model identifier resolved from AssistantMessage responses."""
 
-    model_messages: list[ModelResponse | ModelRequest] = field(default_factory=list)
+    model_messages: list[ModelMessage] = field(default_factory=list)
     """Accumulated pydantic-ai model messages (for ChatMessage.messages)."""
 
     response_parts: list[TextPart | ThinkingPart | ToolCallPart] = field(default_factory=list)
@@ -143,20 +162,17 @@ async def adapt_claude_stream(  # noqa: PLR0915
         ThinkingDelta,
         ToolUseBlock as AnthToolUseBlock,
     )
-    from clawd_code_sdk import (
+    from clawd_code_sdk.models import (
         AssistantMessage,
+        CompactBoundarySystemMessage,
         Message,
         ResultMessage,
+        StreamEvent,
         TextBlock,
         ThinkingBlock,
         ToolResultBlock,
         ToolUseBlock,
         UserMessage,
-    )
-    from clawd_code_sdk.models import (
-        CompactBoundarySystemMessage,
-        StatusSystemMessage,
-        StreamEvent,
     )
 
     result = StreamAdapterResult()
@@ -199,6 +215,8 @@ async def adapt_claude_stream(  # noqa: PLR0915
                             )
                         case ToolResultBlock():
                             pass  # ToolResult Blocks only appear in UserMessages
+                        case _ as unknown_block:
+                            assert_never(unknown_block)  # ty:ignore[type-assertion-failure]
 
             case UserMessage(content=list() as user_blocks):
                 for user_block in user_blocks:
@@ -244,48 +262,38 @@ async def adapt_claude_stream(  # noqa: PLR0915
 
             # Real-time streaming: content_block_start
             case StreamEvent(
-                event=RawContentBlockStartEvent(index=index, content_block=AnthTextBlock())
+                event=RawContentBlockStartEvent(index=index, content_block=content_block)
             ):
-                yield PartStartEvent.text(index=index, content="")
-
-            case StreamEvent(
-                event=RawContentBlockStartEvent(index=index, content_block=AnthThinkingBlock())
-            ):
-                yield PartStartEvent.thinking(index=index, content="")
-
-            case StreamEvent(
-                event=RawContentBlockStartEvent(
-                    content_block=AnthToolUseBlock(id=tc_id, name=raw_tool_name)
-                )
-            ):
-                tool_name = _strip_mcp_prefix(raw_tool_name)
-                streaming_tc_id = tc_id
-                rich_info = derive_rich_tool_info(raw_tool_name, {})
-                yield ToolCallStartEvent(
-                    tool_call_id=tc_id,
-                    tool_name=tool_name,
-                    title=rich_info.title,
-                    kind=rich_info.kind,
-                    locations=[],
-                    content=rich_info.content,
-                    raw_input={},
-                )
+                match content_block:
+                    case AnthTextBlock():
+                        yield PartStartEvent.text(index=index, content="")
+                    case AnthThinkingBlock():
+                        yield PartStartEvent.thinking(index=index, content="")
+                    case AnthToolUseBlock(id=tc_id, name=raw_tool_name):
+                        tool_name = _strip_mcp_prefix(raw_tool_name)
+                        streaming_tc_id = tc_id
+                        rich_info = derive_rich_tool_info(raw_tool_name, {})
+                        yield ToolCallStartEvent(
+                            tool_call_id=tc_id,
+                            tool_name=tool_name,
+                            title=rich_info.title,
+                            kind=rich_info.kind,
+                            locations=[],
+                            content=rich_info.content,
+                            raw_input={},
+                        )
 
             # content_block_delta events
-            case StreamEvent(
-                event=RawContentBlockDeltaEvent(index=index, delta=TextDelta(text=text))
-            ) if text:
-                yield PartDeltaEvent.text(index=index, content=text)
-
-            case StreamEvent(
-                event=RawContentBlockDeltaEvent(index=index, delta=ThinkingDelta(thinking=thinking))
-            ) if thinking:
-                yield PartDeltaEvent.thinking(index=index, content=thinking)
-
-            case StreamEvent(
-                event=RawContentBlockDeltaEvent(index=idx, delta=InputJSONDelta(partial_json=json_))
-            ) if json_ and streaming_tc_id:
-                yield PartDeltaEvent.tool_call(idx, content=json_, tool_call_id=streaming_tc_id)
+            case StreamEvent(event=RawContentBlockDeltaEvent(index=index, delta=delta)):
+                match delta:
+                    case TextDelta(text=text) if text:
+                        yield PartDeltaEvent.text(index=index, content=text)
+                    case ThinkingDelta(thinking=thinking) if thinking:
+                        yield PartDeltaEvent.thinking(index=index, content=thinking)
+                    case InputJSONDelta(partial_json=json_) if json_ and streaming_tc_id:
+                        yield PartDeltaEvent.tool_call(
+                            index, content=json_, tool_call_id=streaming_tc_id
+                        )
 
             # content_block_stop
             case StreamEvent(event=RawContentBlockStopEvent(index=index)):
@@ -305,8 +313,31 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 )
                 continue
 
-            case StreamEvent():
+            case (
+                StreamEvent()
+                | UserMessage()
+                | PromptSuggestionMessage()
+                | ResultSuccessMessage()
+                | ResultErrorMessage()
+                | HookStartedSystemMessage()
+                | HookProgressSystemMessage()
+                | HookResponseSystemMessage()
+                | RateLimitMessage()
+                | AuthStatusMessage()
+                | ToolProgressMessage()
+                | ToolUseSummaryMessage()
+                | InitSystemMessage()
+                | StatusSystemMessage()
+                | TaskStartedSystemMessage()
+                | TaskProgressSystemMessage()
+                | TaskNotificationSystemMessage()
+                | FilesPersistedSystemMessage()
+                | ElicitationCompleteMessage()
+                | LocalCommandOutputMessage()
+            ):
                 continue
+            case _ as unreachable:
+                assert_never(unreachable)
 
         # Check for result (end of response)
         if isinstance(message, ResultMessage):
