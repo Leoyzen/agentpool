@@ -54,6 +54,7 @@ class ACPRequests:
         *,
         limit: int | None = None,
         line: int | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> str:
         """Read text content from a file.
 
@@ -61,17 +62,31 @@ class ACPRequests:
             path: File path to read
             limit: Maximum number of lines to read
             line: Line number to start reading from (1-based)
+            metadata: Optional metadata to include with the request
 
         Returns:
             File content as string
         """
-        request = ReadTextFileRequest(session_id=self.id, path=path, limit=limit, line=line)
+        request = ReadTextFileRequest(
+            session_id=self.id,
+            path=path,
+            limit=limit,
+            line=line,
+            field_meta=metadata,
+        )
         response = await self.client.read_text_file(request)
         return response.content
 
-    async def write_text_file(self, path: str, content: str) -> None:
+    async def write_text_file(
+        self, path: str, content: str, metadata: dict[str, str] | None = None
+    ) -> None:
         """Write text content to a file."""
-        request = WriteTextFileRequest(session_id=self.id, path=path, content=content)
+        request = WriteTextFileRequest(
+            session_id=self.id,
+            path=path,
+            content=content,
+            field_meta=metadata,
+        )
         await self.client.write_text_file(request)
 
     async def create_terminal(
@@ -82,6 +97,7 @@ class ACPRequests:
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         output_byte_limit: int | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> TerminalHandle:
         """Create a new terminal session.
 
@@ -92,6 +108,7 @@ class ACPRequests:
             cwd: Working directory for terminal
             env: Environment variables for terminal
             output_byte_limit: Maximum bytes to capture from output
+            metadata: Optional metadata to include with the request
         """
         request = CreateTerminalRequest(
             session_id=self.id,
@@ -102,28 +119,61 @@ class ACPRequests:
             cwd=cwd,
             env=[EnvVariable(name=k, value=v) for k, v in (env or {}).items()],
             output_byte_limit=output_byte_limit,
+            field_meta=metadata,
         )
         response = await self.client.create_terminal(request)
         return TerminalHandle(terminal_id=response.terminal_id, requests=self)
 
-    async def terminal_output(self, terminal_id: str) -> TerminalOutputResponse:
+    async def terminal_output(
+        self,
+        terminal_id: str,
+        metadata: dict[str, str] | None = None,
+    ) -> TerminalOutputResponse:
         """Get output from a terminal session."""
-        request = TerminalOutputRequest(session_id=self.id, terminal_id=terminal_id)
+        request = TerminalOutputRequest(
+            session_id=self.id,
+            terminal_id=terminal_id,
+            field_meta=metadata,
+        )
         return await self.client.terminal_output(request)
 
-    async def wait_for_terminal_exit(self, terminal_id: str) -> WaitForTerminalExitResponse:
+    async def wait_for_terminal_exit(
+        self,
+        terminal_id: str,
+        metadata: dict[str, str] | None = None,
+    ) -> WaitForTerminalExitResponse:
         """Wait for a terminal to exit."""
-        request = WaitForTerminalExitRequest(session_id=self.id, terminal_id=terminal_id)
+        request = WaitForTerminalExitRequest(
+            session_id=self.id,
+            terminal_id=terminal_id,
+            field_meta=metadata,
+        )
         return await self.client.wait_for_terminal_exit(request)
 
-    async def kill_terminal(self, terminal_id: str) -> None:
+    async def kill_terminal(
+        self,
+        terminal_id: str,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
         """Kill a terminal session."""
-        request = KillTerminalCommandRequest(session_id=self.id, terminal_id=terminal_id)
+        request = KillTerminalCommandRequest(
+            session_id=self.id,
+            terminal_id=terminal_id,
+            field_meta=metadata,
+        )
         await self.client.kill_terminal(request)
 
-    async def release_terminal(self, terminal_id: str) -> None:
+    async def release_terminal(
+        self,
+        terminal_id: str,
+        metadata: dict[str, str] | None = None,
+    ) -> None:
         """Release a terminal session."""
-        request = ReleaseTerminalRequest(session_id=self.id, terminal_id=terminal_id)
+        request = ReleaseTerminalRequest(
+            session_id=self.id,
+            terminal_id=terminal_id,
+            field_meta=metadata,
+        )
         await self.client.release_terminal(request)
 
     async def run_command(
@@ -135,6 +185,7 @@ class ACPRequests:
         env: dict[str, str] | None = None,
         output_byte_limit: int | None = None,
         timeout_seconds: int | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> tuple[str, int | None]:
         """Execute a shell command and return output and exit code.
 
@@ -148,6 +199,7 @@ class ACPRequests:
             env: Environment variables for command execution
             output_byte_limit: Maximum bytes to capture from output
             timeout_seconds: Command timeout in seconds
+            metadata: Metadata for the requests
 
         Returns:
             Tuple of (output, exit_code)
@@ -158,26 +210,27 @@ class ACPRequests:
             cwd=cwd,
             env=env,
             output_byte_limit=output_byte_limit,
+            metadata=metadata,
         )
         terminal_id = terminal_handle.terminal_id
 
         try:
             if timeout_seconds:  # Wait for completion (with optional timeout)
                 try:
-                    coro = self.wait_for_terminal_exit(terminal_id)
+                    coro = self.wait_for_terminal_exit(terminal_id, metadata=metadata)
                     exit_result = await asyncio.wait_for(coro, timeout=timeout_seconds)
                 except TimeoutError:  # Kill on timeout and get partial output
-                    await self.kill_terminal(terminal_id)
-                    output_response = await self.terminal_output(terminal_id)
+                    await self.kill_terminal(terminal_id, metadata=metadata)
+                    output_response = await self.terminal_output(terminal_id, metadata=metadata)
                     return output_response.output, None
             else:
-                exit_result = await self.wait_for_terminal_exit(terminal_id)
+                exit_result = await self.wait_for_terminal_exit(terminal_id, metadata=metadata)
 
-            output_response = await self.terminal_output(terminal_id)
+            output_response = await self.terminal_output(terminal_id, metadata=metadata)
             return output_response.output, exit_result.exit_code
 
         finally:  # Always release terminal
-            await self.release_terminal(terminal_id)
+            await self.release_terminal(terminal_id, metadata=metadata)
 
     async def request_permission(
         self,
@@ -186,6 +239,7 @@ class ACPRequests:
         title: str | None = None,
         raw_input: dict[str, Any] | None = None,
         options: Sequence[PermissionOption] | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> RequestPermissionResponse:
         """Request permission from user before executing a tool call.
 
@@ -194,6 +248,7 @@ class ACPRequests:
             title: Human-readable description of the operation
             raw_input: The raw input parameters for the tool call
             options: Available permission options (defaults to allow/reject once)
+            metadata: Metadata to include with the request
 
         Returns:
             Permission response with user's decision
@@ -205,5 +260,10 @@ class ACPRequests:
             ]
 
         tool_call = ToolCall(tool_call_id=tool_call_id, title=title, raw_input=raw_input)
-        request = RequestPermissionRequest(session_id=self.id, tool_call=tool_call, options=options)
+        request = RequestPermissionRequest(
+            session_id=self.id,
+            tool_call=tool_call,
+            options=options,
+            field_meta=metadata,
+        )
         return await self.client.request_permission(request)
