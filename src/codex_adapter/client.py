@@ -54,6 +54,7 @@ from codex_adapter.models import (
     ModelListResponse,
     ReviewStartParams,
     ReviewStartResponse,
+    ReviewTarget,
     SkillsConfigWriteParams,
     SkillsListParams,
     SkillsListResponse,
@@ -750,7 +751,7 @@ class CodexClient:
     async def review_start(
         self,
         thread_id: str,
-        target: dict[str, Any],
+        target: ReviewTarget,
         *,
         delivery: ReviewDelivery | None = None,
     ) -> ReviewStartResponse:

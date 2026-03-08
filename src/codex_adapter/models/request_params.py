@@ -28,6 +28,7 @@ from codex_adapter.models.misc import (  # noqa: TC001
     NetworkPolicyAmendment,
     ToolRequestUserInputQuestion,
 )
+from codex_adapter.models.response_item import ResponseItem  # noqa: TC001
 
 
 LoginType = Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
@@ -65,7 +66,7 @@ class ThreadResumeParams(CodexBaseModel):
     """Parameters for thread/resume request."""
 
     thread_id: str
-    history: list[dict[str, Any]] | None = None
+    history: list[ResponseItem] | None = None
     path: str | None = None
     cwd: str | None = None
     model: str | None = None
@@ -178,7 +179,7 @@ class TurnSteerParams(CodexBaseModel):
     """Parameters for turn/steer request."""
 
     thread_id: str
-    input: list[TurnInputItem]
+    input: Sequence[TurnInputItem]
     expected_turn_id: str
 
 
@@ -189,12 +190,50 @@ class TurnInterruptParams(CodexBaseModel):
     turn_id: str
 
 
+class UncommittedChangesTarget(CodexBaseModel):
+    """Review the working tree: staged, unstaged, and untracked files."""
+
+    type: Literal["uncommittedChanges"] = "uncommittedChanges"
+
+
+class BaseBranchTarget(CodexBaseModel):
+    """Review changes between the current branch and a base branch."""
+
+    type: Literal["baseBranch"] = "baseBranch"
+    branch: str
+
+
+class CommitTarget(CodexBaseModel):
+    """Review the changes introduced by a specific commit."""
+
+    type: Literal["commit"] = "commit"
+    sha: str
+    title: str | None = None
+
+
+class CustomTarget(CodexBaseModel):
+    """Arbitrary instructions provided by the user."""
+
+    type: Literal["custom"] = "custom"
+    instructions: str
+
+
+ReviewTarget = UncommittedChangesTarget | BaseBranchTarget | CommitTarget | CustomTarget
+
+
 class ReviewStartParams(CodexBaseModel):
     """Parameters for review/start request."""
 
     thread_id: str
-    target: dict[str, Any]  # ReviewTarget - discriminated union
+    target: ReviewTarget
     delivery: ReviewDelivery | None = None
+
+
+class SkillsListExtraRootsForCwd(CodexBaseModel):
+    """Extra user roots to scan for a specific cwd."""
+
+    cwd: str
+    extra_user_roots: list[str]
 
 
 class SkillsListParams(CodexBaseModel):
@@ -202,7 +241,7 @@ class SkillsListParams(CodexBaseModel):
 
     cwds: list[str] | None = None
     force_reload: bool | None = None
-    per_cwd_extra_user_roots: list[dict[str, Any]] | None = None
+    per_cwd_extra_user_roots: list[SkillsListExtraRootsForCwd] | None = None
 
 
 class SkillsConfigWriteParams(CodexBaseModel):
