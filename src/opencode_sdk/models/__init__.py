@@ -198,6 +198,7 @@ from opencode_sdk.models.events import (
     TuiSessionSelectEvent,
 )
 from opencode_sdk.models.mcp import (
+    AddMcpServerRequest,
     LogRequest,
     McpAuthorizationResponse,
     MCPStatus,
@@ -216,6 +217,7 @@ __all__ = [
     "APIError",
     "APIErrorData",
     "APIErrorInfo",
+    "AddMcpServerRequest",
     "Agent",
     "AgentPart",
     "AgentPartInput",

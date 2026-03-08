@@ -5,7 +5,10 @@ OpenCode SDK models directly.
 
 Usage:
     async with OpenCodeClient("http://localhost:3000") as client:
-        sessions = await client.list_sessions()
+        session = await client.create_session()
+        await session.send_message(request)
+        messages = await session.list_messages()
+
         async for event in client.events():
             print(event)
 """
@@ -34,6 +37,7 @@ if TYPE_CHECKING:
 
     from opencode_sdk.models.agent import Agent, Command, SkillInfo
     from opencode_sdk.models.events import PermissionReplyRequest
+    from opencode_sdk.models.mcp import AddMcpServerRequest, LogLevel
     from opencode_sdk.models.message import CommandRequest, MessageRequest, ShellRequest
     from opencode_sdk.models.question import QuestionReply
     from opencode_sdk.models.session import (
@@ -48,11 +52,162 @@ if TYPE_CHECKING:
 _event_adapter: TypeAdapter[Event] = TypeAdapter(Event)
 
 
+# ── Session handle ────────────────────────────────────────────────────
+
+
+class SessionHandle:
+    """Handle for interacting with a specific OpenCode session.
+
+    Wraps session data + client reference so all session-scoped operations
+    can be called directly without passing session_id everywhere.
+
+    Usage:
+        session = await client.create_session()
+        await session.send_message(request)
+        messages = await session.list_messages()
+        await session.abort()
+    """
+
+    def __init__(self, client: OpenCodeClient, info: Session) -> None:
+        self._client = client
+        self.info = info
+
+    @property
+    def id(self) -> str:
+        return self.info.id
+
+    @property
+    def title(self) -> str:
+        return self.info.title
+
+    # ── Session lifecycle ─────────────────────────────────────────
+
+    async def refresh(self) -> None:
+        """Re-fetch session data from the server."""
+        handle = await self._client.session(self.id)
+        self.info = handle.info
+
+    async def update(self, request: SessionUpdateRequest) -> None:
+        """Update session metadata (e.g. title, archive)."""
+        self.info = await self._client.update_session(self.id, request)
+
+    async def delete(self) -> bool:
+        """Delete this session."""
+        return await self._client.delete_session(self.id)
+
+    async def abort(self) -> bool:
+        """Abort this session if busy."""
+        return await self._client.abort_session(self.id)
+
+    async def fork(self, request: SessionForkRequest | None = None) -> SessionHandle:
+        """Fork this session, returning a new SessionHandle."""
+        return await self._client.fork_session(self.id, request)
+
+    async def init(self, request: SessionInitRequest | None = None) -> MessageWithParts:
+        """Initialize this session (create AGENTS.md)."""
+        return await self._client.init_session(self.id, request)
+
+    async def children(self) -> list[SessionHandle]:
+        """Get child sessions as handles."""
+        sessions = await self._client.get_session_children(self.id)
+        return [SessionHandle(self._client, s) for s in sessions]
+
+    # ── Messages ──────────────────────────────────────────────────
+
+    async def list_messages(self, *, limit: int | None = None) -> list[MessageWithParts]:
+        """List messages in this session."""
+        return await self._client.list_messages(self.id, limit=limit)
+
+    async def send_message(self, request: MessageRequest) -> MessageWithParts:
+        """Send a message and wait for the agent's response."""
+        return await self._client.send_message(self.id, request)
+
+    async def send_message_async(self, request: MessageRequest) -> None:
+        """Send a message asynchronously (listen to SSE for updates)."""
+        return await self._client.send_message_async(self.id, request)
+
+    async def get_message(self, message_id: str) -> MessageWithParts:
+        """Get a specific message."""
+        return await self._client.get_message(self.id, message_id)
+
+    async def delete_message(self, message_id: str) -> bool:
+        """Delete a message and all its parts."""
+        return await self._client.delete_message(self.id, message_id)
+
+    # ── Commands / Shell ──────────────────────────────────────────
+
+    async def execute_command(self, request: CommandRequest) -> MessageWithParts:
+        """Execute a slash command in this session."""
+        return await self._client.execute_command(self.id, request)
+
+    async def shell(self, request: ShellRequest) -> MessageWithParts:
+        """Run a shell command in this session."""
+        return await self._client.shell(self.id, request)
+
+    async def summarize(self, request: SummarizeRequest | None = None) -> MessageWithParts:
+        """Summarize/compact this session."""
+        return await self._client.summarize(self.id, request)
+
+    # ── Diffs / Todos ─────────────────────────────────────────────
+
+    async def todos(self) -> list[Todo]:
+        """Get todos for this session."""
+        return await self._client.get_session_todos(self.id)
+
+    async def diff(self) -> list[FileDiff]:
+        """Get file diffs for this session."""
+        return await self._client.get_session_diff(self.id)
+
+    # ── Share / Revert ────────────────────────────────────────────
+
+    async def share(self) -> None:
+        """Share this session (create shareable link)."""
+        self.info = await self._client.share_session(self.id)
+
+    async def unshare(self) -> None:
+        """Remove session sharing."""
+        self.info = await self._client.unshare_session(self.id)
+
+    async def revert(self, *, message_id: str, part_id: str | None = None) -> None:
+        """Revert this session to a specific message."""
+        self.info = await self._client.revert_session(
+            self.id, message_id=message_id, part_id=part_id
+        )
+
+    async def unrevert(self) -> None:
+        """Undo a revert."""
+        self.info = await self._client.unrevert_session(self.id)
+
+    # ── Permissions ───────────────────────────────────────────────
+
+    async def list_permissions(self) -> list[PermissionAskedProperties]:
+        """Get pending permission requests for this session."""
+        return await self._client.list_permissions(self.id)
+
+    async def reply_permission(
+        self,
+        permission_id: str,
+        reply: PermissionReplyRequest,
+    ) -> bool:
+        """Reply to a permission request."""
+        return await self._client.reply_permission(self.id, permission_id, reply)
+
+    def __repr__(self) -> str:
+        return f"SessionHandle(id={self.id!r}, title={self.title!r})"
+
+
+# ── Client ────────────────────────────────────────────────────────────
+
+
 class OpenCodeClient:
     """Async HTTP client for the OpenCode server API.
 
     All methods return OpenCode SDK models — no agentpool-specific types.
     Uses httpx for HTTP and SSE streaming.
+
+    Session-scoped operations are available both as flat methods on the client
+    (taking ``session_id``) and as methods on :class:`SessionHandle` objects
+    returned by :meth:`create_session` and :meth:`session`.
     """
 
     def __init__(
@@ -75,10 +230,7 @@ class OpenCodeClient:
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> Self:
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=self._timeout,
-        )
+        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self._timeout)
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -230,7 +382,7 @@ class OpenCodeClient:
         start: int | None = None,
         search: str | None = None,
         limit: int | None = None,
-    ) -> list[Session]:
+    ) -> list[SessionHandle]:
         """List sessions.
 
         Args:
@@ -248,21 +400,21 @@ class OpenCodeClient:
             search=search,
             limit=limit,
         )
-        return [Session.model_validate(s) for s in data]
+        return [SessionHandle(self, Session.model_validate(s)) for s in data]
 
     async def create_session(
         self,
         request: SessionCreateRequest | None = None,
-    ) -> Session:
+    ) -> SessionHandle:
         """Create a new session."""
         json_data = self._dump(request) if request else None
         data = await self._post("/session", json=json_data)
-        return Session.model_validate(data)
+        return SessionHandle(self, Session.model_validate(data))
 
-    async def get_session(self, session_id: str) -> Session:
-        """Get a session by ID."""
+    async def session(self, session_id: str) -> SessionHandle:
+        """Get a session handle by ID."""
         data = await self._get(f"/session/{session_id}")
-        return Session.model_validate(data)
+        return SessionHandle(self, Session.model_validate(data))
 
     async def update_session(
         self,
@@ -297,11 +449,11 @@ class OpenCodeClient:
         self,
         session_id: str,
         request: SessionForkRequest | None = None,
-    ) -> Session:
+    ) -> SessionHandle:
         """Fork a session, optionally from a specific message."""
         json_data = self._dump(request) if request else None
         data = await self._post(f"/session/{session_id}/fork", json=json_data)
-        return Session.model_validate(data)
+        return SessionHandle(self, Session.model_validate(data))
 
     async def init_session(
         self,
@@ -399,28 +551,16 @@ class OpenCodeClient:
         data = await self._post(f"/session/{session_id}/message", json=self._dump(request))
         return MessageWithParts.model_validate(data)
 
-    async def send_message_async(
-        self,
-        session_id: str,
-        request: MessageRequest,
-    ) -> None:
+    async def send_message_async(self, session_id: str, request: MessageRequest) -> None:
         """Send a message asynchronously (returns immediately, listen to SSE for updates)."""
         await self._post(f"/session/{session_id}/prompt_async", json=self._dump(request))
 
-    async def get_message(
-        self,
-        session_id: str,
-        message_id: str,
-    ) -> MessageWithParts:
+    async def get_message(self, session_id: str, message_id: str) -> MessageWithParts:
         """Get a specific message."""
         data = await self._get(f"/session/{session_id}/message/{message_id}")
         return MessageWithParts.model_validate(data)
 
-    async def delete_message(
-        self,
-        session_id: str,
-        message_id: str,
-    ) -> bool:
+    async def delete_message(self, session_id: str, message_id: str) -> bool:
         """Delete a message and all its parts."""
         data = await self._delete(f"/session/{session_id}/message/{message_id}")
         return bool(data)
@@ -496,24 +636,9 @@ class OpenCodeClient:
         data = await self._get("/mcp")
         return [MCPStatus.model_validate(s) for s in data]
 
-    async def add_mcp_server(
-        self,
-        *,
-        name: str | None = None,
-        command: str | None = None,
-        args: list[str] | None = None,
-        url: str | None = None,
-        env: dict[str, str] | None = None,
-    ) -> MCPStatus:
+    async def add_mcp_server(self, request: AddMcpServerRequest) -> MCPStatus:
         """Add an MCP server dynamically."""
-        body: dict[str, Any] = {
-            "name": name,
-            "command": command,
-            "args": args,
-            "url": url,
-            "env": env,
-        }
-        data = await self._post("/mcp", json={k: v for k, v in body.items() if v is not None})
+        data = await self._post("/mcp", json=self._dump(request))
         return MCPStatus.model_validate(data)
 
     async def connect_mcp_server(self, name: str) -> MCPStatus:
@@ -528,9 +653,15 @@ class OpenCodeClient:
 
     # ── Logging ───────────────────────────────────────────────────────
 
-    async def log(self, message: str, *, level: str = "info") -> None:
+    async def log(
+        self,
+        message: str,
+        *,
+        service: str = "opencode-client",
+        level: LogLevel = "info",
+    ) -> None:
         """Send a log message to the server."""
         from opencode_sdk.models.mcp import LogRequest
 
-        req = LogRequest(message=message, level=level)
+        req = LogRequest(service=service, level=level, message=message)
         await self._post("/log", json=self._dump(req))

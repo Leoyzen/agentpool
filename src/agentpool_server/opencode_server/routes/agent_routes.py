@@ -18,6 +18,7 @@ from agentpool_config.mcp_server import (
 from agentpool_server.opencode_server.converters import to_mcp_status
 from agentpool_server.opencode_server.dependencies import StateDep
 from opencode_sdk.models import (
+    AddMcpServerRequest,
     Agent,
     AuthInfo,
     Command,
@@ -43,23 +44,7 @@ from opencode_sdk.models import (
 router = APIRouter(tags=["agent"])
 
 
-class AddMCPServerRequest(BaseModel):
-    """Request to add an MCP server dynamically."""
-
-    name: str | None = None
-    """Name for the server (used as client_id)."""
-
-    command: str | None = None
-    """Command to run (for stdio servers)."""
-
-    args: list[str] | None = None
-    """Arguments for the command."""
-
-    url: str | None = None
-    """URL for HTTP/SSE servers."""
-
-    env: dict[str, str] | None = None
-    """Environment variables for the server."""
+# AddMcpServerRequest is defined in opencode_sdk.models.mcp
 
 
 class OAuthAuthorizeRequest(BaseModel):
@@ -158,7 +143,7 @@ async def get_mcp_status(state: StateDep) -> dict[str, MCPStatus]:
 
 
 @router.post("/mcp")
-async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPStatus:
+async def add_mcp_server(request: AddMcpServerRequest, state: StateDep) -> MCPStatus:
     """Add an MCP server dynamically.
 
     Supports stdio servers (command + args) or HTTP/SSE servers (url).

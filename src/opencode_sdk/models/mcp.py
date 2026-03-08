@@ -29,6 +29,29 @@ class MCPStatus(OpenCodeBaseModel):
     error: str | None = None
 
 
+class AddMcpServerRequest(OpenCodeBaseModel):
+    """Request to add an MCP server dynamically.
+
+    For stdio servers, provide ``command`` (and optionally ``args`` / ``env``).
+    For HTTP/SSE servers, provide ``url``.
+    """
+
+    name: str | None = None
+    """Name for the server (used as client_id)."""
+
+    command: str | None = None
+    """Command to run (for stdio servers)."""
+
+    args: list[str] | None = None
+    """Arguments for the command."""
+
+    url: str | None = None
+    """URL for HTTP/SSE servers."""
+
+    env: dict[str, str] | None = None
+    """Environment variables for the server."""
+
+
 class McpAuthorizationResponse(OpenCodeBaseModel):
     """Response from starting MCP OAuth flow."""
 
