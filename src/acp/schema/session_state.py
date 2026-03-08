@@ -231,7 +231,7 @@ class SessionConfigOption(AnnotatedObject):
     @classmethod
     def select(
         cls,
-        id: SessionConfigId,
+        config_id: SessionConfigId,
         name: str,
         current_value: SessionConfigValueId,
         options: SessionConfigSelectOptions,
@@ -241,7 +241,7 @@ class SessionConfigOption(AnnotatedObject):
     ) -> SessionConfigOption:
         """Create a select-type config option."""
         return cls(
-            id=id,
+            id=config_id,
             name=name,
             type="select",
             current_value=current_value,
@@ -253,7 +253,7 @@ class SessionConfigOption(AnnotatedObject):
     @classmethod
     def boolean(
         cls,
-        id: SessionConfigId,
+        config_id: SessionConfigId,
         name: str,
         current_value: bool,
         *,
@@ -265,7 +265,7 @@ class SessionConfigOption(AnnotatedObject):
         **UNSTABLE**: This capability is not part of the spec yet.
         """
         return cls(
-            id=id,
+            id=config_id,
             name=name,
             type="boolean",
             current_value=current_value,

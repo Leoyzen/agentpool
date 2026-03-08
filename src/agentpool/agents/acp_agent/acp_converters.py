@@ -113,6 +113,9 @@ def get_modes(
 
     if config_options:
         for config_opt in config_options:
+            # Skip boolean config options - they don't map to mode categories
+            if config_opt.type == "boolean" or config_opt.options is None:
+                continue
             # Extract options from the config (ungrouped or grouped)
             mode_infos: list[ModeInfo] = []
             for i in config_opt.options:
@@ -132,7 +135,7 @@ def get_modes(
                     id=config_opt.id,
                     name=config_opt.name,
                     available_modes=mode_infos,
-                    current_mode_id=config_opt.current_value,
+                    current_mode_id=str(config_opt.current_value),
                     category=config_opt.category or "other",
                 )
             )

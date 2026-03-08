@@ -38,7 +38,7 @@ class ACPModeCategory(ModeCategoryProtocol["ACPAgent"]):
         # Try config_options first
         if agent._state and agent._state.config_options:
             for opt in agent._state.config_options:
-                if opt.id == "mode":
+                if opt.id == "mode" and isinstance(opt.current_value, str):
                     return opt.current_value
         # Fall back to legacy modes state
         if agent._state and agent._state.modes:
@@ -121,6 +121,8 @@ class ACPModeCategory(ModeCategoryProtocol["ACPAgent"]):
                 if config_opt.id != "mode":
                     continue
                 mode_infos: list[ModeInfo] = []
+                if config_opt.options is None:
+                    continue
                 for opt_item in config_opt.options:
                     if isinstance(opt_item, SessionConfigSelectGroup):
                         mode_infos.extend(
@@ -178,7 +180,7 @@ class ACPModelCategory(ModeCategoryProtocol["ACPAgent"]):
         # Try config_options first
         if agent._state and agent._state.config_options:
             for opt in agent._state.config_options:
-                if opt.id == "model":
+                if opt.id == "model" and isinstance(opt.current_value, str):
                     return opt.current_value
         # Fall back to legacy models state
         if agent._state and agent._state.models:
@@ -318,7 +320,8 @@ class ACPGenericCategory(ModeCategoryProtocol["ACPAgent"]):
     def get_current(self, agent: ACPAgent) -> str:
         """Get current value from ACP state."""
         if agent._state and (opts := agent._state.config_options):
-            return next((i.current_value for i in opts if i.id == self.id), "")
+            val = next((i.current_value for i in opts if i.id == self.id), "")
+            return val if isinstance(val, str) else str(val)
         return ""
 
     async def apply(self, agent: ACPAgent, mode_id: str) -> None:
