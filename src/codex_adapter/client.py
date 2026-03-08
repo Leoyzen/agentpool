@@ -530,6 +530,38 @@ class CodexClient:
         result = await self._send_request("thread/rollback", params)
         return ThreadRollbackResponse.model_validate(result)
 
+    async def thread_rollback_to_turn(self, thread_id: str, turn_id: str) -> ThreadRollbackResponse:
+        """Rollback a thread to a specific turn, keeping that turn and removing all after it.
+
+        This is a convenience method that reads the thread to find the turn index,
+        then calls thread_rollback with the computed number of turns to drop.
+
+        Args:
+            thread_id: The thread ID
+            turn_id: The turn ID to roll back to (this turn will be kept)
+
+        Returns:
+            Updated thread object with turns populated
+
+        Raises:
+            ValueError: If the turn_id is not found in the thread
+        """
+        thread_response = await self.thread_read(thread_id, include_turns=True)
+        turns = thread_response.thread.turns
+        turn_index: int | None = None
+        for i, turn in enumerate(turns):
+            if turn.id == turn_id:
+                turn_index = i
+                break
+        if turn_index is None:
+            msg = f"Turn {turn_id!r} not found in thread {thread_id!r}"
+            raise ValueError(msg)
+        num_turns_to_drop = len(turns) - turn_index - 1
+        if num_turns_to_drop < 1:
+            msg = f"Turn {turn_id!r} is already the last turn in thread {thread_id!r}"
+            raise ValueError(msg)
+        return await self.thread_rollback(thread_id, num_turns_to_drop)
+
     # ========================================================================
     # Turn methods
     # ========================================================================
