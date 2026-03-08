@@ -199,10 +199,19 @@ class ACPAgentAPI:
         self,
         session_id: str,
         config_id: str,
-        value: str,
+        value: str | bool,
     ) -> SetSessionConfigOptionResponse | None:
-        """Set a session configuration option."""
-        req = SetSessionConfigOptionRequest(session_id=session_id, config_id=config_id, value=value)
+        """Set a session configuration option.
+
+        Args:
+            session_id: The session ID.
+            config_id: The config option ID.
+            value: String value ID for select options, or bool for boolean options.
+        """
+        type_field = "boolean" if isinstance(value, bool) else None
+        req = SetSessionConfigOptionRequest(
+            session_id=session_id, config_id=config_id, value=value, type=type_field
+        )
         return await self.connection.set_session_config_option(req)
 
     async def authenticate(

@@ -664,9 +664,14 @@ class AgentPoolACPAgent(ACPAgent):
             session_id=params.session_id,
         )
         try:
-            # Forward to agent's set_mode method
-            # config_id maps to category_id, value maps to mode_id
-            await session.agent.set_mode(params.value, category_id=params.config_id)
+            if isinstance(params.value, bool):
+                # Boolean config option — forward as string mode_id
+                await session.agent.set_mode(
+                    str(params.value).lower(), category_id=params.config_id
+                )
+            else:
+                # Select config option — config_id maps to category_id, value to mode_id
+                await session.agent.set_mode(params.value, category_id=params.config_id)
             # Return updated config options
             config_options = await get_session_config_options(session.agent)
             return SetSessionConfigOptionResponse(config_options=config_options)

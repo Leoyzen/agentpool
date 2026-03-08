@@ -175,6 +175,10 @@ class SetSessionModelRequest(Request):
 class SetSessionConfigOptionRequest(Request):
     """Request parameters for setting a session configuration option.
 
+    Supports both select (string value ID) and boolean config options.
+    When ``type`` is ``"boolean"``, ``value`` is a bool.
+    When ``type`` is absent or ``"value_id"``, ``value`` is a string.
+
     See protocol docs: [Session Config Options](https://agentclientprotocol.com/protocol/session-config-options)
     """
 
@@ -184,8 +188,11 @@ class SetSessionConfigOptionRequest(Request):
     session_id: str
     """The ID of the session to set the config option for."""
 
-    value: str = Field(serialization_alias="valueId")
-    """The ID of the value to set for this configuration option."""
+    type: str | None = None
+    """The value type discriminator. ``"boolean"`` for bool values, absent for string value IDs."""
+
+    value: str | bool
+    """The value to set. String for select options, bool for boolean options."""
 
 
 class InitializeRequest(Request):

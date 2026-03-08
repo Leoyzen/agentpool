@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import Discriminator, Field, Tag
 
 from acp.schema.base import AnnotatedObject
 
@@ -158,13 +158,22 @@ class SessionConfigSelect(AnnotatedObject):
     """The set of selectable options."""
 
 
-class SessionConfigKind(AnnotatedObject):
-    """Type-specific session configuration option payload."""
+class SessionConfigBoolean(AnnotatedObject):
+    """**UNSTABLE**: This capability is not part of the spec yet.
+
+    A boolean on/off toggle session configuration option payload.
+    """
+
+    current_value: bool
+    """The current value of the boolean option."""
+
+
+class SessionConfigSelectKind(AnnotatedObject):
+    """Single-value selector (dropdown) config option kind."""
 
     type: Literal["select"] = Field(default="select", init=False)
     """Discriminator for the config option type."""
 
-    # Flattened SessionConfigSelect fields
     current_value: SessionConfigValueId
     """The currently selected value."""
 
@@ -172,8 +181,31 @@ class SessionConfigKind(AnnotatedObject):
     """The set of selectable options."""
 
 
+class SessionConfigBooleanKind(AnnotatedObject):
+    """**UNSTABLE**: Boolean on/off toggle config option kind."""
+
+    type: Literal["boolean"] = Field(default="boolean", init=False)
+    """Discriminator for the config option type."""
+
+    current_value: bool
+    """The current value of the boolean option."""
+
+
+SessionConfigKind = Annotated[
+    Annotated[SessionConfigSelectKind, Tag("select")]
+    | Annotated[SessionConfigBooleanKind, Tag("boolean")],
+    Discriminator("type"),
+]
+"""Type-specific session configuration option payload, discriminated by 'type'."""
+
+
 class SessionConfigOption(AnnotatedObject):
-    """A session configuration option selector and its current state."""
+    """A session configuration option selector and its current state.
+
+    This is a discriminated union on the ``type`` field. For ``type: "select"``
+    the ``options`` and ``current_value`` (string) fields are present. For
+    ``type: "boolean"`` only ``current_value`` (bool) is present.
+    """
 
     id: SessionConfigId
     """Unique identifier for the configuration option."""
@@ -187,11 +219,88 @@ class SessionConfigOption(AnnotatedObject):
     category: SessionConfigOptionCategory | None = None
     """Optional semantic category for this option (UX only)."""
 
-    type: Literal["select"] = Field(default="select", init=False)
-    """Discriminator for the config option type (flattened from kind)."""
+    type: Literal["select", "boolean"] = "select"
+    """Discriminator for the config option type."""
 
-    current_value: SessionConfigValueId
-    """The currently selected value (flattened from kind.select)."""
+    current_value: SessionConfigValueId | bool
+    """The currently selected value (string for select, bool for boolean)."""
 
-    options: SessionConfigSelectOptions
-    """The set of selectable options (flattened from kind.select)."""
+    options: SessionConfigSelectOptions | None = None
+    """The set of selectable options (only for type='select')."""
+
+    @classmethod
+    def select(
+        cls,
+        id: SessionConfigId,
+        name: str,
+        current_value: SessionConfigValueId,
+        options: SessionConfigSelectOptions,
+        *,
+        description: str | None = None,
+        category: SessionConfigOptionCategory | None = None,
+    ) -> SessionConfigOption:
+        """Create a select-type config option."""
+        return cls(
+            id=id,
+            name=name,
+            type="select",
+            current_value=current_value,
+            options=options,
+            description=description,
+            category=category,
+        )
+
+    @classmethod
+    def boolean(
+        cls,
+        id: SessionConfigId,
+        name: str,
+        current_value: bool,
+        *,
+        description: str | None = None,
+        category: SessionConfigOptionCategory | None = None,
+    ) -> SessionConfigOption:
+        """Create a boolean-type config option.
+
+        **UNSTABLE**: This capability is not part of the spec yet.
+        """
+        return cls(
+            id=id,
+            name=name,
+            type="boolean",
+            current_value=current_value,
+            description=description,
+            category=category,
+        )
+
+
+# --- SetSessionConfigOption value types ---
+
+
+class SessionConfigOptionValueBoolean(AnnotatedObject):
+    """A boolean value for setting a config option (type: "boolean")."""
+
+    type: Literal["boolean"] = Field(default="boolean", init=False)
+    """Discriminator value."""
+
+    value: bool
+    """The boolean value."""
+
+
+class SessionConfigOptionValueId(AnnotatedObject):
+    """A SessionConfigValueId string value for setting a config option.
+
+    This is the default when ``type`` is absent on the wire. Unknown ``type``
+    values with string payloads also gracefully deserialize into this variant.
+    """
+
+    value: SessionConfigValueId
+    """The value ID."""
+
+
+SessionConfigOptionValue = SessionConfigOptionValueBoolean | SessionConfigOptionValueId
+"""The value to set for a session configuration option.
+
+When ``type`` is ``"boolean"``, carries a bool. Otherwise (or when ``type``
+is absent), carries a ``SessionConfigValueId`` string.
+"""
