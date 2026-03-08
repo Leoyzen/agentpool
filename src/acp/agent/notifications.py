@@ -9,7 +9,6 @@ from pydantic_ai import (
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     FilePart,
-    ModelMessage,
     RetryPromptPart,
     SystemPromptPart,
     ToolReturnPart,
@@ -51,6 +50,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from pydantic_ai import ModelMessage
+
     from acp import (
         AvailableCommand,
         Client,
@@ -83,7 +84,6 @@ class ACPNotifications:
         self.client = client
         self.id = session_id
         self.log = logger.bind(session_id=session_id)
-        self._tool_call_inputs: dict[str, dict[str, Any]] = {}
 
     async def create_tool_reporter(
         self,
@@ -448,10 +448,11 @@ class ACPNotifications:
         )
         await self.send_update(update)
 
-    async def replay(self, messages: Sequence[ModelMessage]) -> None:
+    async def replay(self, messages: Sequence[ModelMessage]) -> None:  # noqa: PLR0915
         """Replay a sequence of model messages as notifications."""
         from pydantic_ai import TextPart, ThinkingPart, ToolCallPart
 
+        _tool_call_inputs: dict[str, dict[str, Any]] = {}
         for message in messages:
             for part in message.parts:
                 match part:
@@ -467,7 +468,7 @@ class ACPNotifications:
                     ):
                         # Store tool call inputs for later use with ToolReturnPart
                         tool_input = safe_args_as_dict(part)
-                        self._tool_call_inputs[tool_call_id] = tool_input
+                        _tool_call_inputs[tool_call_id] = tool_input
                         # Send tool_call_start so UI can track the tool call
                         title = generate_tool_title(tool_name, tool_input)
                         await self.tool_call_start(
@@ -476,9 +477,13 @@ class ACPNotifications:
                             kind=infer_tool_kind(tool_name),
                             raw_input=tool_input,
                         )
+                    case FilePart(content=content) if content.is_image:
+                        await self.send_agent_image(content.data, mime_type=content.media_type)
+                    case FilePart(content=content) if content.is_audio:
+                        await self.send_agent_audio(content.data, mime_type=content.media_type)
                     case FilePart():
                         pass
-                    case UserPromptPart(content=content) if isinstance(content, str):
+                    case UserPromptPart(content=str(content)):
                         # Handle both str and Sequence[UserContent] types
                         await self.send_user_message(content)
                     case UserPromptPart(content=content):
@@ -543,7 +548,7 @@ class ACPNotifications:
                         )
                     ):
                         converted = to_acp_content_blocks(content)
-                        tool_input = self._tool_call_inputs.get(tool_call_id, {})
+                        tool_input = _tool_call_inputs.get(tool_call_id, {})
                         acp_content = [ContentToolCallContent(content=block) for block in converted]
                         locations = [
                             ToolCallLocation(path=value)
@@ -559,7 +564,7 @@ class ACPNotifications:
                             content=acp_content or None,
                             raw_output=converted,
                         )
-                        self._tool_call_inputs.pop(tool_call_id, None)
+                        _tool_call_inputs.pop(tool_call_id, None)
                     case SystemPromptPart() | RetryPromptPart():
                         pass
                     case _ as unreachable:
