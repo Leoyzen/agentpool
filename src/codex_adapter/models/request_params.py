@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence  # noqa: TC003
 from typing import Any, Literal, Self
 
 from codex_adapter.models.base import CodexBaseModel
@@ -161,7 +162,7 @@ class TurnStartParams(CodexBaseModel):
     """Parameters for turn/start request."""
 
     thread_id: str
-    input: list[TurnInputItem]
+    input: Sequence[TurnInputItem]
     model: str | None = None
     effort: ReasoningEffort | None = None
     approval_policy: ApprovalPolicy | None = None

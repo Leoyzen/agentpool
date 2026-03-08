@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping  # noqa: TC003
+from collections.abc import AsyncIterator, Mapping  # noqa: TC003
 import contextlib
 import json
 import logging
@@ -14,6 +14,7 @@ import anyenv
 from pydantic import BaseModel, TypeAdapter
 
 from codex_adapter.exceptions import CodexProcessError, CodexRequestError
+from codex_adapter.helpers import kebab_to_camel, mcp_config_to_toml_inline
 from codex_adapter.models import (
     AgentMessageDeltaData,
     AgentMessageDeltaEvent,
@@ -24,16 +25,12 @@ from codex_adapter.models import (
     CollaborationModeListResponse,
     CommandExecParams,
     CommandExecResponse,
-    CommandExecutionRequestApprovalParams,
-    CommandExecutionRequestApprovalResponse,
     ConfigBatchWriteParams,
     ConfigReadParams,
     ConfigReadResponse,
     ConfigRequirementsReadResponse,
     ConfigValueWriteParams,
     ConfigWriteResponse,
-    DynamicToolCallParams,
-    DynamicToolCallResponse,
     ExperimentalFeatureListParams,
     ExperimentalFeatureListResponse,
     ExternalAgentConfigDetectParams,
@@ -41,12 +38,9 @@ from codex_adapter.models import (
     ExternalAgentConfigImportParams,
     FeedbackUploadParams,
     FeedbackUploadResponse,
-    FileChangeRequestApprovalParams,
-    FileChangeRequestApprovalResponse,
     GetAccountParams,
     GetAccountRateLimitsResponse,
     GetAccountResponse,
-    HttpMcpServer,
     InitializeParams,
     JsonRpcRequest,
     JsonRpcResponse,
@@ -67,7 +61,6 @@ from codex_adapter.models import (
     SkillsRemoteExportResponse,
     SkillsRemoteListParams,
     SkillsRemoteListResponse,
-    StdioMcpServer,
     TextInputItem,
     ThreadArchiveParams,
     ThreadCompactStartParams,
@@ -87,8 +80,6 @@ from codex_adapter.models import (
     ThreadUnarchiveResponse,
     ThreadUnsubscribeParams,
     ThreadUnsubscribeResponse,
-    ToolRequestUserInputParams,
-    ToolRequestUserInputResponse,
     TurnCompletedEvent,
     TurnErrorData,
     TurnErrorEvent,
@@ -99,58 +90,14 @@ from codex_adapter.models import (
     TurnSteerResponse,
     codex_event_adapter,
 )
-
-
-# Server request method constants
-SERVER_REQUEST_COMMAND_APPROVAL = "item/commandExecution/requestApproval"
-SERVER_REQUEST_FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval"
-SERVER_REQUEST_USER_INPUT = "item/tool/requestUserInput"
-SERVER_REQUEST_DYNAMIC_TOOL_CALL = "item/tool/call"
-
-# Type for server request parameter models
-ServerRequestParams = (
-    CommandExecutionRequestApprovalParams
-    | FileChangeRequestApprovalParams
-    | ToolRequestUserInputParams
-    | DynamicToolCallParams
+from codex_adapter.request_handlers import (
+    SERVER_REQUEST_COMMAND_APPROVAL,
+    SERVER_REQUEST_DYNAMIC_TOOL_CALL,
+    SERVER_REQUEST_FILE_CHANGE_APPROVAL,
+    SERVER_REQUEST_TYPES,
+    SERVER_REQUEST_USER_INPUT,
+    create_auto_approve_dict,
 )
-
-# Type for server request response models
-ServerRequestResponse = (
-    CommandExecutionRequestApprovalResponse
-    | FileChangeRequestApprovalResponse
-    | ToolRequestUserInputResponse
-    | DynamicToolCallResponse
-)
-
-# Server request handler callback type
-ServerRequestHandler = Callable[[ServerRequestParams], Awaitable[ServerRequestResponse]]
-
-# Typed handler callbacks for each server request kind
-CommandApprovalHandler = Callable[
-    [CommandExecutionRequestApprovalParams],
-    Awaitable[CommandExecutionRequestApprovalResponse],
-]
-FileChangeApprovalHandler = Callable[
-    [FileChangeRequestApprovalParams],
-    Awaitable[FileChangeRequestApprovalResponse],
-]
-UserInputHandler = Callable[[ToolRequestUserInputParams], Awaitable[ToolRequestUserInputResponse]]
-DynamicToolCallHandler = Callable[[DynamicToolCallParams], Awaitable[DynamicToolCallResponse]]
-
-# Map from wire method names to param/response model types
-_SERVER_REQUEST_TYPES: dict[str, tuple[type[ServerRequestParams], type[ServerRequestResponse]]] = {
-    SERVER_REQUEST_COMMAND_APPROVAL: (
-        CommandExecutionRequestApprovalParams,
-        CommandExecutionRequestApprovalResponse,
-    ),
-    SERVER_REQUEST_FILE_CHANGE_APPROVAL: (
-        FileChangeRequestApprovalParams,
-        FileChangeRequestApprovalResponse,
-    ),
-    SERVER_REQUEST_USER_INPUT: (ToolRequestUserInputParams, ToolRequestUserInputResponse),
-    SERVER_REQUEST_DYNAMIC_TOOL_CALL: (DynamicToolCallParams, DynamicToolCallResponse),
-}
 
 
 if TYPE_CHECKING:
@@ -180,53 +127,16 @@ if TYPE_CHECKING:
         TurnInputItem,
     )
     from codex_adapter.models.request_params import HazelnutScope, LoginType, ProductSurface
+    from codex_adapter.request_handlers import (
+        CommandApprovalHandler,
+        DynamicToolCallHandler,
+        FileChangeApprovalHandler,
+        ServerRequestHandler,
+        UserInputHandler,
+    )
 
 ResultType = TypeVar("ResultType", bound=BaseModel)
 logger = logging.getLogger(__name__)
-
-
-def _kebab_to_camel(s: str) -> str:
-    """Convert kebab-case to camelCase."""
-    parts = s.split("-")
-    return parts[0] + "".join(p.capitalize() for p in parts[1:])
-
-
-def _mcp_config_to_toml_inline(name: str, config: McpServerConfig) -> str:
-    """Convert MCP server config to TOML inline table format."""
-    match config:
-        case StdioMcpServer(command=command, args=args, env=env, enabled=enabled):
-            # Build stdio config
-            parts = [f'command = "{command}"']
-            if args:
-                args_str = ", ".join(f'"{arg}"' for arg in args)
-                parts.append(f"args = [{args_str}]")
-            if env:
-                # env as inline table
-                env_items = ", ".join(f'{k} = "{v}"' for k, v in env.items())
-                parts.append(f"env = {{{env_items}}}")
-            if not enabled:
-                parts.append("enabled = false")
-            return f"mcp_servers.{name}={{{', '.join(parts)}}}"
-
-        case HttpMcpServer(
-            url=url,
-            bearer_token_env_var=bearer_token_env_var,
-            http_headers=http_headers,
-            enabled=enabled,
-        ):
-            # Build HTTP config
-            parts = [f'url = "{url}"']
-            if bearer_token_env_var:
-                parts.append(f'bearer_token_env_var = "{bearer_token_env_var}"')
-            if http_headers:
-                # headers as inline table
-                headers_items = ", ".join(f'{k} = "{v}"' for k, v in http_headers.items())
-                parts.append(f"http_headers = {{{headers_items}}}")
-            if not enabled:
-                parts.append("enabled = false")
-            return f"mcp_servers.{name}={{{', '.join(parts)}}}"
-        case _:
-            raise ValueError(f"Unsupported MCP server config type: {type(config)}")
 
 
 class CodexClient:
@@ -309,7 +219,7 @@ class CodexClient:
             cmd.extend(["--profile", self._profile])
         # Add MCP server configurations via --config flags
         for server_name, server_config in self._mcp_servers.items():
-            config_str = _mcp_config_to_toml_inline(server_name, server_config)
+            config_str = mcp_config_to_toml_inline(server_name, server_config)
             cmd.extend(["--config", config_str])
 
         logger.info("Starting Codex app-server: %s", " ".join(cmd))
@@ -656,10 +566,6 @@ class CodexClient:
         Yields:
             CodexEvent: Streaming events from the turn
         """
-        # Convert user_input to typed input format
-        input_items: list[TurnInputItem] = (
-            [TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input
-        )
         # Handle output_schema - convert type to JSON Schema if needed
         match output_schema:
             case None:
@@ -677,15 +583,14 @@ class CodexClient:
                 sandbox_dict: dict[str, Any] | None = None
             case str():
                 # Convert kebab-case to camelCase for turn API
-                sandbox_dict = {"type": _kebab_to_camel(sandbox_policy)}
+                sandbox_dict = {"type": kebab_to_camel(sandbox_policy)}
             case dict():
                 sandbox_dict = sandbox_policy
             case _:
                 assert_never(sandbox_policy)
-        # Build typed params
         params = TurnStartParams(
             thread_id=thread_id,
-            input=input_items,
+            input=[TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input,
             model=model,
             effort=effort,
             approval_policy=approval_policy,
@@ -696,19 +601,15 @@ class CodexClient:
             summary=summary,
             collaboration_mode=collaboration_mode,
         )
-
         # Start turn (non-blocking request)
         turn_result = await self._send_request("turn/start", params)
         response = TurnStartResponse.model_validate(turn_result)
         turn_id = response.turn.id
-
         # Create per-turn event queue for proper routing
         turn_queue: asyncio.Queue[CodexEvent | None] = asyncio.Queue()
         turn_key = f"{thread_id}:{turn_id}"
         self._turn_queues[turn_key] = turn_queue
-
-        try:
-            # Stream events until turn completes
+        try:  # Stream events until turn completes
             while True:
                 event = await turn_queue.get()
                 match event:
@@ -720,8 +621,7 @@ class CodexClient:
                     case TurnErrorEvent(data=TurnErrorData(error=error)):
                         yield event
                         raise CodexRequestError(-32000, error)
-        finally:
-            # Cleanup turn queue
+        finally:  # Cleanup turn queue
             if turn_key in self._turn_queues:
                 del self._turn_queues[turn_key]
 
@@ -742,12 +642,9 @@ class CodexClient:
         Returns:
             TurnSteerResponse with the turn ID
         """
-        input_items: list[TurnInputItem] = (
-            [TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input
-        )
         params = TurnSteerParams(
             thread_id=thread_id,
-            input=input_items,
+            input=[TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input,
             expected_turn_id=expected_turn_id,
         )
         result = await self._send_request("turn/steer", params)
@@ -1374,8 +1271,7 @@ class CodexClient:
         params_dict = params.model_dump(by_alias=True, exclude_none=True) if params else {}
         request = JsonRpcRequest(id=request_id, method=method, params=params_dict)
         try:
-            data = request.model_dump_json(by_alias=True, exclude_none=True)
-            message = anyenv.load_json(data, return_type=dict)
+            message = request.model_dump(mode="json", by_alias=True, exclude_none=True)
             await self._write_message(message)
         except Exception as exc:
             del self._pending_requests[request_id]
@@ -1462,9 +1358,6 @@ class CodexClient:
 
         event_data = {"event_type": method, "data": params or {}}
         event = codex_event_adapter.validate_python(event_data)
-        # Skip legacy V1 events (parse_codex_event returns None for these)
-        if event is None:
-            return
         # Route event to appropriate turn queue
         thread_id = params.get("threadId")
         turn_id = params.get("turnId")
@@ -1486,20 +1379,12 @@ class CodexClient:
             await self._event_queue.put(event)
 
     async def _handle_server_request(self, message: dict[str, Any]) -> None:
-        """Handle a JSON-RPC request from the server that expects a response.
-
-        Server requests include:
-        - item/commandExecution/requestApproval
-        - item/fileChange/requestApproval
-        - item/tool/requestUserInput
-        - item/tool/call (dynamic tool calls)
-        - account/chatgptAuthTokens/refresh
-        """
+        """Handle a JSON-RPC request from the server that expects a response."""
         method: str = message["method"]
         request_id = message["id"]
         params = message.get("params") or {}
 
-        type_entry = _SERVER_REQUEST_TYPES.get(method)
+        type_entry = SERVER_REQUEST_TYPES.get(method)
         if type_entry is None:
             logger.warning("Unhandled server request method: %s (id=%s)", method, request_id)
             await self._send_server_request_error(request_id, -32601, f"Method not found: {method}")
@@ -1571,10 +1456,10 @@ class CodexClient:
 
             client.on_server_request(SERVER_REQUEST_COMMAND_APPROVAL, handle_approval)
         """
-        if method not in _SERVER_REQUEST_TYPES:
+        if method not in SERVER_REQUEST_TYPES:
             msg = (
                 f"Unknown server request method: {method}. "
-                f"Valid methods: {list(_SERVER_REQUEST_TYPES)}"
+                f"Valid methods: {list(SERVER_REQUEST_TYPES)}"
             )
             raise ValueError(msg)
         self._server_request_handlers[method] = handler
@@ -1585,33 +1470,7 @@ class CodexClient:
         Convenience method for non-interactive use cases where all approvals
         should be automatically granted and tool calls return empty results.
         """
-
-        async def auto_approve_command(
-            _params: ServerRequestParams,
-        ) -> ServerRequestResponse:
-            return CommandExecutionRequestApprovalResponse(decision="allow")
-
-        async def auto_approve_file_change(
-            _params: ServerRequestParams,
-        ) -> ServerRequestResponse:
-            return FileChangeRequestApprovalResponse(decision="allow")
-
-        async def auto_approve_user_input(
-            _params: ServerRequestParams,
-        ) -> ServerRequestResponse:
-            return ToolRequestUserInputResponse(answers={})
-
-        async def auto_approve_dynamic_tool(
-            _params: ServerRequestParams,
-        ) -> ServerRequestResponse:
-            return DynamicToolCallResponse(content_items=[], success=False)
-
-        self._server_request_handlers[SERVER_REQUEST_COMMAND_APPROVAL] = auto_approve_command
-        self._server_request_handlers[SERVER_REQUEST_FILE_CHANGE_APPROVAL] = (
-            auto_approve_file_change
-        )
-        self._server_request_handlers[SERVER_REQUEST_USER_INPUT] = auto_approve_user_input
-        self._server_request_handlers[SERVER_REQUEST_DYNAMIC_TOOL_CALL] = auto_approve_dynamic_tool
+        self._server_request_handlers = create_auto_approve_dict()
 
 
 if __name__ == "__main__":
