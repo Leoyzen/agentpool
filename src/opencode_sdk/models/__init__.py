@@ -5,8 +5,8 @@ All models inherit from OpenCodeBaseModel which provides:
 - by_alias=True serialization by default
 """
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import (
+from opencode_sdk.models.base import OpenCodeBaseModel
+from opencode_sdk.models.common import (
     FileDiff,
     FileDiffStatus,
     ModelRef,
@@ -15,7 +15,7 @@ from agentpool_server.opencode_server.models.common import (
     TokenCache,
     Tokens,
 )
-from agentpool_server.opencode_server.models.app import (
+from opencode_sdk.models.app import (
     App,
     AppTimeInfo,
     HealthResponse,
@@ -25,7 +25,7 @@ from agentpool_server.opencode_server.models.app import (
     ProjectUpdateRequest,
     VcsInfo,
 )
-from agentpool_server.opencode_server.models.provider import (
+from opencode_sdk.models.provider import (
     Model,
     ModelCost,
     ModelLimit,
@@ -34,7 +34,7 @@ from agentpool_server.opencode_server.models.provider import (
     ProviderListResponse,
     ProvidersResponse,
 )
-from agentpool_server.opencode_server.models.session import (
+from opencode_sdk.models.session import (
     Session,
     SessionCreateRequest,
     SessionForkRequest,
@@ -48,7 +48,7 @@ from agentpool_server.opencode_server.models.session import (
     SummarizeRequest,
     Todo,
 )
-from agentpool_server.opencode_server.models.message import (
+from opencode_sdk.models.message import (
     APIError,
     APIErrorData,
     AssistantMessage,
@@ -83,7 +83,7 @@ from agentpool_server.opencode_server.models.message import (
     UnknownErrorData,
     UserMessage,
 )
-from agentpool_server.opencode_server.models.parts import (
+from opencode_sdk.models.parts import (
     AgentPart,
     APIErrorInfo,
     CompactionPart,
@@ -109,7 +109,7 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStatePending,
     ToolStateRunning,
 )
-from agentpool_server.opencode_server.models.file import (
+from opencode_sdk.models.file import (
     FileContent,
     FileNode,
     FileStatus,
@@ -118,7 +118,7 @@ from agentpool_server.opencode_server.models.file import (
     SubmatchInfo,
     FileType,
 )
-from agentpool_server.opencode_server.models.agent import (
+from opencode_sdk.models.agent import (
     Agent,
     ApiAuthInfo,
     AuthInfo,
@@ -135,19 +135,19 @@ from agentpool_server.opencode_server.models.agent import (
     WorktreeRemoveRequest,
     WorktreeResetRequest,
 )
-from agentpool_server.opencode_server.models.diagnostics import (
+from opencode_sdk.models.diagnostics import (
     FormatterStatus,
     Diagnostic,
     DiagnosticRange,
 )
 
-from agentpool_server.opencode_server.models.pty import (
+from opencode_sdk.models.pty import (
     PtyCreateRequest,
     PtyInfo,
     PtySize,
     PtyUpdateRequest,
 )
-from agentpool_server.opencode_server.models.events import (
+from opencode_sdk.models.events import (
     CommandExecutedEvent,
     Event,
     FileEditedEvent,
@@ -197,14 +197,14 @@ from agentpool_server.opencode_server.models.events import (
     SessionUpdatedEvent,
     TuiSessionSelectEvent,
 )
-from agentpool_server.opencode_server.models.mcp import (
+from opencode_sdk.models.mcp import (
     LogRequest,
     McpAuthorizationResponse,
     MCPStatus,
     McpResource,
 )
-from agentpool_server.opencode_server.models.config import Config
-from agentpool_server.opencode_server.models.question import (
+from opencode_sdk.models.config import Config
+from opencode_sdk.models.question import (
     QuestionInfo,
     QuestionOption,
     QuestionReply,

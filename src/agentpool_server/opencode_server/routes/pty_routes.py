@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect  # 
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     PtyCreatedEvent,
     PtyCreateRequest,
     PtyDeletedEvent,

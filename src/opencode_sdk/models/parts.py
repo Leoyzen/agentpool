@@ -7,8 +7,8 @@ from typing import Any, Literal, Self
 from pydantic import Field
 
 from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import (
+from opencode_sdk.models.base import OpenCodeBaseModel
+from opencode_sdk.models.common import (
     ModelRef,  # noqa: TC001
     TextSpan,
     TimeCreated,  # noqa: TC001

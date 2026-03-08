@@ -40,7 +40,7 @@ from pydantic_ai import (
 )
 
 from agentpool.utils.diffs import compute_unified_diff
-from agentpool_server.opencode_server.models.tool_metadata import (
+from opencode_sdk.models.tool_metadata import (
     BashMetadata,
     EditMetadata,
     FileDiff,
@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     from agentpool.agents.context import ConfirmationResult
     from agentpool.hooks import AgentHooks
     from agentpool_config.mcp_server import MCPServerConfig as NativeMCPServerConfig
-    from agentpool_server.opencode_server.models.tool_metadata import ToolMetadata
+    from opencode_sdk.models.tool_metadata import ToolMetadata
 
 
 def to_thinking_config(

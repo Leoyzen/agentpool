@@ -12,7 +12,7 @@ import os
 from fastapi import APIRouter, HTTPException, Query
 
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     Diagnostic,
     DiagnosticRange,
     FormatterStatus,

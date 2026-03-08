@@ -10,7 +10,7 @@ from mcp import types
 
 from agentpool.log import get_logger
 from agentpool.ui.base import InputProvider
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     PermissionAskedProperties,
     PermissionRequestEvent,
     PermissionToolInfo,
@@ -19,8 +19,8 @@ from agentpool_server.opencode_server.models import (
 
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
-    from agentpool_server.opencode_server.models import PermissionReply
     from agentpool_server.opencode_server.state import ServerState
+    from opencode_sdk.models import PermissionReply
 
 logger = get_logger(__name__)
 
@@ -259,9 +259,9 @@ class OpenCodeInputProvider(InputProvider):
         Returns:
             Elicit result with user's answer
         """
-        from agentpool_server.opencode_server.models.events import QuestionAskedEvent
-        from agentpool_server.opencode_server.models.question import QuestionInfo, QuestionOption
         from agentpool_server.opencode_server.state import PendingQuestion
+        from opencode_sdk.models.events import QuestionAskedEvent
+        from opencode_sdk.models.question import QuestionInfo, QuestionOption
 
         # Extract enum values
         match schema:
@@ -341,9 +341,9 @@ class OpenCodeInputProvider(InputProvider):
         Returns:
             Elicit result with user's text response
         """
-        from agentpool_server.opencode_server.models.events import QuestionAskedEvent
-        from agentpool_server.opencode_server.models.question import QuestionInfo, QuestionOption
         from agentpool_server.opencode_server.state import PendingQuestion
+        from opencode_sdk.models.events import QuestionAskedEvent
+        from opencode_sdk.models.question import QuestionInfo, QuestionOption
 
         question_id = self._generate_permission_id()
         question_info = QuestionInfo(

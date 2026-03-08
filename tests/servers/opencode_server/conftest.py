@@ -27,11 +27,11 @@ from agentpool.utils.streams import FileOpsTracker
 from agentpool.utils.time_utils import now_ms
 from agentpool.utils.todos import TodoTracker
 from agentpool_server.opencode_server.dependencies import get_state
-from agentpool_server.opencode_server.models import Session
-from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.routes import file_router, session_router
 from agentpool_server.opencode_server.state import ServerState
 from agentpool_storage.memory_provider.provider import MemoryStorageProvider
+from opencode_sdk.models import Session
+from opencode_sdk.models.common import TimeCreatedUpdated
 
 
 if TYPE_CHECKING:

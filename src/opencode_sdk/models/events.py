@@ -6,17 +6,17 @@ from typing import Any, Literal, Self
 
 from pydantic import Field
 
-from agentpool_server.opencode_server.models.app import Project  # noqa: TC001
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import FileDiff  # noqa: TC001
-from agentpool_server.opencode_server.models.message import MessageInfo  # noqa: TC001
-from agentpool_server.opencode_server.models.parts import Part  # noqa: TC001
-from agentpool_server.opencode_server.models.pty import PtyInfo  # noqa: TC001
-from agentpool_server.opencode_server.models.question import (  # noqa: TC001
+from opencode_sdk.models.app import Project  # noqa: TC001
+from opencode_sdk.models.base import OpenCodeBaseModel
+from opencode_sdk.models.common import FileDiff  # noqa: TC001
+from opencode_sdk.models.message import MessageInfo  # noqa: TC001
+from opencode_sdk.models.parts import Part  # noqa: TC001
+from opencode_sdk.models.pty import PtyInfo  # noqa: TC001
+from opencode_sdk.models.question import (  # noqa: TC001
     QuestionInfo,
     QuestionToolInfo,
 )
-from agentpool_server.opencode_server.models.session import (  # noqa: TC001
+from opencode_sdk.models.session import (  # noqa: TC001
     Session,
     SessionStatus,
     SessionStatusType,

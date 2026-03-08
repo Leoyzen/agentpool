@@ -3,10 +3,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from agentpool.agents.events import PartDeltaEvent, PartStartEvent
-from agentpool_server.opencode_server.models import PartUpdatedEvent
-from agentpool_server.opencode_server.models.events import PartUpdatedEventProperties
-from agentpool_server.opencode_server.models.parts import ReasoningPart
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+from opencode_sdk.models import PartUpdatedEvent, PartUpdatedEventProperties, ReasoningPart
 
 
 def test_thinking_events_create_reasoning_part():

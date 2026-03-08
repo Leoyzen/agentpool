@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from opencode_sdk.models.base import OpenCodeBaseModel
 
 
 class QuestionOption(OpenCodeBaseModel):

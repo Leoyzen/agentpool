@@ -29,22 +29,19 @@ import anyenv
 from agentpool.log import get_logger
 from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime
 from agentpool_config.storage import OpenCodeStorageConfig
-from agentpool_server.opencode_server.models.message import (
-    AssistantMessage,
-)
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.models import ConversationData as ConvData, TokenUsage
 from agentpool_storage.opencode_provider import helpers
+from opencode_sdk.helpers import parse_message_info, parse_part
+from opencode_sdk.models.message import AssistantMessage
 
 
 if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
     from agentpool_config.session import SessionQuery
-    from agentpool_server.opencode_server.models.message import (
-        MessageInfo,
-    )
-    from agentpool_server.opencode_server.models.parts import Part
     from agentpool_storage.models import QueryFilters, StatsFilters
+    from opencode_sdk.models.message import MessageInfo
+    from opencode_sdk.models.parts import Part
 
 logger = get_logger(__name__)
 
@@ -103,7 +100,7 @@ class OpenCodeStorageProvider(StorageProvider):
         before validation, matching OpenCode's own reconstruction pattern.
         """
         data = anyenv.load_json(row["data"], return_type=dict)
-        return helpers.parse_message_info(data, message_id=row["id"], session_id=row["session_id"])
+        return parse_message_info(data, message_id=row["id"], session_id=row["session_id"])
 
     def _read_parts_for_session(self, session_id: str) -> dict[str, list[Part]]:
         """Read all parts for a session, grouped by message_id.
@@ -125,7 +122,7 @@ class OpenCodeStorageProvider(StorageProvider):
             for row in cursor:
                 data = anyenv.load_json(row["data"], return_type=dict)
                 try:
-                    part = helpers.parse_part(
+                    part = parse_part(
                         data,
                         part_id=row["id"],
                         message_id=row["message_id"],
@@ -158,7 +155,7 @@ class OpenCodeStorageProvider(StorageProvider):
             for row in cursor:
                 data = anyenv.load_json(row["data"], return_type=dict)
                 try:
-                    part = helpers.parse_part(
+                    part = parse_part(
                         data,
                         part_id=row["id"],
                         message_id=row["message_id"],

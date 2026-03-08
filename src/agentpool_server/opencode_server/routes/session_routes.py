@@ -26,7 +26,7 @@ from agentpool_server.opencode_server.converters import (
 )
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     AssistantMessage,
     CommandExecutedEvent,
     CommandRequest,

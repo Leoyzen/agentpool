@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Self
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from opencode_sdk.models.base import OpenCodeBaseModel
 
 
 _APP_NAME = "opencode"

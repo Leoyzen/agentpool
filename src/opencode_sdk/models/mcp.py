@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from opencode_sdk.models.base import OpenCodeBaseModel
 
 
 MCPConnectionStatus = Literal["connected", "disconnected", "error"]

@@ -6,8 +6,8 @@ from typing import Literal
 
 from pydantic import Field
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import (  # noqa: TC001
+from opencode_sdk.models.base import OpenCodeBaseModel
+from opencode_sdk.models.common import (  # noqa: TC001
     FileDiff,
     TimeCreatedUpdated,
 )

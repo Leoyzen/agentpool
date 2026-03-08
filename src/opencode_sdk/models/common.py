@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Self
 from pydantic import Field
 
 from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from opencode_sdk.models.base import OpenCodeBaseModel
 
 
 if TYPE_CHECKING:

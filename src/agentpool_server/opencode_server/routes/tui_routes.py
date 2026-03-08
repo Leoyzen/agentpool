@@ -12,7 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models.events import (
+from opencode_sdk.models.events import (
     TuiCommandExecuteEvent,
     TuiCommandExecuteProperties,
     TuiPromptAppendEvent,

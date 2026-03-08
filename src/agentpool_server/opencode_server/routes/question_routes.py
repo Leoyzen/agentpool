@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     QuestionRejectedEvent,
     QuestionRepliedEvent,
     QuestionReply,

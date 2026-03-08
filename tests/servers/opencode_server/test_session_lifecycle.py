@@ -16,8 +16,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from agentpool.sessions.models import SessionData
-from agentpool_server.opencode_server.models import SessionStatus
-from agentpool_server.opencode_server.models.events import SessionCreatedEvent
+from opencode_sdk.models import SessionCreatedEvent, SessionStatus
 
 
 if TYPE_CHECKING:

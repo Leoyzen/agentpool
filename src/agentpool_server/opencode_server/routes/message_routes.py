@@ -12,7 +12,8 @@ from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import (
+from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+from opencode_sdk.models import (
     AgentPartInput,
     AssistantMessage,
     FilePartInput,
@@ -35,7 +36,6 @@ from agentpool_server.opencode_server.models import (
     Tokens,
     UserMessage,
 )
-from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
 logger = get_logger(__name__)

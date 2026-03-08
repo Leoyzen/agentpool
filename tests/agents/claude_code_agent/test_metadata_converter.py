@@ -8,7 +8,7 @@ from clawd_code_sdk.models import BashInput, BashOutput, TodoItem, TodoWriteOutp
 import pytest
 
 from agentpool.agents.claude_code_agent.converters import convert_to_opencode_metadata
-from agentpool_server.opencode_server.models.tool_metadata import (
+from opencode_sdk.models.tool_metadata import (
     BashMetadata,
     EditMetadata,
     ReadMetadata,

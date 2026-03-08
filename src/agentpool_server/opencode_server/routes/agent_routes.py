@@ -17,7 +17,7 @@ from agentpool_config.mcp_server import (
 )
 from agentpool_server.opencode_server.converters import to_mcp_status
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     Agent,
     AuthInfo,
     Command,

@@ -11,7 +11,8 @@ from fastapi import APIRouter, HTTPException
 
 from agentpool.utils.time_utils import datetime_to_ms
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import (
+from agentpool_storage.project_store import ProjectStore
+from opencode_sdk.models import (
     App,
     AppTimeInfo,
     PathInfo,
@@ -21,7 +22,6 @@ from agentpool_server.opencode_server.models import (
     ProjectUpdateRequest,
     VcsInfo,
 )
-from agentpool_storage.project_store import ProjectStore
 
 
 if TYPE_CHECKING:

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, NotRequired, TypedDict
 
-from agentpool_server.opencode_server.models.common import FileDiffStatus  # noqa: TC001
+from opencode_sdk.models.common import FileDiffStatus  # noqa: TC001
 
 
 ChangeType = Literal["add", "update", "delete", "move"]

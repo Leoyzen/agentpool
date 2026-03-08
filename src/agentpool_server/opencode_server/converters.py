@@ -22,7 +22,7 @@ from agentpool.sessions.models import SessionData
 from agentpool.tools.manager import ToolError
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_content_or_path_ref
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
-from agentpool_server.opencode_server.models import (
+from opencode_sdk.models import (
     AgentPartInput,
     FilePartInput,
     MCPStatus,
@@ -58,12 +58,12 @@ if TYPE_CHECKING:
 
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
-    from agentpool_server.opencode_server.models import ToolState
-    from agentpool_server.opencode_server.models.mcp import (
+    from opencode_sdk.models import ToolState
+    from opencode_sdk.models.mcp import (
         MCPConnectionStatus as OpenCodeMCPConnectionStatus,
     )
-    from agentpool_server.opencode_server.models.message import PartInput
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from opencode_sdk.models.message import PartInput
+    from opencode_sdk.models.parts import ResourceSource
 
 
 logger = log.get_logger(__name__)
@@ -159,7 +159,7 @@ async def extract_user_prompt_from_parts(
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
     """
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from opencode_sdk.models.parts import ResourceSource
 
     result: list[UserContent | PathReference] = []
     for part in parts:

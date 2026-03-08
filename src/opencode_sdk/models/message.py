@@ -7,15 +7,15 @@ from typing import Any, Literal, Self
 from pydantic import Field
 
 from agentpool.utils import identifiers as identifier
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import (  # noqa: TC001
+from opencode_sdk.models.base import OpenCodeBaseModel
+from opencode_sdk.models.common import (  # noqa: TC001
     FileDiff,
     ModelRef,
     TextSpan,
     TimeCreated,
     Tokens,
 )
-from agentpool_server.opencode_server.models.parts import (  # noqa: TC001
+from opencode_sdk.models.parts import (  # noqa: TC001
     AgentPart,
     APIErrorInfo,
     FilePart,

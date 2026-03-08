@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
+from opencode_sdk.models.base import OpenCodeBaseModel
 
 
 DEFAULT_IGNORE = ["node_modules/**", "__pycache__/**", ".venv/**", "*.pyc", ".mypy_cache/**"]

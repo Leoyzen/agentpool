@@ -17,12 +17,12 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
     session_data_to_opencode,
 )
-from agentpool_server.opencode_server.models import (
+from agentpool_server.opencode_server.provider_auth import create_default_auth_service
+from opencode_sdk.models import (
     Config,
     LspUpdatedEvent,
     SessionStatus,
 )
-from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 
 
 if TYPE_CHECKING:
@@ -32,7 +32,8 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-    from agentpool_server.opencode_server.models import (
+    from agentpool_server.opencode_server.provider_auth import ProviderAuthService
+    from opencode_sdk.models import (
         Event,
         MessageWithParts,
         QuestionInfo,
@@ -40,8 +41,7 @@ if TYPE_CHECKING:
         Todo,
         WorkspaceInfo,
     )
-    from agentpool_server.opencode_server.models.question import QuestionToolInfo
-    from agentpool_server.opencode_server.provider_auth import ProviderAuthService
+    from opencode_sdk.models.question import QuestionToolInfo
 
 # Type alias for async callback
 OnFirstSubscriberCallback = Callable[[], Coroutine[Any, Any, None]]

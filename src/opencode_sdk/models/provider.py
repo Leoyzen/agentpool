@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field
 
-from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import ModelRef  # noqa: TC001
+from opencode_sdk.models.base import OpenCodeBaseModel
+from opencode_sdk.models.common import ModelRef  # noqa: TC001
 
 
 if TYPE_CHECKING:
