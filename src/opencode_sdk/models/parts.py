@@ -247,6 +247,8 @@ class CompactionPart(PartBase):
     type: Literal["compaction"] = Field(default="compaction", init=False)
     auto: bool = False
     """Whether this was an automatic compaction."""
+    overflow: bool | None = None
+    """Whether this compaction was triggered by context overflow."""
 
 
 class SubtaskPart(PartBase):
