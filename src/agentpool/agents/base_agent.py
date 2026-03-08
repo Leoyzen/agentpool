@@ -20,6 +20,7 @@ from upathtools.filesystems import IsolatedMemoryFileSystem
 from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
 from agentpool.agents.modes import ModeInfo
 from agentpool.common_types import IndividualEventHandler
+from agentpool.hooks import AgentHooks
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory, MessageNode
 from agentpool.prompts.convert import convert_prompts
@@ -58,7 +59,6 @@ if TYPE_CHECKING:
         StrPath,
     )
     from agentpool.delegation import AgentPool, Team, TeamRun
-    from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
     from agentpool.sessions import SessionData
     from agentpool.storage import StorageManager
@@ -227,7 +227,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self.tools = ToolManager()
         handlers = resolve_event_handlers(event_handlers)
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)  # ty: ignore[invalid-assignment]
-        self.hooks = hooks
+        self.hooks = hooks or AgentHooks()
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
         self._injection_manager = PromptInjectionManager()

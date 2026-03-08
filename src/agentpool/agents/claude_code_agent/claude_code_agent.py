@@ -276,7 +276,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Claude storage provider is available via self.storage
         self._hook_manager = ClaudeCodeHookManager(
             agent_name=self.name,
-            agent_hooks=hooks,
+            agent_hooks=self.hooks,
             injection_manager=self._injection_manager,
             set_mode=self._set_mode,
             env=self.env,

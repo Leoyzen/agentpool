@@ -34,9 +34,7 @@ class ClaudeCodeMCPManager:
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> str:
         """Add a server config. Accepts MCPServerConfig or string shorthand."""
-        from agentpool.agents.claude_code_agent.converters import (
-            convert_mcp_servers_to_sdk_format,
-        )
+        from agentpool.agents.claude_code_agent.converters import convert_mcp_servers_to_sdk_format
 
         resolved = BaseMCPServerConfig.from_string(cfg) if isinstance(cfg, str) else cfg
         sdk_configs = convert_mcp_servers_to_sdk_format([resolved])

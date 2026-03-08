@@ -44,7 +44,7 @@ class ClaudeCodeHookManager:
         self,
         *,
         agent_name: str,
-        agent_hooks: AgentHooks | None = None,
+        agent_hooks: AgentHooks,
         injection_manager: PromptInjectionManager | None = None,
         set_mode: Callable[[str, str], Awaitable[None]] | None = None,
         env: ExecutionEnvironment | None = None,
@@ -82,15 +82,12 @@ class ClaudeCodeHookManager:
         # Add PostToolUse hook for injection
         result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[self._on_post_tool_use])]
         # Merge AgentHooks if present
-        if self.agent_hooks:
-            agent_hooks = build_sdk_hooks_from_agent_hooks(
-                self.agent_hooks, self.agent_name, env=self._env
-            )
-            for event_name, matchers in agent_hooks.items():
-                if event_name in result:
-                    result[event_name].extend(matchers)
-                else:
-                    result[event_name] = matchers
+        agent_hooks = build_sdk_hooks_from_agent_hooks(self.agent_hooks, self.agent_name, self._env)
+        for event_name, matchers in agent_hooks.items():
+            if event_name in result:
+                result[event_name].extend(matchers)
+            else:
+                result[event_name] = matchers
 
         return result
 
@@ -109,14 +106,14 @@ class ClaudeCodeHookManager:
 
         result: SyncHookJSONOutput = {"continue_": True}
         # Consume pending injection from shared manager
+        tool_name = input_data.get("tool_name", "unknown")
         if self._injection_manager and (injection := await self._injection_manager.consume()):
-            tool_name = input_data.get("tool_name", "unknown")
             logger.debug("Injecting context after tool use", agent=self.agent_name, tool=tool_name)
             result["hookSpecificOutput"] = PostToolUseHookSpecificOutput(
                 hookEventName="PostToolUse",
                 additionalContext=injection,
             )
-        if input_data.get("tool_name") == "EnterPlanMode" and self._set_mode:
+        if tool_name == "EnterPlanMode" and self._set_mode:
             await self._set_mode("plan", "mode")
 
         return result
