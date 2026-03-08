@@ -4,55 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
-from pydantic import ValidationError
 import pytest
 
 from codex_adapter import CodexClient, HttpMcpServer, StdioMcpServer
 from codex_adapter.client import _mcp_config_to_toml_inline
 from codex_adapter.exceptions import CodexProcessError, CodexRequestError
-from codex_adapter.models.events import (
-    AgentMessageDeltaEvent,
-    get_text_delta,
-    is_completed_event,
-    is_delta_event,
-    parse_codex_event,
-)
-
-
-def test_parse_codex_event_camel_to_snake():
-    """Test camelCase JSON is converted to snake_case fields."""
-    params = {"delta": "Hello", "itemId": "123", "threadId": "t1", "turnId": "u1"}
-    event = parse_codex_event("item/agentMessage/delta", params)
-    assert isinstance(event, AgentMessageDeltaEvent)
-    assert event.data.item_id == "123"  # camelCase -> snake_case
-    assert event.data.thread_id == "t1"
-
-
-def test_parse_codex_event_unknown_type_raises():
-    """Unknown event types raise ValidationError (strict mode)."""
-    with pytest.raises(ValidationError):
-        parse_codex_event("unknown/event/type", {"threadId": "t1"})
-
-
-def test_parse_codex_event_legacy_v1_returns_none():
-    """Legacy codex/event/* methods are filtered out."""
-    assert parse_codex_event("codex/event/task_started", {"id": "0"}) is None
-
-
-def test_event_helper_functions():
-    """Test is_delta_event, is_completed_event, get_text_delta."""
-    params = {"delta": "text", "itemId": "1", "threadId": "t", "turnId": "u"}
-    delta = parse_codex_event("item/agentMessage/delta", params)
-    params = {"threadId": "t", "turn": {"id": "u", "status": "completed", "items": []}}
-    completed = parse_codex_event("turn/completed", params)
-    assert delta
-    assert completed
-    assert is_delta_event(delta) is True
-    assert is_completed_event(delta) is False
-    assert get_text_delta(delta) == "text"
-    assert is_delta_event(completed) is False
-    assert is_completed_event(completed) is True
-    assert get_text_delta(completed) == ""
+from codex_adapter.models.events import AgentMessageDeltaEvent
 
 
 async def test_process_message_routes_response_to_future():

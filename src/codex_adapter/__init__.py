@@ -86,7 +86,6 @@ from codex_adapter.models.events import (
     is_completed_event,
     is_delta_event,
     is_error_event,
-    parse_codex_event,
 )
 from codex_adapter.exceptions import CodexError, CodexProcessError, CodexRequestError
 from codex_adapter.models import (
@@ -243,5 +242,4 @@ __all__ = [
     "is_completed_event",
     "is_delta_event",
     "is_error_event",
-    "parse_codex_event",
 ]

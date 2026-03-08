@@ -6,7 +6,7 @@ Each event type is a proper BaseModel with the event_type as the discriminator.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter
 
@@ -458,7 +458,7 @@ CodexEvent = Annotated[
 
 
 # TypeAdapter for parsing events
-_codex_event_adapter: TypeAdapter[CodexEvent] = TypeAdapter(CodexEvent)
+codex_event_adapter: TypeAdapter[CodexEvent] = TypeAdapter(CodexEvent)
 
 
 # ============================================================================
@@ -521,40 +521,6 @@ EventType = Literal[
     "thread/compacted/v2",
     "serverRequest/resolved",
 ]
-
-
-# ============================================================================
-# Factory function for creating events from JSON-RPC notifications
-# ============================================================================
-
-
-def parse_codex_event(method: str, params: dict[str, Any] | None) -> CodexEvent | None:
-    """Create a CodexEvent from a JSON-RPC notification.
-
-    Uses the TypeAdapter with discriminator for type-safe parsing of known events.
-    Returns None for legacy codex/event/* methods (duplicates of V2 events).
-
-    Args:
-        method: The JSON-RPC notification method (event type)
-        params: The notification parameters (event data)
-
-    Returns:
-        A typed CodexEvent instance, or None for legacy events to skip
-
-    Raises:
-        ValueError: If the event type is unknown (add a new model for it)
-    """
-    # Skip legacy V1 events - they duplicate V2 events in a different format
-    if method.startswith("codex/event/"):
-        return None
-
-    event_data = {"event_type": method, "data": params or {}}
-    return _codex_event_adapter.validate_python(event_data)
-
-
-# ============================================================================
-# Type-safe delta extraction
-# ============================================================================
 
 
 # Type alias for all delta events

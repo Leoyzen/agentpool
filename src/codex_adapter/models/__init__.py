@@ -172,6 +172,7 @@ from codex_adapter.models.events import (
     AccountUpdatedEvent,
     AgentMessageDeltaEvent,
     AppListUpdatedEvent,
+    codex_event_adapter,
     AuthStatusChangeEvent,
     CodexEvent,
     CommandExecutionOutputDeltaEvent,
@@ -213,7 +214,6 @@ from codex_adapter.models.events import (
     is_completed_event,
     is_delta_event,
     is_error_event,
-    parse_codex_event,
 )
 from codex_adapter.models.input_item import (
     ImageInputItem,
@@ -678,9 +678,9 @@ __all__ = [
     "WindowsWorldWritableWarningEvent",
     "WorkspaceWriteSandboxPolicy",
     "WriteStatus",
+    "codex_event_adapter",
     "get_text_delta",
     "is_completed_event",
     "is_delta_event",
     "is_error_event",
-    "parse_codex_event",
 ]

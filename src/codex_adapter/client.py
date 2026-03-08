@@ -97,7 +97,7 @@ from codex_adapter.models import (
     TurnStartResponse,
     TurnSteerParams,
     TurnSteerResponse,
-    parse_codex_event,
+    codex_event_adapter,
 )
 
 
@@ -1456,7 +1456,12 @@ class CodexClient:
         """Handle a JSON-RPC notification (one-way event)."""
         method = message["method"]
         params = message.get("params") or {}
-        event = parse_codex_event(method, params)
+
+        if method.startswith("codex/event/"):
+            return
+
+        event_data = {"event_type": method, "data": params or {}}
+        event = codex_event_adapter.validate_python(event_data)
         # Skip legacy V1 events (parse_codex_event returns None for these)
         if event is None:
             return
