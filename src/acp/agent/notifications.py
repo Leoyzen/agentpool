@@ -5,7 +5,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, assert_never
 
-from pydantic_ai import ModelRequest, ModelResponse, ToolReturnPart, UserPromptPart
+from pydantic_ai import (
+    BuiltinToolCallPart,
+    BuiltinToolReturnPart,
+    FilePart,
+    ModelMessage,
+    RetryPromptPart,
+    SystemPromptPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 import structlog
 
 from acp.schema import (
@@ -439,133 +448,122 @@ class ACPNotifications:
         )
         await self.send_update(update)
 
-    async def replay(self, messages: Sequence[ModelRequest | ModelResponse]) -> None:
+    async def replay(self, messages: Sequence[ModelMessage]) -> None:
         """Replay a sequence of model messages as notifications."""
-        for message in messages:
-            try:
-                match message:
-                    case ModelRequest():
-                        await self._replay_request(message)
-                    case ModelResponse():
-                        await self._replay_response(message)
-                    case _ as unreachable:
-                        assert_never(unreachable)
-            except Exception as e:
-                self.log.exception("Failed to replay message", error=str(e))
-
-    async def _replay_request(self, request: ModelRequest) -> None:
-        """Replay a ModelRequest by converting it to appropriate ACP notifications."""
-        for part in request.parts:
-            match part:
-                case UserPromptPart(content=content) if isinstance(content, str):
-                    # Handle both str and Sequence[UserContent] types
-                    await self.send_user_message(content)
-                case UserPromptPart(content=content):
-                    # Convert multi-modal content to appropriate ACP content blocks
-                    converted_content = to_acp_content_blocks(content)
-                    # Send each content block as separate notifications
-                    for block in converted_content:
-                        match block:
-                            case TextContentBlock(text=text):
-                                await self.send_user_message(text)
-                            case ImageContentBlock(annotations=annots) as img_block:
-                                await self.send_user_image(
-                                    data=img_block.data,
-                                    mime_type=img_block.mime_type,
-                                    uri=img_block.uri,
-                                    audience=annots.audience if annots else None,
-                                    last_modified=annots.last_modified if annots else None,
-                                    priority=annots.priority if annots else None,
-                                )
-                            case AudioContentBlock(annotations=annots) as audio_block:
-                                await self.send_user_audio(
-                                    data=audio_block.data,
-                                    mime_type=audio_block.mime_type,
-                                    audience=annots.audience if annots else None,
-                                    last_modified=annots.last_modified if annots else None,
-                                    priority=annots.priority if annots else None,
-                                )
-                            case ResourceContentBlock(annotations=annots) as resource_block:
-                                await self.send_user_resource(
-                                    uri=resource_block.uri,
-                                    name=resource_block.name,
-                                    description=resource_block.description,
-                                    mime_type=resource_block.mime_type,
-                                    size=resource_block.size,
-                                    title=resource_block.title,
-                                    audience=annots.audience if annots else None,
-                                    last_modified=annots.last_modified if annots else None,
-                                    priority=annots.priority if annots else None,
-                                )
-                            case EmbeddedResourceContentBlock(resource=resource):
-                                # Handle embedded resources with proper pattern matching
-                                match resource:
-                                    case TextResourceContents(text=text):
-                                        await self.send_user_message(text)
-                                    case BlobResourceContents(blob=blob, mime_type=mime_type):
-                                        blob_size = len(blob) * 3 // 4
-                                        size_mb = blob_size / (1024 * 1024)
-                                        mime = mime_type or "unknown"
-                                        msg = f"Embedded resource: {mime} ({size_mb:.2f} MB)"
-                                        await self.send_user_message(msg)
-                                    case _ as unreachable:
-                                        assert_never(unreachable)  # ty: ignore[type-assertion-failure]
-                            case _ as unreachable:
-                                assert_never(unreachable)
-
-                case ToolReturnPart(
-                    content=content, tool_name=tool_name, tool_call_id=tool_call_id
-                ):
-                    converted = to_acp_content_blocks(content)
-                    tool_input = self._tool_call_inputs.get(tool_call_id, {})
-                    acp_content = [ContentToolCallContent(content=block) for block in converted]
-                    locations = [
-                        ToolCallLocation(path=value)
-                        for key, value in tool_input.items()
-                        if key in {"path", "file_path", "filepath"} and isinstance(value, str)
-                    ]
-                    title = generate_tool_title(tool_name, tool_input)
-                    await self.tool_call_progress(
-                        tool_call_id=tool_call_id,
-                        title=title,
-                        status="completed",
-                        locations=locations or None,
-                        content=acp_content or None,
-                        raw_output=converted,
-                    )
-                    self._tool_call_inputs.pop(tool_call_id, None)
-                case _:
-                    typ = type(part).__name__
-                    self.log.debug("Unhandled request part type", part_type=typ)
-
-    async def _replay_response(self, response: ModelResponse) -> None:
-        """Replay a ModelResponse by converting it to appropriate ACP notifications."""
         from pydantic_ai import TextPart, ThinkingPart, ToolCallPart
 
-        for part in response.parts:
-            match part:
-                case TextPart(content=content):
-                    await self.send_agent_text(content)
+        for message in messages:
+            for part in message.parts:
+                match part:
+                    case TextPart(content=content):
+                        await self.send_agent_text(content)
 
-                case ThinkingPart(content=content):
-                    await self.send_agent_thought(content)
+                    case ThinkingPart(content=content):
+                        await self.send_agent_thought(content)
 
-                case ToolCallPart(tool_call_id=tool_call_id, tool_name=tool_name):
-                    # Store tool call inputs for later use with ToolReturnPart
-                    tool_input = safe_args_as_dict(part)
-                    self._tool_call_inputs[tool_call_id] = tool_input
-                    # Send tool_call_start so UI can track the tool call
-                    title = generate_tool_title(tool_name, tool_input)
-                    await self.tool_call_start(
-                        tool_call_id=tool_call_id,
-                        title=title,
-                        kind=infer_tool_kind(tool_name),
-                        raw_input=tool_input,
-                    )
+                    case (
+                        ToolCallPart(tool_call_id=tool_call_id, tool_name=tool_name)
+                        | BuiltinToolCallPart(tool_call_id=tool_call_id, tool_name=tool_name)
+                    ):
+                        # Store tool call inputs for later use with ToolReturnPart
+                        tool_input = safe_args_as_dict(part)
+                        self._tool_call_inputs[tool_call_id] = tool_input
+                        # Send tool_call_start so UI can track the tool call
+                        title = generate_tool_title(tool_name, tool_input)
+                        await self.tool_call_start(
+                            tool_call_id=tool_call_id,
+                            title=title,
+                            kind=infer_tool_kind(tool_name),
+                            raw_input=tool_input,
+                        )
+                    case FilePart():
+                        pass
+                    case UserPromptPart(content=content) if isinstance(content, str):
+                        # Handle both str and Sequence[UserContent] types
+                        await self.send_user_message(content)
+                    case UserPromptPart(content=content):
+                        # Convert multi-modal content to appropriate ACP content blocks
+                        converted_content = to_acp_content_blocks(content)
+                        # Send each content block as separate notifications
+                        for block in converted_content:
+                            match block:
+                                case TextContentBlock(text=text):
+                                    await self.send_user_message(text)
+                                case ImageContentBlock(annotations=annots) as img_block:
+                                    await self.send_user_image(
+                                        data=img_block.data,
+                                        mime_type=img_block.mime_type,
+                                        uri=img_block.uri,
+                                        audience=annots.audience if annots else None,
+                                        last_modified=annots.last_modified if annots else None,
+                                        priority=annots.priority if annots else None,
+                                    )
+                                case AudioContentBlock(annotations=annots) as audio_block:
+                                    await self.send_user_audio(
+                                        data=audio_block.data,
+                                        mime_type=audio_block.mime_type,
+                                        audience=annots.audience if annots else None,
+                                        last_modified=annots.last_modified if annots else None,
+                                        priority=annots.priority if annots else None,
+                                    )
+                                case ResourceContentBlock(annotations=annots) as resource_block:
+                                    await self.send_user_resource(
+                                        uri=resource_block.uri,
+                                        name=resource_block.name,
+                                        description=resource_block.description,
+                                        mime_type=resource_block.mime_type,
+                                        size=resource_block.size,
+                                        title=resource_block.title,
+                                        audience=annots.audience if annots else None,
+                                        last_modified=annots.last_modified if annots else None,
+                                        priority=annots.priority if annots else None,
+                                    )
+                                case EmbeddedResourceContentBlock(resource=resource):
+                                    # Handle embedded resources with proper pattern matching
+                                    match resource:
+                                        case TextResourceContents(text=text):
+                                            await self.send_user_message(text)
+                                        case BlobResourceContents(blob=blob, mime_type=mime_type):
+                                            blob_size = len(blob) * 3 // 4
+                                            size_mb = blob_size / (1024 * 1024)
+                                            mime = mime_type or "unknown"
+                                            msg = f"Embedded resource: {mime} ({size_mb:.2f} MB)"
+                                            await self.send_user_message(msg)
+                                        case _ as unreachable:
+                                            assert_never(unreachable)  # ty: ignore[type-assertion-failure]
+                                case _ as unreachable:
+                                    assert_never(unreachable)
 
-                case _:
-                    typ = type(part).__name__
-                    self.log.debug("Unhandled response part type", part_type=typ)
+                    case (
+                        ToolReturnPart(
+                            content=content, tool_name=tool_name, tool_call_id=tool_call_id
+                        )
+                        | BuiltinToolReturnPart(
+                            content=content, tool_name=tool_name, tool_call_id=tool_call_id
+                        )
+                    ):
+                        converted = to_acp_content_blocks(content)
+                        tool_input = self._tool_call_inputs.get(tool_call_id, {})
+                        acp_content = [ContentToolCallContent(content=block) for block in converted]
+                        locations = [
+                            ToolCallLocation(path=value)
+                            for key, value in tool_input.items()
+                            if key in {"path", "file_path", "filepath"} and isinstance(value, str)
+                        ]
+                        title = generate_tool_title(tool_name, tool_input)
+                        await self.tool_call_progress(
+                            tool_call_id=tool_call_id,
+                            title=title,
+                            status="completed",
+                            locations=locations or None,
+                            content=acp_content or None,
+                            raw_output=converted,
+                        )
+                        self._tool_call_inputs.pop(tool_call_id, None)
+                    case SystemPromptPart() | RetryPromptPart():
+                        pass
+                    case _ as unreachable:
+                        assert_never(unreachable)
 
     async def send_agent_image(
         self,
