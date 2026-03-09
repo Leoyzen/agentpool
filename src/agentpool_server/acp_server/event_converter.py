@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import os
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 import uuid
 
@@ -939,7 +940,9 @@ class ACPEventConverter:
             case StreamCompleteEvent():
                 header_key = f"`{source_name}`:{depth}"
                 self._subagent_headers.discard(header_key)
-                yield AgentMessageChunk.text(f"\n{indent}---\n", message_id=self._current_message_id)
+                yield AgentMessageChunk.text(
+                    f"\n{indent}---\n", message_id=self._current_message_id
+                )
 
             case (
                 BuiltinToolCallEvent()  # depracated
