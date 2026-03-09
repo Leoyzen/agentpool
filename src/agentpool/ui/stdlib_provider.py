@@ -91,33 +91,35 @@ class StdlibInputProvider(InputProvider):
         params: types.ElicitRequestParams,
     ) -> types.ElicitResult | types.ErrorData:
         """Get user response to elicitation request using stdlib input."""
+        print(f"\n{params.message}", file=sys.stderr)
         try:
-            print(f"\n{params.message}", file=sys.stderr)
-
             # URL mode: prompt user to open external URL
-            if isinstance(params, types.ElicitRequestURLParams):
-                print(f"URL: {params.url}", file=sys.stderr)
-                print("Open this URL? [y/n]: ", end="", file=sys.stderr, flush=True)
-                response = input().strip().lower()
-                action = (
-                    "accept"
-                    if response in ("y", "yes")
-                    else ("decline" if response in ("n", "no") else "cancel")
-                )
-                return types.ElicitResult(action=action)
-
-            # Form mode: collect structured JSON input
-            print("Please provide response as JSON:", file=sys.stderr)
-            if params.requestedSchema:
-                schema_json = anyenv.dump_json(params.requestedSchema, indent=True)
-                print(f"Expected schema:\n{schema_json}", file=sys.stderr)
-            print("> ", end="", file=sys.stderr, flush=True)
-            response = input()
-            try:
-                content = anyenv.load_json(response, return_type=dict)
-                return types.ElicitResult(action="accept", content=content)
-            except anyenv.JsonLoadError as e:
-                return types.ErrorData(code=types.INVALID_REQUEST, message=f"Invalid JSON: {e}")
+            match params:
+                case types.ElicitRequestURLParams(url=url):
+                    print(f"URL: {url}", file=sys.stderr)
+                    print("Open this URL? [y/n]: ", end="", file=sys.stderr, flush=True)
+                    response = input().strip().lower()
+                    action = (
+                        "accept"
+                        if response in ("y", "yes")
+                        else ("decline" if response in ("n", "no") else "cancel")
+                    )
+                    return types.ElicitResult(action=action)
+                case types.ElicitRequestFormParams(requestedSchema=schema):
+                    # Form mode: collect structured JSON input
+                    print("Please provide response as JSON:", file=sys.stderr)
+                    if schema:
+                        schema_json = anyenv.dump_json(schema, indent=True)
+                        print(f"Expected schema:\n{schema_json}", file=sys.stderr)
+                    print("> ", end="", file=sys.stderr, flush=True)
+                    response = input()
+                    try:
+                        content = anyenv.load_json(response, return_type=dict)
+                        return types.ElicitResult(action="accept", content=content)
+                    except anyenv.JsonLoadError as e:
+                        return types.ErrorData(
+                            code=types.INVALID_REQUEST, message=f"Invalid JSON: {e}"
+                        )
 
         except KeyboardInterrupt:
             return types.ElicitResult(action="cancel")
