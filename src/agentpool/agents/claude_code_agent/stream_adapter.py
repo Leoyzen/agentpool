@@ -72,6 +72,7 @@ from agentpool.agents.events import (
     CompactionEvent,
     PartDeltaEvent,
     PartStartEvent,
+    TerminalContentItem,
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
@@ -86,6 +87,7 @@ if TYPE_CHECKING:
     from clawd_code_sdk.models import StopReason
 
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.agents.events.events import ToolCallContentItem
 
 _MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
 """Pattern to detect CC-provided tool names."""
@@ -210,6 +212,35 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     # ToolCallCompleteEvent observation
 
                     tool_use = pending_tool_calls.pop(tc_id)
+
+                    # For Bash tools: stream output + exit to virtual terminal
+                    # before signaling completion. This matches the 3-step
+                    # display-only terminal lifecycle.
+                    if tool_use.name == "Bash":
+                        output_str = str(result_content) if result_content else ""
+                        exit_code = 1 if user_block.is_error else 0
+                        yield ToolCallProgressEvent(
+                            tool_call_id=tc_id,
+                            tool_name=_strip_mcp_prefix(tool_use.name),
+                            field_meta={
+                                "terminal_output": {
+                                    "terminal_id": tc_id,
+                                    "data": output_str,
+                                },
+                            },
+                        )
+                        yield ToolCallProgressEvent(
+                            tool_call_id=tc_id,
+                            tool_name=_strip_mcp_prefix(tool_use.name),
+                            field_meta={
+                                "terminal_exit": {
+                                    "terminal_id": tc_id,
+                                    "exit_code": exit_code,
+                                    "signal": None,
+                                },
+                            },
+                        )
+
                     return_part = ToolReturnPart(
                         tool_name=_strip_mcp_prefix(tool_use.name),
                         content=result_content,
@@ -251,14 +282,30 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         tool_name = _strip_mcp_prefix(raw_tool_name)
                         streaming_tc_id = tc_id
                         rich_info = derive_rich_tool_info(raw_tool_name, {})
+                        # For Bash tools: signal client to create a display-only
+                        # terminal. Claude Code executes commands server-side, so
+                        # we use the _meta virtual terminal convention instead of
+                        # the ACP terminal/create RPC.
+                        is_bash = raw_tool_name == "Bash"
+                        if is_bash:
+                            tc_content: list[ToolCallContentItem] = [
+                                TerminalContentItem(terminal_id=tc_id),
+                            ]
+                            meta: dict[str, Any] | None = {
+                                "terminal_info": {"terminal_id": tc_id},
+                            }
+                        else:
+                            tc_content = rich_info.content
+                            meta = None
                         yield ToolCallStartEvent(
                             tool_call_id=tc_id,
                             tool_name=tool_name,
                             title=rich_info.title,
                             kind=rich_info.kind,
                             locations=[],
-                            content=rich_info.content,
+                            content=tc_content,
                             raw_input={},
+                            field_meta=meta,
                         )
 
             # content_block_delta events
