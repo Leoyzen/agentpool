@@ -15,7 +15,6 @@ from importlib.metadata import version
 import logging
 from typing import TYPE_CHECKING, Any, Self, assert_never
 
-import anyio
 from pydantic_ai import RunContext, ToolReturn
 from schemez import FunctionSchema
 
@@ -403,12 +402,14 @@ class MCPClient:
 
         # Prepare metadata to pass tool_call_id to the MCP server
         meta = None
-        if agent_ctx and agent_ctx.tool_call_id:
-            # Use the same key that tool_bridge expects: "claudecode/toolUseId"
-            # Ensure it's a string (handles both real values and mocks)
-            tool_call_id = str(agent_ctx.tool_call_id) if agent_ctx.tool_call_id else None
-            if tool_call_id:
-                meta = {"claudecode/toolUseId": tool_call_id}
+        # Use the same key that tool_bridge expects: "claudecode/toolUseId"
+        # Ensure it's a string (handles both real values and mocks)
+        if (
+            agent_ctx
+            and (ctx_id := agent_ctx.tool_call_id)
+            and (tool_call_id := (str(ctx_id) if ctx_id else None))
+        ):
+            meta = {"claudecode/toolUseId": tool_call_id}
 
         try:
             result = await self._client.call_tool(
@@ -426,8 +427,8 @@ class MCPClient:
                     return ToolReturn(return_value=msg, content=content)
                 case (False, False):  # Fallback to text extraction
                     return extract_text_content(result.content)
-                case _:  # Handle unexpected cases
-                    raise ValueError(f"Unexpected MCP content: {result.content}")  # noqa: TRY301
+                case _ as unreachable:
+                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
         except Exception as e:
             raise RuntimeError(f"MCP tool call failed: {e}") from e
         finally:
@@ -436,6 +437,8 @@ class MCPClient:
 
 
 if __name__ == "__main__":
+    import anyio
+
     path = "/home/phil65/dev/oss/agentpool/tests/mcp_server/server.py"
     # path = Path(__file__).parent / "test_mcp_server.py"
     config = StdioMCPServerConfig(command="uv", args=["run", str(path)])
