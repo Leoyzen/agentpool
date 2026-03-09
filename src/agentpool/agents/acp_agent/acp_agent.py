@@ -506,12 +506,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             enriched_event.metadata is None
                             and enriched_event.tool_call_id in self._tool_bridge.tool_metadata
                         ):
-                            enriched_event = replace(
-                                enriched_event,
-                                metadata=self._tool_bridge.tool_metadata[
-                                    enriched_event.tool_call_id
-                                ],
-                            )
+                            meta = self._tool_bridge.tool_metadata[enriched_event.tool_call_id]
+                            enriched_event = replace(enriched_event, metadata=meta)
                         event = enriched_event  # noqa: PLW2901
                     part = event_to_part(event)  # ty: ignore[invalid-argument-type]
                     if isinstance(part, TextPart):
