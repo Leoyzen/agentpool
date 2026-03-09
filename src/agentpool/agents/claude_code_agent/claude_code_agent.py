@@ -90,18 +90,17 @@ ThinkingMode = Literal["off", "4k", "8k", "16k", "32k"]
 _MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
 """Pattern to detect CC-provided tool names ( mcp__agentpool-{agent_name}-tools__{tool_name} )."""
 
-ALLOWED_SLASH_COMMANDS = frozenset({
-    # Skills that invoke the LLM and produce output over the wire
-    "init",
-    "debug",
-    "pr-comments",
-    "review",
-    "security-review",
-    "insights",
-    # Side-effect commands
-    "compact",
+# see https://github.com/zed-industries/claude-agent-acp/blob/main/src/acp-agent.ts for a list
+UNSUPPORTED_COMMANDS = frozenset({
+    # "cost",
+    "keybindings-help",
+    "login",
+    "logout",
+    "output-style:new",
+    "release-notes",
+    "todos",
 })
-"""Slash commands that produce useful output over the wire protocol."""
+
 
 THINKING_MODE_TOKENS: dict[ThinkingMode, int] = {
     "off": 0,
@@ -729,7 +728,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         commands = [
             create_claude_code_command(cmd_info)
             for cmd_info in server_info.commands
-            if cmd_info.name and cmd_info.name in ALLOWED_SLASH_COMMANDS
+            if cmd_info.name and cmd_info.name not in UNSUPPORTED_COMMANDS
         ]
         for command in commands:
             self._command_store.register_command(command, replace=True)

@@ -479,11 +479,7 @@ class MemoryStorageProvider(StorageProvider):
             result.append(conv["id"])
         return result
 
-    async def update_sdk_session_id(
-        self,
-        session_id: str,
-        sdk_session_id: str,
-    ) -> None:
+    async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
         """Update the external SDK session ID in memory."""
         for conv in self.conversations:
             if conv["id"] == session_id:
