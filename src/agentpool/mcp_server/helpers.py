@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def mcp_tool_to_fn_schema(tool: MCPTool) -> dict[str, Any]:
-    """Convert MCP tool to OpenAI function schema format."""
+def mcp_tool_to_input_schema(tool: MCPTool) -> dict[str, Any]:
+    """Convert MCP tool inputSchema to OpenAI function schema format."""
     return {
         "name": tool.name,
         "description": tool.description or "",

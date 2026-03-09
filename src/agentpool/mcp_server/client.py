@@ -21,7 +21,7 @@ from schemez import FunctionSchema
 from agentpool.agents.context import AgentContext
 from agentpool.log import get_logger
 from agentpool.mcp_server.constants import MCP_TO_LOGGING
-from agentpool.mcp_server.helpers import extract_text_content, mcp_tool_to_fn_schema
+from agentpool.mcp_server.helpers import extract_text_content, mcp_tool_to_input_schema
 from agentpool.mcp_server.message_handler import MCPMessageHandler
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
@@ -333,8 +333,8 @@ class MCPClient:
             return await self.call_tool(tool.name, ctx, filtered_kwargs, agent_ctx)
 
         # Set proper signature and annotations with both RunContext and AgentContext
-        schema = mcp_tool_to_fn_schema(tool)
-        fn_schema = FunctionSchema.from_dict(schema)
+        schema = mcp_tool_to_input_schema(tool)
+        fn_schema = FunctionSchema.from_dict(schema, output_schema=tool.outputSchema)
         sig = fn_schema.to_python_signature()
         tool_callable.__signature__ = create_modified_signature(  # type: ignore[attr-defined]
             sig, inject={"ctx": RunContext, "agent_ctx": AgentContext}
@@ -343,7 +343,8 @@ class MCPClient:
         annotations["ctx"] = RunContext
         annotations["agent_ctx"] = AgentContext
         # Update return annotation to support multiple types
-        annotations["return"] = str | Any | ToolReturn  # type: ignore[assignment]
+        if not tool.outputSchema:
+            annotations["return"] = str | Any | ToolReturn  # type: ignore[assignment]
         tool_callable.__annotations__ = annotations
         tool_callable.__name__ = tool.name
         tool_callable.__doc__ = tool.description or "No description provided."
