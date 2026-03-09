@@ -417,18 +417,13 @@ class MCPClient:
             )
             content = await from_mcp_content(result.content)
             # Decision logic for return type
-            match (result.data is not None, bool(content)):
-                case (True, True):  # Both structured data and rich content -> ToolReturn
-                    return ToolReturn(return_value=result.data, content=content)
-                case (True, False):  # Only structured data -> return directly
-                    return result.data
-                case (False, True):  # Only content -> ToolReturn with content
-                    msg = "Tool executed successfully"
-                    return ToolReturn(return_value=msg, content=content)
-                case (False, False):  # Fallback to text extraction
-                    return extract_text_content(result.content)
-                case _ as unreachable:
-                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+            if result.data is not None and content:
+                return ToolReturn(return_value=result.data, content=content)
+            if result.data is not None:
+                return result.data
+            if content:
+                return ToolReturn(return_value="Tool executed successfully", content=content)
+            return extract_text_content(result.content)
         except Exception as e:
             raise RuntimeError(f"MCP tool call failed: {e}") from e
         finally:
