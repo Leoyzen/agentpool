@@ -45,6 +45,7 @@ from acp.schema import (
     FileEditToolCallContent,
     ImageContentBlock,
     ResourceContentBlock,
+    SelectSessionConfigOption,
     SessionConfigSelectOption,
     TerminalToolCallContent,
     TextContentBlock,
@@ -114,7 +115,7 @@ def get_modes(
     if config_options:
         for config_opt in config_options:
             # Skip boolean config options - they don't map to mode categories
-            if config_opt.type == "boolean" or config_opt.options is None:
+            if not isinstance(config_opt, SelectSessionConfigOption):
                 continue
             # Extract options from the config (ungrouped or grouped)
             mode_infos: list[ModeInfo] = []

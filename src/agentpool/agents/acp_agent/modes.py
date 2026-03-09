@@ -10,7 +10,11 @@ from agentpool.agents.modes import ConfigOptionChanged, ModeCategoryProtocol, Mo
 
 
 if TYPE_CHECKING:
-    from acp.schema import SessionConfigOption, SessionModelState, SessionModeState
+    from acp.schema import (
+        SessionConfigOption,
+        SessionModelState,
+        SessionModeState,
+    )
     from agentpool.agents.acp_agent.acp_agent import ACPAgent
 
 
@@ -113,7 +117,7 @@ class ACPModeCategory(ModeCategoryProtocol["ACPAgent"]):
         Returns:
             ACPModeCategory instance, or None if no mode info available
         """
-        from acp.schema import SessionConfigSelectGroup
+        from acp.schema import SelectSessionConfigOption, SessionConfigSelectGroup
 
         # Try config_options first
         if config_options:
@@ -121,7 +125,7 @@ class ACPModeCategory(ModeCategoryProtocol["ACPAgent"]):
                 if config_opt.id != "mode":
                     continue
                 mode_infos: list[ModeInfo] = []
-                if config_opt.options is None:
+                if not isinstance(config_opt, SelectSessionConfigOption):
                     continue
                 for opt_item in config_opt.options:
                     if isinstance(opt_item, SessionConfigSelectGroup):
@@ -257,7 +261,7 @@ class ACPModelCategory(ModeCategoryProtocol["ACPAgent"]):
         Returns:
             ACPModelCategory instance, or None if no model info available
         """
-        from acp.schema import SessionConfigSelectGroup
+        from acp.schema import SelectSessionConfigOption, SessionConfigSelectGroup
 
         # Try config_options first
         if config_options:
@@ -265,7 +269,7 @@ class ACPModelCategory(ModeCategoryProtocol["ACPAgent"]):
                 if config_opt.id != "model":
                     continue
                 mode_infos: list[ModeInfo] = []
-                if isinstance(config_opt.options, list):
+                if isinstance(config_opt, SelectSessionConfigOption):
                     for opt_item in config_opt.options:
                         if isinstance(opt_item, SessionConfigSelectGroup):
                             mode_infos.extend(
@@ -365,7 +369,7 @@ class ACPGenericCategory(ModeCategoryProtocol["ACPAgent"]):
         Returns:
             List of ACPGenericCategory for options that aren't mode/model
         """
-        from acp.schema import SessionConfigSelectGroup
+        from acp.schema import SelectSessionConfigOption, SessionConfigSelectGroup
 
         categories: list[ACPGenericCategory] = []
 
@@ -373,9 +377,12 @@ class ACPGenericCategory(ModeCategoryProtocol["ACPAgent"]):
             # Skip mode and model - they have dedicated categories
             if config_opt.id in ("mode", "model"):
                 continue
+            # Skip boolean options - they don't map to mode categories
+            if not isinstance(config_opt, SelectSessionConfigOption):
+                continue
 
             mode_infos: list[ModeInfo] = []
-            if isinstance(config_opt.options, list):
+            if config_opt.options:
                 for opt_item in config_opt.options:
                     if isinstance(opt_item, SessionConfigSelectGroup):
                         mode_infos.extend(

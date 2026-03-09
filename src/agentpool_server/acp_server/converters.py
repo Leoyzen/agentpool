@@ -45,7 +45,11 @@ if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import UserContent
 
-    from acp.schema import ContentBlock, McpServer, SessionConfigOption
+    from acp.schema import (
+        ContentBlock,
+        McpServer,
+        SelectSessionConfigOption,
+    )
     from acp.schema.content_blocks import ResourceContents
     from agentpool.agents.modes import ModeCategory, ModeInfo
     from agentpool.common_types import PathReference
@@ -172,10 +176,10 @@ def to_session_select_option(mode: ModeInfo) -> SessionConfigSelectOption:
     return SessionConfigSelectOption(value=mode.id, name=mode.name, description=mode.description)
 
 
-def to_session_config_option(category: ModeCategory) -> SessionConfigOption:
-    from acp.schema import SessionConfigOption
+def to_session_config_option(category: ModeCategory) -> SelectSessionConfigOption:
+    from acp.schema import SelectSessionConfigOption
 
-    return SessionConfigOption(
+    return SelectSessionConfigOption(
         id=category.id,
         name=category.name,
         description=None,
