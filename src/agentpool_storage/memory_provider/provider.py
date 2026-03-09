@@ -298,7 +298,7 @@ class MemoryStorageProvider(StorageProvider):
                 title=conv.get("title"),
                 start_time=conv["start_time"].isoformat(),
                 messages=conv_messages,
-                token_usage=self._aggregate_token_usage(conv_messages),
+                token_usage=_aggregate_token_usage(conv_messages),
             )
             results.append(conv_data)
             if filters.limit and len(results) >= filters.limit:
@@ -319,17 +319,6 @@ class MemoryStorageProvider(StorageProvider):
 
         # Use base class aggregation
         return self.aggregate_stats(rows, filters.group_by)
-
-    @staticmethod
-    def _aggregate_token_usage(messages: Sequence[ChatMessage[Any]]) -> TokenUsage:
-        """Sum up tokens from a sequence of messages."""
-        total = prompt = completion = 0
-        for msg in messages:
-            if msg.cost_info:
-                total += msg.cost_info.token_usage.total_tokens
-                prompt += msg.cost_info.token_usage.input_tokens
-                completion += msg.cost_info.token_usage.output_tokens
-        return {"total": total, "prompt": prompt, "completion": completion}
 
     async def reset(self, *, agent_name: str | None = None, hard: bool = False) -> tuple[int, int]:
         """Reset stored data."""
@@ -500,3 +489,14 @@ class MemoryStorageProvider(StorageProvider):
             if conv["id"] == session_id:
                 conv["sdk_session_id"] = sdk_session_id
                 return
+
+
+def _aggregate_token_usage(messages: Sequence[ChatMessage[Any]]) -> TokenUsage:
+    """Sum up tokens from a sequence of messages."""
+    total = prompt = completion = 0
+    for msg in messages:
+        if msg.cost_info:
+            total += msg.cost_info.token_usage.total_tokens
+            prompt += msg.cost_info.token_usage.input_tokens
+            completion += msg.cost_info.token_usage.output_tokens
+    return {"total": total, "prompt": prompt, "completion": completion}

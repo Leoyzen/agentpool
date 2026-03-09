@@ -259,7 +259,7 @@ class FileProvider(StorageProvider):
     ) -> list[ChatMessage[str]]:
         """Get all messages for a session."""
         messages = [
-            self._to_chat_message(msg)
+            _to_chat_message(msg)
             for msg in self._data["messages"]
             if msg["session_id"] == session_id
         ]
@@ -275,38 +275,6 @@ class FileProvider(StorageProvider):
             return ancestors + messages
         return messages
 
-    def _to_chat_message(self, msg: MessageData) -> ChatMessage[str]:
-        """Convert stored message data to ChatMessage."""
-        cost_info = None
-        if msg.get("token_usage"):
-            usage = msg["token_usage"]
-            cost_info = TokenCost(
-                token_usage=RunUsage(
-                    input_tokens=usage.get("prompt", 0) if usage else 0,
-                    output_tokens=usage.get("completion", 0) if usage else 0,
-                ),
-                total_cost=Decimal(str(msg.get("cost") or 0)),
-            )
-
-        # Build kwargs, only including timestamp/message_id if they have values
-        kwargs: dict[str, Any] = {
-            "content": msg["content"],
-            "role": cast(MessageRole, msg["role"]),
-            "name": msg.get("name"),
-            "model_name": msg.get("model"),
-            "cost_info": cost_info,
-            "response_time": msg.get("response_time"),
-            "parent_id": msg.get("parent_id"),
-            "session_id": msg.get("session_id"),
-            "messages": deserialize_messages(msg.get("messages")),
-            "finish_reason": msg.get("finish_reason"),
-        }
-        if msg.get("timestamp"):
-            kwargs["timestamp"] = datetime.fromisoformat(msg["timestamp"])
-        if msg.get("message_id"):
-            kwargs["message_id"] = msg["message_id"]
-        return ChatMessage[str](**kwargs)
-
     async def get_message(
         self,
         message_id: str,
@@ -316,7 +284,7 @@ class FileProvider(StorageProvider):
         """Get a single message by ID."""
         return next(
             (
-                self._to_chat_message(m)
+                _to_chat_message(m)
                 for m in self._data["messages"]
                 if m.get("message_id") == message_id
             ),
@@ -358,8 +326,7 @@ class FileProvider(StorageProvider):
             None,
         )
         if not source_conv:
-            msg = f"Source conversation not found: {source_session_id}"
-            raise ValueError(msg)
+            raise ValueError(f"Source conversation not found: {source_session_id}")
 
         # Determine fork point
         fork_point_id: str | None = None
@@ -451,8 +418,7 @@ class FileProvider(StorageProvider):
 
         if hard:
             if agent_name:
-                msg = "Hard reset cannot be used with agent_name"
-                raise ValueError(msg)
+                raise ValueError("Hard reset cannot be used with agent_name")
             # Clear everything
             self._data = {
                 "messages": [],
@@ -606,3 +572,36 @@ class FileProvider(StorageProvider):
                 p["last_active"] = get_now().isoformat()
                 self._save()
                 return
+
+
+def _to_chat_message(msg: MessageData) -> ChatMessage[str]:
+    """Convert stored message data to ChatMessage."""
+    cost_info = None
+    if msg.get("token_usage"):
+        usage = msg["token_usage"]
+        cost_info = TokenCost(
+            token_usage=RunUsage(
+                input_tokens=usage.get("prompt", 0) if usage else 0,
+                output_tokens=usage.get("completion", 0) if usage else 0,
+            ),
+            total_cost=Decimal(str(msg.get("cost") or 0)),
+        )
+
+    # Build kwargs, only including timestamp/message_id if they have values
+    kwargs: dict[str, Any] = {
+        "content": msg["content"],
+        "role": cast(MessageRole, msg["role"]),
+        "name": msg.get("name"),
+        "model_name": msg.get("model"),
+        "cost_info": cost_info,
+        "response_time": msg.get("response_time"),
+        "parent_id": msg.get("parent_id"),
+        "session_id": msg.get("session_id"),
+        "messages": deserialize_messages(msg.get("messages")),
+        "finish_reason": msg.get("finish_reason"),
+    }
+    if msg.get("timestamp"):
+        kwargs["timestamp"] = datetime.fromisoformat(msg["timestamp"])
+    if msg.get("message_id"):
+        kwargs["message_id"] = msg["message_id"]
+    return ChatMessage[str](**kwargs)

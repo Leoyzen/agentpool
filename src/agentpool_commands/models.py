@@ -29,10 +29,7 @@ class ListModelsCommand(NodeCommand):
     name = "list-models"
     category = "model"
 
-    async def execute_command(
-        self,
-        ctx: CommandContext[AgentContext],
-    ) -> None:
+    async def execute_command(self, ctx: CommandContext[AgentContext]) -> None:
         """List available models.
 
         Args:
@@ -52,7 +49,7 @@ class ListModelsCommand(NodeCommand):
         ]
 
         for model in models:
-            model_id = model.id_override if model.id_override else model.id
+            model_id = model.id_override or model.id
             name = model.name or ""
             description = model.description or ""
             # Escape pipe characters in fields
@@ -86,11 +83,7 @@ class SetModelCommand(NodeCommand):
     name = "set-model"
     category = "model"
 
-    async def execute_command(
-        self,
-        ctx: CommandContext[AgentContext],
-        model: str,
-    ) -> None:
+    async def execute_command(self, ctx: CommandContext[AgentContext], model: str) -> None:
         """Change the model for the current conversation.
 
         Args:

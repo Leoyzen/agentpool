@@ -112,6 +112,12 @@ class CompactCommand(NodeCommand):
             preset: Optional preset name (minimal, balanced, summarizing)
         """
         from agentpool.agents.base_agent import BaseAgent
+        from agentpool.messaging.compaction import (
+            balanced_context,
+            compact_conversation,
+            minimal_context,
+            summarizing_context,
+        )
 
         # Get agent from context
         agent = ctx.context.node
@@ -127,17 +133,8 @@ class CompactCommand(NodeCommand):
             return
 
         try:
-            # Get compaction pipeline
-            from agentpool.messaging.compaction import (
-                balanced_context,
-                minimal_context,
-                summarizing_context,
-            )
-
             pipeline = None
-
-            # Check for preset override
-            if preset:
+            if preset:  # Check for preset override
                 match preset.lower():
                     case "minimal":
                         pipeline = minimal_context()
@@ -161,10 +158,7 @@ class CompactCommand(NodeCommand):
                 pipeline = summarizing_context()
 
             await ctx.output.print("🔄 **Compacting conversation history...**")
-
             # Apply the pipeline using shared helper
-            from agentpool.messaging.compaction import compact_conversation
-
             original_count, compacted_count = await compact_conversation(
                 pipeline, agent.conversation
             )
@@ -239,7 +233,6 @@ class SpawnCommand(NodeCommand):
         # The event handler system (ACP, OpenCode, CLI, etc.) handles rendering
         # Get parent agent's context to access event emitter
         parent_ctx = ctx.context.agent.get_context()
-
         async for event in agent.run_stream(task_prompt):
             wrapped = SubAgentEvent(
                 source_name=agent_name,
