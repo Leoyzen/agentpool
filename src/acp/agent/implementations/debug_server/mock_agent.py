@@ -13,6 +13,7 @@ from acp.agent.implementations.debug_server.models import DebugSession
 from acp.agent.protocol import Agent
 from acp.schema import (
     AuthenticateResponse,
+    CloseSessionResponse,
     CreateTerminalResponse,
     # CurrentModelUpdate,
     ForkSessionResponse,
@@ -24,7 +25,6 @@ from acp.schema import (
     ReadTextFileResponse,
     ResumeSessionResponse,
     SessionInfo,
-    StopSessionResponse,
     WriteTextFileResponse,
 )
 
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from acp.schema import (
         AuthenticateRequest,
         CancelNotification,
+        CloseSessionRequest,
         CreateTerminalRequest,
         ForkSessionRequest,
         InitializeRequest,
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
         ReadTextFileRequest,
         ResumeSessionRequest,
         SetSessionConfigOptionRequest,
-        StopSessionRequest,
         WriteTextFileRequest,
     )
 
@@ -166,9 +166,9 @@ class MockAgent(Agent):
             self.debug_state.active_session_id = params.session_id
         return ResumeSessionResponse()
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         """Mock stop session."""
         self.debug_state.sessions.pop(params.session_id, None)
         if self.debug_state.active_session_id == params.session_id:
             self.debug_state.active_session_id = None
-        return StopSessionResponse()
+        return CloseSessionResponse()

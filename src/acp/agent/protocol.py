@@ -10,6 +10,8 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         AuthenticateResponse,
         CancelNotification,
+        CloseSessionRequest,
+        CloseSessionResponse,
         ForkSessionRequest,
         ForkSessionResponse,
         InitializeRequest,
@@ -30,8 +32,6 @@ if TYPE_CHECKING:
         SetSessionModelResponse,
         SetSessionModeRequest,
         SetSessionModeResponse,
-        StopSessionRequest,
-        StopSessionResponse,
     )
 
 
@@ -54,7 +54,7 @@ class Agent(Protocol):
 
     async def resume_session(self, params: ResumeSessionRequest) -> ResumeSessionResponse: ...
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse: ...
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse: ...
 
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None: ...
 

@@ -12,6 +12,7 @@ from acp.connection import Connection
 from acp.exceptions import RequestError
 from acp.schema import (
     AuthenticateResponse,
+    CloseSessionResponse,
     CreateTerminalRequest,
     ForkSessionResponse,
     InitializeResponse,
@@ -28,7 +29,6 @@ from acp.schema import (
     SetSessionConfigOptionResponse,
     SetSessionModelResponse,
     SetSessionModeResponse,
-    StopSessionResponse,
     TerminalOutputRequest,
     WaitForTerminalExitRequest,
     WriteTextFileRequest,
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         CancelNotification,
         ClientMethod,
+        CloseSessionRequest,
         CreateTerminalResponse,
         ForkSessionRequest,
         InitializeRequest,
@@ -61,7 +62,6 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        StopSessionRequest,
         TerminalOutputResponse,
         WaitForTerminalExitResponse,
         WriteTextFileResponse,
@@ -135,13 +135,13 @@ class ClientSideConnection(Agent):
         payload = resp if isinstance(resp, dict) else {}
         return ResumeSessionResponse.model_validate(payload)
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         dct = params.model_dump(
             mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
         )
-        resp = await self._conn.send_request("session/stop", dct)
+        resp = await self._conn.send_request("session/close", dct)
         payload = resp if isinstance(resp, dict) else {}
-        return StopSessionResponse.model_validate(payload)
+        return CloseSessionResponse.model_validate(payload)
 
     async def set_session_mode(self, params: SetSessionModeRequest) -> SetSessionModeResponse:
         dct = params.model_dump(

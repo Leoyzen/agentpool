@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from acp import Agent as ACPAgent
 from acp.schema import (
+    CloseSessionResponse,
     ForkSessionResponse,
     InitializeResponse,
     ListSessionsResponse,
@@ -24,7 +25,6 @@ from acp.schema import (
     SetSessionModelResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
-    StopSessionResponse,
 )
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         CancelNotification,
         ClientCapabilities,
+        CloseSessionRequest,
         ForkSessionRequest,
         Implementation,
         InitializeRequest,
@@ -52,7 +53,6 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        StopSessionRequest,
     )
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
@@ -241,7 +241,7 @@ class AgentPoolACPAgent(ACPAgent):
             load_session=True,
             list_sessions=True,
             resume_session=True,
-            stop_session=True,
+            close_session=True,
             http_mcp_servers=True,
             sse_mcp_servers=True,
             audio_prompts=True,
@@ -544,8 +544,8 @@ class AgentPoolACPAgent(ACPAgent):
             logger.info("Returning PromptResponse", stop_reason=stop_reason)
             return response
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
-        """Stop an active session and free its resources.
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
+        """Close an active session and free its resources.
 
         Cancels any ongoing work (like session/cancel) and then
         closes the session and releases all associated resources.
@@ -559,8 +559,8 @@ class AgentPoolACPAgent(ACPAgent):
             await self.session_manager.close_session(params.session_id)
             logger.info("Session stopped", session_id=params.session_id)
         except Exception:
-            logger.exception("Failed to stop session", session_id=params.session_id)
-        return StopSessionResponse()
+            logger.exception("Failed to close session", session_id=params.session_id)
+        return CloseSessionResponse()
 
     async def cancel(self, params: CancelNotification) -> None:
         """Cancel operations for a session."""

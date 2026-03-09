@@ -266,7 +266,7 @@ class InitializeRequest(Request):
         )
 
 
-class StopSessionRequest(Request):
+class CloseSessionRequest(Request):
     """**UNSTABLE**: This capability is not part of the spec yet.
 
     Request parameters for stopping an active session.
@@ -303,7 +303,7 @@ ClientRequest = (
     | ListSessionsRequest
     | ForkSessionRequest
     | ResumeSessionRequest
-    | StopSessionRequest
+    | CloseSessionRequest
     | SetSessionModeRequest
     | SetSessionConfigOptionRequest
     | PromptRequest

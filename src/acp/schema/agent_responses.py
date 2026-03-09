@@ -242,7 +242,7 @@ class PromptResponse(Response):
     """
 
 
-class StopSessionResponse(Response):
+class CloseSessionResponse(Response):
     """**UNSTABLE**: This capability is not part of the spec yet.
 
     Response from stopping a session.
@@ -295,7 +295,7 @@ class InitializeResponse(Response):
         image_prompts: bool = False,
         list_sessions: bool = False,
         resume_session: bool = False,
-        stop_session: bool = False,
+        close_session: bool = False,
         auth_methods: Sequence[AuthMethod] | None = None,
     ) -> Self:
         """Create an instance of AgentCapabilities.
@@ -313,7 +313,7 @@ class InitializeResponse(Response):
             image_prompts: Whether the agent supports image prompts.
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
-            stop_session: Whether the agent supports `session/stop` (unstable).
+            close_session: Whether the agent supports `session/close` (unstable).
             auth_methods: The authentication methods supported by the agent.
         """
         caps = AgentCapabilities.create(
@@ -325,7 +325,7 @@ class InitializeResponse(Response):
             image_prompts=image_prompts,
             list_sessions=list_sessions,
             resume_session=resume_session,
-            stop_session=stop_session,
+            close_session=close_session,
         )
         return cls(
             agent_info=Implementation(name=name, title=title, version=version),
@@ -356,7 +356,7 @@ AgentResponse = (
     | LoadSessionResponse
     | ForkSessionResponse
     | ResumeSessionResponse
-    | StopSessionResponse
+    | CloseSessionResponse
     | ListSessionsResponse
     | SetSessionModeResponse
     | SetSessionConfigOptionResponse

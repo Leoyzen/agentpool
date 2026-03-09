@@ -60,8 +60,8 @@ from acp.schema import (
     SessionNotification,
     SetSessionModelRequest,
     SetSessionModelResponse,
-    StopSessionRequest,
-    StopSessionResponse,
+    CloseSessionRequest,
+    CloseSessionResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
     TerminalOutputRequest,
@@ -164,8 +164,8 @@ __all__ = [  # noqa: RUF022
     "SetSessionModeRequest",
     "SetSessionModeResponse",
     # stop session
-    "StopSessionRequest",
-    "StopSessionResponse",
+    "CloseSessionRequest",
+    "CloseSessionResponse",
     # model types
     "ModelInfo",
     "SessionModelState",

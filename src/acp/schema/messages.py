@@ -30,7 +30,7 @@ AgentMethod = Literal[
     "session/list",
     "session/fork",
     "session/resume",
-    "session/stop",
+    "session/close",
 ]
 
 ClientMethod = Literal[
