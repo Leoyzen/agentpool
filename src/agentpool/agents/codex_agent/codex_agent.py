@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import anyenv
 from pydantic import TypeAdapter
-from pydantic_ai import TextPartDelta
 from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
@@ -24,7 +23,8 @@ from agentpool.agents.codex_agent.codex_converters import (
     turns_to_chat_messages,
     user_content_to_codex,
 )
-from agentpool.agents.events import PartDeltaEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -435,7 +435,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         if self.storage and self.session_id and self._sdk_session_id:
             await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
         # Stream turn events with bridge context set
-        accumulated_text: list[str] = []
+        reconstructor = MessageReconstructor(
+            initial_prompts=prompts,
+            model_name=self.model_name,
+        )
         self._token_usage_data = None
         self._turn_status: MiscTurnStatusValue | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
@@ -471,13 +474,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 )
                 # Wrap to capture metadata (turn_id, token usage), then convert
                 async for native_event in convert_codex_stream(capture_metadata(raw_stream)):
+                    reconstructor.observe(native_event)
                     yield native_event
 
-                    match native_event:
-                        case PlanUpdateEvent() if self.agent_pool:
-                            self.agent_pool.todos.replace_all(native_event.entries)
-                        case PartDeltaEvent(delta=TextPartDelta(content_delta=content)):
-                            accumulated_text.append(content)
+                    if isinstance(native_event, PlanUpdateEvent) and self.agent_pool:
+                        self.agent_pool.todos.replace_all(native_event.entries)
 
         except Exception as e:
             self.log.exception("Error during Codex turn", error=str(e))
@@ -487,7 +488,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             self._current_turn_id = None
 
         # Emit completion event
-        final_text = "".join(accumulated_text)
+        reconstructor.flush()
+        final_text = reconstructor.text_content
         cost_info: TokenCost | None = None
         request_usage = RequestUsage()
 
@@ -518,6 +520,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             cost_info=cost_info,
             usage=request_usage,
             model_name=self.model_name,
+            messages=reconstructor.model_messages,
             finish_reason=to_finish_reason(self._turn_status) if self._turn_status else None,
         )
 

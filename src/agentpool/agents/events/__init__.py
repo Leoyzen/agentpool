@@ -40,6 +40,7 @@ from .processors import (
     StreamProcessor,
     event_handler_processor,
 )
+from .reconstructor import MessageReconstructor
 
 __all__ = [
     "BaseTTSEventHandler",
@@ -51,6 +52,7 @@ __all__ = [
     "EdgeTTSEventHandler",
     "FileContentItem",
     "LocationContentItem",
+    "MessageReconstructor",
     "OpenAITTSEventHandler",
     "PartDeltaEvent",
     "PartStartEvent",

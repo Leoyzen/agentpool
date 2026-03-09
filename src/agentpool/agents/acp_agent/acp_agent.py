@@ -39,7 +39,6 @@ import uuid
 
 import anyio
 from pydantic import HttpUrl
-from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
@@ -50,7 +49,7 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     ToolCallCompleteEvent,
 )
-from agentpool.agents.events.processors import event_to_part
+from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -70,7 +69,7 @@ if TYPE_CHECKING:
     from anyio.abc import Process
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
-    from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
+    from pydantic_ai import UserContent
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
 
@@ -448,11 +447,11 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         run_id = str(uuid.uuid4())
         self._state.clear()
-        model_messages: list[ModelResponse | ModelRequest] = []
-        initial_request = ModelRequest(parts=[UserPromptPart(content=prompts)])
-        model_messages.append(initial_request)
-        current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
-        text_chunks: list[str] = []
+        reconstructor = MessageReconstructor(
+            initial_prompts=prompts,
+            model_name=self.model_name,
+            provider_name=self._provider_type,
+        )
         assert self.session_id is not None
         yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
         # Persist SDK session ID to storage for cross-referencing
@@ -509,26 +508,23 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             meta = self._tool_bridge.tool_metadata[enriched_event.tool_call_id]
                             enriched_event = replace(enriched_event, metadata=meta)
                         event = enriched_event  # noqa: PLW2901
-                    part = event_to_part(event)  # ty: ignore[invalid-argument-type]
-                    if isinstance(part, TextPart):
-                        text_chunks.append(part.content)
-                    if part:
-                        current_response_parts.append(part)
+                    reconstructor.observe(event)  # ty: ignore[invalid-argument-type]
                     yield event
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             self._cancelled = True
 
         if self._cancelled:
+            reconstructor.flush()
             message = ChatMessage[str](
-                content="".join(text_chunks),
+                content=reconstructor.text_content,
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid.uuid4()),
                 session_id=self.session_id,
                 parent_id=user_msg.message_id,
                 model_name=self.model_name,
-                messages=model_messages,
+                messages=reconstructor.model_messages,
                 finish_reason="stop",
             )
             yield StreamCompleteEvent(message=message)
@@ -537,20 +533,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         response = await prompt_task
         finish_reason = to_finish_reason(response.stop_reason)
-        if current_response_parts:
-            model_messages.append(
-                ModelResponse(
-                    parts=current_response_parts,
-                    finish_reason=finish_reason,
-                    model_name=self.model_name,
-                    provider_name=self._provider_type,
-                )
-            )
+        reconstructor.flush(finish_reason=finish_reason)
 
-        text_content = "".join(text_chunks)
+        text_content = reconstructor.text_content
         usage, cost_info = await calculate_usage_from_parts(
             input_parts=prompts,
-            response_parts=current_response_parts,
+            response_parts=reconstructor.all_response_parts,
             text_content=text_content,
             model_name=self.model_name,
             provider=self._provider_type,
@@ -564,7 +552,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             session_id=self.session_id,
             parent_id=user_msg.message_id,
             model_name=self.model_name,
-            messages=model_messages,
+            messages=reconstructor.model_messages,
             finish_reason=finish_reason,
             usage=usage,
             cost_info=cost_info,

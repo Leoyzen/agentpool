@@ -13,7 +13,6 @@ import uuid
 
 import anyio
 from pydantic import TypeAdapter
-from pydantic_ai import TextPart
 from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
@@ -29,6 +28,7 @@ from agentpool.agents.claude_code_agent.converters import (
 from agentpool.agents.claude_code_agent.slash_commands import create_claude_code_command
 from agentpool.agents.claude_code_agent.static_info import models_to_category
 from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -778,6 +778,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             client = fork_client
 
         adapter_result: StreamAdapterResult | None = None
+        reconstructor = MessageReconstructor(initial_prompts=prompts)
         try:
             claude_prompts = [*to_prompt_input(prompts)]
             await client.query(*claude_prompts)
@@ -805,6 +806,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                     if isinstance(event, StreamAdapterResult):
                         adapter_result = event
                     else:
+                        reconstructor.observe(event)
                         yield event
 
         except asyncio.CancelledError:
@@ -812,21 +814,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             msg_metadata: SimpleJsonType = {}
             if self._sdk_session_id:
                 msg_metadata["sdk_session_id"] = self._sdk_session_id
-            parts = adapter_result.response_parts if adapter_result else []
-            content = "".join(i.content for i in parts if isinstance(i, TextPart))
-            messages = adapter_result.model_messages if adapter_result else []
+            reconstructor.flush()
             resolved = (
                 adapter_result.resolved_model if adapter_result else None
             ) or self.model_name
             response_msg = ChatMessage[TResult](
-                content=content,  # type: ignore[arg-type]
+                content=reconstructor.text_content,  # type: ignore[arg-type]
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid.uuid4()),
                 session_id=self.session_id,
                 parent_id=user_msg.message_id,
                 model_name=resolved,
-                messages=messages,
+                messages=reconstructor.model_messages,
                 finish_reason="stop",
                 metadata=msg_metadata,
             )
@@ -847,11 +847,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         if not adapter_result:
             raise RuntimeError("Stream completed without producing adapter result")
 
+        reconstructor.flush()
+
         # Determine final content - use structured output if available
         result_message = adapter_result.result_message
-        content = "".join(
-            i.content for i in adapter_result.response_parts if isinstance(i, TextPart)
-        )
+        content = reconstructor.text_content
         final_content: TResult
         if (
             self._output_type is not str
@@ -892,7 +892,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             session_id=self.session_id,
             parent_id=user_msg.message_id,
             model_name=adapter_result.resolved_model or self.model_name,
-            messages=adapter_result.model_messages,
+            messages=reconstructor.model_messages,
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,

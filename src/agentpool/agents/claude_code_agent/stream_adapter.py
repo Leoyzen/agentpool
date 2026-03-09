@@ -36,7 +36,7 @@ avoiding race conditions with permission dialogs:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import re
 from typing import TYPE_CHECKING, Any, assert_never, cast
 
@@ -62,12 +62,8 @@ from clawd_code_sdk.models import (
 )
 from pydantic_ai import (
     FunctionToolResultEvent,
-    ModelRequest,
-    ModelResponse,
     PartEndEvent,
     TextPart,
-    ThinkingPart,
-    ToolCallPart,
     ToolReturnPart,
 )
 
@@ -88,7 +84,6 @@ if TYPE_CHECKING:
 
     from clawd_code_sdk import ResultMessage, ToolUseBlock
     from clawd_code_sdk.models import StopReason
-    from pydantic_ai import ModelMessage
 
     from agentpool.agents.events import RichAgentStreamEvent
 
@@ -108,7 +103,8 @@ class StreamAdapterResult:
     """Accumulated state from processing the Claude SDK stream.
 
     Populated during stream processing and consumed by the caller
-    to build the final ChatMessage.
+    to build the final ChatMessage. Message reconstruction (model_messages,
+    response_parts, text) is handled by the caller's ``MessageReconstructor``.
     """
 
     result_message: ResultMessage | None = None
@@ -116,12 +112,6 @@ class StreamAdapterResult:
 
     resolved_model: str | None = None
     """Model identifier resolved from AssistantMessage responses."""
-
-    model_messages: list[ModelMessage] = field(default_factory=list)
-    """Accumulated pydantic-ai model messages (for ChatMessage.messages)."""
-
-    response_parts: list[TextPart | ThinkingPart | ToolCallPart] = field(default_factory=list)
-    """Current turn's response parts (text, thinking, tool calls)."""
 
     @property
     def stop_reason(self) -> StopReason | None:
@@ -178,6 +168,8 @@ async def adapt_claude_stream(  # noqa: PLR0915
     result = StreamAdapterResult()
     pending_tool_calls: dict[str, ToolUseBlock] = {}
     streaming_tc_id: str | None = None
+    # Note: message reconstruction (model_messages, response_parts, text accumulation)
+    # is handled by the caller's MessageReconstructor, which observes the yielded events.
 
     async for event_or_message in merged_stream:
         if not isinstance(event_or_message, Message):
@@ -190,19 +182,9 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     result.resolved_model = model
                 for block in msg_content:
                     match block:
-                        case TextBlock(text=text):
-                            result.response_parts.append(TextPart(content=text))
-                        case ThinkingBlock(thinking=text):
-                            result.response_parts.append(ThinkingPart(content=text))
                         case ToolUseBlock(id=tc_id, name=name, input=input_data):
                             pending_tool_calls[tc_id] = block
                             display_name = _strip_mcp_prefix(name)
-                            tool_call_part = ToolCallPart(
-                                tool_name=display_name,
-                                args=cast(dict[str, Any], input_data),
-                                tool_call_id=tc_id,
-                            )
-                            result.response_parts.append(tool_call_part)
                             # Emit progress update with complete args
                             # (ToolCallStartEvent was already emitted via streaming
                             # with empty args; now we have the full picture)
@@ -213,7 +195,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                                 title=rich_info.title,
                                 tool_input=cast(dict[str, Any], input_data),
                             )
-                        case ToolResultBlock():
+                        case ToolResultBlock() | ThinkingBlock() | TextBlock():
                             pass  # ToolResult Blocks only appear in UserMessages
                         case _ as unknown_block:
                             assert_never(unknown_block)  # ty:ignore[type-assertion-failure]
@@ -224,11 +206,8 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         continue
                     tc_id = user_block.tool_use_id
                     result_content = user_block.get_parsed_content()
-                    # Flush response parts into model messages
-                    if result.response_parts:
-                        model_response = ModelResponse(parts=result.response_parts)
-                        result.model_messages.append(model_response)
-                        result.response_parts = []
+                    # Flush + tool return handled by reconstructor via
+                    # ToolCallCompleteEvent observation
 
                     tool_use = pending_tool_calls.pop(tc_id)
                     return_part = ToolReturnPart(
@@ -245,7 +224,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         )
                         metadata = convert_to_opencode_metadata(
                             tool_use.name,
-                            tool_use_result,  # pyright: ignore[reportArgumentType]
+                            tool_use_result,
                             tool_input,
                         )  # type: ignore[assignment]
 
@@ -258,7 +237,6 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         message_id="",
                         metadata=metadata,
                     )
-                    result.model_messages.append(ModelRequest(parts=[return_part]))
 
             # Real-time streaming: content_block_start
             case StreamEvent(
@@ -343,9 +321,5 @@ async def adapt_claude_stream(  # noqa: PLR0915
         if isinstance(message, ResultMessage):
             result.result_message = message
             break
-
-    # Flush remaining response parts
-    if result.response_parts:
-        result.model_messages.append(ModelResponse(parts=result.response_parts))
 
     yield result

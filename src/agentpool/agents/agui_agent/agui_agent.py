@@ -20,17 +20,14 @@ import anyio
 import httpx
 from pydantic_ai import (
     ModelRequest,
-    ModelResponse,
-    TextPart,
-    ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
-    UserPromptPart,
 )
 
 from agentpool.agents.agui_agent.helpers import execute_tool_call, parse_sse_stream
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import PartStartEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     OperationNotAllowedError,
@@ -307,13 +304,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             self._sdk_session_id = self.session_id
 
         run_id = str(uuid4())  # New run ID for each run
-        # Track messages in pydantic-ai format: ModelRequest -> ModelResponse -> ModelRequest...
-        # This mirrors pydantic-ai's new_messages() which includes the initial user request.
-        model_messages: list[ModelResponse | ModelRequest] = []
-        # Start with the user's request (same as pydantic-ai's new_messages())
-        initial_request = ModelRequest(parts=[UserPromptPart(content=prompts)])
-        model_messages.append(initial_request)
-        response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
+        reconstructor = MessageReconstructor(initial_prompts=prompts)
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         thread_id = self._sdk_session_id or self.session_id
         yield RunStartedEvent(session_id=thread_id, run_id=run_id, agent_name=self.name)
@@ -353,9 +344,9 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                         response.raise_for_status()
                         async for event in self._process_events(
                             response=response,
-                            response_parts=response_parts,
                             tool_calls_pending=tool_calls_pending,
                         ):
+                            reconstructor.observe(event)
                             yield event
                 except httpx.HTTPError:
                     self.log.exception("HTTP error during AG-UI run")
@@ -387,20 +378,16 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 # If no results (all tools were server-side), we're done
                 if not pending_tool_results:
                     break
-                # Flush current response parts to model_messages
-                if response_parts:
-                    model_messages.append(ModelResponse(parts=response_parts))
-                    response_parts = []
-                # Create ModelRequest with tool return parts
-                tool_return_parts = [
-                    ToolReturnPart(
-                        tool_name=tool_calls_pending.get(r.tool_call_id, ("unknown", {}))[0],
+                # Flush current response parts and add tool returns
+                reconstructor.flush()
+                for r in pending_tool_results:
+                    tool_name = tool_calls_pending.get(r.tool_call_id, ("unknown", {}))[0]
+                    return_part = ToolReturnPart(
+                        tool_name=tool_name,
                         content=r.content,
                         tool_call_id=r.tool_call_id,
                     )
-                    for r in pending_tool_results
-                ]
-                model_messages.append(ModelRequest(parts=tool_return_parts))
+                    reconstructor.model_messages.append(ModelRequest(parts=[return_part]))
                 # Add tool results to messages for next iteration
                 messages = [*pending_tool_results]
                 self.log.debug("Continuing with tool results", count=len(pending_tool_results))
@@ -408,28 +395,21 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             self.log.info("Stream cancelled via task cancellation")
             self._cancelled = True
 
-        # Handle cancellation - emit partial message
-        text = "".join([i.content for i in response_parts if isinstance(i, TextPart)])
+        reconstructor.flush()
+
         if self._cancelled:
-            # Flush any remaining response parts
-            if response_parts:
-                model_messages.append(ModelResponse(parts=response_parts))
             final_message = ChatMessage[str](
-                content=text,
+                content=reconstructor.text_content,
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid4()),
                 session_id=self.session_id,
                 parent_id=user_msg.message_id,
-                messages=model_messages,
+                messages=reconstructor.model_messages,
                 finish_reason="stop",
             )
             yield StreamCompleteEvent(message=final_message)
             return
-
-        # Flush any remaining response parts
-        if response_parts:
-            model_messages.append(ModelResponse(parts=response_parts))
 
         # Final drain of event queue after stream completes
         async for e in self._drain_event_queue():
@@ -437,19 +417,19 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         # Calculate approximate token usage from what we can observe
         usage, cost_info = await calculate_usage_from_parts(
             input_parts=prompts,
-            response_parts=response_parts,
-            text_content=text,
+            response_parts=reconstructor.all_response_parts,
+            text_content=reconstructor.text_content,
             model_name=self.model_name,
         )
 
         final_message = ChatMessage[str](
-            content=text,
+            content=reconstructor.text_content,
             role="assistant",
             name=self.name,
             message_id=message_id or str(uuid4()),
             session_id=self.session_id,
             parent_id=user_msg.message_id,
-            messages=model_messages,
+            messages=reconstructor.model_messages,
             usage=usage,
             cost_info=cost_info,
         )
@@ -466,15 +446,9 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
     async def _process_events(
         self,
         response: httpx.Response,
-        response_parts: list[TextPart | ThinkingPart | ToolCallPart],
         tool_calls_pending: dict[str, tuple[str, dict[str, Any]]],
     ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         from ag_ui.core import (
-            ReasoningMessageChunkEvent,
-            ReasoningMessageContentEvent,
-            TextMessageChunkEvent,
-            TextMessageContentEvent,
-            ThinkingTextMessageContentEvent,
             ToolCallArgsEvent as AGUIToolCallArgsEvent,
             ToolCallEndEvent as AGUIToolCallEndEvent,
             ToolCallStartEvent as AGUIToolCallStartEvent,
@@ -493,17 +467,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 break
             # Transform chunks to proper START/CONTENT/END sequences
             for event in chunk_transformer.transform(raw_event):
-                match event:  # Handle events for accumulation and tool calls
-                    case TextMessageContentEvent(delta=delta):
-                        response_parts.append(TextPart(content=delta))
-                    case TextMessageChunkEvent(delta=delta) if delta:
-                        response_parts.append(TextPart(content=delta))
-                    case ThinkingTextMessageContentEvent(delta=delta):
-                        response_parts.append(ThinkingPart(content=delta))
-                    case ReasoningMessageContentEvent(delta=delta):
-                        response_parts.append(ThinkingPart(content=delta))
-                    case ReasoningMessageChunkEvent(delta=str() as delta):
-                        response_parts.append(ThinkingPart(content=delta))
+                match event:  # Handle events for tool call accumulation
                     case AGUIToolCallStartEvent(tool_call_id=tc_id, tool_call_name=name) if name:
                         tool_accumulator.start(tc_id, name)
                     case AGUIToolCallArgsEvent(tool_call_id=tc_id, delta=delta):
@@ -512,8 +476,13 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                         if result := tool_accumulator.complete(tc_id):
                             tool_name, args = result
                             tool_calls_pending[tc_id] = (tool_name, args)
-                            p = ToolCallPart(tool_name=tool_name, args=args, tool_call_id=tc_id)
-                            response_parts.append(p)
+                            # Emit PartStartEvent so reconstructor can track the tool call
+                            part = ToolCallPart(
+                                tool_name=tool_name,
+                                args=args,
+                                tool_call_id=tc_id,
+                            )
+                            yield PartStartEvent(index=0, part=part)
 
                 # Convert to native event and distribute to handlers
                 if native_event := agui_to_native_event(event):
