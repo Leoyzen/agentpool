@@ -57,5 +57,4 @@ test_configs/
 **/_versions/
 
 .envrc
-docs/rfcs
 .sisyphus
