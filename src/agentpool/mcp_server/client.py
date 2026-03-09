@@ -21,7 +21,11 @@ from schemez import FunctionSchema
 from agentpool.agents.context import AgentContext
 from agentpool.log import get_logger
 from agentpool.mcp_server.constants import MCP_TO_LOGGING
-from agentpool.mcp_server.helpers import extract_text_content, mcp_tool_to_input_schema
+from agentpool.mcp_server.helpers import (
+    extract_text_content,
+    mcp_annotations_to_hints,
+    mcp_tool_to_input_schema,
+)
 from agentpool.mcp_server.message_handler import MCPMessageHandler
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
@@ -348,7 +352,8 @@ class MCPClient:
         tool_callable.__annotations__ = annotations
         tool_callable.__name__ = tool.name
         tool_callable.__doc__ = tool.description or "No description provided."
-        return FunctionTool.from_callable(tool_callable, source="mcp")
+        hints = mcp_annotations_to_hints(tool.annotations)
+        return FunctionTool.from_callable(tool_callable, source="mcp", hints=hints)
 
     async def call_tool(
         self,
