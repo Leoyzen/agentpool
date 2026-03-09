@@ -22,11 +22,15 @@ from pydantic_ai.usage import RequestUsage, RunUsage
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pydantic_ai import ModelResponsePart
     from pydantic_ai.messages import ModelMessage, TextPart
     from pydantic_ai.models import Model
     from pydantic_ai.settings import ModelSettings
 
     from agentpool.messaging.messages import TokenCost
+
+
+DEFAULT_ENCODING_MODEL = "gpt-4"
 
 
 @dataclass
@@ -82,7 +86,7 @@ def _normalize_tool_schema(tool: ToolDefinition | dict[str, Any]) -> dict[str, A
     return tool
 
 
-def count_tokens(text: str, model_name: str = "gpt-4") -> int:
+def count_tokens(text: str, model_name: str | None = None) -> int:
     """Count tokens using tiktoken.
 
     Args:
@@ -99,7 +103,7 @@ def count_tokens(text: str, model_name: str = "gpt-4") -> int:
         return len(text) // 4
 
     try:
-        encoding = tiktoken.encoding_for_model(model_name)
+        encoding = tiktoken.encoding_for_model(model_name or DEFAULT_ENCODING_MODEL)
     except KeyError:
         # Fall back to cl100k_base for unknown models
         encoding = tiktoken.get_encoding("cl100k_base")
@@ -109,7 +113,7 @@ def count_tokens(text: str, model_name: str = "gpt-4") -> int:
 
 async def calculate_usage_from_parts(
     input_parts: Sequence[Any],
-    response_parts: Sequence[TextPart | ThinkingPart | ToolCallPart],
+    response_parts: Sequence[ModelResponsePart],
     text_content: str,
     model_name: str | None = None,
     provider: str | None = None,
@@ -131,11 +135,9 @@ async def calculate_usage_from_parts(
     """
     from agentpool.messaging.messages import TokenCost
 
-    model_for_count = model_name or "gpt-4"
-
     # Input tokens from prompts
     input_text = " ".join(str(p) for p in input_parts)
-    input_tokens = count_tokens(input_text, model_for_count)
+    input_tokens = count_tokens(input_text, model_name)
 
     # Output tokens from response content
     output_text = text_content
@@ -145,7 +147,7 @@ async def calculate_usage_from_parts(
         elif isinstance(part, ToolCallPart) and part.args:
             args_str = anyenv.dump_json(part.args) if not isinstance(part.args, str) else part.args
             output_text += args_str
-    output_tokens = count_tokens(output_text, model_for_count)
+    output_tokens = count_tokens(output_text, model_name)
 
     # Build usage
     usage = RequestUsage(input_tokens=input_tokens, output_tokens=output_tokens)
