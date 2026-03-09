@@ -329,6 +329,7 @@ class ACPEventConverter:
                 kind=kind,
                 locations=loc_items,
                 raw_input=raw_input,
+                field_meta=meta,
             ):
                 state = self._get_or_create_tool_state(tc_id, tool_name, raw_input or {})
                 acp_locations = [ToolCallLocation(path=i.path, line=i.line) for i in loc_items]
@@ -342,6 +343,7 @@ class ACPEventConverter:
                         raw_input=raw_input,
                         locations=acp_locations or None,
                         status="pending",
+                        field_meta=meta,
                     )
                 else:
                     # Send update with tool-provided details
@@ -350,6 +352,7 @@ class ACPEventConverter:
                         title=title,
                         kind=kind,
                         locations=acp_locations or None,
+                        field_meta=meta,
                     )
 
             # Tool progress event - create state if needed (tool may emit progress before SDK event)
@@ -361,6 +364,7 @@ class ACPEventConverter:
                 progress=progress,
                 total=total,
                 message=message,
+                field_meta=meta,
             ) if tool_call_id:
                 # Get or create state - handles race where tool emits before SDK event
                 state = self._get_or_create_tool_state(tool_call_id, "unknown", {})
@@ -423,6 +427,7 @@ class ACPEventConverter:
                     status="in_progress",
                     content=acp_content or None,
                     locations=locations or None,
+                    field_meta=meta,
                 )
                 if acp_content:
                     state.has_content = True

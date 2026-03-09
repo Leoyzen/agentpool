@@ -216,6 +216,13 @@ class ToolCallStartEvent:
     """File locations affected by this tool call."""
     raw_input: dict[str, Any] = field(default_factory=dict)
     """The raw input parameters sent to the tool."""
+    field_meta: dict[str, Any] | None = None
+    """Protocol-level metadata passed through to ACP ``_meta``.
+
+    Used for undocumented conventions like display-only terminal lifecycle
+    signals (``terminal_info``, ``terminal_output``, ``terminal_exit``).
+    See :mod:`acp.schema.field_meta` for known conventions.
+    """
 
     event_kind: Literal["tool_call_start"] = "tool_call_start"
     """Event type identifier."""
@@ -262,6 +269,13 @@ class ToolCallProgressEvent:
     """The name of the tool being called."""
     tool_input: dict[str, Any] | None = None
     """The input provided to the tool."""
+    field_meta: dict[str, Any] | None = None
+    """Protocol-level metadata passed through to ACP ``_meta``.
+
+    Used for undocumented conventions like display-only terminal lifecycle
+    signals (``terminal_info``, ``terminal_output``, ``terminal_exit``).
+    See :mod:`acp.schema.field_meta` for known conventions.
+    """
 
     event_kind: Literal["tool_call_progress"] = "tool_call_progress"
     """Event type identifier."""
