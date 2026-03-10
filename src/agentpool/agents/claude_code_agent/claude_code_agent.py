@@ -257,7 +257,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._max_budget_usd = max_budget_usd
         self._max_thinking_tokens: int | Literal["adaptive"] | None = max_thinking_tokens
         self._effort: ReasoningEffort | None = reasoning_effort
-        self._permission_mode: PermissionMode | None = permission_mode
+        self._permission_mode: PermissionMode = permission_mode or "default"
         self._thinking_mode: ThinkingMode = "32k"
         self._external_mcp_servers = list(mcp_servers) if mcp_servers else []
         self._env_vars = env_vars
@@ -488,20 +488,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from clawd_code_sdk import PermissionResultAllow, PermissionResultDeny
 
         input_dict = cast(dict[str, Any], input_data)
-        # Auto-grant if bypassPermissions mode is active
-        match self._permission_mode:
-            case "bypassPermissions":
-                return PermissionResultAllow()
-            case "plan":
-                return PermissionResultDeny(message="Plan mode active - tool execution disabled")
-            case "acceptEdits":
-                actual_tool_name = _strip_mcp_prefix(tool_name)
-                # Auto-allow file editing tools
-                if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
-                    return PermissionResultAllow()
-
-        # For "default" mode and non-edit tools in "acceptEdits" mode:
-        # Ask for confirmation via input provider
         tc_id = context.tool_use_id
         display_name = _strip_mcp_prefix(tool_name)
         self.log.debug("Permission request", tool_name=display_name, tool_call_id=tc_id)
@@ -514,8 +500,24 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             tool_name=display_name,
         )
         input_provider = ctx.get_input_provider()
-        result = await input_provider.get_tool_confirmation(context=ctx)
-        return confirmation_result_to_native(result)
+        # Auto-grant if bypassPermissions mode is active
+        match self._permission_mode:
+            case "bypassPermissions":
+                return PermissionResultAllow()
+            case "plan":
+                return PermissionResultDeny(message="Plan mode active - tool execution disabled")
+            case "acceptEdits":
+                actual_tool_name = _strip_mcp_prefix(tool_name)
+                # Auto-allow file editing tools
+                if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
+                    return PermissionResultAllow()
+                result = await input_provider.get_tool_confirmation(context=ctx)
+                return confirmation_result_to_native(result)
+            case "default" | "plan" | "delegate" | "dontAsk":
+                result = await input_provider.get_tool_confirmation(context=ctx)
+                return confirmation_result_to_native(result)
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def _on_user_question(
         self,

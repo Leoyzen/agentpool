@@ -538,23 +538,20 @@ class OpenCodeStreamAdapter:
                     case _:
                         type_label = ""
                         icon = "→"
-                indicator = f"{indent}{icon} {source_name}{type_label}"
                 indicator_part = TextPart(
                     id=identifier.ascending("part"),
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
-                    text=indicator,
+                    text=f"{indent}{icon} {source_name}{type_label}",
                     time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(indicator_part)
                 yield PartUpdatedEvent.create(indicator_part)
-
-                content = str(msg.content) if msg.content else "(no output)"
                 content_part = TextPart(
                     id=identifier.ascending("part"),
                     message_id=self.assistant_msg_id,
                     session_id=self.session_id,
-                    text=content,
+                    text=str(msg.content) if msg.content else "(no output)",
                     time=TimeStartEndOptional.now(),
                 )
                 self.assistant_msg.parts.append(content_part)
