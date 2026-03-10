@@ -61,6 +61,7 @@ if TYPE_CHECKING:
         StructuredPatchHunk,
         ThinkingConfig,
         ToolInput,
+        ToolUseResult,
         Usage,
         UserPrompt,
     )
@@ -224,7 +225,7 @@ def convert_mcp_servers_to_sdk_format(
 
 def convert_to_opencode_metadata(  # noqa: PLR0911
     tool_name: str,
-    tool_use_result: dict[str, Any] | ToolInput | str | None,
+    tool_use_result: dict[str, Any] | ToolUseResult | str | None,
     tool_input: ToolInput | dict[str, Any] | None = None,
 ) -> ToolMetadata | None:
     """Convert Claude Code SDK tool_use_result to OpenCode metadata format."""

@@ -60,12 +60,7 @@ from clawd_code_sdk.models import (
     ToolProgressMessage,
     ToolUseSummaryMessage,
 )
-from pydantic_ai import (
-    FunctionToolResultEvent,
-    PartEndEvent,
-    TextPart,
-    ToolReturnPart,
-)
+from pydantic_ai import FunctionToolResultEvent, PartEndEvent, TextPart, ToolReturnPart
 
 from agentpool.agents.claude_code_agent.converters import convert_to_opencode_metadata
 from agentpool.agents.events import (
@@ -144,10 +139,12 @@ async def adapt_claude_stream(  # noqa: PLR0915
         RichAgentStreamEvent instances, followed by a final StreamAdapterResult.
     """
     from anthropic.types import (
+        CitationsDelta,
         InputJSONDelta,
         RawContentBlockDeltaEvent,
         RawContentBlockStartEvent,
         RawContentBlockStopEvent,
+        SignatureDelta,
         TextBlock as AnthTextBlock,
         TextDelta,
         ThinkingBlock as AnthThinkingBlock,
@@ -210,9 +207,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     result_content = user_block.get_parsed_content()
                     # Flush + tool return handled by reconstructor via
                     # ToolCallCompleteEvent observation
-
                     tool_use = pending_tool_calls.pop(tc_id)
-
                     # For Bash tools: stream output + exit to virtual terminal
                     # before signaling completion. This matches the 3-step
                     # display-only terminal lifecycle.
@@ -253,11 +248,12 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         tool_use_result = (
                             message.tool_use_result[0] if message.tool_use_result else {}
                         )
-                        metadata = convert_to_opencode_metadata(
+                        oc_metadata = convert_to_opencode_metadata(
                             tool_use.name,
                             tool_use_result,
                             tool_input,
-                        )  # type: ignore[assignment]
+                        )
+                        metadata = cast(dict[str, Any] | None, oc_metadata)
 
                     yield ToolCallCompleteEvent(
                         tool_name=_strip_mcp_prefix(tool_use.name),
@@ -311,14 +307,18 @@ async def adapt_claude_stream(  # noqa: PLR0915
             # content_block_delta events
             case StreamEvent(event=RawContentBlockDeltaEvent(index=index, delta=delta)):
                 match delta:
-                    case TextDelta(text=text) if text:
+                    case TextDelta(text=text):
                         yield PartDeltaEvent.text(index=index, content=text)
-                    case ThinkingDelta(thinking=thinking) if thinking:
+                    case ThinkingDelta(thinking=thinking):
                         yield PartDeltaEvent.thinking(index=index, content=thinking)
                     case InputJSONDelta(partial_json=json_) if json_ and streaming_tc_id:
                         yield PartDeltaEvent.tool_call(
                             index, content=json_, tool_call_id=streaming_tc_id
                         )
+                    case CitationsDelta() | SignatureDelta() | InputJSONDelta():
+                        pass
+                    case _ as unreachable:
+                        assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
             # content_block_stop
             case StreamEvent(event=RawContentBlockStopEvent(index=index)):

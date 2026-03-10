@@ -186,7 +186,7 @@ class Message(AsyncAttrs, SQLModel, table=True):
     checkpoint_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     """A dictionary of checkpoints (name -> metadata)."""
 
-    model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
+    model_config = SQLModelConfig(use_attribute_docstrings=True)
 
 
 class Project(AsyncAttrs, SQLModel, table=True):
@@ -222,7 +222,7 @@ class Project(AsyncAttrs, SQLModel, table=True):
     settings_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     """Project-specific settings overrides."""
 
-    model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
+    model_config = SQLModelConfig(use_attribute_docstrings=True)
 
 
 class Conversation(AsyncAttrs, SQLModel, table=True):
@@ -285,4 +285,4 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     """Protocol-specific or custom metadata stored as JSON."""
 
-    model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
+    model_config = SQLModelConfig(use_attribute_docstrings=True)

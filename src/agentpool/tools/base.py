@@ -221,8 +221,7 @@ class Tool[TOutputType = Any]:
         exec(code, namespace)
         func = next((v for v in namespace.values() if callable(v)), None)
         if not func:
-            msg = "No callable found in provided code"
-            raise ValueError(msg)
+            raise ValueError("No callable found in provided code")
         return FunctionTool.from_callable(
             func, name_override=name, description_override=description
         )
@@ -268,13 +267,13 @@ class Tool[TOutputType = Any]:
 
     def to_mcp_tool(self) -> MCPTool:
         """Convert internal Tool to MCP Tool."""
-        schema = self.schema
         from mcp.types import Tool as MCPTool
 
+        schema = self.schema
         return MCPTool(
             name=schema["function"]["name"],
             description=schema["function"]["description"],
-            inputSchema=schema["function"]["parameters"],  # pyright: ignore
+            inputSchema=schema["function"]["parameters"],
             annotations=self.get_mcp_tool_annotations(),
         )
 

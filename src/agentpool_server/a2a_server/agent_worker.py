@@ -224,8 +224,6 @@ def _request_parts_from_a2a(parts: list[Part]) -> list[ModelRequestPart]:
                 model_parts.append(UserPromptPart(content=[content]))
             case {"kind": "data"}:
                 raise NotImplementedError("Data parts are not supported yet.")
-            case _:
-                assert_never(part)  # ty: ignore[type-assertion-failure]
     return model_parts
 
 

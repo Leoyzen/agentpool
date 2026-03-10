@@ -12,6 +12,7 @@ from agentpool_server.openai_api_server.completions.helpers import stream_respon
 from agentpool_server.openai_api_server.completions.models import (
     ChatCompletionResponse,
     Choice,
+    CompletionUsage,
     OpenAIMessage,
     OpenAIModelInfo,
 )
@@ -134,12 +135,19 @@ class OpenAIAPIServer(BaseServer):
         try:
             response = await agent.run(content)
             message = OpenAIMessage(role="assistant", content=str(response.content))
+            usage = None
+            if response.cost_info:
+                usage = CompletionUsage(
+                    input_tokens=response.cost_info.token_usage.input_tokens,
+                    output_tokens=response.cost_info.token_usage.output_tokens,
+                    total_tokens=response.cost_info.token_usage.total_tokens,
+                )
             completion_response = ChatCompletionResponse(
                 id=response.message_id,
                 created=int(response.timestamp.timestamp()),
                 model=request.model,
                 choices=[Choice(message=message)],
-                usage=response.cost_info.token_usage if response.cost_info else None,  # pyright: ignore
+                usage=usage,
             )
             json = completion_response.model_dump_json()
             return Response(content=json, media_type="application/json")

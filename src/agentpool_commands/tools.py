@@ -237,9 +237,7 @@ class RegisterToolCommand(NodeCommand):
                 source="dynamic",
                 metadata={"import_path": import_path, "registered_via": "register-tool"},
             )
-
             # Show the registered tool info
-            tool_info.format_info()
             await ctx.print(
                 f"✅ **Tool registered successfully:**\n`{tool_info.name}`"
                 f" - {tool_info.description or '*No description*'}"

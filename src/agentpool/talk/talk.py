@@ -275,7 +275,7 @@ class Talk[TTransmittedData = Any]:
                 source=self.source,
                 targets=target_list,
                 queued=self.queued,
-                connection_type=self.connection_type,  # pyright: ignore
+                connection_type=self.connection_type,
             )
         )
         # 8. if we have targets, update stats and emit message forwarded

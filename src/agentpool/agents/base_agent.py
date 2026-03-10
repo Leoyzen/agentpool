@@ -434,7 +434,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 store_history=store_history,
                 wait_for_connections=wait_for_connections,
             )
-            yield response  # pyright: ignore
+            yield response
 
     async def run_in_background(
         self,

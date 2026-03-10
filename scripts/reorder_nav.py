@@ -114,7 +114,7 @@ def extract_nav_item_info(nav_item: Tag) -> tuple[str | None, str | None]:
         href = "index"
     assert isinstance(href, str)
     # Clean up href - remove leading/trailing slashes and trailing index.html
-    href = href.strip("/")  # pyright: ignore[reportAttributeAccessIssue]
+    href = href.strip("/")
     if href.endswith("/"):
         href = href[:-1]
     if href.endswith("index.html"):
@@ -186,7 +186,7 @@ def sort_nav_items_with_context(
         current_parts = Path(current_page_path).parts if current_page_path else ()
 
         # Clean up href first
-        href = href.strip("/")  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
+        href = href.strip("/")
 
         # Resolve relative paths based on current page context
         # This handles: "../foo", "./foo", "foo" (all relative to current page)
