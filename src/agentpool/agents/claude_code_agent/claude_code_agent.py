@@ -379,17 +379,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         return self._model
 
     async def get_mcp_server_info(self) -> dict[str, MCPServerStatus]:
-        """Get information about configured MCP servers.
-
-        Returns a dict mapping server names to their status info. This is used
-        by the OpenCode /mcp endpoint to display MCP servers in the sidebar.
-
-        If a client is connected, queries live status from Claude Code.
-        Otherwise falls back to reporting from config.
-
-        Returns:
-            Dict mapping server name to MCPServerStatus dataclass
-        """
+        """Get information about configured MCP servers."""
         result: dict[str, MCPServerStatus] = {}
         # Try live status from connected client
         if self._client:
@@ -432,11 +422,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient
         from clawd_code_sdk.models.options import NewSession, ResumeSession
 
-        # Determine permission and elicitation callbacks
-        bypass = self._permission_mode == "bypassPermissions"
-        can_use_tool = self._can_use_tool if not bypass else None
-        on_user_question = self._on_user_question
-        on_elicitation = self._on_elicitation
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []
         # Build environment variables
@@ -469,9 +454,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             add_dirs=self._add_dir or [],
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
-            can_use_tool=can_use_tool,
-            on_user_question=on_user_question,
-            on_elicitation=on_elicitation,
+            can_use_tool=self._can_use_tool,
+            on_user_question=self._on_user_question,
+            on_elicitation=self._on_elicitation,
             output_schema=self._output_type if self._output_type is not str else None,
             mcp_servers=self._mcp_servers or {},
             hooks=self._hook_manager.build_hooks(),
