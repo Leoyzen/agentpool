@@ -167,13 +167,19 @@ class ACPClientHandler(Client):
                 self._update_event.set()
                 return
 
-            case ConfigOptionUpdate(config_id=config_id, value_id=value_id):
-                # Update the config option in state
-                for config_opt in self.state.config_options:
-                    if config_opt.id == config_id:
-                        config_opt.current_value = value_id
-                        break
-                await self._agent.update_state(config_id=config_id, value_id=value_id)
+            case ConfigOptionUpdate(config_options=new_options):
+                # Detect changes by comparing with current state
+                old_by_id = {o.id: o.current_value for o in self.state.config_options}
+                # Replace full config options list
+                self.state.config_options = list(new_options)
+                # Emit change signals for each option whose value changed
+                for opt in new_options:
+                    old_val = old_by_id.get(opt.id)
+                    if old_val != opt.current_value:
+                        await self._agent.update_state(
+                            config_id=str(opt.id),
+                            value_id=str(opt.current_value),
+                        )
                 self._update_event.set()
                 return
 

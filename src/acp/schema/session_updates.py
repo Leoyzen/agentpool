@@ -380,21 +380,18 @@ class CurrentModelUpdate(AnnotatedObject):
 class ConfigOptionUpdate(AnnotatedObject):
     """A session configuration option value has changed.
 
-    See protocol docs: [Session Config Options](https://agentclientprotocol.com/protocol/session-config-options)
+    The full set of configuration options and their current values is sent
+    on every change. Clients should replace their cached list entirely.
+
+    See protocol docs: `Session Config Options <https://agentclientprotocol.com/protocol/session-config-options>`_
     """
 
     session_update: Literal["config_option_update"] = Field(
         default="config_option_update", init=False
     )
 
-    config_id: str
-    """The ID of the configuration option that changed."""
-
-    value_id: str
-    """The new value ID for this configuration option."""
-
     config_options: Sequence[SessionConfigOption]
-    """The full list of config options with updated values."""
+    """The full set of configuration options and their current values."""
 
 
 class ToolCallStart(AnnotatedObject):

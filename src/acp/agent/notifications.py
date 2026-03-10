@@ -624,16 +624,14 @@ class ACPNotifications:
 
     async def update_config_option(
         self,
-        config_id: str,
-        value_id: str,
         config_options: Sequence[SessionConfigOption],
     ) -> None:
-        """Send a config option update notification for a full config options update."""
-        update = ConfigOptionUpdate(
-            config_id=config_id,
-            value_id=value_id,
-            config_options=config_options,
-        )
+        """Send a config option update notification.
+
+        Args:
+            config_options: The full set of configuration options with current values.
+        """
+        update = ConfigOptionUpdate(config_options=config_options)
         await self.send_update(update)
 
     async def send_agent_audio(

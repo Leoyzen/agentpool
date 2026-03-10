@@ -276,11 +276,7 @@ class ACPSession:
                 if opt := next((i for i in config_options if i.id == config_id), None):
                     opt.current_value = value_id
                 # Convert our core type to ACP type with full config_options
-                update = ConfigOptionUpdate(
-                    config_id=config_id,
-                    value_id=value_id,
-                    config_options=config_options,
-                )
+                update = ConfigOptionUpdate(config_options=config_options)
                 self.log.debug("Config option change", config_id=config_id, value_id=value_id)
                 # For permissions, also send legacy CurrentModeUpdate (still needed)
                 if config_id == "permissions":
