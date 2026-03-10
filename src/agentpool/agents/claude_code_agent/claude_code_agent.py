@@ -90,6 +90,8 @@ ThinkingMode = Literal["off", "4k", "8k", "16k", "32k"]
 _MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
 """Pattern to detect CC-provided tool names ( mcp__agentpool-{agent_name}-tools__{tool_name} )."""
 
+VALID_EFFORTS: set[str] = {"low", "medium", "high", "max"}
+
 # see https://github.com/zed-industries/claude-agent-acp/blob/main/src/acp-agent.ts for a list
 UNSUPPORTED_COMMANDS = frozenset({
     # "cost",
@@ -900,6 +902,17 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """Set the model for future requests."""
         await self._set_mode(model, "model")
 
+    async def set_effort(self, effort: ReasoningEffort) -> None:
+        """Set reasoning effort level.
+
+        This requires a session reconnect since effort is a CLI startup flag.
+        The current session is preserved via session resumption.
+
+        Args:
+            effort: Reasoning effort level ("low", "medium", "high", "max")
+        """
+        await self._set_mode(effort, "effort")
+
     async def set_permission_mode(self, mode: PermissionMode) -> None:
         """Set permission mode."""
         await self._set_mode(mode, "mode")
@@ -913,12 +926,17 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for Claude Code agent.
 
-        Claude Code exposes permission modes and model selection.
+        Claude Code exposes permission modes, model selection, thinking level,
+        and reasoning effort.
 
         Returns:
-            List of ModeCategory for permissions and models
+            List of ModeCategory for permissions, models, thinking, and effort
         """
-        from agentpool.agents.claude_code_agent.static_info import MODES, THINKING_MODES
+        from agentpool.agents.claude_code_agent.static_info import (
+            EFFORT_MODES,
+            MODES,
+            THINKING_MODES,
+        )
         from agentpool.agents.modes import ModeCategory
 
         categories = [
@@ -943,11 +961,21 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 category="thought_level",
             )
         )
+        # Reasoning effort selection
+        categories.append(
+            ModeCategory(
+                id="effort",
+                name="Reasoning Effort",
+                available_modes=EFFORT_MODES,
+                current_mode_id=self._effort or "high",
+                category="other",
+            )
+        )
 
         return categories
 
     async def _set_mode(self, mode_id: str, category_id: str) -> None:
-        """Handle permissions, model, and thinking_level mode switching."""
+        """Handle permissions, model, thinking_level, and effort mode switching."""
         from clawd_code_sdk import PermissionMode
 
         from agentpool.agents.claude_code_agent.static_info import VALID_MODES
@@ -982,6 +1010,14 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                     await self.ensure_initialized()
                     tokens = THINKING_MODE_TOKENS[self._thinking_mode]
                     await self._client.set_max_thinking_tokens(tokens)
+            case "effort":
+                # Validate effort level
+                if mode_id not in VALID_EFFORTS:
+                    raise UnknownModeError(mode_id, list(VALID_EFFORTS))
+                self._effort = cast("ReasoningEffort", mode_id)
+                # Effort is a CLI startup flag only - requires session reconnect
+                if self._client:
+                    await self.reconnect(resume_session=True)
             case _:
                 raise UnknownCategoryError(category_id)
         await self.update_state(config_id=category_id, value_id=mode_id)

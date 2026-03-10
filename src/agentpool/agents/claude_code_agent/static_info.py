@@ -111,6 +111,33 @@ MODES = [
     # ),
 ]
 
+EFFORT_MODES = [
+    ModeInfo(
+        id="low",
+        name="Low",
+        description="Faster, cheaper responses for straightforward tasks",
+        category_id="effort",
+    ),
+    ModeInfo(
+        id="medium",
+        name="Medium",
+        description="Balanced reasoning effort",
+        category_id="effort",
+    ),
+    ModeInfo(
+        id="high",
+        name="High",
+        description="Deeper reasoning for complex tasks",
+        category_id="effort",
+    ),
+    ModeInfo(
+        id="max",
+        name="Max",
+        description="Maximum reasoning depth",
+        category_id="effort",
+    ),
+]
+
 THINKING_MODES = [
     ModeInfo(
         id="off",
