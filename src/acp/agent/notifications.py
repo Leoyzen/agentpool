@@ -32,7 +32,6 @@ from acp.schema import (
     ImageContentBlock,
     ResourceContentBlock,
     SessionNotification,
-    # CurrentModelUpdate,
     TerminalToolCallContent,
     TextContentBlock,
     TextResourceContents,

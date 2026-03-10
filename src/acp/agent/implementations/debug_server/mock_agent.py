@@ -15,7 +15,6 @@ from acp.schema import (
     AuthenticateResponse,
     CloseSessionResponse,
     CreateTerminalResponse,
-    # CurrentModelUpdate,
     ForkSessionResponse,
     InitializeResponse,
     ListSessionsResponse,

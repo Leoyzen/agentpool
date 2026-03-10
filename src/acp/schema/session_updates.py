@@ -363,20 +363,6 @@ class AvailableCommandsUpdate(AnnotatedObject):
     """Commands the agent can execute"""
 
 
-class CurrentModelUpdate(AnnotatedObject):
-    """**UNSTABLE**: This capability is not part of the spec yet.
-
-    The current model of the session has changed.
-    """
-
-    current_model_id: str
-    """The ID of the current model."""
-
-    session_update: Literal["current_model_update"] = Field(
-        default="current_model_update", init=False
-    )
-
-
 class ConfigOptionUpdate(AnnotatedObject):
     """A session configuration option value has changed.
 
@@ -514,7 +500,6 @@ SessionUpdate = Annotated[
         | AvailableCommandsUpdate
         | AgentPlanUpdate
         | CurrentModeUpdate
-        | CurrentModelUpdate
         | ConfigOptionUpdate
         | SessionInfoUpdate
         | UsageUpdate

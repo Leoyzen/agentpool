@@ -122,12 +122,9 @@ class ACPClientHandler(Client):
         Raw updates are stored as the single source of truth. Conversion to
         native events happens lazily during streaming consumption.
         """
-        from tokonomics.model_discovery.model_info import ModelInfo
-
         from acp.schema import (
             AvailableCommandsUpdate,
             ConfigOptionUpdate,
-            CurrentModelUpdate,
             CurrentModeUpdate,
         )
         from agentpool.agents.modes import ModeInfo
@@ -150,18 +147,6 @@ class ACPClientHandler(Client):
                         await self._agent.state_updated.emit(mode_info)
                 self.state.current_mode_id = mode_id
                 logger.debug("Mode updated", mode_id=mode_id)
-                self._update_event.set()
-            case CurrentModelUpdate(current_model_id=model_id):
-                self.state.current_model_id = model_id
-                if state := self.state.models:
-                    state.current_model_id = model_id
-                    # Find ModelInfo and emit signal
-                    if m := next(
-                        (m for m in state.available_models if m.model_id == model_id), None
-                    ):
-                        info = ModelInfo(id=m.model_id, name=m.name, description=m.description)
-                        await self._agent.state_updated.emit(info)
-                logger.debug("Model updated", model_id=model_id)
                 self._update_event.set()
             case ConfigOptionUpdate(config_options=new_options):
                 # Detect changes by comparing with current state

@@ -247,22 +247,21 @@ class ACPSession:
         self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
     ) -> None:
         """Handle state update signal from agent - forward to ACP client."""
-        from acp.schema import (
-            AvailableCommandsUpdate,
-            ConfigOptionUpdate,
-            CurrentModelUpdate,
-            CurrentModeUpdate,
-        )
+        from acp.schema import AvailableCommandsUpdate, ConfigOptionUpdate, CurrentModeUpdate
         from agentpool_server.acp_server.acp_agent import get_session_config_options
 
-        update: CurrentModeUpdate | CurrentModelUpdate | ConfigOptionUpdate
+        update: CurrentModeUpdate | ConfigOptionUpdate
         match state:
             case ModeInfo(id=mode_id):
                 update = CurrentModeUpdate(current_mode_id=mode_id)
                 self.log.debug("Forwarding mode change to client", mode_id=mode_id)
             case ModelInfo(id=model_id):
-                update = CurrentModelUpdate(current_model_id=model_id)
-                self.log.debug("Forwarding model change to client", model_id=model_id)
+                # Model changes go through ConfigOptionUpdate (model category)
+                config_options = await get_session_config_options(self.agent)
+                if opt := next((i for i in config_options if i.id == "model"), None):
+                    opt.current_value = model_id
+                update = ConfigOptionUpdate(config_options=config_options)
+                self.log.debug("Forwarding model change as config update", model_id=model_id)
             case AvailableCommandsUpdate(available_commands=cmds):
                 # Store remote commands and send merged list
                 self._remote_commands = list(cmds)

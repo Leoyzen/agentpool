@@ -170,8 +170,6 @@ async def _create_notification_update(  # noqa: PLR0911
             return AvailableCommandsUpdate(available_commands=commands)
         case "mode_update":
             return CurrentModeUpdate(current_mode_id=data.get("mode_id", "debug"))
-        # case "model_update":
-        #     return CurrentModelUpdate(current_model_id=data.get("model_id", "None"))
         case _:
             raise ValueError(f"Unknown notification type: {notification_type}")
 
