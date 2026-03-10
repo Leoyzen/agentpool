@@ -112,7 +112,7 @@ class ACPClientHandler(Client):
         caps = self._agent._init_request.client_capabilities
         return bool(caps and caps.terminal)
 
-    async def session_update(self, params: SessionNotification[Any]) -> None:
+    async def session_update(self, params: SessionNotification) -> None:
         """Handle session update notifications from the agent.
 
         Some updates are state changes (mode, model, config) that should update
@@ -151,8 +151,6 @@ class ACPClientHandler(Client):
                 self.state.current_mode_id = mode_id
                 logger.debug("Mode updated", mode_id=mode_id)
                 self._update_event.set()
-                return
-
             case CurrentModelUpdate(current_model_id=model_id):
                 self.state.current_model_id = model_id
                 if state := self.state.models:
@@ -165,8 +163,6 @@ class ACPClientHandler(Client):
                         await self._agent.state_updated.emit(info)
                 logger.debug("Model updated", model_id=model_id)
                 self._update_event.set()
-                return
-
             case ConfigOptionUpdate(config_options=new_options):
                 # Detect changes by comparing with current state
                 old_by_id = {o.id: o.current_value for o in self.state.config_options}
@@ -181,8 +177,6 @@ class ACPClientHandler(Client):
                             value_id=str(opt.current_value),
                         )
                 self._update_event.set()
-                return
-
             case AvailableCommandsUpdate() as update:
                 self.state.available_commands = update
                 # Populate command store with remote commands
@@ -193,18 +187,16 @@ class ACPClientHandler(Client):
                 await self._agent.state_updated.emit(update)
                 logger.debug("Available commands updated", count=len(update.available_commands))
                 self._update_event.set()
-                return
+            case _:
+                # TODO: AgentPlanUpdate handling is complex and needs design work.
+                # Options:
+                # 1. Update pool.todos - requires merging with existing todos
+                # 2. Pass through to UI - but then todos aren't centrally managed
+                # 3. Switch to agent-owned todos instead of pool-owned
+                # For now, AgentPlanUpdate falls through to stream data.
 
-        # TODO: AgentPlanUpdate handling is complex and needs design work.
-        # Options:
-        # 1. Update pool.todos - requires merging with existing todos
-        # 2. Pass through to UI - but then todos aren't centrally managed
-        # 3. Switch to agent-owned todos instead of pool-owned
-        # For now, AgentPlanUpdate falls through to stream data.
-
-        # Store raw update - conversion happens lazily during consumption
-        self.state.add_update(params.update)
-        self._update_event.set()
+                self.state.add_update(params.update)
+                self._update_event.set()
 
     async def request_permission(  # noqa: PLR0911
         self, params: RequestPermissionRequest
