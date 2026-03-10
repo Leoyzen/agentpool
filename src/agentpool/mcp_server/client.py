@@ -348,7 +348,11 @@ class MCPClient:
         tool_callable.__annotations__ = annotations
         tool_callable.__name__ = tool.name
         tool_callable.__doc__ = tool.description or "No description provided."
-        return FunctionTool.from_callable(tool_callable, source="mcp")
+        return FunctionTool.from_callable(
+            tool_callable,
+            source="mcp",
+            schema_override=schema,  # type: ignore[arg-type]
+        )
 
     async def call_tool(
         self,
