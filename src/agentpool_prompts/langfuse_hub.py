@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from langfuse import Langfuse  # pyright: ignore
+from langfuse import Langfuse
 
 from agentpool.prompts.base import BasePromptProvider
 
@@ -21,14 +21,13 @@ class LangfusePromptHub(BasePromptProvider):
     supports_variables = True
 
     def __init__(self, config: LangfuseConfig) -> None:
+        from langfuse.api.client import LangfuseAPI
+
         self.config = config
         secret = config.secret_key.get_secret_value()
         pub = config.public_key.get_secret_value()
         self._client = Langfuse(secret_key=secret, public_key=pub, host=str(config.host))
-
-        from langfuse.api.client import FernLangfuse
-
-        self._api_client = FernLangfuse(
+        self._api_client = LangfuseAPI(
             base_url=str(config.host),
             x_langfuse_public_key=pub,
             username=pub,
