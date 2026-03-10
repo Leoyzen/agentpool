@@ -71,6 +71,7 @@ class ThreadResponse(CodexBaseModel):
     approval_policy: AskForApproval
     sandbox: SandboxPolicy
     reasoning_effort: ReasoningEffort | None = None
+    service_tier: Literal["flex", "fast"] | None = None
 
 
 class TurnStartResponse(CodexBaseModel):
