@@ -19,7 +19,7 @@ from agentpool_config.storage import OpenCodeStorageConfig
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.models import ConversationData as ConvData, TokenUsage
 from agentpool_storage.opencode_provider import helpers
-from opencode_sdk.models.message import AssistantMessage
+from opencode_sdk.models import AssistantMessage
 from opencode_sdk.storage_client import OpenCodeStorageClient
 
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import QueryFilters, StatsFilters
-    from opencode_sdk.models.message import MessageWithParts
+    from opencode_sdk.models import MessageWithParts
 
 logger = get_logger(__name__)
 

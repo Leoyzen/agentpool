@@ -59,10 +59,12 @@ if TYPE_CHECKING:
 
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
-    from opencode_sdk.models import ToolState
-    from opencode_sdk.models.mcp import MCPConnectionStatus as OpenCodeMCPConnectionStatus
-    from opencode_sdk.models.message import PartInput
-    from opencode_sdk.models.parts import ResourceSource
+    from opencode_sdk.models import (
+        MCPConnectionStatus as OpenCodeMCPConnectionStatus,
+        PartInput,
+        ResourceSource,
+        ToolState,
+    )
 
 
 logger = log.get_logger(__name__)
@@ -155,7 +157,7 @@ async def extract_user_prompt_from_parts(
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
     """
-    from opencode_sdk.models.parts import ResourceSource
+    from opencode_sdk.models import ResourceSource
 
     result: list[UserContent | PathReference] = []
     for part in parts:

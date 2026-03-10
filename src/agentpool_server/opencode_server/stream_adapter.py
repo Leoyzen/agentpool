@@ -42,20 +42,18 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from opencode_sdk.models import (
+    FileEditedEvent,
     PartUpdatedEvent,
+    ReasoningPart,
     SessionCompactedEvent,
     SessionErrorEvent,
-    Tokens,
-)
-from opencode_sdk.models.events import FileEditedEvent
-from opencode_sdk.models.parts import (
-    ReasoningPart,
     StepFinishPart,
     TextPart,
     TimeStart,
     TimeStartEnd,
     TimeStartEndCompacted,
     TimeStartEndOptional,
+    Tokens,
     ToolPart,
     ToolStateCompleted,
     ToolStateError,
@@ -70,9 +68,7 @@ if TYPE_CHECKING:
     from agentpool.agents.events import ToolCallContentItem
     from agentpool.agents.events.events import RichAgentStreamEvent, SubAgentType
     from agentpool.messaging.messages import TokenCost
-    from opencode_sdk.models import MessageWithParts
-    from opencode_sdk.models.events import Event
-    from opencode_sdk.models.parts import ToolState
+    from opencode_sdk.models import Event, MessageWithParts, ToolState
 
 logger = get_logger(__name__)
 

@@ -20,15 +20,11 @@ from llmling_models.auth.anthropic_auth import (
     generate_pkce,
 )
 
-from opencode_sdk.models.agent import (
-    OAuthAuthInfo,
-    ProviderAuthAuthorization,
-    ProviderAuthMethod,
-)
+from opencode_sdk.models import OAuthAuthInfo, ProviderAuthAuthorization, ProviderAuthMethod
 
 
 if TYPE_CHECKING:
-    from opencode_sdk.models.agent import AuthInfo
+    from opencode_sdk.models import AuthInfo
 
 
 class ProviderAuthBackend(ABC):

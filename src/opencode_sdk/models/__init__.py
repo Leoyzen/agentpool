@@ -92,6 +92,7 @@ from opencode_sdk.models.parts import (
     PatchPart,
     ReasoningPart,
     RetryPart,
+    ResourceSource,
     SnapshotPart,
     StepFinishPart,
     StepStartPart,
@@ -202,6 +203,7 @@ from opencode_sdk.models.mcp import (
     McpAuthorizationResponse,
     MCPStatus,
     McpResource,
+    MCPConnectionStatus,
 )
 from opencode_sdk.models.config import Config
 from opencode_sdk.models.question import (
@@ -251,6 +253,7 @@ __all__ = [
     "LogRequest",
     "LspStatus",
     "LspUpdatedEvent",
+    "MCPConnectionStatus",
     "MCPStatus",
     "McpAuthorizationResponse",
     "McpResource",
@@ -322,6 +325,7 @@ __all__ = [
     "QuestionRequest",
     "QuestionToolInfo",
     "ReasoningPart",
+    "ResourceSource",
     "RetryPart",
     "ServerConnectedEvent",
     "ServerHeartbeatEvent",

@@ -15,11 +15,11 @@ from agentpool_server.opencode_server.dependencies import StateDep
 from opencode_sdk.models import (
     FileContent,
     FileNode,
+    FileType,
     FindMatch,
     SubmatchInfo,
     Symbol,
 )
-from opencode_sdk.models.file import FileType
 
 
 router = APIRouter(tags=["file"])

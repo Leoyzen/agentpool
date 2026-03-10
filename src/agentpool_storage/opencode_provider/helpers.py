@@ -27,13 +27,14 @@ from agentpool.messaging import ChatMessage, TokenCost
 from agentpool.utils.pydantic_ai_helpers import to_user_content
 from agentpool.utils.time_utils import ms_to_datetime
 from opencode_sdk.helpers import extract_text_content
-from opencode_sdk.models.message import AssistantMessage, UserMessage
-from opencode_sdk.models.parts import (
+from opencode_sdk.models import (
+    AssistantMessage,
     FilePart,
     ReasoningPart,
     TextPart,
     ToolPart,
     ToolStateCompleted,
+    UserMessage,
 )
 
 
@@ -42,8 +43,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai.messages import UserContent
 
-    from opencode_sdk.models.message import MessageInfo
-    from opencode_sdk.models.parts import Part
+    from opencode_sdk.models import MessageInfo, Part
 
 
 logger = get_logger(__name__)

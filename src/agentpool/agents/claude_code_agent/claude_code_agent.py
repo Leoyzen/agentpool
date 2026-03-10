@@ -422,7 +422,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             fork_session: Whether to fork the session
         """
         from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient
-        from clawd_code_sdk.models.options import NewSession, ResumeSession
+        from clawd_code_sdk.models import NewSession, ResumeSession
 
         # Check builtin_tools for special tools that need extra handling
         builtin_tools = self._builtin_tools or []

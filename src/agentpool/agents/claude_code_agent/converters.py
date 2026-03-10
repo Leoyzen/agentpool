@@ -54,11 +54,12 @@ from opencode_sdk.models.tool_metadata import (
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from clawd_code_sdk import PermissionResult, ThinkingConfig
     from clawd_code_sdk.models import (
         HookEvent,
+        PermissionResult,
         StopReason,
         StructuredPatchHunk,
+        ThinkingConfig,
         ToolInput,
         Usage,
         UserPrompt,

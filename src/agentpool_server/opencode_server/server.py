@@ -44,7 +44,6 @@ if TYPE_CHECKING:
     from agentpool.utils.todos import TodoTracker
 
 
-VERSION = "0.1.0"
 logger = log.get_logger(__name__)
 
 
@@ -63,14 +62,7 @@ class OpenCodeJSONResponse(JSONResponse):
 
 
 async def check_pypi_version(package: str = "agentpool") -> str | None:
-    """Check PyPI for the latest version of a package.
-
-    Args:
-        package: Package name to check
-
-    Returns:
-        Latest version string, or None if check fails
-    """
+    """Check PyPI for the latest version of a package. Returns latest version string."""
     import httpx
 
     try:
@@ -112,8 +104,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     import logfire
 
     if agent.agent_pool is None:
-        msg = "Agent must have agent_pool set"
-        raise ValueError(msg)
+        raise ValueError("Agent must have agent_pool set")
 
     state = ServerState(working_dir=working_dir or str(Path.cwd()), agent=agent)
 

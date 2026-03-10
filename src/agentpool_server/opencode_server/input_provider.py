@@ -260,8 +260,7 @@ class OpenCodeInputProvider(InputProvider):
             Elicit result with user's answer
         """
         from agentpool_server.opencode_server.state import PendingQuestion
-        from opencode_sdk.models.events import QuestionAskedEvent
-        from opencode_sdk.models.question import QuestionInfo, QuestionOption
+        from opencode_sdk.models import QuestionAskedEvent, QuestionInfo, QuestionOption
 
         # Extract enum values
         match schema:
@@ -342,8 +341,7 @@ class OpenCodeInputProvider(InputProvider):
             Elicit result with user's text response
         """
         from agentpool_server.opencode_server.state import PendingQuestion
-        from opencode_sdk.models.events import QuestionAskedEvent
-        from opencode_sdk.models.question import QuestionInfo, QuestionOption
+        from opencode_sdk.models import QuestionAskedEvent, QuestionInfo, QuestionOption
 
         question_id = self._generate_permission_id()
         question_info = QuestionInfo(

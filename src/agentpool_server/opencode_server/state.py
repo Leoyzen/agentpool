@@ -37,11 +37,11 @@ if TYPE_CHECKING:
         Event,
         MessageWithParts,
         QuestionInfo,
+        QuestionToolInfo,
         Session,
         Todo,
         WorkspaceInfo,
     )
-    from opencode_sdk.models.question import QuestionToolInfo
 
 # Type alias for async callback
 OnFirstSubscriberCallback = Callable[[], Coroutine[Any, Any, None]]
