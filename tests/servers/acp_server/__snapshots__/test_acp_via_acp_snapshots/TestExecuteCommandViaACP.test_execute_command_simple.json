@@ -2,6 +2,7 @@
   {
     "content": [],
     "event_kind": "tool_call_start",
+    "field_meta": null,
     "kind": "execute",
     "locations": [],
     "raw_input": {
@@ -14,6 +15,7 @@
   },
   {
     "event_kind": "tool_call_progress",
+    "field_meta": null,
     "items": [
       {
         "terminal_id": "cmd_0001",
@@ -33,6 +35,7 @@
   },
   {
     "event_kind": "tool_call_progress",
+    "field_meta": null,
     "items": [
       {
         "terminal_id": "cmd_0001",
@@ -52,6 +55,7 @@
   },
   {
     "event_kind": "tool_call_progress",
+    "field_meta": null,
     "items": [
       {
         "terminal_id": "cmd_0001",
