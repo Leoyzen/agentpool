@@ -463,7 +463,7 @@ async def get_session_todos(session_id: str, state: StateDep) -> list[Todo]:
 
     # Get todos from pool's TodoTracker
     tracker = state.pool.todos
-    return [Todo(id=e.id, content=e.content, status=e.status) for e in tracker.entries]
+    return [Todo(content=e.content, status=e.status, priority=e.priority) for e in tracker.entries]
 
 
 @router.get("/{session_id}/diff")

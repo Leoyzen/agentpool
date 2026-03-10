@@ -20,11 +20,11 @@ from opencode_sdk.models.session import (  # noqa: TC001
     Session,
     SessionStatus,
     SessionStatusType,
+    Todo,
 )
 
 
 Variant = Literal["info", "success", "warning", "error"]
-TodoPriority = Literal["high", "medium", "low"]
 FileUpdateEvent = Literal["add", "change", "unlink"]
 ConnectionStatus = Literal["connected", "error"]
 
@@ -579,22 +579,6 @@ class TuiSessionSelectEvent(OpenCodeBaseModel):
 # =============================================================================
 # Todo Events
 # =============================================================================
-
-
-class Todo(OpenCodeBaseModel):
-    """A single todo item."""
-
-    id: str
-    """Unique identifier for the todo item."""
-
-    content: str
-    """Brief description of the task."""
-
-    status: Literal["pending", "in_progress", "completed", "cancelled"]
-    """Current status: pending, in_progress, completed, cancelled."""
-
-    priority: TodoPriority
-    """Priority level: high, medium, low."""
 
 
 class TodoUpdatedProperties(OpenCodeBaseModel):

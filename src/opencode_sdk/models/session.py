@@ -14,7 +14,6 @@ from opencode_sdk.models.common import (  # noqa: TC001
 
 
 SessionStatusType = Literal["idle", "busy", "retry"]
-TodoStatus = Literal["pending", "in_progress", "completed"]
 
 
 class SessionSummary(OpenCodeBaseModel):
@@ -118,9 +117,32 @@ class SessionStatus(OpenCodeBaseModel):
     type: SessionStatusType = "idle"
 
 
+TodoStatus = Literal["pending", "in_progress", "completed", "cancelled"]
+"""Well-known todo status values used by OpenCode.
+
+The field accepts any string, but these are the conventional values:
+- ``pending``: Task not yet started.
+- ``in_progress``: Task currently being worked on.
+- ``completed``: Task finished successfully.
+- ``cancelled``: Task was cancelled.
+"""
+
+TodoPriority = Literal["high", "medium", "low"]
+"""Well-known todo priority values used by OpenCode.
+
+The field accepts any string, but these are the conventional values:
+- ``high``: High priority.
+- ``medium``: Medium priority (default).
+- ``low``: Low priority.
+"""
+
+
 class Todo(OpenCodeBaseModel):
     """Todo item for a session."""
 
-    id: str
     content: str
-    status: TodoStatus = "pending"
+    """Brief description of the task."""
+    status: TodoStatus | str = "pending"
+    """Current status of the task."""
+    priority: TodoPriority | str = "medium"
+    """Priority level of the task."""
