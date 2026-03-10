@@ -29,6 +29,7 @@ from opencode_sdk.models import (
     MessagePath,
     MessageTime,
     MessageWithParts,
+    ModelRef,
     Session,
     SessionRevert,
     SessionShare,
@@ -54,14 +55,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from fsspec.asyn import AsyncFileSystem
-    from pydantic_ai import UserContent
+    from pydantic_ai import ModelMessage, UserContent
 
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
     from opencode_sdk.models import ToolState
-    from opencode_sdk.models.mcp import (
-        MCPConnectionStatus as OpenCodeMCPConnectionStatus,
-    )
+    from opencode_sdk.models.mcp import MCPConnectionStatus as OpenCodeMCPConnectionStatus
     from opencode_sdk.models.message import PartInput
     from opencode_sdk.models.parts import ResourceSource
 
@@ -80,11 +79,8 @@ _PARAM_NAME_MAP: dict[str, str] = {
 
 
 def to_mcp_status(status: MCPServerStatus) -> MCPStatus:
-    return MCPStatus(
-        name=status.name,
-        status=to_opencode_mcp_status(status.status),
-        error=status.error,
-    )
+    status_val = to_opencode_mcp_status(status.status)
+    return MCPStatus(name=status.name, status=status_val, error=status.error)
 
 
 def to_opencode_mcp_status(status: MCPConnectionStatus) -> OpenCodeMCPConnectionStatus:
@@ -232,6 +228,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
             session_id=session_id,
             time=TimeCreated(created=created_ms),
             agent_name=agent_name,
+            model=ModelRef(provider_id=provider_id, model_id=model_id),
         )
         if msg.content and isinstance(msg.content, str):
             ts_opt = TimeStartEndOptional(start=created_ms)
@@ -377,11 +374,11 @@ def opencode_to_chat_message(
     session_id = info.session_id
     created_ms = info.time.created
     timestamp = ms_to_datetime(created_ms)
-    model_messages: list[ModelRequest | ModelResponse] = []
+    model_messages: list[ModelMessage] = []
     # Determine role and extract timing
     if isinstance(info, UserMessage):
-        model_name = info.model.model_id if info.model else None
-        provider_name = info.model.provider_id if info.model else None
+        model_name = info.model.model_id
+        provider_name = info.model.provider_id
         usage = RequestUsage()
         finish_reason = None
         text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]

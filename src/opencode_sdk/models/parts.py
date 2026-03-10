@@ -9,6 +9,7 @@ from pydantic import Field
 from agentpool.utils.time_utils import now_ms
 from opencode_sdk.models.base import OpenCodeBaseModel
 from opencode_sdk.models.common import (
+    APIError,  # noqa: TC001
     ModelRef,  # noqa: TC001
     TextSpan,
     TimeCreated,  # noqa: TC001
@@ -238,7 +239,7 @@ class ReasoningPart(PartBase):
     text: str
     """The reasoning/thinking content."""
     metadata: dict[str, Any] | None = None
-    time: TimeStartEndOptional | None = None
+    time: TimeStartEndOptional
 
 
 class CompactionPart(PartBase):
@@ -267,24 +268,13 @@ class SubtaskPart(PartBase):
     """The model used for the subtask."""
 
 
-class APIErrorInfo(OpenCodeBaseModel):
-    """API error information for retry parts."""
-
-    message: str
-    status_code: int | None = None
-    is_retryable: bool = False
-    response_headers: dict[str, str] | None = None
-    response_body: str | None = None
-    metadata: dict[str, str] | None = None
-
-
 class RetryPart(PartBase):
     """Marks a retry of a failed operation."""
 
     type: Literal["retry"] = Field(default="retry", init=False)
     attempt: int
     """Which retry attempt this is."""
-    error: APIErrorInfo
+    error: APIError
     """Error information from the failed attempt."""
     time: TimeCreated
 

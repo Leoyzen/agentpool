@@ -9,6 +9,8 @@ from pydantic import Field
 from agentpool.utils import identifiers as identifier
 from opencode_sdk.models.base import OpenCodeBaseModel
 from opencode_sdk.models.common import (  # noqa: TC001
+    APIError,
+    APIErrorData,
     FileDiff,
     ModelRef,
     TextSpan,
@@ -17,7 +19,6 @@ from opencode_sdk.models.common import (  # noqa: TC001
 )
 from opencode_sdk.models.parts import (  # noqa: TC001
     AgentPart,
-    APIErrorInfo,
     FilePart,
     FilePartSource,
     Part,
@@ -79,7 +80,7 @@ class UserMessage(OpenCodeBaseModel):
     session_id: str
     time: TimeCreated
     agent: str = "default"
-    model: ModelRef | None = None
+    model: ModelRef
     format: OutputFormat | None = None
     summary: MessageSummary | None = None
     system: str | None = None
@@ -143,24 +144,6 @@ class MessageAbortedError(OpenCodeBaseModel):
 
     name: Literal["MessageAbortedError"] = Field(default="MessageAbortedError", init=False)
     data: MessageAbortedErrorData
-
-
-class APIErrorData(OpenCodeBaseModel):
-    """Data for API errors."""
-
-    message: str
-    status_code: int | None = None
-    is_retryable: bool = False
-    response_headers: dict[str, str] | None = None
-    response_body: str | None = None
-    metadata: dict[str, str] | None = None
-
-
-class APIError(OpenCodeBaseModel):
-    """API error."""
-
-    name: Literal["APIError"] = Field(default="APIError", init=False)
-    data: APIErrorData
 
 
 class StructuredOutputErrorData(OpenCodeBaseModel):
@@ -247,7 +230,7 @@ class MessageWithParts(OpenCodeBaseModel):
         session_id: str,
         time: TimeCreated,
         agent_name: str,
-        model: ModelRef | None = None,
+        model: ModelRef,
     ) -> Self:
         user_msg = UserMessage(
             id=message_id,
@@ -442,10 +425,12 @@ class MessageWithParts(OpenCodeBaseModel):
             message_id=self.info.id,
             session_id=self.info.session_id,
             attempt=attempt,
-            error=APIErrorInfo(
-                message=message,
-                is_retryable=is_retryable,
-                metadata=metadata,
+            error=APIError(
+                data=APIErrorData(
+                    message=message,
+                    is_retryable=is_retryable,
+                    metadata=metadata,
+                ),
             ),
             time=TimeCreated(created=created),
         )

@@ -88,6 +88,24 @@ class Tokens(OpenCodeBaseModel):
         )
 
 
+class APIErrorData(OpenCodeBaseModel):
+    """Data for API errors."""
+
+    message: str
+    status_code: int | None = None
+    is_retryable: bool = False
+    response_headers: dict[str, str] | None = None
+    response_body: str | None = None
+    metadata: dict[str, str] | None = None
+
+
+class APIError(OpenCodeBaseModel):
+    """API error."""
+
+    name: Literal["APIError"] = Field(default="APIError", init=False)
+    data: APIErrorData
+
+
 class TextSpan(OpenCodeBaseModel):
     """A text span in user input (value + start/end offsets)."""
 

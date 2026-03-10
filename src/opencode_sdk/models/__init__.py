@@ -7,6 +7,8 @@ All models inherit from OpenCodeBaseModel which provides:
 
 from opencode_sdk.models.base import OpenCodeBaseModel
 from opencode_sdk.models.common import (
+    APIError,
+    APIErrorData,
     FileDiff,
     FileDiffStatus,
     ModelRef,
@@ -49,8 +51,6 @@ from opencode_sdk.models.session import (
     Todo,
 )
 from opencode_sdk.models.message import (
-    APIError,
-    APIErrorData,
     AssistantMessage,
     CommandRequest,
     ContextOverflowError,
@@ -85,7 +85,6 @@ from opencode_sdk.models.message import (
 )
 from opencode_sdk.models.parts import (
     AgentPart,
-    APIErrorInfo,
     CompactionPart,
     FilePart,
     Part,
@@ -216,7 +215,6 @@ from opencode_sdk.models.question import (
 __all__ = [
     "APIError",
     "APIErrorData",
-    "APIErrorInfo",
     "AddMcpServerRequest",
     "Agent",
     "AgentPart",

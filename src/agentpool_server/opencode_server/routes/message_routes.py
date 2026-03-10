@@ -23,6 +23,7 @@ from opencode_sdk.models import (
     MessageTime,
     MessageUpdatedEvent,
     MessageWithParts,
+    ModelRef,
     Part,
     PartRemovedEvent,
     PartUpdatedEvent,
@@ -40,7 +41,7 @@ from opencode_sdk.models import (
 
 logger = get_logger(__name__)
 
-
+DEFAULT_MODEL_REF = ModelRef(provider_id="agentpool", model_id="default")
 router = APIRouter(prefix="/session/{session_id}", tags=["message"])
 
 
@@ -79,7 +80,7 @@ async def _process_message(  # noqa: PLR0915
         session_id=session_id,
         time=TimeCreated.now(),
         agent=request.agent or "default",
-        model=request.model,
+        model=request.model or DEFAULT_MODEL_REF,
         variant=request.variant,
     )
 
@@ -125,12 +126,13 @@ async def _process_message(  # noqa: PLR0915
     # --- Create assistant message ---
     assistant_msg_id = identifier.ascending("message")
     now = now_ms()
+    model = request.model or DEFAULT_MODEL_REF
     assistant_msg = AssistantMessage(
         id=assistant_msg_id,
         session_id=session_id,
         parent_id=user_msg_id,
-        model_id=request.model.model_id if request.model else "default",
-        provider_id=request.model.provider_id if request.model else "agentpool",
+        model_id=model.model_id,
+        provider_id=model.provider_id,
         mode=request.agent or "default",
         agent=request.agent or "default",
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
