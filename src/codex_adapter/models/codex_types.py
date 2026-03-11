@@ -55,7 +55,7 @@ CollabAgentStatus = Literal[
 ]
 InputModality = Literal["text", "image"]
 SkillScope = Literal["user", "repo", "system", "admin"]
-McpAuthStatusValue = Literal["Unsupported", "NotAuthenticated", "Authenticated"]
+McpAuthStatusValue = Literal["unsupported", "notLoggedIn", "bearerToken", "oAuth"]
 ReviewDelivery = Literal["inline", "detached"]
 ThreadActiveFlag = Literal["waitingOnApproval", "waitingOnUserInput"]
 CommandExecutionApprovalDecision = Literal["allow", "allowForSession", "deny", "denyForSession"]

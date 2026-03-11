@@ -365,7 +365,7 @@ class McpServerStatusEntry(CodexBaseModel):
     tools: dict[str, McpTool] = Field(default_factory=dict)
     resources: list[McpResource] = Field(default_factory=list)
     resource_templates: list[McpResourceTemplate] = Field(default_factory=list)
-    auth_status: McpAuthStatusValue = "Unsupported"
+    auth_status: McpAuthStatusValue = "unsupported"
 
 
 # ============================================================================
