@@ -101,13 +101,13 @@ class TerminalToolCallContent(Schema):
     """The ID of the terminal being embedded."""
 
 
-class ContentToolCallContent[TContentBlock: ContentBlock = ContentBlock](Schema):
+class ContentToolCallContent(Schema):
     """Standard content block (text, images, resources)."""
 
     type: Literal["content"] = Field(default="content", init=False)
     """Standard content block (text, images, resources)."""
 
-    content: TContentBlock
+    content: ContentBlock
     """The actual content block."""
 
     @classmethod
@@ -261,7 +261,7 @@ class ContentToolCallContent[TContentBlock: ContentBlock = ContentBlock](Schema)
         )
         contents = TextResourceContents(text=text, mime_type=mime_type, uri=uri)
         content = EmbeddedResourceContentBlock(annotations=annotations, resource=contents)
-        return cls(content=content)  # ty: ignore[invalid-argument-type]
+        return cls(content=content)
 
     @classmethod
     def embedded_blob_resource(
@@ -292,7 +292,7 @@ class ContentToolCallContent[TContentBlock: ContentBlock = ContentBlock](Schema)
         )
         resource = BlobResourceContents(blob=data, mime_type=mime_type, uri=uri)
         content = EmbeddedResourceContentBlock(annotations=annotations, resource=resource)
-        return cls(content=content)  # ty: ignore[invalid-argument-type]
+        return cls(content=content)
 
 
 class ToolCallLocation(AnnotatedObject):

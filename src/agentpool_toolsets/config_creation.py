@@ -168,7 +168,7 @@ class ConfigCreationTools(StaticResourceProvider):
         """
         fs = self._get_schema_fs()
         try:
-            content = fs.cat(path)
+            content: str = fs.cat(path)
             # Parse and re-format for readability
             schema_data = anyenv.load_json(content)
             return anyenv.dump_json(schema_data, indent=True)

@@ -78,9 +78,7 @@ class BaseContentBlock(AnnotatedObject):
 ResourceContents = TextResourceContents | BlobResourceContents
 
 
-class EmbeddedResourceContentBlock[TResourceContents: ResourceContents = ResourceContents](
-    BaseContentBlock
-):
+class EmbeddedResourceContentBlock(BaseContentBlock):
     """Complete resource contents embedded directly in the message.
 
     Preferred for including context as it avoids extra round-trips.
@@ -90,7 +88,7 @@ class EmbeddedResourceContentBlock[TResourceContents: ResourceContents = Resourc
 
     type: Literal["resource"] = Field(default="resource", init=False)
 
-    resource: TResourceContents
+    resource: ResourceContents
     """Resource content that can be embedded in a message."""
 
 
