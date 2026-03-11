@@ -16,6 +16,7 @@ from exxec.base import ExecutionEnvironment
 from pydantic_ai import (
     BinaryContent,
     ModelResponse,
+    ModelRetry,
     PartDeltaEvent,
     PartStartEvent,
     RunContext,  # noqa: TC002
@@ -785,6 +786,12 @@ class FSSpecTools(ResourceProvider):
     ) -> str:
         r"""Apply regex replacement to a line range specified by line numbers or text markers.
 
+        Applies ``re.subn(pattern, replacement, line, count=count)`` to each line
+        individually within the specified range. Because matching is per-line,
+        avoid patterns that match the empty string (e.g. ``.*``, ``[\s\S]*``,
+        ``\d*``) — ``subn`` will match both the content and the trailing empty
+        string, duplicating the replacement.
+
         Useful for systematic edits:
         - Remove/add indentation
         - Comment/uncomment blocks
@@ -805,7 +812,7 @@ class FSSpecTools(ResourceProvider):
 
         Examples:
             # Remove a function
-            regex_replace_lines(ctx, "file.py", "def old_func(", "    return", r".*\n", "")
+            regex_replace_lines(ctx, "file.py", "def old_func(", "    return", r".+\n", "")
 
             # Indent by line numbers
             regex_replace_lines(ctx, "file.py", 10, 20, r"^", "    ")
@@ -847,6 +854,15 @@ class FSSpecTools(ResourceProvider):
             end_idx = end_line  # end_line is inclusive, but list slice is exclusive
             # Compile regex pattern
             regex = re.compile(pattern)
+            # Guard against patterns that match empty strings (e.g. .*, [\s\S]*,
+            # \d*). These cause subn to replace both the actual content AND the
+            # empty string after it on every line, duplicating the replacement.
+            if regex.match("") is not None and replacement:
+                raise ModelRetry(  # noqa: TRY301
+                    f"Pattern {pattern!r} matches the empty string, which causes "
+                    "duplicate replacements per line. Use a non-optional quantifier "
+                    "(e.g. '.+' instead of '.*') or an anchored pattern (e.g. '^')."
+                )
             # Apply replacements to the specified line range
             modified_count = 0
             replacement_count = 0
