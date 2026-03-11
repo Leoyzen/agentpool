@@ -27,6 +27,7 @@ if not shutil.which("codex"):
     pytest.skip("codex CLI not available", allow_module_level=True)
 
 pytestmark = [pytest.mark.integration]
+DEFAULT_MODEL = "gpt-5.1-codex-mini"
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def codex_config_with_subagent() -> CodexAgentConfig:
     return CodexAgentConfig(
         name="codex_orchestrator",
         description="Codex agent with subagent delegation capabilities",
-        model="gpt-5.1-codex-mini",
+        model=DEFAULT_MODEL,
         reasoning_effort="medium",
         approval_policy="never",
         tools=[SubagentToolsetConfig()],
@@ -82,7 +83,7 @@ async def test_codex_subagent_tool_invocation():
     # Create a unique config for this test to avoid conflicts with other tests
     config = CodexAgentConfig(
         name="codex_tool_invoker",  # Unique name
-        model="gpt-5.1-codex-mini",
+        model=DEFAULT_MODEL,
         reasoning_effort="medium",
         approval_policy="never",
         tools=[SubagentToolsetConfig()],
@@ -106,7 +107,7 @@ async def test_codex_multiple_toolsets():
     """Test CodexAgent with multiple toolsets."""
     config = CodexAgentConfig(
         name="codex_multi",
-        model="gpt-5.1-codex-mini",
+        model=DEFAULT_MODEL,
         reasoning_effort="medium",
         approval_policy="never",
         tools=[SubagentToolsetConfig(), SkillsToolsetConfig()],
@@ -132,7 +133,7 @@ async def test_codex_mcp_servers_config():
     test_server_path = Path(__file__).parent.parent.parent / "mcp_server" / "server.py"
     config = CodexAgentConfig(
         name="codex_mixed",
-        model="gpt-5.1-codex-mini",
+        model=DEFAULT_MODEL,
         reasoning_effort="medium",
         approval_policy="never",
         tools=[SubagentToolsetConfig()],

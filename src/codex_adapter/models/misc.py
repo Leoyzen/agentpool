@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
@@ -25,6 +25,10 @@ from codex_adapter.models.codex_types import (  # noqa: TC001
 )
 from codex_adapter.models.thread_item import ThreadItem  # noqa: TC001
 from codex_adapter.models.thread_status import ThreadStatusValue  # noqa: TC001
+
+
+if TYPE_CHECKING:
+    from mcp.types import Annotations, Icon, ToolAnnotations
 
 
 # Strict validation in tests to catch schema changes, lenient in production
@@ -334,28 +338,39 @@ class ModelData(CodexBaseModel):
 
 
 class McpTool(CodexBaseModel):
-    """Tool exposed by an MCP server."""
+    """Tool exposed by an MCP server. Mirrors `mcp.types.Tool`."""
 
     name: str
+    title: str | None = None
     description: str | None = None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    annotations: ToolAnnotations | None = None
+    icons: list[Icon] | None = None
 
 
 class McpResource(CodexBaseModel):
-    """Resource exposed by an MCP server."""
+    """Resource exposed by an MCP server. Mirrors `mcp.types.Resource`."""
 
     uri: str
-    name: str | None = None
+    name: str
+    title: str | None = None
     description: str | None = None
     mime_type: str | None = None
+    size: int | None = None
+    annotations: Annotations | None = None
+    icons: list[Icon] | None = None
 
 
 class McpResourceTemplate(CodexBaseModel):
-    """Resource template exposed by an MCP server."""
+    """Resource template exposed by an MCP server. Mirrors `mcp.types.ResourceTemplate`."""
 
     uri_template: str
-    name: str | None = None
+    name: str
+    title: str | None = None
     description: str | None = None
     mime_type: str | None = None
+    annotations: Annotations | None = None
 
 
 class McpServerStatusEntry(CodexBaseModel):
