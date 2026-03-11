@@ -654,6 +654,8 @@ class CodexClient:
                     case TurnErrorEvent(data=TurnErrorData(error=error)):
                         yield event
                         raise CodexRequestError(-32000, error)
+                    case _:
+                        yield event
         finally:  # Cleanup turn queue
             if turn_key in self._turn_queues:
                 del self._turn_queues[turn_key]
