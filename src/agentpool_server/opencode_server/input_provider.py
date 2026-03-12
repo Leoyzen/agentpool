@@ -20,6 +20,7 @@ from agentpool_server.opencode_server.models import (
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
     from agentpool_server.opencode_server.models import PermissionReply
+    from agentpool_server.opencode_server.models.question import QuestionInfo
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)
@@ -238,6 +239,10 @@ class OpenCodeInputProvider(InputProvider):
                 requestedSchema=({"enum": _} | {"type": "array", "items": {"enum": _}}) as schema
             ):
                 return await self._handle_question_elicitation(params, schema)
+            case types.ElicitRequestFormParams(
+                requestedSchema={"type": "object", "properties": dict() as props}
+            ) if len(props) >= 1:
+                return await self._handle_multi_question(params, props)
             case types.ElicitRequestFormParams(requestedSchema=schema, message=msg):
                 # For other form elicitation, we don't have UI support yet
                 logger.info("Form elicitation request (not supported)", message=msg, schema=schema)
@@ -253,6 +258,22 @@ class OpenCodeInputProvider(InputProvider):
         Args:
             params: Form elicitation parameters
             schema: JSON schema with enum values
+
+        Returns:
+            Elicit result with user's answer
+        """
+        return await self._handle_single_enum(params, schema)
+
+    async def _handle_single_enum(
+        self,
+        params: types.ElicitRequestFormParams,
+        schema: dict[str, Any],
+    ) -> types.ElicitResult | types.ErrorData:
+        """Handle single enum/array question elicitation.
+
+        Args:
+            params: Form elicitation parameters
+            schema: JSON schema with enum values (single or array type)
 
         Returns:
             Elicit result with user's answer
@@ -320,6 +341,192 @@ class OpenCodeInputProvider(InputProvider):
         except Exception as e:
             logger.exception("Question failed", question_id=question_id)
             return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")  # Generic err code
+        finally:
+            # Clean up pending question
+            self.state.pending_questions.pop(question_id, None)
+
+    def _property_to_question(self, key: str, prop_schema: dict[str, Any]) -> QuestionInfo:
+        """Convert JSON schema property definition to QuestionInfo.
+
+        Supports enum, array+enum, string, and oneOf property types.
+        Unsupported types fall back to text input behavior.
+
+        Args:
+            key: Property name (used as fallback for title/header)
+            prop_schema: JSON schema property definition
+
+        Returns:
+            QuestionInfo configured for the property type
+        """
+        from agentpool_server.opencode_server.models.question import (
+            QuestionInfo,
+            QuestionOption,
+        )
+
+        # Extract title with fallback to key
+        title = prop_schema.get("title", key)
+        # Use description if available, otherwise use title as secondary text
+        description = prop_schema.get("description", title)
+        # Header truncated to 12 chars per OpenCode spec
+        header = title[:12]
+
+        # Pattern match property schema types
+        match prop_schema:
+            case {"type": "array", "items": dict() as items}:
+                # Multi-select array with enum items
+                enum_values = items.get("enum", [])
+                # Support x-option-descriptions for multi-select options
+                descriptions = items.get("x-option-descriptions", {})
+                opts = [
+                    QuestionOption(label=str(val), description=descriptions.get(str(val), ""))
+                    for val in enum_values
+                ]
+                return QuestionInfo(
+                    question=description,
+                    header=header,
+                    options=opts,
+                    multiple=True,
+                )
+            case {"enum": list() as enum_values}:
+                # Single-select enum
+                opts = [QuestionOption(label=str(val), description="") for val in enum_values]
+                return QuestionInfo(
+                    question=description,
+                    header=header,
+                    options=opts,
+                    multiple=None,
+                )
+            case {"oneOf": list() as one_of}:
+                # Single-select with const/title pairs (must check before type:string)
+                one_of_opts: list[QuestionOption] = []
+                for opt_def in one_of:
+                    if isinstance(opt_def, dict):
+                        const_val = opt_def.get("const") or ""
+                        opt_title = opt_def.get("title") or ""
+                        one_of_opts.append(
+                            QuestionOption(label=str(const_val), description=opt_title)
+                        )
+                return QuestionInfo(
+                    question=description,
+                    header=header,
+                    options=one_of_opts,
+                    multiple=None,
+                )
+            case {"type": "string"}:
+                # Text input - empty options (fallback if no oneOf)
+                return QuestionInfo(
+                    question=description,
+                    header=header,
+                    options=[],
+                    multiple=None,
+                )
+            case _:
+                # Unsupported types fallback to text input behavior
+                return QuestionInfo(
+                    question=description,
+                    header=header,
+                    options=[],
+                    multiple=None,
+                )
+
+    async def _handle_multi_question(
+        self,
+        params: types.ElicitRequestFormParams,
+        props: dict[str, Any],
+    ) -> types.ElicitResult | types.ErrorData:
+        """Handle multi-property object schema elicitation.
+
+        Creates multiple questions from object properties, respecting order.
+        Limits to 10 questions max with warning log.
+
+        Args:
+            params: Form elicitation parameters (contains message, description)
+            props: Object properties dict (property name -> schema)
+
+        Returns:
+            Elicit result with dict of property names to answers
+        """
+        from agentpool_server.opencode_server.models.events import QuestionAskedEvent
+        from agentpool_server.opencode_server.state import PendingQuestion
+
+        max_questions = 10
+
+        # Guard: empty properties should return decline (shouldn't happen due to match guard)
+        if not props:
+            logger.warning("Empty object schema properties, declining")
+            return types.ElicitResult(action="decline")
+
+        # Build property order and limit
+        prop_items = list(props.items())
+        original_keys = [k for k, _ in prop_items]
+
+        if len(prop_items) > max_questions:
+            logger.warning(
+                "Object schema has too many properties, limiting to 10",
+                property_count=len(prop_items),
+            )
+            prop_items = prop_items[:max_questions]
+            original_keys = original_keys[:max_questions]
+
+        # Convert each property to QuestionInfo
+        questions: list[QuestionInfo] = []
+        for prop_name, prop_schema in prop_items:
+            q_info = self._property_to_question(prop_name, prop_schema)
+            questions.append(q_info)
+
+        if not questions:
+            logger.warning("No valid questions could be created from object schema")
+            return types.ElicitResult(action="decline")
+
+        question_id = self._generate_permission_id()
+
+        # Create future to wait for answers
+        future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
+        self.state.pending_questions[question_id] = PendingQuestion(
+            session_id=self.session_id,
+            questions=questions,
+            future=future,
+        )
+
+        # Broadcast QuestionAskedEvent with all questions
+        event = QuestionAskedEvent.create(
+            request_id=question_id,
+            session_id=self.session_id,
+            questions=questions,
+        )
+        await self.state.broadcast_event(event)
+        logger.info(
+            "Multi-question asked",
+            question_id=question_id,
+            question_count=len(questions),
+            message=params.message,
+        )
+
+        # Wait for answers
+        try:
+            answers = await future  # list[list[str]] - indexed by question
+
+            # Map answers back to property keys
+            # answers[i] corresponds to questions[i] which corresponds to original_keys[i]
+            result_content: dict[str, Any] = {}
+            for i, key in enumerate(original_keys[: len(answers)]):
+                answer_list = answers[i] if i < len(answers) else []
+                # For multi-select, return list; for single-select, return string
+                # Determined by checking if it was a multi question
+                question_info: QuestionInfo | None = questions[i] if i < len(questions) else None
+                if question_info is not None and question_info.multiple:
+                    result_content[key] = answer_list
+                else:
+                    result_content[key] = answer_list[0] if answer_list else ""
+
+            return types.ElicitResult(action="accept", content=result_content)  # pyright: ignore[reportArgumentType]
+
+        except asyncio.CancelledError:
+            logger.info("Multi-question cancelled", question_id=question_id)
+            return types.ElicitResult(action="cancel")
+        except Exception as e:
+            logger.exception("Multi-question failed", question_id=question_id)
+            return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")
         finally:
             # Clean up pending question
             self.state.pending_questions.pop(question_id, None)
