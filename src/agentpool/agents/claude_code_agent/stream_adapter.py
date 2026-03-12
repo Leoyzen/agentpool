@@ -154,7 +154,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
     from clawd_code_sdk.models import (
         AssistantMessage,
         CompactBoundarySystemMessage,
-        Message,
+        MessageUnion,
         ResultMessage,
         StreamEvent,
         TextBlock,
@@ -171,7 +171,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
     # is handled by the caller's MessageReconstructor, which observes the yielded events.
 
     async for event_or_message in merged_stream:
-        if not isinstance(event_or_message, Message):
+        if not isinstance(event_or_message, MessageUnion):
             yield event_or_message
             continue
         message = event_or_message
@@ -362,7 +362,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
             ):
                 continue
             case _ as unreachable:
-                assert_never(unreachable)
+                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
         # Check for result (end of response)
         if isinstance(message, ResultMessage):
