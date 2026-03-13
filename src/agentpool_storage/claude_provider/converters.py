@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 import uuid
 
 from clawd_code_sdk.models.content_blocks import (
@@ -65,22 +65,18 @@ def chat_message_to_entry(
             user_type="external",
             is_sidechain=False,
         )
-
     # Assistant message
-    content_blocks = [ClaudeTextBlock(type="text", text=message.content)]
-    usage = ClaudeUsage()
-    if message.usage:
-        usage = ClaudeUsage(
-            input_tokens=message.usage.input_tokens,
-            output_tokens=message.usage.output_tokens,
-            cache_read_input_tokens=message.usage.cache_read_tokens,
-            cache_creation_input_tokens=message.usage.cache_write_tokens,
-        )
+    usage = ClaudeUsage(
+        input_tokens=message.usage.input_tokens,
+        output_tokens=message.usage.output_tokens,
+        cache_read_input_tokens=message.usage.cache_read_tokens,
+        cache_creation_input_tokens=message.usage.cache_write_tokens,
+    )
     assistant_msg = ClaudeApiMessage(
         model=message.model_name or "unknown",
         id=f"msg_{msg_uuid[:20]}",
         role="assistant",
-        content=content_blocks,
+        content=[ClaudeTextBlock(type="text", text=message.content)],
         usage=usage,
     )
     return ClaudeAssistantEntry(
@@ -261,10 +257,9 @@ def build_pydantic_message(
                 case ClaudeThinkingBlock(thinking=thinking, signature=signature) if thinking:
                     resp_parts.append(ThinkingPart(content=thinking, signature=signature))
                 case ClaudeToolUseBlock(id=block_id, name=name) if block_id and name:
-                    args = block.input or {}
-                    resp_parts.append(
-                        ToolCallPart(tool_name=block.name, args=args, tool_call_id=block.id)
-                    )
+                    args = cast(dict[str, Any], block.input or {})
+                    part = ToolCallPart(tool_name=block.name, args=args, tool_call_id=block.id)
+                    resp_parts.append(part)
 
     if not resp_parts:
         return None
