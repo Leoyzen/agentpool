@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyenv
+from clawd_code_sdk.models.content_blocks import ToolUseBlock as ClaudeToolUseBlock
 from clawd_code_sdk.storage.helpers import (
     count_session_messages,
     encode_project_path,
@@ -28,12 +29,7 @@ from clawd_code_sdk.storage.helpers import (
     read_session,
     write_entry,
 )
-from clawd_code_sdk.storage.models import (
-    ClaudeAssistantEntry,
-    ClaudeEntry,
-    ClaudeToolUseBlock,
-    ClaudeUserEntry,
-)
+from clawd_code_sdk.storage.models import ClaudeAssistantEntry, ClaudeEntry, ClaudeUserEntry
 
 from agentpool.log import get_logger
 from agentpool.utils.thread_helpers import parallel_map

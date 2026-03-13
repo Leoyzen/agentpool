@@ -6,13 +6,15 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 import uuid
 
+from clawd_code_sdk.models.content_blocks import (
+    TextBlock as ClaudeTextBlock,
+    ThinkingBlock as ClaudeThinkingBlock,
+    ToolResultBlock as ClaudeToolResultBlock,
+    ToolUseBlock as ClaudeToolUseBlock,
+)
 from clawd_code_sdk.storage.models import (
     ClaudeApiMessage,
     ClaudeAssistantEntry,
-    ClaudeTextBlock,
-    ClaudeThinkingBlock,
-    ClaudeToolResultBlock,
-    ClaudeToolUseBlock,
     ClaudeUsage,
     ClaudeUserEntry,
     ClaudeUserMessage,
