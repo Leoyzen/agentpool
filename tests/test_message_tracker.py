@@ -19,7 +19,7 @@ async def test_simple_sequential_chain():
             msg = await agent1.run("test")
             mermaid = tracker.visualize(msg)
             # Should only see these two connections
-            connections = mermaid.replace(" ", "").split("\n")[1:]  # pyright: ignore
+            connections = mermaid.replace(" ", "").split("\n")[1:]
             assert sorted(connections) == sorted(["agent1-->agent2", "agent2-->agent3"])
 
 
@@ -38,7 +38,7 @@ async def test_parallel_to_sequential():
         async with pool.track_message_flow() as tracker:
             msg = await agent1.run("test")
             mermaid = tracker.visualize(msg)
-            connections = mermaid.replace(" ", "").split("\n")[1:]  # pyright: ignore
+            connections = mermaid.replace(" ", "").split("\n")[1:]
             assert sorted(connections) == sorted([
                 "agent1-->agent2",
                 "agent1-->agent3",
@@ -62,7 +62,7 @@ async def test_callback_chain():
         async with pool.track_message_flow() as tracker:
             msg = await agent1.run("test")
             mermaid = tracker.visualize(msg)
-            connections = mermaid.replace(" ", "").split("\n")[1:]  # pyright: ignore
+            connections = mermaid.replace(" ", "").split("\n")[1:]
             assert sorted(connections) == sorted(["agent1-->process", "process-->agent2"])
 
 
@@ -156,7 +156,7 @@ async def test_message_flow_tracker_nested():
             mermaid = tracker.visualize(result)
 
             # Should only show connection to team as a unit
-            connections = mermaid.replace(" ", "").split("\n")[1:]  # pyright: ignore
+            connections = mermaid.replace(" ", "").split("\n")[1:]
             assert sorted(connections) == ["agent1-->team"]
 
 

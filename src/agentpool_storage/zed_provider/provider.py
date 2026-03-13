@@ -195,12 +195,10 @@ class ZedStorageProvider(StorageProvider):
                 continue
             # Get token usage from thread-level cumulative data
             usage = thread.cumulative_token_usage
-            total_tokens = usage.input_tokens + usage.output_tokens
+            total = usage.input_tokens + usage.output_tokens
             token_usage_data = (
-                TokenUsage(
-                    total=total_tokens, prompt=usage.input_tokens, completion=usage.output_tokens
-                )
-                if total_tokens
+                TokenUsage(total=total, prompt=usage.input_tokens, completion=usage.output_tokens)
+                if total
                 else None
             )
 

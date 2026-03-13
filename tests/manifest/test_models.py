@@ -73,7 +73,7 @@ def test_valid_agent_definition():
     agent_def = AgentsManifest.model_validate(yamling.load_yaml(VALID_AGENT_CONFIG))
     schema = agent_def.responses["TestResponse"].response_schema
     assert isinstance(schema, InlineSchemaDef)
-    score = schema.fields["score"]  # pyright: ignore
+    score = schema.fields["score"]
     assert score.ge == 0
     assert score.le == 100
 

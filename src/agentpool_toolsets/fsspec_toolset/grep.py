@@ -474,7 +474,6 @@ async def grep_with_fsspec(
                 # Skip binary files
                 if b"\x00" in file_content[:8192]:  # pyright: ignore[reportOperatorIssue, reportOptionalSubscript]
                     continue
-
                 text = file_content.decode("utf-8", errors="replace")  # pyright: ignore[reportAttributeAccessIssue]
                 lines = text.splitlines()
 

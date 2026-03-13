@@ -207,7 +207,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
             return None
 
     # Apply wraps first
-    wraps(fn)(wrapped)  # pyright: ignore
+    wraps(fn)(wrapped)
     # Python 3.14: functools.wraps copies __annotate__ but not __annotations__.
     # Any subsequent assignment to __annotations__ destroys __annotate__ (PEP 649).
     # Restore from original to preserve deferred annotation evaluation.
