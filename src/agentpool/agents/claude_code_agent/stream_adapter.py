@@ -77,8 +77,9 @@ from agentpool.agents.events.infer_info import derive_rich_tool_info
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
+    from anthropic.types.beta import BetaRawContentBlockDelta
     from clawd_code_sdk import ResultMessage, ToolUseBlock
     from clawd_code_sdk.models import StopReason
 
@@ -140,17 +141,11 @@ async def adapt_claude_stream(  # noqa: PLR0915
         RichAgentStreamEvent instances, followed by a final StreamAdapterResult.
     """
     from anthropic.types.beta import (
-        BetaCitationsDelta as CitationsDelta,
-        BetaCompactionContentBlockDelta as CompactionContentBlockDelta,
-        BetaInputJSONDelta as InputJSONDelta,
         BetaRawContentBlockDeltaEvent,
         BetaRawContentBlockStartEvent,
         BetaRawContentBlockStopEvent,
-        BetaSignatureDelta as SignatureDelta,
         BetaTextBlock as AnthTextBlock,
-        BetaTextDelta as TextDelta,
         BetaThinkingBlock as AnthThinkingBlock,
-        BetaThinkingDelta as ThinkingDelta,
         BetaToolUseBlock as AnthToolUseBlock,
     )
     from clawd_code_sdk.models import (
@@ -308,25 +303,8 @@ async def adapt_claude_stream(  # noqa: PLR0915
 
             # content_block_delta events
             case StreamEvent(event=BetaRawContentBlockDeltaEvent(index=index, delta=delta)):
-                match delta:
-                    case TextDelta(text=text):
-                        yield PartDeltaEvent.text(index=index, content=text)
-                    case ThinkingDelta(thinking=thinking):
-                        yield PartDeltaEvent.thinking(index=index, content=thinking)
-                    case InputJSONDelta(partial_json=json_) if json_ and streaming_tc_id:
-                        yield PartDeltaEvent.tool_call(
-                            index, content=json_, tool_call_id=streaming_tc_id
-                        )
-                    case (
-                        CitationsDelta()
-                        | SignatureDelta()
-                        | InputJSONDelta()
-                        | CompactionContentBlockDelta()
-                    ):
-                        pass
-                    case _ as unreachable:
-                        assert_never(unreachable)  # ty:ignore[type-assertion-failure]
-
+                for e in handle_delta(index=index, delta=delta, streaming_tc_id=streaming_tc_id):
+                    yield e
             # content_block_stop
             case StreamEvent(event=BetaRawContentBlockStopEvent(index=index)):
                 streaming_tc_id = None
@@ -375,3 +353,30 @@ async def adapt_claude_stream(  # noqa: PLR0915
             break
 
     yield result
+
+
+def handle_delta(
+    index: int,
+    delta: BetaRawContentBlockDelta,
+    streaming_tc_id: str | None,
+) -> Iterator[PartDeltaEvent]:
+    from anthropic.types.beta import (
+        BetaCitationsDelta as CitationsDelta,
+        BetaCompactionContentBlockDelta as CompactionContentBlockDelta,
+        BetaInputJSONDelta as InputJSONDelta,
+        BetaSignatureDelta as SignatureDelta,
+        BetaTextDelta as TextDelta,
+        BetaThinkingDelta as ThinkingDelta,
+    )
+
+    match delta:
+        case TextDelta(text=text):
+            yield PartDeltaEvent.text(index=index, content=text)
+        case ThinkingDelta(thinking=thinking):
+            yield PartDeltaEvent.thinking(index=index, content=thinking)
+        case InputJSONDelta(partial_json=json_) if json_ and streaming_tc_id:
+            yield PartDeltaEvent.tool_call(index, content=json_, tool_call_id=streaming_tc_id)
+        case CitationsDelta() | SignatureDelta() | InputJSONDelta() | CompactionContentBlockDelta():
+            pass
+        case _ as unreachable:
+            assert_never(unreachable)
