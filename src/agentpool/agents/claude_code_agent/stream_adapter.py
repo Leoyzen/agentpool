@@ -330,7 +330,6 @@ async def adapt_claude_stream(  # noqa: PLR0915
 
             case StatusSystemMessage(status="compacting"):
                 yield CompactionEvent(session_id=session_id, trigger="auto", phase="starting")
-                continue
 
             case CompactBoundarySystemMessage(compact_metadata=compact_metadata):
                 yield CompactionEvent(
@@ -339,7 +338,6 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     phase="completed",
                     pre_tokens=compact_metadata["pre_tokens"],
                 )
-                continue
 
             case (
                 StreamEvent()
@@ -363,7 +361,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 | ElicitationCompleteMessage()
                 | LocalCommandOutputMessage()
             ):
-                continue
+                pass
             case _ as unreachable:
                 assert_never(unreachable)
 
