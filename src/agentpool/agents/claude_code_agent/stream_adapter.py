@@ -142,15 +142,17 @@ async def adapt_claude_stream(  # noqa: PLR0915
     from anthropic.types import (
         CitationsDelta,
         InputJSONDelta,
-        RawContentBlockDeltaEvent,
-        RawContentBlockStartEvent,
-        RawContentBlockStopEvent,
         SignatureDelta,
         TextBlock as AnthTextBlock,
         TextDelta,
         ThinkingBlock as AnthThinkingBlock,
         ThinkingDelta,
         ToolUseBlock as AnthToolUseBlock,
+    )
+    from anthropic.types.beta import (
+        BetaRawContentBlockDeltaEvent,
+        BetaRawContentBlockStartEvent,
+        BetaRawContentBlockStopEvent,
     )
     from clawd_code_sdk.models import (
         AssistantMessage,
@@ -207,7 +209,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     tc_id = user_block.tool_use_id
                     result_content = user_block.get_parsed_content()
                     # Flush + tool return handled by reconstructor via
-                    # ToolCallCompleteEvent observation
+                    # ToolCcleanupallCompleteEvent observation
                     tool_use = pending_tool_calls.pop(tc_id)
                     # For Bash tools: stream output + exit to virtual terminal
                     # before signaling completion. This matches the 3-step
@@ -268,7 +270,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
 
             # Real-time streaming: content_block_start
             case StreamEvent(
-                event=RawContentBlockStartEvent(index=index, content_block=content_block)
+                event=BetaRawContentBlockStartEvent(index=index, content_block=content_block)
             ):
                 match content_block:
                     case AnthTextBlock():
@@ -306,7 +308,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         )
 
             # content_block_delta events
-            case StreamEvent(event=RawContentBlockDeltaEvent(index=index, delta=delta)):
+            case StreamEvent(event=BetaRawContentBlockDeltaEvent(index=index, delta=delta)):
                 match delta:
                     case TextDelta(text=text):
                         yield PartDeltaEvent.text(index=index, content=text)
@@ -322,7 +324,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
             # content_block_stop
-            case StreamEvent(event=RawContentBlockStopEvent(index=index)):
+            case StreamEvent(event=BetaRawContentBlockStopEvent(index=index)):
                 streaming_tc_id = None
                 yield PartEndEvent(index=index, part=TextPart(content=""))
 
