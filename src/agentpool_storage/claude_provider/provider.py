@@ -30,6 +30,7 @@ from clawd_code_sdk.storage.helpers import (
     write_entry,
 )
 from clawd_code_sdk.storage.models import ClaudeAssistantEntry, ClaudeEntry, ClaudeUserEntry
+from pydantic_ai import RequestUsage
 
 from agentpool.log import get_logger
 from agentpool.utils.thread_helpers import parallel_map
@@ -94,7 +95,7 @@ class ParsedSession:
     tool_mapping: dict[str, str]
     messages: list[ChatMessage[str]]
     first_timestamp: datetime | None
-    total_tokens: int
+    usage: RequestUsage
 
 
 def _read_session_metadata(
@@ -200,7 +201,7 @@ def _parse_session_full(session_id: str, session_path: Path) -> ParsedSession | 
     tool_mapping = _build_tool_id_mapping(entries)
     messages: list[ChatMessage[str]] = []
     first_timestamp: datetime | None = None
-    total_tokens = 0
+    usage = RequestUsage()
 
     for entry in entries:
         msg = entry_to_chat_message(entry, session_id, tool_mapping)
@@ -209,9 +210,7 @@ def _parse_session_full(session_id: str, session_path: Path) -> ParsedSession | 
         messages.append(msg)
         if first_timestamp is None and msg.timestamp:
             first_timestamp = msg.timestamp
-        if msg.cost_info:
-            total_tokens += msg.cost_info.token_usage.total_tokens
-
+        usage.incr(msg.usage)
     if not messages:
         return None
 
@@ -222,7 +221,7 @@ def _parse_session_full(session_id: str, session_path: Path) -> ParsedSession | 
         tool_mapping=tool_mapping,
         messages=messages,
         first_timestamp=first_timestamp,
-        total_tokens=total_tokens,
+        usage=usage,
     )
 
 
@@ -494,10 +493,10 @@ class ClaudeStorageProvider(StorageProvider):
             if filters.query and not any(filters.query in m.content for m in parsed.messages):
                 continue
 
-            token_usage_data: TokenUsage | None = (
-                TokenUsage(total=parsed.total_tokens, prompt=0, completion=0)
-                if parsed.total_tokens
-                else None
+            token_usage_data = TokenUsage(
+                total=parsed.usage.total_tokens,
+                prompt=parsed.usage.input_tokens,
+                completion=parsed.usage.output_tokens,
             )
             conv_data = ConversationData(
                 id=parsed.session_id,

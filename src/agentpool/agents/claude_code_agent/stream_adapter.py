@@ -47,6 +47,7 @@ from clawd_code_sdk.models import (
     HookProgressSystemMessage,
     HookResponseSystemMessage,
     HookStartedSystemMessage,
+    ImageBlock,
     InitSystemMessage,
     LocalCommandOutputMessage,
     PromptSuggestionMessage,
@@ -194,7 +195,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                                 title=rich_info.title,
                                 tool_input=cast(dict[str, Any], input_data),
                             )
-                        case ToolResultBlock() | ThinkingBlock() | TextBlock():
+                        case ToolResultBlock() | ThinkingBlock() | TextBlock() | ImageBlock():
                             pass  # ToolResult Blocks only appear in UserMessages
                         case _ as unknown_block:
                             assert_never(unknown_block)  # ty:ignore[type-assertion-failure]
