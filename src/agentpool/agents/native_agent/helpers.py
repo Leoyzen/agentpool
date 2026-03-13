@@ -9,6 +9,7 @@ from pydantic_ai import (
     BaseToolReturnPart,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    ModelMessage,
     ModelResponse,
     PartStartEvent,
     TextPart,
@@ -43,7 +44,10 @@ def filter_builtin_tools(
     Returns:
         Filtered list containing only tools the model supports
     """
-    supported = model.profile.supported_builtin_tools
+    try:
+        supported = model.profile.supported_builtin_tools
+    except NotImplementedError:  # some models (->FallbackModel) raise this when accessing profile
+        return tools
     filtered = [t for t in tools if isinstance(t, tuple(supported))]
     if len(filtered) != len(tools):
         dropped = [type(t).__name__ for t in tools if not isinstance(t, tuple(supported))]
@@ -94,7 +98,10 @@ def process_tool_event(
     return None
 
 
-def extract_text_from_messages(messages: list[Any], include_interruption_note: bool = False) -> str:
+def extract_text_from_messages(
+    messages: list[ModelMessage],
+    include_interruption_note: bool = False,
+) -> str:
     """Extract text content from pydantic-ai messages.
 
     Args:
