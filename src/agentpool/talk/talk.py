@@ -193,7 +193,7 @@ class Talk[TTransmittedData = Any]:
             registry=registry,
             talk=self,
         )
-        return await execute(condition, ctx)
+        return await execute(condition, ctx)  # ty: ignore[invalid-return-type]
 
     def on_event(
         self,

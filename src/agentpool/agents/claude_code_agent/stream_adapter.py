@@ -362,7 +362,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
             ):
                 continue
             case _ as unreachable:
-                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+                assert_never(unreachable)
 
         # Check for result (end of response)
         if isinstance(message, ResultMessage):

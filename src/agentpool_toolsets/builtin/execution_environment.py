@@ -139,7 +139,7 @@ class ProcessManagementTools(ResourceProvider):
                 combined = filter_lines_regex(filter_lines, combined)
             status = "completed" if output.exit_code is not None else "running"
             # Format as plain text
-            suffix_parts = [f"Status: {status}"]
+            suffix_parts: list[str] = [f"Status: {status}"]
             if output.exit_code is not None:
                 suffix_parts.append(f"Exit code: {output.exit_code}")
             if output.truncated:
