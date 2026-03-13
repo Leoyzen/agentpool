@@ -10,20 +10,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 
-from clawd_code_sdk import (
-    McpServerConfig,
-    UserDocumentPrompt,
-    UserDocumentURLPrompt,
-    UserImageURLPrompt,
-)
 from clawd_code_sdk.models import (
     BashInput,
     BashOutput,
     EditOutput,
+    McpHttpServerConfig,
+    McpSSEServerConfig,
+    McpStdioServerConfig,
     ReadOutput,
     TodoWriteOutput,
+    UserDocumentPrompt,
+    UserDocumentURLPrompt,
     UserFilePrompt,
     UserImagePrompt,
+    UserImageURLPrompt,
     UserTextPrompt,
     WriteOutput,
 )
@@ -55,6 +55,9 @@ from opencode_sdk.models.tool_metadata import (
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
+    from clawd_code_sdk import (
+        McpServerConfig,
+    )
     from clawd_code_sdk.models import (
         HookEvent,
         PermissionResult,
@@ -191,24 +194,24 @@ def convert_mcp_servers_to_sdk_format(
                 assert_never(unreachable)
 
         # Build SDK-compatible config
-        config: dict[str, Any]
+        config: McpServerConfig
         match server:
             case StdioMCPServerConfig(command=command, args=args):
-                config = {"type": "stdio", "command": command, "args": args}
+                config = McpStdioServerConfig(type="stdio", command=command, args=args)
                 if server.env:
                     config["env"] = server.get_env_vars()
             case SSEMCPServerConfig(url=url):
-                config = {"type": "sse", "url": str(url)}
+                config = McpSSEServerConfig(type="sse", url=str(url))
                 if server.headers:
                     config["headers"] = server.headers
             case StreamableHTTPMCPServerConfig(url=url):
-                config = {"type": "http", "url": str(url)}
+                config = McpHttpServerConfig(type="http", url=str(url))
                 if server.headers:
                     config["headers"] = server.headers
             case _ as unreachable:
                 assert_never(unreachable)
 
-        result[name] = cast(McpServerConfig, config)
+        result[name] = config
 
     return result
 

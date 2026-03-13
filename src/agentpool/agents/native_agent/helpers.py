@@ -9,7 +9,6 @@ from pydantic_ai import (
     BaseToolReturnPart,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
-    ModelMessage,
     ModelResponse,
     PartStartEvent,
     TextPart,
@@ -21,6 +20,7 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
 if TYPE_CHECKING:
+    from pydantic_ai import ModelMessage
     from pydantic_ai.builtin_tools import AbstractBuiltinTool
     from pydantic_ai.models import Model
     from tokonomics.model_discovery import ModelInfo

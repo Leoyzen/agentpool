@@ -141,6 +141,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
     """
     from anthropic.types.beta import (
         BetaCitationsDelta as CitationsDelta,
+        BetaCompactionContentBlockDelta as CompactionContentBlockDelta,
         BetaInputJSONDelta as InputJSONDelta,
         BetaRawContentBlockDeltaEvent,
         BetaRawContentBlockStartEvent,
@@ -316,7 +317,12 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         yield PartDeltaEvent.tool_call(
                             index, content=json_, tool_call_id=streaming_tc_id
                         )
-                    case CitationsDelta() | SignatureDelta() | InputJSONDelta():
+                    case (
+                        CitationsDelta()
+                        | SignatureDelta()
+                        | InputJSONDelta()
+                        | CompactionContentBlockDelta()
+                    ):
                         pass
                     case _ as unreachable:
                         assert_never(unreachable)  # ty:ignore[type-assertion-failure]
