@@ -268,10 +268,10 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         yield PartStartEvent.text(index=index, content="")
                     case AnthThinkingBlock():
                         yield PartStartEvent.thinking(index=index, content="")
-                    case AnthToolUseBlock(id=tc_id, name=raw_tool_name):
+                    case AnthToolUseBlock(id=tc_id, name=raw_tool_name, input=input_):
                         tool_name = _strip_mcp_prefix(raw_tool_name)
                         streaming_tc_id = tc_id
-                        rich_info = derive_rich_tool_info(raw_tool_name, {})
+                        rich_info = derive_rich_tool_info(raw_tool_name, input_)
                         # For Bash tools: signal client to create a display-only
                         # terminal. Claude Code executes commands server-side, so
                         # we use the _meta virtual terminal convention instead of
@@ -294,7 +294,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                             kind=rich_info.kind,
                             locations=[],
                             content=tc_content,
-                            raw_input={},
+                            raw_input=input_,
                             field_meta=meta,
                         )
 
