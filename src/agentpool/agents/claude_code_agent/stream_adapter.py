@@ -139,20 +139,18 @@ async def adapt_claude_stream(  # noqa: PLR0915
     Yields:
         RichAgentStreamEvent instances, followed by a final StreamAdapterResult.
     """
-    from anthropic.types import (
-        CitationsDelta,
-        InputJSONDelta,
-        SignatureDelta,
-        TextBlock as AnthTextBlock,
-        TextDelta,
-        ThinkingBlock as AnthThinkingBlock,
-        ThinkingDelta,
-        ToolUseBlock as AnthToolUseBlock,
-    )
     from anthropic.types.beta import (
+        BetaCitationsDelta as CitationsDelta,
+        BetaInputJSONDelta as InputJSONDelta,
         BetaRawContentBlockDeltaEvent,
         BetaRawContentBlockStartEvent,
         BetaRawContentBlockStopEvent,
+        BetaSignatureDelta as SignatureDelta,
+        BetaTextBlock as AnthTextBlock,
+        BetaTextDelta as TextDelta,
+        BetaThinkingBlock as AnthThinkingBlock,
+        BetaThinkingDelta as ThinkingDelta,
+        BetaToolUseBlock as AnthToolUseBlock,
     )
     from clawd_code_sdk.models import (
         AssistantMessage,
