@@ -125,6 +125,7 @@ if TYPE_CHECKING:
         SkillData,
         ThreadSortKey,
         ThreadSourceKind,
+        ToolConfig,
         TurnInputItem,
     )
     from codex_adapter.models.request_params import HazelnutScope, LoginType, ProductSurface
@@ -285,6 +286,7 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
+        tools: list[ToolConfig] | None = None,
         service_name: str | None = None,
         personality: Personality | None = None,
         ephemeral: bool | None = None,
@@ -300,6 +302,7 @@ class CodexClient:
             approval_policy: Tool approval policy
             sandbox: Sandbox mode for file operations
             config: Additional configuration overrides
+            tools: List of builtin tool configurations. Merged into ``config``.
             service_name: Optional service name
             personality: Personality preset (none, friendly, pragmatic)
             ephemeral: If true, thread is not persisted to disk
@@ -307,6 +310,19 @@ class CodexClient:
         Returns:
             ThreadResponse containing thread data and configuration
         """
+        merged_config = dict(config) if config else {}
+        if tools:
+            from codex_adapter.models.tool_config import tools_to_config_dict
+
+            tool_config = tools_to_config_dict(tools)
+            # Tool config is base layer; explicit config keys take precedence
+            for key, value in tool_config.items():
+                if key not in merged_config:
+                    merged_config[key] = value
+                elif isinstance(value, dict) and isinstance(merged_config[key], dict):
+                    merged = {**value, **merged_config[key]}
+                    merged_config[key] = merged
+
         params = ThreadStartParams(
             cwd=cwd,
             model=model,
@@ -315,7 +331,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=config,
+            config=merged_config or None,
             service_name=service_name,
             personality=personality,
             ephemeral=ephemeral,

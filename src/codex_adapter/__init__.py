@@ -88,6 +88,7 @@ from codex_adapter.models.events import (
     is_error_event,
 )
 from codex_adapter.exceptions import CodexError, CodexProcessError, CodexRequestError
+from codex_adapter.models.tool_config import BuiltinToolsConfig, ToolConfig, tools_to_config_dict
 from codex_adapter.models import (
     AgentMessageDeltaData,
     AppInfo,
@@ -137,6 +138,7 @@ __all__ = [
     "AppListUpdatedEvent",
     "ApprovalPolicy",
     "AskForApproval",
+    "BuiltinToolsConfig",
     "CodexClient",
     "CodexError",
     "CodexEvent",
@@ -226,6 +228,7 @@ __all__ = [
     "ThreadUnarchivedData",
     "ThreadUnarchivedEvent",
     "TokenUsageBreakdown",
+    "ToolConfig",
     "TurnCompletedData",
     "TurnCompletedEvent",
     "TurnErrorData",
@@ -242,4 +245,5 @@ __all__ = [
     "is_completed_event",
     "is_delta_event",
     "is_error_event",
+    "tools_to_config_dict",
 ]
