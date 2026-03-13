@@ -327,7 +327,7 @@ _HIGH_PRIORITY_THRESHOLD = 0.33
 _MEDIUM_PRIORITY_THRESHOLD = 0.67
 
 
-def _infer_priority(content: str, index: int, total: int) -> str:
+def _infer_priority(content: str, index: int, total: int) -> Literal["low", "medium", "high"]:
     """Infer priority from content keywords or position."""
     content_lower = content.lower()
 

@@ -242,13 +242,10 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     tool_input = cast(dict[str, Any], tool_use.input) if tool_use else {}
                     metadata: dict[str, Any] | None = tool_metadata.get(tc_id)
                     if not metadata and isinstance(message.tool_use_result, list):
-                        tool_use_result = (
-                            message.tool_use_result[0] if message.tool_use_result else {}
-                        )
                         oc_metadata = convert_to_opencode_metadata(
-                            tool_use.name,
-                            tool_use_result,
-                            tool_input,
+                            tool_name=tool_use.name,
+                            tool_use_result=i[0] if (i := message.tool_use_result) else {},
+                            tool_input=tool_input,
                         )
                         metadata = cast(dict[str, Any] | None, oc_metadata)
 
