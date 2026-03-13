@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
-import uuid
 
 from clawd_code_sdk.models.content_blocks import (
     TextBlock as ClaudeTextBlock,
@@ -32,7 +31,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RequestUsage
 
 from agentpool.messaging import ChatMessage, TokenCost
-from agentpool.utils.time_utils import get_now, parse_iso_timestamp
+from agentpool.utils.time_utils import parse_iso_timestamp
 
 
 if TYPE_CHECKING:
@@ -47,19 +46,16 @@ def chat_message_to_entry(
     cwd: str | None = None,
 ) -> ClaudeUserEntry | ClaudeAssistantEntry:
     """Convert a ChatMessage to a Claude JSONL entry."""
-    msg_uuid = message.message_id or str(uuid.uuid4())
-    parent_uuid = message.parent_id
-    timestamp = (message.timestamp or get_now()).isoformat().replace("+00:00", "Z")
+    timestamp = message.timestamp.isoformat().replace("+00:00", "Z")
     # Build entry based on role
     if message.role == "user":
-        user_msg = ClaudeUserMessage(role="user", content=message.content)
         return ClaudeUserEntry(
             type="user",
-            uuid=msg_uuid,
-            parent_uuid=parent_uuid,
+            uuid=message.message_id,
+            parent_uuid=message.parent_id,
             session_id=session_id,
             timestamp=timestamp,
-            message=user_msg,
+            message=ClaudeUserMessage(role="user", content=message.content),
             cwd=cwd or "",
             version="agentpool",
             user_type="external",
@@ -74,15 +70,15 @@ def chat_message_to_entry(
     )
     assistant_msg = ClaudeApiMessage(
         model=message.model_name or "unknown",
-        id=f"msg_{msg_uuid[:20]}",
+        id=f"msg_{message.message_id[:20]}",
         role="assistant",
         content=[ClaudeTextBlock(type="text", text=message.content)],
         usage=usage,
     )
     return ClaudeAssistantEntry(
         type="assistant",
-        uuid=msg_uuid,
-        parent_uuid=parent_uuid,
+        uuid=message.message_id,
+        parent_uuid=message.parent_id,
         session_id=session_id,
         timestamp=timestamp,
         message=assistant_msg,

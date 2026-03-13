@@ -143,8 +143,7 @@ def _read_session_metadata(
                     # Get timestamp and cwd from first message entry
                     if first_timestamp is None:
                         first_timestamp = timestamp
-                        if cwd is None:
-                            cwd = data.get("cwd")
+                        cwd = cwd or data.get("cwd")
 
                     # First user message as fallback title
                     if entry_type == "user" and title is None:
