@@ -38,6 +38,7 @@ from pydantic_ai import (
     UploadedFile,
     VideoUrl,
 )
+from pydantic_ai.models.anthropic import _FINISH_REASON_MAP as FINISH_REASON_MAP
 
 from agentpool.utils.diffs import compute_unified_diff
 from opencode_sdk.models.tool_metadata import (
@@ -154,18 +155,7 @@ def confirmation_result_to_native(result: ConfirmationResult) -> PermissionResul
 
 
 def to_finish_reason(reason: StopReason) -> FinishReason:
-
-    match reason:
-        case "end_turn":
-            return "stop"
-        case "max_tokens" | "model_context_window_exceeded":
-            return "length"
-        case "stop_sequence" | "pause_turn" | "refusal":
-            return "stop"
-        case "tool_use":
-            return "tool_call"
-        case _ as unreachable:
-            raise assert_never(unreachable)
+    return FINISH_REASON_MAP[reason]
 
 
 def convert_mcp_servers_to_sdk_format(
