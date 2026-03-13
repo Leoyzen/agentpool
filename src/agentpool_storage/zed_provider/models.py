@@ -158,7 +158,7 @@ class ZedProjectSnapshot(ZedBaseModel):
 class ZedThread(ZedBaseModel):
     """A Zed conversation thread."""
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
 
     # v0.3.0 uses "title", v0.2.0 uses "summary"
     title: str = Field(alias="title", validation_alias=AliasChoices("title", "summary"))
