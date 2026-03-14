@@ -31,17 +31,17 @@ from codex_adapter.models.tool_config import (
 
 
 def test_default_config_produces_empty_dict():
-    """Default BuiltinToolsConfig should produce an empty config dict."""
+    """Default BuiltinToolsConfig (all None) should produce an empty config dict."""
     config = BuiltinToolsConfig()
     result = config.to_config_dict()
     assert result == {}
 
 
-def test_shell_disabled():
-    """Disabling the shell tool should set the feature flag."""
-    config = BuiltinToolsConfig(shell=ShellToolConfig(enabled=False))
+def test_shell_config():
+    """Including shell tool should set the feature flag."""
+    config = BuiltinToolsConfig(shell=ShellToolConfig())
     result = config.to_config_dict()
-    assert result["features"]["shell_tool"] is False
+    assert result["features"]["shell_tool"] is True
 
 
 def test_shell_allow_login_shell():
@@ -51,18 +51,9 @@ def test_shell_allow_login_shell():
     assert result["allow_login_shell"] is False
 
 
-def test_apply_patch_disabled():
-    """Disabling apply_patch should set include_apply_patch_tool to False."""
-    config = BuiltinToolsConfig(apply_patch=ApplyPatchToolConfig(enabled=False))
-    result = config.to_config_dict()
-    assert result["include_apply_patch_tool"] is False
-
-
-def test_apply_patch_variant():
-    """Setting a patch variant should enable and set the variant."""
-    config = BuiltinToolsConfig(
-        apply_patch=ApplyPatchToolConfig(variant="freeform"),
-    )
+def test_apply_patch_config():
+    """Including apply_patch should set include_apply_patch_tool to True."""
+    config = BuiltinToolsConfig(apply_patch=ApplyPatchToolConfig())
     result = config.to_config_dict()
     assert result["include_apply_patch_tool"] is True
 
@@ -93,61 +84,55 @@ def test_web_search_full_config():
     assert tools["location"]["city"] == "NYC"
 
 
-def test_view_image_disabled():
-    """Disabling view_image should set tools.view_image to False."""
-    config = BuiltinToolsConfig(view_image=ViewImageToolConfig(enabled=False))
+def test_view_image():
+    """Including view_image should set tools.view_image to True."""
+    config = BuiltinToolsConfig(view_image=ViewImageToolConfig())
     result = config.to_config_dict()
-    assert result["tools"]["view_image"] is False
+    assert result["tools"]["view_image"] is True
 
 
-def test_js_repl_enabled():
-    """Enabling js_repl should set the feature flag."""
-    config = BuiltinToolsConfig(js_repl=JsReplToolConfig(enabled=True))
+def test_js_repl():
+    """Including js_repl should set the feature flag."""
+    config = BuiltinToolsConfig(js_repl=JsReplToolConfig())
     result = config.to_config_dict()
     assert result["features"]["js_repl"] is True
 
 
-def test_collab_disabled():
-    """Disabling collab should set multi_agent feature to False."""
-    config = BuiltinToolsConfig(collab=CollabToolsConfig(enabled=False))
+def test_collab():
+    """Including collab should set multi_agent feature to True."""
+    config = BuiltinToolsConfig(collab=CollabToolsConfig())
     result = config.to_config_dict()
-    assert result["features"]["multi_agent"] is False
+    assert result["features"]["multi_agent"] is True
 
 
-def test_image_generation_enabled():
-    """Enabling image generation should set the feature flag."""
-    config = BuiltinToolsConfig(
-        image_generation=ImageGenerationToolConfig(enabled=True),
-    )
+def test_image_generation():
+    """Including image generation should set the feature flag."""
+    config = BuiltinToolsConfig(image_generation=ImageGenerationToolConfig())
     result = config.to_config_dict()
     assert result["features"]["image_generation"] is True
 
 
-def test_request_permissions_enabled():
-    """Enabling request_permissions should set the feature flag."""
-    config = BuiltinToolsConfig(
-        request_permissions=RequestPermissionsToolConfig(enabled=True),
-    )
+def test_request_permissions():
+    """Including request_permissions should set the feature flag."""
+    config = BuiltinToolsConfig(request_permissions=RequestPermissionsToolConfig())
     result = config.to_config_dict()
     assert result["features"]["request_permissions_tool"] is True
 
 
-def test_code_mode_enabled_with_only():
-    """Enabling code mode with 'only' should set both feature flags."""
-    config = BuiltinToolsConfig(
-        code_mode=CodeModeToolConfig(enabled=True, only=True),
-    )
+def test_code_mode_with_only():
+    """Including code mode with 'only' should set both feature flags."""
+    config = BuiltinToolsConfig(code_mode=CodeModeToolConfig(only=True))
     result = config.to_config_dict()
     assert result["features"]["code_mode"] is True
     assert result["features"]["code_mode_only"] is True
 
 
 def test_experimental_tools():
-    """Enabling experimental tools should populate experimental_supported_tools."""
+    """Including experimental tools should populate experimental_supported_tools."""
     config = BuiltinToolsConfig(
-        grep_files=GrepFilesToolConfig(enabled=True),
-        read_file=ReadFileToolConfig(enabled=True),
-        list_dir=ListDirToolConfig(enabled=True),
+        grep_files=GrepFilesToolConfig(),
+        read_file=ReadFileToolConfig(),
+        list_dir=ListDirToolConfig(),
     )
     result = config.to_config_dict()
     assert "grep_files" in result["experimental_supported_tools"]
@@ -155,9 +140,9 @@ def test_experimental_tools():
     assert "list_dir" in result["experimental_supported_tools"]
 
 
-def test_tool_suggest_enabled():
-    """Enabling tool_suggest should set the feature flag."""
-    config = BuiltinToolsConfig(tool_suggest=ToolSuggestToolConfig(enabled=True))
+def test_tool_suggest():
+    """Including tool_suggest should set the feature flag."""
+    config = BuiltinToolsConfig(tool_suggest=ToolSuggestToolConfig())
     result = config.to_config_dict()
     assert result["features"]["tool_suggest"] is True
 
@@ -165,13 +150,13 @@ def test_tool_suggest_enabled():
 def test_combined_config():
     """Multiple tools configured together should produce correct combined config."""
     config = BuiltinToolsConfig(
-        shell=ShellToolConfig(enabled=False),
+        shell=ShellToolConfig(),
         web_search=WebSearchToolConfig(mode="live"),
-        js_repl=JsReplToolConfig(enabled=True),
-        grep_files=GrepFilesToolConfig(enabled=True),
+        js_repl=JsReplToolConfig(),
+        grep_files=GrepFilesToolConfig(),
     )
     result = config.to_config_dict()
-    assert result["features"]["shell_tool"] is False
+    assert result["features"]["shell_tool"] is True
     assert result["features"]["js_repl"] is True
     assert result["web_search"] == "live"
     assert "grep_files" in result["experimental_supported_tools"]
@@ -188,22 +173,37 @@ def test_no_features_key_when_empty():
 
 
 def test_no_experimental_key_when_empty():
-    """Config dict should not have experimental_supported_tools when none enabled."""
-    config = BuiltinToolsConfig(shell=ShellToolConfig(enabled=False))
+    """Config dict should not have experimental_supported_tools when none set."""
+    config = BuiltinToolsConfig(shell=ShellToolConfig())
     result = config.to_config_dict()
     assert "experimental_supported_tools" not in result
+
+
+def test_to_tool_list_only_set():
+    """to_tool_list should only return explicitly set tools."""
+    config = BuiltinToolsConfig(shell=ShellToolConfig(), js_repl=JsReplToolConfig())
+    tools = config.to_tool_list()
+    assert len(tools) == 2
+    assert isinstance(tools[0], ShellToolConfig)
+    assert isinstance(tools[1], JsReplToolConfig)
+
+
+def test_to_tool_list_empty_default():
+    """Default BuiltinToolsConfig should produce an empty tool list."""
+    config = BuiltinToolsConfig()
+    assert config.to_tool_list() == []
 
 
 def test_roundtrip_model_dump():
     """BuiltinToolsConfig should serialize and deserialize cleanly."""
     original = BuiltinToolsConfig(
-        shell=ShellToolConfig(enabled=False, allow_login_shell=True),
+        shell=ShellToolConfig(allow_login_shell=True),
         web_search=WebSearchToolConfig(
             mode="live",
             context_size="medium",
             location=WebSearchLocationConfig(country="DE"),
         ),
-        js_repl=JsReplToolConfig(enabled=True),
+        js_repl=JsReplToolConfig(),
     )
     data = original.model_dump()
     restored = BuiltinToolsConfig.model_validate(data)
@@ -216,9 +216,15 @@ def test_roundtrip_model_dump():
 # ===========================================================================
 
 
-def test_tools_list_empty():
-    """Empty list produces empty config dict."""
-    assert tools_to_config_dict([]) == {}
+def test_tools_list_empty_disables_all():
+    """Empty list should disable all builtin tools."""
+    result = tools_to_config_dict([])
+    assert result["features"]["shell_tool"] is False
+    assert result["include_apply_patch_tool"] is False
+    assert result["web_search"] == "disabled"
+    assert result["features"]["js_repl"] is False
+    assert result["features"]["multi_agent"] is False
+    assert result["features"]["image_generation"] is False
 
 
 def test_tools_list_single():
@@ -230,11 +236,11 @@ def test_tools_list_single():
 def test_tools_list_multiple():
     """Multiple tool configs in list."""
     result = tools_to_config_dict([
-        ShellToolConfig(enabled=False),
-        JsReplToolConfig(enabled=True),
-        GrepFilesToolConfig(enabled=True),
+        ShellToolConfig(),
+        JsReplToolConfig(),
+        GrepFilesToolConfig(),
     ])
-    assert result["features"]["shell_tool"] is False
+    assert result["features"]["shell_tool"] is True
     assert result["features"]["js_repl"] is True
     assert "grep_files" in result["experimental_supported_tools"]
 
@@ -242,14 +248,14 @@ def test_tools_list_multiple():
 def test_tools_list_matches_builtin_config():
     """List-based and BuiltinToolsConfig should produce same output."""
     builtin = BuiltinToolsConfig(
-        shell=ShellToolConfig(enabled=False),
+        shell=ShellToolConfig(),
         web_search=WebSearchToolConfig(mode="live"),
-        js_repl=JsReplToolConfig(enabled=True),
+        js_repl=JsReplToolConfig(),
     )
     list_result = tools_to_config_dict([
-        ShellToolConfig(enabled=False),
+        ShellToolConfig(),
         WebSearchToolConfig(mode="live"),
-        JsReplToolConfig(enabled=True),
+        JsReplToolConfig(),
     ])
     assert builtin.to_config_dict() == list_result
 
@@ -257,8 +263,8 @@ def test_tools_list_matches_builtin_config():
 def test_to_tool_list_roundtrips():
     """BuiltinToolsConfig.to_tool_list() should roundtrip through tools_to_config_dict."""
     config = BuiltinToolsConfig(
-        collab=CollabToolsConfig(enabled=False),
-        image_generation=ImageGenerationToolConfig(enabled=True),
+        collab=CollabToolsConfig(),
+        image_generation=ImageGenerationToolConfig(),
     )
     from_list = tools_to_config_dict(config.to_tool_list())
     from_config = config.to_config_dict()
@@ -273,9 +279,8 @@ def test_to_tool_list_roundtrips():
 def test_discriminator_resolves_type():
     """ToolConfig union should resolve based on type field."""
     adapter = TypeAdapter(ToolConfig)
-    shell = adapter.validate_python({"type": "shell", "enabled": False})
+    shell = adapter.validate_python({"type": "shell"})
     assert isinstance(shell, ShellToolConfig)
-    assert shell.enabled is False
 
 
 def test_discriminator_all_types():
@@ -311,9 +316,9 @@ def test_discriminated_list_roundtrip():
     """A list[ToolConfig] should serialize and deserialize with discriminator."""
     adapter = TypeAdapter(list[ToolConfig])
     tools: list[ToolConfig] = [
-        ShellToolConfig(enabled=False),
+        ShellToolConfig(),
         WebSearchToolConfig(mode="live"),
-        JsReplToolConfig(enabled=True),
+        JsReplToolConfig(),
     ]
     data = adapter.dump_python(tools, mode="python")
     restored = adapter.validate_python(data)
@@ -327,7 +332,7 @@ def test_discriminated_list_json_roundtrip():
     """list[ToolConfig] should roundtrip through JSON."""
     adapter = TypeAdapter(list[ToolConfig])
     tools: list[ToolConfig] = [
-        ShellToolConfig(enabled=False, allow_login_shell=True),
+        ShellToolConfig(allow_login_shell=True),
         WebSearchToolConfig(mode="cached", context_size="high"),
     ]
     json_bytes = adapter.dump_json(tools)

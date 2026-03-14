@@ -302,7 +302,9 @@ class CodexClient:
             approval_policy: Tool approval policy
             sandbox: Sandbox mode for file operations
             config: Additional configuration overrides
-            tools: List of builtin tool configurations. Merged into ``config``.
+            tools: Builtin tool configurations. ``None`` uses server defaults,
+                an empty list disables all tools, a populated list enables
+                exactly those tools. Merged into ``config``.
             service_name: Optional service name
             personality: Personality preset (none, friendly, pragmatic)
             ephemeral: If true, thread is not persisted to disk
@@ -311,7 +313,7 @@ class CodexClient:
             ThreadResponse containing thread data and configuration
         """
         merged_config = dict(config) if config else {}
-        if tools:
+        if tools is not None:
             from codex_adapter.models.tool_config import tools_to_config_dict
 
             tool_config = tools_to_config_dict(tools)

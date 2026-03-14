@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
+from pydantic import BaseModel, ConfigDict, Discriminator, Tag
 
 
 class _ToolConfigBase(BaseModel):
@@ -32,9 +32,6 @@ class ShellToolConfig(_ToolConfigBase):
 
     type: Literal["shell"] = "shell"
 
-    enabled: bool = True
-    """Enable or disable the shell tool entirely."""
-
     allow_login_shell: bool | None = None
     """Whether the model may request a login shell."""
 
@@ -48,9 +45,6 @@ class ApplyPatchToolConfig(_ToolConfigBase):
     """Configuration for the apply_patch tool."""
 
     type: Literal["apply_patch"] = "apply_patch"
-
-    enabled: bool = True
-    """Enable or disable the apply_patch tool."""
 
     variant: Literal["freeform", "function"] | None = None
     """Patch format variant."""
@@ -75,9 +69,6 @@ class WebSearchToolConfig(_ToolConfigBase):
 
     type: Literal["web_search"] = "web_search"
 
-    enabled: bool = True
-    """Enable or disable web search."""
-
     mode: Literal["disabled", "cached", "live"] | None = None
     """Search mode."""
 
@@ -90,9 +81,6 @@ class WebSearchToolConfig(_ToolConfigBase):
     location: WebSearchLocationConfig | None = None
     """Approximate user location for localised results."""
 
-    content_types: Literal["text", "text_and_image"] | None = None
-    """Content types to include in search results."""
-
 
 # ---------------------------------------------------------------------------
 # Image generation tool
@@ -103,9 +91,6 @@ class ImageGenerationToolConfig(_ToolConfigBase):
     """Configuration for the image_generation tool."""
 
     type: Literal["image_generation"] = "image_generation"
-
-    enabled: bool = False
-    """Enable or disable image generation (disabled by default)."""
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +103,6 @@ class ViewImageToolConfig(_ToolConfigBase):
 
     type: Literal["view_image"] = "view_image"
 
-    enabled: bool = True
-    """Enable or disable the view_image tool."""
-
 
 # ---------------------------------------------------------------------------
 # Plan tool
@@ -132,9 +114,6 @@ class PlanToolConfig(_ToolConfigBase):
 
     type: Literal["plan"] = "plan"
 
-    enabled: bool = True
-    """Enable or disable the plan tool."""
-
 
 # ---------------------------------------------------------------------------
 # JavaScript REPL tool
@@ -145,9 +124,6 @@ class JsReplToolConfig(_ToolConfigBase):
     """Configuration for the js_repl / js_repl_reset tools."""
 
     type: Literal["js_repl"] = "js_repl"
-
-    enabled: bool = False
-    """Enable or disable the JavaScript REPL (disabled by default)."""
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +140,6 @@ class CollabToolsConfig(_ToolConfigBase):
 
     type: Literal["collab"] = "collab"
 
-    enabled: bool = True
-    """Enable or disable all collaboration tools."""
-
 
 # ---------------------------------------------------------------------------
 # Agent jobs tools
@@ -181,9 +154,6 @@ class AgentJobsToolsConfig(_ToolConfigBase):
 
     type: Literal["agent_jobs"] = "agent_jobs"
 
-    enabled: bool = False
-    """Enable or disable agent-jobs tools (disabled by default)."""
-
 
 # ---------------------------------------------------------------------------
 # Request user input tool
@@ -194,9 +164,6 @@ class RequestUserInputToolConfig(_ToolConfigBase):
     """Configuration for the request_user_input tool."""
 
     type: Literal["request_user_input"] = "request_user_input"
-
-    enabled: bool = True
-    """Enable or disable the request_user_input tool."""
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +176,6 @@ class RequestPermissionsToolConfig(_ToolConfigBase):
 
     type: Literal["request_permissions"] = "request_permissions"
 
-    enabled: bool = False
-    """Enable or disable the request_permissions tool (disabled by default)."""
-
 
 # ---------------------------------------------------------------------------
 # Artifacts tool
@@ -222,9 +186,6 @@ class ArtifactsToolConfig(_ToolConfigBase):
     """Configuration for the artifacts tool."""
 
     type: Literal["artifacts"] = "artifacts"
-
-    enabled: bool = False
-    """Enable or disable the artifacts tool (disabled by default)."""
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +198,6 @@ class GrepFilesToolConfig(_ToolConfigBase):
 
     type: Literal["grep_files"] = "grep_files"
 
-    enabled: bool = False
-    """Enable or disable the grep_files tool."""
-
 
 # ---------------------------------------------------------------------------
 # Read file tool (experimental)
@@ -250,9 +208,6 @@ class ReadFileToolConfig(_ToolConfigBase):
     """Configuration for the read_file tool (experimental)."""
 
     type: Literal["read_file"] = "read_file"
-
-    enabled: bool = False
-    """Enable or disable the read_file tool."""
 
 
 # ---------------------------------------------------------------------------
@@ -265,9 +220,6 @@ class ListDirToolConfig(_ToolConfigBase):
 
     type: Literal["list_dir"] = "list_dir"
 
-    enabled: bool = False
-    """Enable or disable the list_dir tool."""
-
 
 # ---------------------------------------------------------------------------
 # Code mode tool
@@ -278,9 +230,6 @@ class CodeModeToolConfig(_ToolConfigBase):
     """Configuration for the code-mode tool (experimental)."""
 
     type: Literal["code_mode"] = "code_mode"
-
-    enabled: bool = False
-    """Enable or disable code mode."""
 
     only: bool = False
     """When True, restrict model-visible tools to code mode entrypoints only."""
@@ -296,17 +245,11 @@ class ToolSearchToolConfig(_ToolConfigBase):
 
     type: Literal["tool_search"] = "tool_search"
 
-    enabled: bool = False
-    """Enable or disable the tool_search tool."""
-
 
 class ToolSuggestToolConfig(_ToolConfigBase):
     """Configuration for the tool_suggest tool (requires discoverable tools)."""
 
     type: Literal["tool_suggest"] = "tool_suggest"
-
-    enabled: bool = False
-    """Enable or disable the tool_suggest tool."""
 
 
 # ---------------------------------------------------------------------------
@@ -322,9 +265,6 @@ class McpResourceToolsConfig(_ToolConfigBase):
     """
 
     type: Literal["mcp_resources"] = "mcp_resources"
-
-    enabled: bool = True
-    """Enable or disable MCP resource tools."""
 
 
 # ===========================================================================
@@ -361,20 +301,45 @@ ToolConfig = Annotated[
 # ===========================================================================
 
 
+def _disable_all_tools() -> dict[str, Any]:
+    """Return config dict that disables all builtin tools."""
+    return {
+        "features": {
+            "shell_tool": False,
+            "image_generation": False,
+            "js_repl": False,
+            "multi_agent": False,
+            "enable_fanout": False,
+            "request_permissions_tool": False,
+            "code_mode": False,
+            "artifact": False,
+            "tool_suggest": False,
+        },
+        "include_apply_patch_tool": False,
+        "web_search": "disabled",
+        "tools": {
+            "view_image": False,
+        },
+    }
+
+
 def tools_to_config_dict(tools: list[ToolConfig]) -> dict[str, Any]:  # noqa: PLR0915
     """Convert a list of tool configs into the ``config`` dict for ``ThreadStartParams``.
 
     Each tool config contributes its settings to the appropriate config keys.
-    Only non-default values are emitted so that server defaults are preserved.
+    An empty list explicitly disables all builtin tools.
 
     Example::
 
-        config = tools_to_config_dict([
+        config = tools_to_config_dict([])  # disable all tools
+        config = tools_to_config_dict([    # enable only these
             WebSearchToolConfig(mode="live", context_size="high"),
-            JsReplToolConfig(enabled=True),
-            CollabToolsConfig(enabled=False),
+            JsReplToolConfig(),
         ])
     """
+    if not tools:
+        return _disable_all_tools()
+
     features: dict[str, bool] = {}
     config: dict[str, Any] = {}
     tools_section: dict[str, Any] = {}
@@ -382,24 +347,23 @@ def tools_to_config_dict(tools: list[ToolConfig]) -> dict[str, Any]:  # noqa: PL
 
     for tool in tools:
         match tool:
-            case ShellToolConfig(enabled=enabled, allow_login_shell=allow_login):
-                if not enabled:
-                    features["shell_tool"] = False
+            case ShellToolConfig(allow_login_shell=allow_login):
+                features["shell_tool"] = True
                 if allow_login is not None:
                     config["allow_login_shell"] = allow_login
 
-            case ApplyPatchToolConfig(enabled=enabled, variant=variant):
-                if not enabled:
-                    config["include_apply_patch_tool"] = False
-                elif variant is not None:
-                    config["include_apply_patch_tool"] = True
+            case ApplyPatchToolConfig(variant=variant):
+                config["include_apply_patch_tool"] = True
+                if variant == "freeform":
+                    features["apply_patch_freeform"] = True
+                elif variant == "function":
+                    features["apply_patch_freeform"] = False
 
             case WebSearchToolConfig(
                 mode=mode,
                 context_size=context_size,
                 allowed_domains=allowed_domains,
                 location=location,
-                content_types=_content_types,
             ):
                 if mode is not None:
                     config["web_search"] = mode
@@ -415,43 +379,42 @@ def tools_to_config_dict(tools: list[ToolConfig]) -> dict[str, Any]:  # noqa: PL
                 if ws_config:
                     tools_section["web_search"] = ws_config
 
-            case ImageGenerationToolConfig(enabled=True):
+            case ImageGenerationToolConfig():
                 features["image_generation"] = True
 
-            case ViewImageToolConfig(enabled=False):
-                tools_section["view_image"] = False
+            case ViewImageToolConfig():
+                tools_section["view_image"] = True
 
-            case JsReplToolConfig(enabled=True):
+            case JsReplToolConfig():
                 features["js_repl"] = True
 
-            case CollabToolsConfig(enabled=False):
-                features["multi_agent"] = False
+            case CollabToolsConfig():
+                features["multi_agent"] = True
 
-            case AgentJobsToolsConfig(enabled=True):
+            case AgentJobsToolsConfig():
                 features["enable_fanout"] = True
 
-            case RequestPermissionsToolConfig(enabled=True):
+            case RequestPermissionsToolConfig():
                 features["request_permissions_tool"] = True
 
-            case CodeModeToolConfig(enabled=enabled, only=only):
-                if enabled:
-                    features["code_mode"] = True
+            case CodeModeToolConfig(only=only):
+                features["code_mode"] = True
                 if only:
                     features["code_mode_only"] = True
 
-            case ArtifactsToolConfig(enabled=True):
+            case ArtifactsToolConfig():
                 features["artifact"] = True
 
-            case ToolSuggestToolConfig(enabled=True):
+            case ToolSuggestToolConfig():
                 features["tool_suggest"] = True
 
-            case GrepFilesToolConfig(enabled=True):
+            case GrepFilesToolConfig():
                 experimental_tools.append("grep_files")
 
-            case ReadFileToolConfig(enabled=True):
+            case ReadFileToolConfig():
                 experimental_tools.append("read_file")
 
-            case ListDirToolConfig(enabled=True):
+            case ListDirToolConfig():
                 experimental_tools.append("list_dir")
 
             case (
@@ -489,62 +452,68 @@ class BuiltinToolsConfig(BaseModel):
 
         tools = BuiltinToolsConfig(
             web_search=WebSearchToolConfig(mode="live", context_size="high"),
-            js_repl=JsReplToolConfig(enabled=True),
-            collab=CollabToolsConfig(enabled=False),
+            js_repl=JsReplToolConfig(),
         )
         params = ThreadStartParams(config=tools.to_config_dict())
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
-    apply_patch: ApplyPatchToolConfig = Field(default_factory=ApplyPatchToolConfig)
-    web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
-    image_generation: ImageGenerationToolConfig = Field(default_factory=ImageGenerationToolConfig)
-    view_image: ViewImageToolConfig = Field(default_factory=ViewImageToolConfig)
-    plan: PlanToolConfig = Field(default_factory=PlanToolConfig)
-    js_repl: JsReplToolConfig = Field(default_factory=JsReplToolConfig)
-    collab: CollabToolsConfig = Field(default_factory=CollabToolsConfig)
-    agent_jobs: AgentJobsToolsConfig = Field(default_factory=AgentJobsToolsConfig)
-    request_user_input: RequestUserInputToolConfig = Field(
-        default_factory=RequestUserInputToolConfig,
-    )
-    request_permissions: RequestPermissionsToolConfig = Field(
-        default_factory=RequestPermissionsToolConfig,
-    )
-    artifacts: ArtifactsToolConfig = Field(default_factory=ArtifactsToolConfig)
-    grep_files: GrepFilesToolConfig = Field(default_factory=GrepFilesToolConfig)
-    read_file: ReadFileToolConfig = Field(default_factory=ReadFileToolConfig)
-    list_dir: ListDirToolConfig = Field(default_factory=ListDirToolConfig)
-    code_mode: CodeModeToolConfig = Field(default_factory=CodeModeToolConfig)
-    tool_search: ToolSearchToolConfig = Field(default_factory=ToolSearchToolConfig)
-    tool_suggest: ToolSuggestToolConfig = Field(default_factory=ToolSuggestToolConfig)
-    mcp_resources: McpResourceToolsConfig = Field(default_factory=McpResourceToolsConfig)
+    shell: ShellToolConfig | None = None
+    apply_patch: ApplyPatchToolConfig | None = None
+    web_search: WebSearchToolConfig | None = None
+    image_generation: ImageGenerationToolConfig | None = None
+    view_image: ViewImageToolConfig | None = None
+    plan: PlanToolConfig | None = None
+    js_repl: JsReplToolConfig | None = None
+    collab: CollabToolsConfig | None = None
+    agent_jobs: AgentJobsToolsConfig | None = None
+    request_user_input: RequestUserInputToolConfig | None = None
+    request_permissions: RequestPermissionsToolConfig | None = None
+    artifacts: ArtifactsToolConfig | None = None
+    grep_files: GrepFilesToolConfig | None = None
+    read_file: ReadFileToolConfig | None = None
+    list_dir: ListDirToolConfig | None = None
+    code_mode: CodeModeToolConfig | None = None
+    tool_search: ToolSearchToolConfig | None = None
+    tool_suggest: ToolSuggestToolConfig | None = None
+    mcp_resources: McpResourceToolsConfig | None = None
 
     def to_tool_list(self) -> list[ToolConfig]:
-        """Return all tool configs as a list."""
+        """Return only explicitly set tool configs as a list."""
         return [
-            self.shell,
-            self.apply_patch,
-            self.web_search,
-            self.image_generation,
-            self.view_image,
-            self.plan,
-            self.js_repl,
-            self.collab,
-            self.agent_jobs,
-            self.request_user_input,
-            self.request_permissions,
-            self.artifacts,
-            self.grep_files,
-            self.read_file,
-            self.list_dir,
-            self.code_mode,
-            self.tool_search,
-            self.tool_suggest,
-            self.mcp_resources,
+            v
+            for v in (
+                self.shell,
+                self.apply_patch,
+                self.web_search,
+                self.image_generation,
+                self.view_image,
+                self.plan,
+                self.js_repl,
+                self.collab,
+                self.agent_jobs,
+                self.request_user_input,
+                self.request_permissions,
+                self.artifacts,
+                self.grep_files,
+                self.read_file,
+                self.list_dir,
+                self.code_mode,
+                self.tool_search,
+                self.tool_suggest,
+                self.mcp_resources,
+            )
+            if v is not None
         ]
 
     def to_config_dict(self) -> dict[str, Any]:
-        """Serialize into a flat config dict for ``ThreadStartParams.config``."""
-        return tools_to_config_dict(self.to_tool_list())
+        """Serialize into a flat config dict for ``ThreadStartParams.config``.
+
+        Only explicitly set tools are included. An empty ``BuiltinToolsConfig``
+        produces an empty dict (server defaults preserved).
+        """
+        tool_list = self.to_tool_list()
+        if not tool_list:
+            return {}
+        return tools_to_config_dict(tool_list)
