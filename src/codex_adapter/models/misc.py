@@ -334,7 +334,7 @@ class ModelData(CodexBaseModel):
     input_modalities: list[InputModality] = Field(
         default_factory=lambda: list[InputModality](["text", "image"])
     )
-    supports_personality: bool = False
+    supports_personality: bool | None = None
 
 
 class McpTool(CodexBaseModel):
