@@ -8,7 +8,7 @@ import contextlib
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any, TypeVar, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 import anyenv
 from pydantic import BaseModel, TypeAdapter
@@ -138,7 +138,6 @@ if TYPE_CHECKING:
         UserInputHandler,
     )
 
-ResultType = TypeVar("ResultType", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
 
@@ -216,7 +215,7 @@ class Session:
         """Interrupt a running turn.  See :meth:`CodexClient.turn_interrupt`."""
         await self._client.turn_interrupt(self.thread_id, turn_id)
 
-    async def turn_stream_structured(
+    async def turn_stream_structured[ResultType: BaseModel](
         self,
         user_input: str | list[UserInput],
         result_type: type[ResultType],
@@ -468,8 +467,9 @@ class CodexClient:
         config: dict[str, Any] | None,
         tools: list[ToolConfig] | None,
         code_mode: bool | None,
+        mcp_servers: Mapping[str, McpServerConfig] | None = None,
     ) -> dict[str, Any] | None:
-        """Merge tools and code_mode into a config dict."""
+        """Merge tools, code_mode, and mcp_servers into a config dict."""
         merged = dict(config) if config else {}
         if code_mode is not None:
             merged.setdefault("features", {})["code_mode"] = code_mode
@@ -482,6 +482,10 @@ class CodexClient:
                     merged[key] = value
                 elif isinstance(value, dict) and isinstance(merged[key], dict):
                     merged[key] = {**value, **merged[key]}
+        if mcp_servers:
+            servers = merged.setdefault("mcp_servers", {})
+            for name, srv in mcp_servers.items():
+                servers.setdefault(name, srv.model_dump(exclude_none=True))
         return merged or None
 
     async def thread_start(
@@ -500,6 +504,7 @@ class CodexClient:
         service_name: str | None = None,
         personality: Personality | None = None,
         ephemeral: bool | None = None,
+        mcp_servers: Mapping[str, McpServerConfig] | None = None,
     ) -> Session:
         """Start a new conversation thread.
 
@@ -519,6 +524,8 @@ class CodexClient:
             service_name: Optional service name
             personality: Personality preset (none, friendly, pragmatic)
             ephemeral: If true, thread is not persisted to disk
+            mcp_servers: Per-thread MCP server configurations.
+                Merged into ``config`` under the ``mcp_servers`` key.
 
         Returns:
             Session wrapping the new thread
@@ -531,7 +538,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=self._merge_config(config, tools, code_mode),
+            config=self._merge_config(config, tools, code_mode, mcp_servers),
             service_name=service_name,
             personality=personality,
             ephemeral=ephemeral,
@@ -557,6 +564,7 @@ class CodexClient:
         tools: list[ToolConfig] | None = None,
         code_mode: bool | None = None,
         personality: Personality | None = None,
+        mcp_servers: Mapping[str, McpServerConfig] | None = None,
     ) -> Session:
         """Resume an existing thread by ID.
 
@@ -574,6 +582,7 @@ class CodexClient:
             tools: Builtin tool configurations override
             code_mode: Enable experimental code mode feature flag
             personality: Personality override
+            mcp_servers: Per-thread MCP server configurations
 
         Returns:
             Session wrapping the resumed thread
@@ -588,7 +597,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=self._merge_config(config, tools, code_mode),
+            config=self._merge_config(config, tools, code_mode, mcp_servers),
             personality=personality,
         )
         result = await self._send_request("thread/resume", params)
@@ -612,6 +621,7 @@ class CodexClient:
         tools: list[ToolConfig] | None = None,
         code_mode: bool | None = None,
         personality: Personality | None = None,
+        mcp_servers: Mapping[str, McpServerConfig] | None = None,
     ) -> Session:
         """Fork an existing thread into a new thread with copied history.
 
@@ -629,6 +639,7 @@ class CodexClient:
             tools: Builtin tool configurations for forked thread
             code_mode: Enable experimental code mode feature flag
             personality: Personality for forked thread
+            mcp_servers: Per-thread MCP server configurations
 
         Returns:
             Session wrapping the new forked thread
@@ -643,7 +654,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=self._merge_config(config, tools, code_mode),
+            config=self._merge_config(config, tools, code_mode, mcp_servers),
             personality=personality,
         )
         result = await self._send_request("thread/fork", params)
@@ -910,16 +921,11 @@ class CodexClient:
         return TurnSteerResponse.model_validate(result)
 
     async def turn_interrupt(self, thread_id: str, turn_id: str) -> None:
-        """Interrupt a running turn.
-
-        Args:
-            thread_id: The thread ID
-            turn_id: The turn ID to interrupt
-        """
+        """Interrupt a running turn."""
         params = TurnInterruptParams(thread_id=thread_id, turn_id=turn_id)
         await self._send_request("turn/interrupt", params)
 
-    async def turn_stream_structured(
+    async def turn_stream_structured[ResultType: BaseModel](
         self,
         thread_id: str,
         user_input: str | list[UserInput],
@@ -1265,14 +1271,7 @@ class CodexClient:
         return LoginAccountResponse.model_validate(result)
 
     async def account_login_cancel(self, login_id: str) -> CancelLoginAccountResponse:
-        """Cancel an in-progress account login.
-
-        Args:
-            login_id: The login ID to cancel
-
-        Returns:
-            CancelLoginAccountResponse with status
-        """
+        """Cancel an in-progress account login."""
         params = CancelLoginAccountParams(login_id=login_id)
         result = await self._send_request("account/login/cancel", params)
         return CancelLoginAccountResponse.model_validate(result)
@@ -1282,11 +1281,7 @@ class CodexClient:
         await self._send_request("account/logout")
 
     async def account_rate_limits_read(self) -> GetAccountRateLimitsResponse:
-        """Read account rate limits.
-
-        Returns:
-            GetAccountRateLimitsResponse with rate limit information
-        """
+        """Read account rate limits."""
         result = await self._send_request("account/rateLimits/read")
         return GetAccountRateLimitsResponse.model_validate(result)
 
@@ -1370,11 +1365,7 @@ class CodexClient:
         return ConfigWriteResponse.model_validate(result)
 
     async def config_requirements_read(self) -> ConfigRequirementsReadResponse:
-        """Read config requirements.
-
-        Returns:
-            ConfigRequirementsReadResponse with requirements
-        """
+        """Read config requirements."""
         result = await self._send_request("configRequirements/read")
         return ConfigRequirementsReadResponse.model_validate(result)
 
