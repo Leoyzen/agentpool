@@ -304,7 +304,7 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["docs"]
+extend-exclude = ["docs", "src/codex_adapter/reference"]
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -442,6 +442,10 @@ max-complexity = 15
 
 [tool.ruff.format]
 preview = true
+
+[tool.ty]
+[tool.ty.src]
+exclude = ["src/codex_adapter/reference"]
 
 [tool.ty.environment]
 python-version = "3.13"
