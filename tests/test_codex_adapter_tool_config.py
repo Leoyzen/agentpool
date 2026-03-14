@@ -7,7 +7,6 @@ from pydantic import TypeAdapter
 from codex_adapter.models.tool_config import (
     ApplyPatchToolConfig,
     BuiltinToolsConfig,
-    CodeModeToolConfig,
     CollabToolsConfig,
     GrepFilesToolConfig,
     ImageGenerationToolConfig,
@@ -117,14 +116,6 @@ def test_request_permissions():
     config = BuiltinToolsConfig(request_permissions=RequestPermissionsToolConfig())
     result = config.to_config_dict()
     assert result["features"]["request_permissions_tool"] is True
-
-
-def test_code_mode_with_only():
-    """Including code mode with 'only' should set both feature flags."""
-    config = BuiltinToolsConfig(code_mode=CodeModeToolConfig(only=True))
-    result = config.to_config_dict()
-    assert result["features"]["code_mode"] is True
-    assert result["features"]["code_mode_only"] is True
 
 
 def test_experimental_tools():
@@ -302,7 +293,6 @@ def test_discriminator_all_types():
         "grep_files",
         "read_file",
         "list_dir",
-        "code_mode",
         "tool_search",
         "tool_suggest",
         "mcp_resources",

@@ -222,19 +222,6 @@ class ListDirToolConfig(_ToolConfigBase):
 
 
 # ---------------------------------------------------------------------------
-# Code mode tool
-# ---------------------------------------------------------------------------
-
-
-class CodeModeToolConfig(_ToolConfigBase):
-    """Configuration for the code-mode tool (experimental)."""
-
-    type: Literal["code_mode"] = "code_mode"
-
-    only: bool = False
-    """When True, restrict model-visible tools to code mode entrypoints only."""
-
-
 # ---------------------------------------------------------------------------
 # Tool search / suggest
 # ---------------------------------------------------------------------------
@@ -287,7 +274,6 @@ ToolConfig = Annotated[
     | Annotated[GrepFilesToolConfig, Tag("grep_files")]
     | Annotated[ReadFileToolConfig, Tag("read_file")]
     | Annotated[ListDirToolConfig, Tag("list_dir")]
-    | Annotated[CodeModeToolConfig, Tag("code_mode")]
     | Annotated[ToolSearchToolConfig, Tag("tool_search")]
     | Annotated[ToolSuggestToolConfig, Tag("tool_suggest")]
     | Annotated[McpResourceToolsConfig, Tag("mcp_resources")],
@@ -397,11 +383,6 @@ def tools_to_config_dict(tools: list[ToolConfig]) -> dict[str, Any]:  # noqa: PL
             case RequestPermissionsToolConfig():
                 features["request_permissions_tool"] = True
 
-            case CodeModeToolConfig(only=only):
-                features["code_mode"] = True
-                if only:
-                    features["code_mode_only"] = True
-
             case ArtifactsToolConfig():
                 features["artifact"] = True
 
@@ -474,7 +455,6 @@ class BuiltinToolsConfig(BaseModel):
     grep_files: GrepFilesToolConfig | None = None
     read_file: ReadFileToolConfig | None = None
     list_dir: ListDirToolConfig | None = None
-    code_mode: CodeModeToolConfig | None = None
     tool_search: ToolSearchToolConfig | None = None
     tool_suggest: ToolSuggestToolConfig | None = None
     mcp_resources: McpResourceToolsConfig | None = None
@@ -499,7 +479,6 @@ class BuiltinToolsConfig(BaseModel):
                 self.grep_files,
                 self.read_file,
                 self.list_dir,
-                self.code_mode,
                 self.tool_search,
                 self.tool_suggest,
                 self.mcp_resources,

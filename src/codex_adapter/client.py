@@ -275,6 +275,27 @@ class CodexClient:
     # Thread lifecycle methods
     # ========================================================================
 
+    @staticmethod
+    def _merge_config(
+        config: dict[str, Any] | None,
+        tools: list[ToolConfig] | None,
+        code_mode: bool | None,
+    ) -> dict[str, Any] | None:
+        """Merge tools and code_mode into a config dict."""
+        merged = dict(config) if config else {}
+        if code_mode is not None:
+            merged.setdefault("features", {})["code_mode"] = code_mode
+        if tools is not None:
+            from codex_adapter.models.tool_config import tools_to_config_dict
+
+            tool_config = tools_to_config_dict(tools)
+            for key, value in tool_config.items():
+                if key not in merged:
+                    merged[key] = value
+                elif isinstance(value, dict) and isinstance(merged[key], dict):
+                    merged[key] = {**value, **merged[key]}
+        return merged or None
+
     async def thread_start(
         self,
         *,
@@ -287,6 +308,7 @@ class CodexClient:
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
         tools: list[ToolConfig] | None = None,
+        code_mode: bool | None = None,
         service_name: str | None = None,
         personality: Personality | None = None,
         ephemeral: bool | None = None,
@@ -305,6 +327,7 @@ class CodexClient:
             tools: Builtin tool configurations. ``None`` uses server defaults,
                 an empty list disables all tools, a populated list enables
                 exactly those tools. Merged into ``config``.
+            code_mode: Enable experimental code mode feature flag
             service_name: Optional service name
             personality: Personality preset (none, friendly, pragmatic)
             ephemeral: If true, thread is not persisted to disk
@@ -312,19 +335,6 @@ class CodexClient:
         Returns:
             ThreadResponse containing thread data and configuration
         """
-        merged_config = dict(config) if config else {}
-        if tools is not None:
-            from codex_adapter.models.tool_config import tools_to_config_dict
-
-            tool_config = tools_to_config_dict(tools)
-            # Tool config is base layer; explicit config keys take precedence
-            for key, value in tool_config.items():
-                if key not in merged_config:
-                    merged_config[key] = value
-                elif isinstance(value, dict) and isinstance(merged_config[key], dict):
-                    merged = {**value, **merged_config[key]}
-                    merged_config[key] = merged
-
         params = ThreadStartParams(
             cwd=cwd,
             model=model,
@@ -333,7 +343,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=merged_config or None,
+            config=self._merge_config(config, tools, code_mode),
             service_name=service_name,
             personality=personality,
             ephemeral=ephemeral,
@@ -356,6 +366,8 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
+        tools: list[ToolConfig] | None = None,
+        code_mode: bool | None = None,
         personality: Personality | None = None,
     ) -> ThreadResponse:
         """Resume an existing thread by ID.
@@ -371,6 +383,8 @@ class CodexClient:
             approval_policy: Tool approval policy override
             sandbox: Sandbox mode override
             config: Additional configuration overrides
+            tools: Builtin tool configurations override
+            code_mode: Enable experimental code mode feature flag
             personality: Personality override
 
         Returns:
@@ -386,7 +400,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=config,
+            config=self._merge_config(config, tools, code_mode),
             personality=personality,
         )
         result = await self._send_request("thread/resume", params)
@@ -407,6 +421,8 @@ class CodexClient:
         approval_policy: ApprovalPolicy | None = None,
         sandbox: SandboxMode | None = None,
         config: dict[str, Any] | None = None,
+        tools: list[ToolConfig] | None = None,
+        code_mode: bool | None = None,
         personality: Personality | None = None,
     ) -> ThreadResponse:
         """Fork an existing thread into a new thread with copied history.
@@ -422,6 +438,8 @@ class CodexClient:
             approval_policy: Tool approval policy for forked thread
             sandbox: Sandbox mode for forked thread
             config: Additional configuration overrides
+            tools: Builtin tool configurations for forked thread
+            code_mode: Enable experimental code mode feature flag
             personality: Personality for forked thread
 
         Returns:
@@ -437,7 +455,7 @@ class CodexClient:
             developer_instructions=developer_instructions,
             approval_policy=approval_policy,
             sandbox=sandbox,
-            config=config,
+            config=self._merge_config(config, tools, code_mode),
             personality=personality,
         )
         result = await self._send_request("thread/fork", params)
