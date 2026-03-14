@@ -18,7 +18,6 @@ from codex_adapter.models.codex_types import (  # noqa: TC001
     ThreadSourceKind,
 )
 from codex_adapter.models.command_action import CommandAction  # noqa: TC001
-from codex_adapter.models.input_item import TurnInputItem  # noqa: TC001
 from codex_adapter.models.misc import (  # noqa: TC001
     ClientInfo,
     ConfigEdit,
@@ -29,6 +28,7 @@ from codex_adapter.models.misc import (  # noqa: TC001
     ToolRequestUserInputQuestion,
 )
 from codex_adapter.models.response_item import ResponseItem  # noqa: TC001
+from codex_adapter.models.user_input import UserInput  # noqa: TC001
 
 
 LoginType = Literal["apiKey", "chatgpt", "chatgptAuthTokens"]
@@ -163,7 +163,7 @@ class TurnStartParams(CodexBaseModel):
     """Parameters for turn/start request."""
 
     thread_id: str
-    input: Sequence[TurnInputItem]
+    input: Sequence[UserInput]
     model: str | None = None
     effort: ReasoningEffort | None = None
     approval_policy: ApprovalPolicy | None = None
@@ -179,7 +179,7 @@ class TurnSteerParams(CodexBaseModel):
     """Parameters for turn/steer request."""
 
     thread_id: str
-    input: Sequence[TurnInputItem]
+    input: Sequence[UserInput]
     expected_turn_id: str
 
 

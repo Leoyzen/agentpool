@@ -215,13 +215,15 @@ from codex_adapter.models.events import (
     is_delta_event,
     is_error_event,
 )
-from codex_adapter.models.input_item import (
-    ImageInputItem,
-    LocalImageInputItem,
-    MentionInputItem,
-    SkillInputItem,
-    TextInputItem,
-    TurnInputItem,
+from codex_adapter.models.user_input import (
+    ByteRange,
+    TextElement,
+    UserInput,
+    UserInputImage,
+    UserInputLocalImage,
+    UserInputMention,
+    UserInputSkill,
+    UserInputText,
 )
 from codex_adapter.models.request_params import (
     AppsListParams,
@@ -361,16 +363,6 @@ from codex_adapter.models.thread_status import (
     ThreadStatusSystemError,
 )
 from codex_adapter.models.thread_status import ThreadStatusValue as ThreadStatusUnion
-from codex_adapter.models.user_input import (
-    ByteRange,
-    TextElement,
-    UserInput,
-    UserInputImage,
-    UserInputLocalImage,
-    UserInputMention,
-    UserInputSkill,
-    UserInputText,
-)
 from codex_adapter.models.web_search import (
     WebSearchAction,
     WebSearchActionFindInPage,
@@ -528,7 +520,6 @@ __all__ = [
     "HttpMcpServer",
     "ImageGenerationCallResponseItem",
     "ImageGenerationToolConfig",
-    "ImageInputItem",
     "InitializeParams",
     "InputModality",
     "ItemCompletedData",
@@ -545,7 +536,6 @@ __all__ = [
     "ListDirToolConfig",
     "ListMcpServerStatusParams",
     "ListMcpServerStatusResponse",
-    "LocalImageInputItem",
     "LocalShellCallResponseItem",
     "LoginAccountParams",
     "LoginAccountResponse",
@@ -569,7 +559,6 @@ __all__ = [
     "McpToolCallProgressEvent",
     "McpToolCallResult",
     "McpToolCallStatus",
-    "MentionInputItem",
     "MergeStrategy",
     "MessagePhase",
     "MessageResponseItem",
@@ -640,7 +629,6 @@ __all__ = [
     "SkillData",
     "SkillDependencies",
     "SkillErrorInfo",
-    "SkillInputItem",
     "SkillInterface",
     "SkillRequestApprovalParams",
     "SkillRequestApprovalResponse",
@@ -658,7 +646,6 @@ __all__ = [
     "SkillsRemoteListResponse",
     "StdioMcpServer",
     "TextElement",
-    "TextInputItem",
     "Thread",
     "ThreadActiveFlag",
     "ThreadArchiveParams",
@@ -736,7 +723,6 @@ __all__ = [
     "TurnError",
     "TurnErrorData",
     "TurnErrorEvent",
-    "TurnInputItem",
     "TurnInterruptParams",
     "TurnPlanStep",
     "TurnPlanUpdatedData",

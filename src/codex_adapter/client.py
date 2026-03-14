@@ -61,7 +61,6 @@ from codex_adapter.models import (
     SkillsRemoteExportResponse,
     SkillsRemoteListParams,
     SkillsRemoteListResponse,
-    TextInputItem,
     ThreadArchiveParams,
     ThreadCompactStartParams,
     ThreadForkParams,
@@ -88,6 +87,7 @@ from codex_adapter.models import (
     TurnStartResponse,
     TurnSteerParams,
     TurnSteerResponse,
+    UserInputText,
     codex_event_adapter,
 )
 from codex_adapter.request_handlers import (
@@ -126,7 +126,7 @@ if TYPE_CHECKING:
         ThreadSortKey,
         ThreadSourceKind,
         ToolConfig,
-        TurnInputItem,
+        UserInput,
     )
     from codex_adapter.models.request_params import HazelnutScope, LoginType, ProductSurface
     from codex_adapter.request_handlers import (
@@ -173,7 +173,7 @@ class Session:
 
     def turn_stream(
         self,
-        user_input: str | list[TurnInputItem],
+        user_input: str | list[UserInput],
         *,
         model: str | None = None,
         effort: ReasoningEffort | None = None,
@@ -202,7 +202,7 @@ class Session:
 
     async def turn_steer(
         self,
-        user_input: str | list[TurnInputItem],
+        user_input: str | list[UserInput],
         *,
         expected_turn_id: str,
     ) -> TurnSteerResponse:
@@ -219,7 +219,7 @@ class Session:
 
     async def turn_stream_structured(
         self,
-        user_input: str | list[TurnInputItem],
+        user_input: str | list[UserInput],
         result_type: type[ResultType],
         *,
         model: str | None = None,
@@ -794,7 +794,7 @@ class CodexClient:
     async def turn_stream(
         self,
         thread_id: str,
-        user_input: str | list[TurnInputItem],
+        user_input: str | list[UserInput],
         *,
         model: str | None = None,
         effort: ReasoningEffort | None = None,
@@ -848,7 +848,7 @@ class CodexClient:
                 assert_never(sandbox_policy)
         params = TurnStartParams(
             thread_id=thread_id,
-            input=[TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input,
+            input=[UserInputText(text=user_input)] if isinstance(user_input, str) else user_input,
             model=model,
             effort=effort,
             approval_policy=approval_policy,
@@ -888,7 +888,7 @@ class CodexClient:
     async def turn_steer(
         self,
         thread_id: str,
-        user_input: str | list[TurnInputItem],
+        user_input: str | list[UserInput],
         *,
         expected_turn_id: str,
     ) -> TurnSteerResponse:
@@ -904,7 +904,7 @@ class CodexClient:
         """
         params = TurnSteerParams(
             thread_id=thread_id,
-            input=[TextInputItem(text=user_input)] if isinstance(user_input, str) else user_input,
+            input=[UserInputText(text=user_input)] if isinstance(user_input, str) else user_input,
             expected_turn_id=expected_turn_id,
         )
         result = await self._send_request("turn/steer", params)
@@ -923,7 +923,7 @@ class CodexClient:
     async def turn_stream_structured(
         self,
         thread_id: str,
-        user_input: str | list[TurnInputItem],
+        user_input: str | list[UserInput],
         result_type: type[ResultType],
         *,
         model: str | None = None,

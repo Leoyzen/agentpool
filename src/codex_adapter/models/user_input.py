@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Literal
+import base64
+from typing import Literal, Self
 
 from pydantic import Field
 
@@ -43,11 +44,18 @@ class UserInputImage(CodexBaseModel):
     type: Literal["image"] = "image"
     url: str
 
+    @classmethod
+    def from_bytes(cls, data: bytes, media_type: str) -> Self:
+        """Create from raw bytes as a base64 data URI."""
+        b64 = base64.b64encode(data).decode()
+        data_uri = f"data:{media_type};base64,{b64}"
+        return cls(url=data_uri)
+
 
 class UserInputLocalImage(CodexBaseModel):
     """Local image file user input."""
 
-    type: Literal["local_image"] = "local_image"
+    type: Literal["localImage"] = "localImage"
     path: str
 
 

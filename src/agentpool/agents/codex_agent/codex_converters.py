@@ -70,7 +70,6 @@ if TYPE_CHECKING:
         ThreadData,
         ThreadItem,
         Turn,
-        TurnInputItem,
         UserInput,
     )
     from codex_adapter.models.codex_types import InputModality
@@ -203,19 +202,19 @@ def to_session_data(thread_data: ThreadData, agent_name: str, cwd: str | None) -
     )
 
 
-def user_content_to_codex(content: list[UserContent]) -> list[TurnInputItem]:
-    """Convert pydantic-ai UserContent list to Codex TurnInputItem list."""
-    from codex_adapter.models import ImageInputItem, TextInputItem
+def user_content_to_codex(content: list[UserContent]) -> list[UserInput]:
+    """Convert pydantic-ai UserContent list to Codex UserInput list."""
+    from codex_adapter.models import UserInputImage, UserInputText
 
-    result: list[TurnInputItem] = []
+    result: list[UserInput] = []
     for item in content:
         match item:
             case str():
-                result.append(TextInputItem(text=item))
+                result.append(UserInputText(text=item))
             case ImageUrl(url=url):
-                result.append(ImageInputItem(url=url))
+                result.append(UserInputImage(url=url))
             case BinaryContent(data=data, media_type=media_type, is_image=is_image) if is_image:
-                result.append(ImageInputItem.from_bytes(data=data, media_type=media_type))
+                result.append(UserInputImage.from_bytes(data=data, media_type=media_type))
             case FileUrl() | BinaryContent() | CachePoint() | UploadedFile():
                 pass
             case _ as unreachable:
