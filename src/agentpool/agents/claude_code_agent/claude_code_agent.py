@@ -452,7 +452,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             add_dirs=self._add_dir or [],
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
-            can_use_tool=self._can_use_tool,
+            on_permission=self._can_use_tool,
             on_user_question=self._on_user_question,
             on_elicitation=self._on_elicitation,
             output_schema=self._output_type if self._output_type is not str else None,
@@ -538,10 +538,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             raise RuntimeError("User question callback invoked outside of an active run")
         return await handle_clarifying_questions(ctx, input_data, context)
 
-    async def _on_elicitation(
-        self,
-        request: ElicitationRequest,
-    ) -> ElicitationResult:
+    async def _on_elicitation(self, request: ElicitationRequest) -> ElicitationResult:
         """Handle MCP elicitation requests.
 
         Converts from Claude SDK's ElicitationRequest to MCP's ElicitRequestParams,
