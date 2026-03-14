@@ -133,6 +133,7 @@ if TYPE_CHECKING:
         CommandApprovalHandler,
         DynamicToolCallHandler,
         FileChangeApprovalHandler,
+        HandlerMethod,
         ServerRequestHandler,
         UserInputHandler,
     )
@@ -157,8 +158,6 @@ class Session:
             ...
         await session.set_name("exploration")
     """
-
-    __slots__ = ("_client", "response")
 
     def __init__(self, client: CodexClient, response: ThreadResponse) -> None:
         self._client = client
@@ -377,13 +376,13 @@ class CodexClient:
         self._active_threads: set[str] = set()
         self._server_request_handlers: dict[str, ServerRequestHandler] = {}
         if on_command_approval:
-            self.on_server_request(SERVER_REQUEST_COMMAND_APPROVAL, on_command_approval)  # type: ignore[arg-type]
+            self.register_handler(SERVER_REQUEST_COMMAND_APPROVAL, on_command_approval)  # type: ignore[arg-type]
         if on_file_change_approval:
-            self.on_server_request(SERVER_REQUEST_FILE_CHANGE_APPROVAL, on_file_change_approval)  # type: ignore[arg-type]
+            self.register_handler(SERVER_REQUEST_FILE_CHANGE_APPROVAL, on_file_change_approval)  # type: ignore[arg-type]
         if on_user_input:
-            self.on_server_request(SERVER_REQUEST_USER_INPUT, on_user_input)  # type: ignore[arg-type]
+            self.register_handler(SERVER_REQUEST_USER_INPUT, on_user_input)  # type: ignore[arg-type]
         if on_dynamic_tool_call:
-            self.on_server_request(SERVER_REQUEST_DYNAMIC_TOOL_CALL, on_dynamic_tool_call)  # type: ignore[arg-type]
+            self.register_handler(SERVER_REQUEST_DYNAMIC_TOOL_CALL, on_dynamic_tool_call)  # type: ignore[arg-type]
 
     async def __aenter__(self) -> Self:
         """Async context manager entry - starts the app-server."""
@@ -1697,7 +1696,7 @@ class CodexClient:
     # Server request handler registration
     # ========================================================================
 
-    def on_server_request(self, method: str, handler: ServerRequestHandler) -> None:
+    def register_handler(self, method: HandlerMethod, handler: ServerRequestHandler) -> None:
         """Register a handler for a server request method.
 
         The handler receives the parsed params model and must return
@@ -1714,7 +1713,7 @@ class CodexClient:
             ) -> CommandExecutionRequestApprovalResponse:
                 return CommandExecutionRequestApprovalResponse(decision="allow")
 
-            client.on_server_request(SERVER_REQUEST_COMMAND_APPROVAL, handle_approval)
+            client.register_handler(SERVER_REQUEST_COMMAND_APPROVAL, handle_approval)
         """
         if method not in SERVER_REQUEST_TYPES:
             msg = (

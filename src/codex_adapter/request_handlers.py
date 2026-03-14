@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Literal
 
 from codex_adapter.models import (
     CommandExecutionRequestApprovalParams,
@@ -22,6 +23,12 @@ SERVER_REQUEST_FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval"
 SERVER_REQUEST_USER_INPUT = "item/tool/requestUserInput"
 SERVER_REQUEST_DYNAMIC_TOOL_CALL = "item/tool/call"
 
+HandlerMethod = Literal[
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/tool/requestUserInput",
+    "item/tool/call",
+]
 # Type for server request parameter models
 ServerRequestParams = (
     CommandExecutionRequestApprovalParams
