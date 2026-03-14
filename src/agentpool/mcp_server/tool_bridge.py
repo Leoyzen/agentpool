@@ -64,8 +64,7 @@ def _is_annotation_of_type(annotation: Any, type_name: str) -> bool:
     if isinstance(annotation, type) and annotation.__name__ == type_name:
         return True
     # Check generic origin (e.g., SomeType[T])
-    origin = get_origin(annotation)
-    if origin is not None:
+    if origin := get_origin(annotation):
         if isinstance(origin, type) and origin.__name__ == type_name:
             return True
         # Handle Union types (e.g., SomeType | None)
