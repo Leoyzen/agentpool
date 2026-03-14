@@ -323,15 +323,15 @@ class FSSpecTools(ResourceProvider):
                 suggestion_text = " ".join(suggestions) if suggestions else ""
                 return f"Error: Too many items ({total_found:,}). {suggestion_text}"
 
-            for file_path, file_info in paths.items():  # pyright: ignore[reportAttributeAccessIssue]
+            for file_path, file_info in paths.items():
                 rel_path = os.path.relpath(str(file_path), path)
                 # Skip excluded patterns
                 if exclude and any(fnmatch(rel_path, pat) for pat in exclude):
                     continue
                 # Use type from glob detail info, falling back to isdir only if needed
-                is_dir = await is_directory(fs, file_path, entry_type=file_info.get("type"))  # pyright: ignore[reportArgumentType]
+                is_dir = await is_directory(fs, file_path, entry_type=file_info.get("type"))
                 item_info = {
-                    "name": Path(file_path).name,  # pyright: ignore[reportArgumentType]
+                    "name": Path(file_path).name,
                     "path": file_path,
                     "relative_path": rel_path,
                     "size": file_info.get("size", 0),
@@ -1068,7 +1068,7 @@ class FSSpecTools(ResourceProvider):
         # with self.fs.open(path, "r", encoding="utf-8") as f:
         #     return f.read()
         val = await self._get_fs(agent_ctx)._cat(path)
-        return val.decode() if isinstance(val, bytes) else val  # pyright: ignore[reportReturnType]
+        return val.decode() if isinstance(val, bytes) else val
 
     async def _write(self, agent_ctx: AgentContext, path: str, content: str | bytes) -> None:
         if isinstance(content, str):

@@ -371,7 +371,7 @@ class CodeTools(ResourceProvider):
                 files = await fs._find(resolved, detail=True)
                 file_paths = [
                     p
-                    for p, info in files.items()  # pyright: ignore[reportAttributeAccessIssue]
+                    for p, info in files.items()
                     if not await is_directory(fs, p, entry_type=info["type"])
                 ]
             except Exception as e:  # noqa: BLE001

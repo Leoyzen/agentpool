@@ -143,7 +143,7 @@ class ACPViaACPHarness:
         # Extract mock environment from first tool (all should have same env)
         mock_env = None
         for tool in tools:
-            if hasattr(tool, "environment") and (env := tool.environment):  # pyright: ignore[reportAttributeAccessIssue]
+            if hasattr(tool, "environment") and (env := tool.environment):
                 mock_env = env
                 break
         if not mock_env:

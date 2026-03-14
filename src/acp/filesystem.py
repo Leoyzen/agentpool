@@ -46,7 +46,7 @@ class ACPFile(AbstractBufferedFile):  # type: ignore[misc]
         """Fetch byte range from file (sync wrapper)."""
         if self._content is None:
             # Run the async operation in the event loop
-            self._content = self.fs.cat_file(self.path)  # pyright: ignore[reportAttributeAccessIssue]
+            self._content = self.fs.cat_file(self.path)
             assert self._content
 
         if start is None and end is None:
@@ -148,7 +148,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         except Exception as e:
             raise FileNotFoundError(f"Could not read file {path}: {e}") from e
 
-    cat_file = sync_wrapper(_cat_file)  # pyright: ignore[reportAssignmentType]
+    cat_file = sync_wrapper(_cat_file)
 
     async def _put_file(
         self, lpath: str, rpath: str, mode: str = "overwrite", **kwargs: Any
@@ -315,7 +315,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
         else:
             return exists_cmd.parse_command(output, exit_code if exit_code is not None else 1)
 
-    exists = sync_wrapper(_exists)  # pyright: ignore[reportAssignmentType]
+    exists = sync_wrapper(_exists)
 
     async def _isdir(self, path: str, **kwargs: Any) -> bool:
         """Check if path is a directory via test command.
@@ -525,7 +525,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
             logger.warning("CLI find error, falling back to walk: %s", e)
             return await super()._find(path, maxdepth=maxdepth, withdirs=withdirs, **kwargs)  # type: ignore[no-any-return]
 
-    find = sync_wrapper(_find)  # pyright: ignore[reportAssignmentType]
+    find = sync_wrapper(_find)
 
     def open(
         self,

@@ -136,7 +136,7 @@ class ListDirectoryTool(Tool[ToolResult]):
                     metadata={"count": total_found, "truncated": True},
                 )
 
-            for file_path, file_info in paths.items():  # pyright: ignore[reportAttributeAccessIssue]
+            for file_path, file_info in paths.items():
                 rel_path = os.path.relpath(str(file_path), path)
 
                 # Skip excluded patterns
@@ -144,10 +144,10 @@ class ListDirectoryTool(Tool[ToolResult]):
                     continue
 
                 # Use type from glob detail info, falling back to isdir only if needed
-                is_dir = await is_directory(fs, file_path, entry_type=file_info.get("type"))  # pyright: ignore[reportArgumentType]
+                is_dir = await is_directory(fs, file_path, entry_type=file_info.get("type"))
 
                 item_info = {
-                    "name": Path(file_path).name,  # pyright: ignore[reportArgumentType]
+                    "name": Path(file_path).name,
                     "path": file_path,
                     "relative_path": rel_path,
                     "size": file_info.get("size", 0),

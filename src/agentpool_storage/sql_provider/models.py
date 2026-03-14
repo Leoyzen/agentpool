@@ -73,7 +73,7 @@ class CommandHistory(AsyncAttrs, SQLModel, table=True):
     )
     """When the command was executed"""
 
-    model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
+    model_config = SQLModelConfig(use_attribute_docstrings=True)
 
 
 class MessageLog(Schema):

@@ -139,7 +139,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
 
     if run_ctx_key or agent_ctx_key:
         # Tool has RunContext and/or AgentContext
-        async def wrapped(  # pyright: ignore[reportRedeclaration]
+        async def wrapped(
             ctx: RunContext, *args: Any, **kwargs: Any
         ) -> TReturn | None | ToolReturn:
             confirm_ctx = replace(

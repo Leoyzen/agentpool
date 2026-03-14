@@ -323,7 +323,7 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
         return cls(
             name=name_override or name,
             description=description_override or inspect.getdoc(callable_obj) or "",
-            callable=callable_obj,  # pyright: ignore[reportArgumentType]
+            callable=callable_obj,
             import_path=import_path,
             schema_override=schema_override,
             category=category,

@@ -167,6 +167,7 @@ dev = [
   "pytest-timeout>=2.4.0",
   "pytest-xdist",
   "syrupy>=4.0.0",
+  "ty>=0.0.23",
 ]
 benchmark = ["pyinstrument"]
 docs = [
@@ -255,26 +256,6 @@ disable_error_code = [
 [[tool.mypy.overrides]]
 module = ["fsspec.*"]
 ignore_missing_imports = true
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-pythonVersion = "3.13"
-pythonPlatform = "All"
-typeCheckingMode = "basic"
-deprecateTypingAliases = true
-reportMissingTypeStubs = false
-reportUnusedCallResult = false
-reportUnknownVariableType = false
-reportAny = false
-reportImplicitOverride = false
-reportUnusedFunction = false
-reportImplicitStringConcatenation = false
-reportIgnoreCommentWithoutRule = false
-reportUnannotatedClassAttribute = false
-reportSelfClsParameterName = false
-reportPrivateImportUsage = false
-reportUnusedExpression = false
 
 [tool.pytest]
 addopts = ["-m", "not slow and not acp_snapshot"]
