@@ -392,21 +392,17 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 pass
             else:
                 for server in live_status.mcp_servers:
-                    name = server.name
-                    server_info = server.server_info
-                    typ = server.config.get("type", "stdio") if server.config else "unknown"
-                    result[name] = MCPServerStatus(
-                        name=name,
+                    result[server.name] = MCPServerStatus(
+                        name=server.name,
                         status=server.status,
-                        server_type=typ,
-                        server_name=server_info.name if server_info else None,
-                        server_version=server_info.version if server_info else None,
+                        server_type=server.config.type if server.config else "unknown",
+                        server_name=server.server_info.name if server.server_info else None,
+                        server_version=server.server_info.version if server.server_info else None,
                     )
                 return result
         # Fallback: report from config
         for name, config in self._mcp_servers.items():
-            server_type = config.get("type", "unknown")
-            result[name] = MCPServerStatus(name=name, status="connected", server_type=server_type)
+            result[name] = MCPServerStatus(name=name, status="connected", server_type=config.type)
         return result
 
     def _get_client(

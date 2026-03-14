@@ -6,7 +6,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
-from clawd_code_sdk.models import ResultMessage
+from clawd_code_sdk.models import McpHttpServerConfig, ResultMessage
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 import pytest
@@ -250,7 +250,7 @@ async def test_claude_code_mcp_bridge_integration():
 
         async with ToolManagerBridge(node=agent) as bridge:
             options = ClaudeAgentOptions(
-                mcp_servers={"test_bridge": {"type": "http", "url": bridge.url}},
+                mcp_servers={"test_bridge": McpHttpServerConfig(url=bridge.url)},
                 allowed_tools=["mcp__test_bridge__capture_context_tool"],
             )
 

@@ -197,17 +197,17 @@ def convert_mcp_servers_to_sdk_format(
         config: McpServerConfig
         match server:
             case StdioMCPServerConfig(command=command, args=args):
-                config = McpStdioServerConfig(type="stdio", command=command, args=args)
+                config = McpStdioServerConfig(command=command, args=args)
                 if server.env:
-                    config["env"] = server.get_env_vars()
+                    config.env = server.get_env_vars()
             case SSEMCPServerConfig(url=url):
-                config = McpSSEServerConfig(type="sse", url=str(url))
+                config = McpSSEServerConfig(url=str(url))
                 if server.headers:
-                    config["headers"] = server.headers
+                    config.headers = server.headers
             case StreamableHTTPMCPServerConfig(url=url):
-                config = McpHttpServerConfig(type="http", url=str(url))
+                config = McpHttpServerConfig(url=str(url))
                 if server.headers:
-                    config["headers"] = server.headers
+                    config.headers = server.headers
             case _ as unreachable:
                 assert_never(unreachable)
 

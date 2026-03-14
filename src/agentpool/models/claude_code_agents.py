@@ -383,13 +383,11 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
             for server_name, server_config in (v.mcp_servers or {}).items():
                 match server_config:
                     case StdioMCPServerConfig(command=command, args=args):
-                        mcp_dct[server_name] = McpStdioServerConfig(
-                            type="stdio", command=command, args=args
-                        )
+                        mcp_dct[server_name] = McpStdioServerConfig(command=command, args=args)
                     case StreamableHTTPMCPServerConfig(url=url):
-                        mcp_dct[server_name] = McpHttpServerConfig(type="http", url=str(url))
+                        mcp_dct[server_name] = McpHttpServerConfig(url=str(url))
                     case SSEMCPServerConfig(url=url):
-                        mcp_dct[server_name] = McpSSEServerConfig(type="sse", url=str(url))
+                        mcp_dct[server_name] = McpSSEServerConfig(url=str(url))
             dumped = v.model_dump()
             dumped["mcp_servers"] = mcp_dct
             dct[k] = CCAgentDefinition(**dumped)
