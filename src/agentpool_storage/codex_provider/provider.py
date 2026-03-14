@@ -120,12 +120,12 @@ class CodexStorageProvider(StorageProvider):
             return []
 
         try:
-            response = await self._client.thread_resume(session_id)
+            session = await self._client.thread_resume(session_id)
         except Exception:
             logger.exception("Failed to load Codex thread", session_id=session_id)
             return []
 
-        if not response.thread.turns:
+        if not session.response.thread.turns:
             return []
 
-        return turns_to_chat_messages(response.thread.turns)
+        return turns_to_chat_messages(session.response.thread.turns)

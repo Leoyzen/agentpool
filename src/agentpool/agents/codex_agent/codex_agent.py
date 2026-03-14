@@ -320,8 +320,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Resume existing session or start new thread
         if self._sdk_session_id:
             # Resume the specified thread
-            response = await self._client.thread_resume(self._sdk_session_id)
-            thread = response.thread
+            session = await self._client.thread_resume(self._sdk_session_id)
+            thread = session.response.thread
             self._sdk_session_id = thread.id
             self.log.info("Codex thread resumed", sdk_session_id=self._sdk_session_id, cwd=cwd)
             # Restore conversation history from resumed thread
@@ -331,7 +331,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             self.log.info("Restored conversation history", turn_count=len(thread.turns))
         else:
             # Start a new thread
-            response = await self._client.thread_start(
+            session = await self._client.thread_start(
                 cwd=cwd,
                 model=self._current_model,
                 base_instructions=self._base_instructions,
@@ -340,7 +340,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 approval_policy=self._approval_policy,
                 personality=self._current_personality,
             )
-            self._sdk_session_id = response.thread.id
+            self._sdk_session_id = session.thread_id
             self.log.info("Codex thread started", sdk_session_id=self._sdk_session_id, cwd=cwd)
         return self
 
@@ -721,12 +721,12 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             return None
 
         try:
-            response = await self._client.thread_resume(session_id)
+            session = await self._client.thread_resume(session_id)
         except Exception:
             self.log.exception("Failed to resume Codex thread", session_id=session_id)
             return None
         # Update current thread ID
-        thread = response.thread
+        thread = session.response.thread
         self._sdk_session_id = thread.id
         self.log.info("Thread resumed from Codex server", sdk_session_id=thread.id)
         # Convert turns to ChatMessages and populate conversation

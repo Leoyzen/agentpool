@@ -11,9 +11,9 @@ from codex_adapter.models.events import AgentMessageDeltaEvent, TurnCompletedEve
 
 async def main():
     async with CodexClient() as client:
-        thread = await client.thread_start(cwd="/path/to/project")
+        session = await client.thread_start(cwd="/path/to/project")
         
-        async for event in client.turn_stream(thread.id, "Help me refactor this code"):
+        async for event in session.turn_stream("Help me refactor this code"):
             match event:
                 case AgentMessageDeltaEvent():
                     print(get_text_delta(event), end="", flush=True)
@@ -33,9 +33,8 @@ class FileList(BaseModel):
     total: int
 
 async with CodexClient() as client:
-    thread = await client.thread_start(cwd=".")
-    result = await client.turn_stream_structured(
-        thread.id,
+    session = await client.thread_start(cwd=".")
+    result = await session.turn_stream_structured(
         "List Python files",
         FileList,
     )
