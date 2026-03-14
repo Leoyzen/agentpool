@@ -210,7 +210,7 @@ class AgentPoolACPAgent(ACPAgent):
         update = SessionInfoUpdate(session_id=event.session_id, title=event.metadata.title)
         notification = SessionNotification(session_id=event.session_id, update=update)
         try:
-            await session.client.session_update(notification)  # pyright: ignore[reportArgumentType]
+            await session.client.session_update(notification)
             logger.info(
                 "Sent session info update",
                 session_id=event.session_id,

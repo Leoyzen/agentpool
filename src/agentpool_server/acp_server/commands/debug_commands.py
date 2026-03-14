@@ -202,7 +202,7 @@ class DebugReplaySequenceCommand(NodeCommand):
                 try:
                     # Auto-construct the correct SessionUpdate type via discriminator
                     update = SessionUpdateAdapter.validate_python(notification_data)
-                    await session.notifications.send_update(update)  # pyright: ignore[reportArgumentType]
+                    await session.notifications.send_update(update)
                     count += 1
                     if delay_ms:
                         await anyio.sleep(delay_ms / 1000)

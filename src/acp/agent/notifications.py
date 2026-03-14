@@ -318,7 +318,7 @@ class ACPNotifications:
 
     async def send_update(self, update: SessionUpdate) -> None:
         notification = SessionNotification(session_id=self.id, update=update)
-        await self.client.session_update(notification)  # pyright: ignore[reportArgumentType]
+        await self.client.session_update(notification)
 
     async def tool_call_progress(
         self,
