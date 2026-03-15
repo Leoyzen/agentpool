@@ -141,9 +141,9 @@ async def adapt_claude_stream(  # noqa: PLR0915
         RichAgentStreamEvent instances, followed by a final StreamAdapterResult.
     """
     from anthropic.types.beta import (
-        BetaRawContentBlockDeltaEvent,
-        BetaRawContentBlockStartEvent,
-        BetaRawContentBlockStopEvent,
+        BetaRawContentBlockDeltaEvent as ContentBlockDeltaEvent,
+        BetaRawContentBlockStartEvent as ContentBlockStartEvent,
+        BetaRawContentBlockStopEvent as ContentBlockStopEvent,
         BetaTextBlock as AnthTextBlock,
         BetaThinkingBlock as AnthThinkingBlock,
         BetaToolUseBlock as AnthToolUseBlock,
@@ -260,14 +260,12 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     )
 
             # Real-time streaming: content_block_start
-            case StreamEvent(
-                event=BetaRawContentBlockStartEvent(index=index, content_block=content_block)
-            ):
+            case StreamEvent(event=ContentBlockStartEvent(index=idx, content_block=content_block)):
                 match content_block:
                     case AnthTextBlock():
-                        yield PartStartEvent.text(index=index, content="")
+                        yield PartStartEvent.text(index=idx, content="")
                     case AnthThinkingBlock():
-                        yield PartStartEvent.thinking(index=index, content="")
+                        yield PartStartEvent.thinking(index=idx, content="")
                     case AnthToolUseBlock(id=tc_id, name=raw_tool_name, input=input_):
                         tool_name = _strip_mcp_prefix(raw_tool_name)
                         streaming_tc_id = tc_id
@@ -299,11 +297,11 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         )
 
             # content_block_delta events
-            case StreamEvent(event=BetaRawContentBlockDeltaEvent(index=index, delta=delta)):
+            case StreamEvent(event=ContentBlockDeltaEvent(index=index, delta=delta)):
                 for e in handle_delta(index=index, delta=delta, streaming_tc_id=streaming_tc_id):
                     yield e
             # content_block_stop
-            case StreamEvent(event=BetaRawContentBlockStopEvent(index=index)):
+            case StreamEvent(event=ContentBlockStopEvent(index=index)):
                 streaming_tc_id = None
                 yield PartEndEvent(index=index, part=TextPart(content=""))
 
