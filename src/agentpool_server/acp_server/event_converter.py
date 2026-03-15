@@ -28,6 +28,7 @@ from pydantic_ai import (
     TextPartDelta,
     ThinkingPart,
     ThinkingPartDelta,
+    ToolCallPart,
     ToolCallPartDelta,
     ToolReturnPart,
 )
@@ -282,11 +283,18 @@ class ACPEventConverter:
                             )
 
             # Function tool call started
-            case FunctionToolCallEvent(part=part):
-                tool_call_id = part.tool_call_id
-                tool_input = safe_args_as_dict(part, default={})
+            case (
+                FunctionToolCallEvent(part=ToolCallPart() as call_part)  # type: ignore[misc]
+                | PartStartEvent(part=BuiltinToolCallPart() as call_part)
+            ):
+                tool_call_id = call_part.tool_call_id
+                tool_input = safe_args_as_dict(call_part, default={})
                 self._current_tool_inputs[tool_call_id] = tool_input
-                state = self._get_or_create_tool_state(tool_call_id, part.tool_name, tool_input)
+                state = self._get_or_create_tool_state(
+                    tool_call_id,
+                    call_part.tool_name,
+                    tool_input,
+                )
                 if not state.started:
                     state.started = True
                     yield ToolCallStart(
@@ -298,19 +306,20 @@ class ACPEventConverter:
                     )
 
             # Tool completed successfully
-            case FunctionToolResultEvent(result=ToolReturnPart(content=out), tool_call_id=tc_id):
+            case (
+                FunctionToolResultEvent(result=ToolReturnPart(content=out), tool_call_id=tc_id)  # type: ignore[misc]
+                | PartStartEvent(part=BuiltinToolReturnPart(content=out, tool_call_id=tc_id))
+            ):
                 # Handle async generator content
-                tool_state = self._tool_states.get(tc_id)
-                if tool_state and tool_state.has_content:
+                if (tool_state := self._tool_states.get(tc_id)) and tool_state.has_content:
                     yield ToolCallProgress(tool_call_id=tc_id, status="completed", raw_output=out)
                 else:
                     converted = to_acp_content_blocks(out)
-                    content_items = [ContentToolCallContent(content=block) for block in converted]
                     yield ToolCallProgress(
                         tool_call_id=tc_id,
                         status="completed",
                         raw_output=out,
-                        content=content_items,
+                        content=[ContentToolCallContent(content=block) for block in converted],
                     )
                 self._cleanup_tool_state(tc_id)
 
@@ -528,12 +537,18 @@ class ACPEventConverter:
                     f"{indent}[{source_name}] {delta or ''}", message_id=self._current_message_id
                 )
 
-            case FunctionToolCallEvent(part=part):
+            case (
+                FunctionToolCallEvent(part=part)
+                | PartStartEvent(part=BuiltinToolCallPart() as part)
+            ):
                 text = f"\n{indent}🔧 [{source_name}] Using tool: {part.tool_name}\n"
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
-            case FunctionToolResultEvent(
-                result=ToolReturnPart(content=content, tool_name=tool_name),
+            case (
+                FunctionToolResultEvent(
+                    result=ToolReturnPart(content=content, tool_name=tool_name),
+                )
+                | PartStartEvent(part=BuiltinToolReturnPart(content=content, tool_name=tool_name))
             ):
                 result_str = str(content)
                 if len(result_str) > 200:  # noqa: PLR2004
@@ -610,13 +625,19 @@ class ACPEventConverter:
                     async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
                         yield n
 
-            case FunctionToolCallEvent(part=part):
+            case (
+                FunctionToolCallEvent(part=part)
+                | PartStartEvent(part=BuiltinToolCallPart() as part)
+            ):
                 accumulated.append(f"\n🔧 Using tool: {part.tool_name}\n")
                 async for n in self._emit_subagent_progress(state_key, f"{icon} {source_name}"):
                     yield n
 
-            case FunctionToolResultEvent(
-                result=ToolReturnPart(content=content, tool_name=tool_name),
+            case (
+                FunctionToolResultEvent(
+                    result=ToolReturnPart(content=content, tool_name=tool_name),
+                )
+                | PartStartEvent(part=BuiltinToolReturnPart(content=content, tool_name=tool_name))
             ):
                 result_str = str(content)
                 if len(result_str) > 200:  # noqa: PLR2004
