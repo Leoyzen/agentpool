@@ -35,6 +35,7 @@ dependencies = [
   "anyenv[httpx]>=0.3.0",
   "clawd-code-sdk>=0.1.36",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
+  "codexed>=0.0.1",
   "docler>=1.0.3",
   "docstring-parser>=0.17.0",
   "epregistry",
@@ -227,7 +228,7 @@ python_version = "3.13"
 pretty = true
 strict = true
 check_untyped_defs = true
-exclude = ["venv/", ".venv/", "src/codex_adapter/reference/"]
+exclude = ["venv/", ".venv/"]
 plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
@@ -285,7 +286,7 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["docs", "src/codex_adapter/reference"]
+extend-exclude = ["docs"]
 target-version = "py313"
 
 [tool.ruff.lint]
@@ -426,7 +427,7 @@ preview = true
 
 [tool.ty]
 [tool.ty.src]
-exclude = ["src/codex_adapter/reference"]
+exclude = []
 
 [tool.ty.environment]
 python-version = "3.13"
@@ -454,7 +455,6 @@ module-name = [
   "agentpool_server",
   "agentpool_toolsets",
   "acp",
-  "codex_adapter",
   "opencode_sdk",
 ]
 wheel-exclude = [

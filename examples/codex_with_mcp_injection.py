@@ -6,7 +6,7 @@ similar to how ToolManagerBridge creates in-process MCP servers for ACP agents.
 
 from __future__ import annotations
 
-from codex_adapter import CodexClient, HttpMcpServer, StdioMcpServer, get_text_delta
+from codexed import CodexClient, HttpMcpServer, StdioMcpServer, get_text_delta
 
 
 async def example_with_http_mcp_server():

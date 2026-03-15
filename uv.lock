@@ -46,6 +46,7 @@ dependencies = [
     { name = "alembic" },
     { name = "anyenv", extra = ["httpx"] },
     { name = "clawd-code-sdk" },
+    { name = "codexed" },
     { name = "docler" },
     { name = "docstring-parser" },
     { name = "epregistry" },
@@ -208,6 +209,7 @@ requires-dist = [
     { name = "autoevals", marker = "extra == 'braintrust'" },
     { name = "braintrust", marker = "extra == 'braintrust'" },
     { name = "clawd-code-sdk", specifier = ">=0.1.36" },
+    { name = "codexed", specifier = ">=0.0.1" },
     { name = "composio", marker = "extra == 'composio'" },
     { name = "copykitten", marker = "extra == 'clipboard'" },
     { name = "croniter", marker = "extra == 'bot'", specifier = ">=2.0.0" },
@@ -1087,6 +1089,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz", hash = "sha256:7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414", size = 22330, upload-time = "2025-11-03T09:25:26.604Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl", hash = "sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a", size = 22228, upload-time = "2025-11-03T09:25:25.534Z" },
+]
+
+[[package]]
+name = "codexed"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyenv" },
+    { name = "pydantic" },
+    { name = "schemez" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/6a/a9b69fcc9593613c593318480de94a0a3aed42fd75c4031cbb4f1ef1fef2/codexed-0.0.1.tar.gz", hash = "sha256:5de8f31ac151588940efbe81ad4be3e5393edd59cac8be4e3b7d044a353c7d50", size = 45756, upload-time = "2026-03-15T02:02:26.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/04/3bc3be7623606069e705493a81df150abaf46295efe4bd80d258817af344/codexed-0.0.1-py3-none-any.whl", hash = "sha256:604dc372a0db3683d467c9afc992033cfe987459800ecfe2c493d7d6cb25c0c5", size = 54069, upload-time = "2026-03-15T02:02:24.919Z" },
 ]
 
 [[package]]

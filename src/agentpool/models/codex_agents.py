@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 
+from codexed import ApprovalPolicy, Personality, ReasoningEffort, SandboxMode  # noqa: TC002
 from pydantic import ConfigDict, Field
 
 from agentpool.models.agents import AnyToolConfig  # noqa: TC001
 from agentpool.models.fields import OutputTypeField  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
-from codex_adapter import ApprovalPolicy, Personality, ReasoningEffort, SandboxMode  # noqa: TC001
 
 
 if TYPE_CHECKING:

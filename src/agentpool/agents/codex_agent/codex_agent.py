@@ -38,6 +38,15 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
+    from codexed import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
+    from codexed.models import (
+        CodexEvent,
+        McpServerConfig,
+        MiscTurnStatusValue,
+        TokenUsageBreakdown,
+        ToolRequestUserInputParams,
+        ToolRequestUserInputResponse,
+    )
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -53,15 +62,6 @@ if TYPE_CHECKING:
     from agentpool.sessions.models import SessionData
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
-    from codex_adapter import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
-    from codex_adapter.models import (
-        CodexEvent,
-        McpServerConfig,
-        MiscTurnStatusValue,
-        TokenUsageBreakdown,
-        ToolRequestUserInputParams,
-        ToolRequestUserInputResponse,
-    )
 
 
 logger = get_logger(__name__)
@@ -92,12 +92,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         Returns:
             ToolRequestUserInputResponse with answers
         """
-        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
-
-        from codex_adapter.models import (
+        from codexed.models import (
             ToolRequestUserInputAnswer as _Answer,
             ToolRequestUserInputResponse as _Response,
         )
+        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
 
         if self._tool_bridge._current_context is None:
             raise RuntimeError("User input callback invoked outside of an active run")
@@ -286,7 +285,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _setup_toolsets(self) -> None:
         """Setup toolsets and start the tool bridge."""
-        from codex_adapter.models.mcp_server import HttpMcpServer as CodexHttpMcpServer
+        from codexed.models.mcp_server import HttpMcpServer as CodexHttpMcpServer
 
         if not self._toolsets:
             return
@@ -304,7 +303,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def __aenter__(self) -> Self:
         """Start Codex client and create or resume thread."""
-        from codex_adapter import CodexClient
+        from codexed import CodexClient
 
         await super().__aenter__()
         await self._setup_toolsets()
@@ -411,13 +410,14 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream events from Codex turn execution."""
-        from agentpool.agents.events import PlanUpdateEvent
-        from agentpool.messaging.messages import TokenCost
-        from codex_adapter.models.events import (
+        from codexed.models.events import (
             ThreadTokenUsageUpdatedEvent,
             TurnCompletedEvent,
             TurnStartedEvent,
         )
+
+        from agentpool.agents.events import PlanUpdateEvent
+        from agentpool.messaging.messages import TokenCost
 
         if not self._client or not self._sdk_session_id:
             raise AgentNotInitializedError

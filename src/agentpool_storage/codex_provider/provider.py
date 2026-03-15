@@ -12,9 +12,10 @@ from agentpool_storage.models import ConversationData
 
 
 if TYPE_CHECKING:
+    from codexed.client import CodexClient
+
     from agentpool.messaging import ChatMessage
     from agentpool_storage.models import QueryFilters
-    from codex_adapter.client import CodexClient
 
 
 logger = get_logger(__name__)

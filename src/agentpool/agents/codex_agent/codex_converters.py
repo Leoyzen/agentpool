@@ -10,6 +10,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, assert_never, overload
 
+from codexed.models import (
+    ThreadItemAgentMessage,
+    ThreadItemCollabAgentToolCall,
+    ThreadItemContextCompaction,
+    ThreadItemDynamicToolCall,
+    ThreadItemEnteredReviewMode,
+    ThreadItemExitedReviewMode,
+    ThreadItemPlan,
+    ThreadItemReasoning,
+    ThreadItemUserMessage,
+    ThreadItemWebSearch,
+)
 from pydantic_ai import (
     BinaryContent,
     BuiltinToolCallPart,
@@ -32,35 +44,13 @@ from pydantic_ai import (
 
 from agentpool.messaging import ChatMessage
 from agentpool.sessions import SessionData
-from codex_adapter.models import (
-    ThreadItemAgentMessage,
-    ThreadItemCollabAgentToolCall,
-    ThreadItemContextCompaction,
-    ThreadItemDynamicToolCall,
-    ThreadItemEnteredReviewMode,
-    ThreadItemExitedReviewMode,
-    ThreadItemPlan,
-    ThreadItemReasoning,
-    ThreadItemUserMessage,
-    ThreadItemWebSearch,
-)
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from pydantic_ai import FinishReason
-    from tokonomics.model_discovery.model_info import Modality, ModelInfo as TokoModelInfo
-
-    from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool_config.mcp_server import (
-        MCPServerConfig,
-        SSEMCPServerConfig,
-        StdioMCPServerConfig,
-        StreamableHTTPMCPServerConfig,
-    )
-    from codex_adapter import TokenUsageBreakdown
-    from codex_adapter.models import (
+    from codexed import TokenUsageBreakdown
+    from codexed.models import (
         CodexEvent,
         HttpMcpServer,
         McpServerConfig,
@@ -72,7 +62,17 @@ if TYPE_CHECKING:
         Turn,
         UserInput,
     )
-    from codex_adapter.models.codex_types import InputModality
+    from codexed.models.codex_types import InputModality
+    from pydantic_ai import FinishReason
+    from tokonomics.model_discovery.model_info import Modality, ModelInfo as TokoModelInfo
+
+    from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool_config.mcp_server import (
+        MCPServerConfig,
+        SSEMCPServerConfig,
+        StdioMCPServerConfig,
+        StreamableHTTPMCPServerConfig,
+    )
 
 
 _MODALITY_MAP: dict[InputModality, Modality] = {"text": "text", "image": "image"}
@@ -134,12 +134,13 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
     Returns:
         Tuple of (server name, Codex-compatible MCP server configuration)
     """
+    from codexed.models.mcp_server import HttpMcpServer, StdioMcpServer
+
     from agentpool_config.mcp_server import (
         SSEMCPServerConfig,
         StdioMCPServerConfig,
         StreamableHTTPMCPServerConfig,
     )
-    from codex_adapter.models.mcp_server import HttpMcpServer, StdioMcpServer
 
     # Name should not be None by the time we use it
     server_name = config.name or f"server_{id(config)}"
@@ -204,7 +205,7 @@ def to_session_data(thread_data: ThreadData, agent_name: str, cwd: str | None) -
 
 def user_content_to_codex(content: list[UserContent]) -> list[UserInput]:
     """Convert pydantic-ai UserContent list to Codex UserInput list."""
-    from codex_adapter.models import UserInputImage, UserInputText
+    from codexed.models import UserInputImage, UserInputText
 
     result: list[UserInput] = []
     for item in content:
@@ -233,12 +234,13 @@ async def _format_tool_result(
     Returns:
         Formatted result string, or list of content items for MCP tool results.
     """
-    from agentpool.mcp_server.conversions import from_mcp_content
-    from codex_adapter.models import (
+    from codexed.models import (
         ThreadItemCommandExecution,
         ThreadItemFileChange,
         ThreadItemMcpToolCall,
     )
+
+    from agentpool.mcp_server.conversions import from_mcp_content
 
     match item:
         case ThreadItemCommandExecution(aggregated_output=output):
@@ -276,7 +278,7 @@ async def _thread_item_to_tool_return_part(
     Returns:
         ToolReturnPart for MCP tools, BuiltinToolReturnPart for Codex built-ins, or None
     """
-    from codex_adapter.models import (
+    from codexed.models import (
         ThreadItemCommandExecution,
         ThreadItemFileChange,
         ThreadItemImageView,
@@ -315,7 +317,7 @@ def _thread_item_to_tool_call_part(item: ThreadItem) -> ToolCallPart | BuiltinTo
     Returns:
         ToolCallPart for MCP tools, BuiltinToolCallPart for Codex built-ins, or None
     """
-    from codex_adapter.models import (
+    from codexed.models import (
         ThreadItemCommandExecution,
         ThreadItemFileChange,
         ThreadItemImageView,
@@ -370,22 +372,12 @@ async def convert_codex_stream(  # noqa: PLR0915
     Yields:
         Native AgentPool stream events
     """
-    from agentpool.agents.events import (
-        CompactionEvent,
-        PartDeltaEvent,
-        PlanUpdateEvent,
-        TextContentItem,
-        ToolCallCompleteEvent,
-        ToolCallProgressEvent,
-        ToolCallStartEvent,
-    )
-    from agentpool.utils.todos import PlanEntry
-    from codex_adapter.models import (
+    from codexed.models import (
         ThreadItemCommandExecution,
         ThreadItemFileChange,
         ThreadItemMcpToolCall,
     )
-    from codex_adapter.models.events import (
+    from codexed.models.events import (
         AgentMessageDeltaEvent,
         CommandExecutionOutputDeltaEvent,
         FileChangeOutputDeltaEvent,
@@ -396,6 +388,17 @@ async def convert_codex_stream(  # noqa: PLR0915
         ThreadCompactedEvent,
         TurnPlanUpdatedEvent,
     )
+
+    from agentpool.agents.events import (
+        CompactionEvent,
+        PartDeltaEvent,
+        PlanUpdateEvent,
+        TextContentItem,
+        ToolCallCompleteEvent,
+        ToolCallProgressEvent,
+        ToolCallStartEvent,
+    )
+    from agentpool.utils.todos import PlanEntry
 
     # Accumulation state for streaming tool outputs
     tool_outputs: dict[str, list[str]] = {}
@@ -522,7 +525,7 @@ async def event_to_part(
     Returns:
         Part or None
     """
-    from codex_adapter.models.events import (
+    from codexed.models.events import (
         AgentMessageDeltaEvent,
         ItemCompletedEvent,
         ItemStartedEvent,
@@ -544,7 +547,7 @@ async def event_to_part(
 
 def _user_input_to_content(inp: UserInput) -> UserContent:
     """Convert Codex UserInput to pydantic-ai UserContent."""
-    from codex_adapter.models import (
+    from codexed.models import (
         UserInputImage,
         UserInputLocalImage,
         UserInputMention,
@@ -580,7 +583,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
         List of ChatMessages - always includes user message, assistant message
         only if there are assistant responses (handles interrupted/incomplete turns)
     """
-    from codex_adapter.models import (
+    from codexed.models import (
         ThreadItemAgentMessage,
         ThreadItemCollabAgentToolCall,
         ThreadItemCommandExecution,
