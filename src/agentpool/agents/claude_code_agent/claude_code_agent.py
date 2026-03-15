@@ -462,6 +462,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             chrome="Chrome" in builtin_tools,
             session=session,
             stderr=lambda line: logger.debug("claude_cli_stderr", output=line),
+            allow_dangerously_skip_permissions=True,
         )
         return ClaudeSDKClient(opts)
 
