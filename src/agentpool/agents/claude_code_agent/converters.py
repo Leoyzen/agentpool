@@ -55,9 +55,7 @@ from opencode_sdk.models.tool_metadata import (
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from clawd_code_sdk import (
-        McpServerConfig,
-    )
+    from clawd_code_sdk import McpServerConfig
     from clawd_code_sdk.models import (
         HookEvent,
         PermissionResult,
@@ -254,13 +252,11 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata:
     """Convert Edit tool result to OpenCode metadata."""
     file_path = result["filePath"]
     original_file = result["originalFile"]
-    old_string = result["oldString"]
-    new_string = result["newString"]
     structured_patch = result["structuredPatch"]
     # Compute the "after" content by applying the edit
     after_content = original_file
-    if original_file is not None and old_string and new_string:
-        after_content = original_file.replace(old_string, new_string, 1)
+    if original_file is not None and (old := result["oldString"]) and (new := result["newString"]):
+        after_content = original_file.replace(old, new, 1)
 
     # Build unified diff from structuredPatch or compute it
     diff = _build_unified_diff(file_path, original_file, after_content, structured_patch)
