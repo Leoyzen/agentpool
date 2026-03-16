@@ -141,6 +141,13 @@ class EventProcessor:
             ) if not ctx.has_tool_part(tc_part.tool_call_id):
                 for e in self._process_pydantic_tool_call(ctx, tc_part):
                     yield e
+            case (
+                FunctionToolCallEvent(part=tc_part)
+                | PartStartEvent(part=PydanticToolCallPart() as tc_part)
+            ) if ctx.has_tool_part(tc_part.tool_call_id):
+                # Tool part already exists (from ToolCallStartEvent), update input if empty
+                for e in self._update_tool_call_input(ctx, tc_part):
+                    yield e
 
             case ToolCallProgressEvent(
                 tool_call_id=tool_call_id,
@@ -414,6 +421,55 @@ class EventProcessor:
         ctx.add_tool_part(tool_call_id, tool_part)
         ctx.assistant_msg.parts.append(tool_part)
         yield PartUpdatedEvent.create(tool_part)
+
+    def _update_tool_call_input(
+        self,
+        ctx: EventProcessorContext,
+        tc_part: PydanticToolCallPart,
+    ) -> Iterator[Event]:
+        """Update existing tool part with input from pydantic ToolCallPart.
+
+        This handles the case where ToolCallStartEvent (from ctx.events.tool_call_start())
+        arrives before PartStartEvent, creating an empty tool part that needs to be
+        populated with actual arguments from the pydantic event.
+
+        Args:
+            ctx: The event processor context.
+            tc_part: The pydantic-ai tool call part containing args.
+
+        Yields:
+            PartUpdatedEvent if the tool part was updated with new input.
+        """
+        tool_call_id = tc_part.tool_call_id
+        existing_input = ctx.get_tool_input(tool_call_id) or {}
+
+        # Only update if current input is empty and we have args
+        if not existing_input and tc_part.args:
+            raw_input = safe_args_as_dict(tc_part)
+            if raw_input:
+                ui_input = _convert_params_for_ui(raw_input)
+                ctx.set_tool_input(tool_call_id, ui_input)
+
+                # Update the existing tool part with new input
+                existing = ctx.get_tool_part(tool_call_id)
+                if existing is not None:
+                    existing_title = _extract_title_from_tool_state(existing.state)
+                    tool_state = ToolStateRunning(
+                        time=TimeStart(start=now_ms()),
+                        input=ui_input,
+                        title=existing_title or tc_part.tool_name,
+                    )
+                    updated = ToolPart(
+                        id=existing.id,
+                        message_id=existing.message_id,
+                        session_id=existing.session_id,
+                        tool=existing.tool,
+                        call_id=existing.call_id,
+                        state=tool_state,
+                    )
+                    ctx.add_tool_part(tool_call_id, updated)
+                    ctx.assistant_msg.update_part(updated)
+                    yield PartUpdatedEvent.create(updated)
 
     def _process_tool_progress(
         self,
