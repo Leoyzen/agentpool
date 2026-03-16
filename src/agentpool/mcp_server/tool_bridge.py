@@ -26,7 +26,6 @@ from pydantic_ai.usage import RunUsage
 
 from agentpool.agents import Agent
 from agentpool.log import get_logger
-from agentpool.resource_providers import ResourceChangeEvent
 from agentpool.utils.signatures import filter_schema_params, get_params_matching_predicate
 
 
@@ -41,8 +40,8 @@ if TYPE_CHECKING:
     from agentpool.agents import AgentContext
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.prompt_injection import PromptInjectionManager
+    from agentpool.resource_providers import ResourceChangeEvent
     from agentpool.tools.base import Tool
-_ = ResourceChangeEvent  # Used at runtime in method signature
 
 
 logger = get_logger(__name__)
