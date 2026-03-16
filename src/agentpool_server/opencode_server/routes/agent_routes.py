@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
+from schemez.functionschema import ToolParameters
 
 from agentpool.log import get_logger
 from agentpool.mcp_server.manager import MCPManager
@@ -446,7 +447,7 @@ class ToolListItem(BaseModel):
 
     id: str
     description: str
-    parameters: dict[str, Any]
+    parameters: ToolParameters
 
 
 @router.get("/experimental/tool")

@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field, replace
 import inspect
 import time
-from typing import TYPE_CHECKING, Any, Self, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Self, cast, get_args, get_origin
 from uuid import uuid4
 
 import anyio
@@ -412,7 +412,7 @@ class ToolManagerBridge:
                 super().__init__(
                     name=tool.name,
                     description=desc,
-                    parameters=filtered_schema,
+                    parameters=cast(dict[str, Any], filtered_schema),
                     annotations=tool.get_mcp_tool_annotations(),
                     # output_schema=...,
                 )

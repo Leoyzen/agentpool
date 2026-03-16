@@ -8,7 +8,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
 from uuid import uuid4
 
 import logfire
@@ -638,7 +638,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         return ToolDefinition(
                             name=t.schema_override.get("name") or t.name,
                             description=t.schema_override.get("description") or t.description,
-                            parameters_json_schema=t.schema_override.get("parameters"),
+                            parameters_json_schema=cast(
+                                dict[str, Any], t.schema_override.get("parameters")
+                            ),
                         )
 
                     return prepare_schema

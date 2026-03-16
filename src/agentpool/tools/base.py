@@ -5,10 +5,10 @@ from __future__ import annotations
 from abc import abstractmethod
 from dataclasses import dataclass, field
 import inspect
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import logfire
-from pydantic_ai.tools import Tool as PydanticAiTool
+from pydantic_ai import RunContext, Tool as PydanticAiTool
 import schemez
 
 from agentpool.log import get_logger
@@ -130,8 +130,6 @@ class Tool[TOutputType = Any]:
     @property
     def schema_obj(self) -> FunctionSchema:
         """Get the OpenAI function schema for the tool."""
-        from pydantic_ai import RunContext
-
         from agentpool.agents.context import AgentContext
 
         return schemez.create_schema(
@@ -162,9 +160,9 @@ class Tool[TOutputType = Any]:
     @property
     def parameters(self) -> list[ToolParameter]:
         """Get information about tool parameters."""
-        schema = self.schema["function"]
-        properties: dict[str, Property] = schema.get("properties", {})  # type: ignore[assignment]
-        required: list[str] = schema.get("required", [])  # type: ignore[assignment]
+        params = self.schema["function"]["parameters"]
+        properties: dict[str, Property] = params["properties"]
+        required: list[str] = params.get("required", [])
 
         return [
             ToolParameter(
@@ -273,7 +271,7 @@ class Tool[TOutputType = Any]:
         return MCPTool(
             name=schema["function"]["name"],
             description=schema["function"]["description"],
-            inputSchema=schema["function"]["parameters"],
+            inputSchema=cast(dict[str, Any], schema["function"]["parameters"]),
             annotations=self.get_mcp_tool_annotations(),
         )
 

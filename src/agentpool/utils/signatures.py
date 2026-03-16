@@ -14,6 +14,8 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from schemez.functionschema import ToolParameters
+
 
 logger = get_logger(__name__)
 
@@ -117,7 +119,7 @@ def get_params_matching_predicate(
     return {name for name, param in sig.parameters.items() if predicate(param)}
 
 
-def filter_schema_params(schema: dict[str, Any], params_to_remove: set[str]) -> dict[str, Any]:
+def filter_schema_params(schema: ToolParameters, params_to_remove: set[str]) -> ToolParameters:
     """Filter parameters from a JSON schema.
 
     Creates a copy of the schema with specified parameters removed from
@@ -133,7 +135,7 @@ def filter_schema_params(schema: dict[str, Any], params_to_remove: set[str]) -> 
     if not params_to_remove:
         return schema
 
-    result = schema.copy()
+    result: ToolParameters = schema.copy()
     if "properties" in result:
         result["properties"] = {
             k: v for k, v in result["properties"].items() if k not in params_to_remove
