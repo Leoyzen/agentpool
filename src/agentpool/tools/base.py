@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from dataclasses import dataclass, field
 import inspect
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, get_type_hints
 
 import logfire
 from pydantic_ai import RunContext, Tool as PydanticAiTool
@@ -135,6 +135,27 @@ class Tool[TOutputType = Any]:
             description_override=self.description,
             exclude_types=[AgentContext, RunContext],
         )
+
+    @property
+    def output_schema(self) -> dict[str, Any] | None:
+        """Get the MCP-facing output schema, unwrapping internal wrapper types.
+
+        Returns None for tools returning ToolResult (internal transport wrapper)
+        or generic object types where no meaningful schema can be advertised.
+        Returns the JSON schema dict for tools with concrete return types.
+        """
+        fn = self.get_callable()
+        try:
+            hints = get_type_hints(fn)
+        except Exception:  # noqa: BLE001
+            return None
+        ret = hints.get("return")
+        if ret is None or ret is ToolResult:
+            return None
+        returns = self.schema_obj.returns
+        if returns == {"type": "object"}:
+            return None
+        return returns
 
     @property
     def schema(self) -> schemez.OpenAIFunctionTool:

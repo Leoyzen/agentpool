@@ -375,14 +375,12 @@ class ToolManagerBridge:
                 run_context_params = _get_context_param_names(fn, "RunContext")
                 all_context_params = context_params | run_context_params
                 filtered_schema = filter_schema_params(input_schema, all_context_params)
-                # Use output schema from function schema if more specific than default
-                # returns = tool.schema_obj.returns
                 super().__init__(
                     name=tool.name,
                     description=tool.description or "No description",
                     parameters=cast(dict[str, Any], filtered_schema),
                     annotations=tool.get_mcp_tool_annotations(),
-                    # output_schema=returns if returns != {"type": "object"} else None,
+                    # output_schema=tool.output_schema,
                 )
                 # Set these AFTER super().__init__() to avoid being overwritten
                 self._tool = tool
