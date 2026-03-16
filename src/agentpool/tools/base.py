@@ -106,9 +106,6 @@ class Tool[TOutputType = Any]:
     category: ToolKind | None = None
     """The category of the tool."""
 
-    instructions: str | None = None
-    """Instructions for how to use this tool effectively."""
-
     __repr__ = dataclasses_no_defaults_repr
 
     @abstractmethod
@@ -193,15 +190,7 @@ class Tool[TOutputType = Any]:
         return await execute(self.get_callable(), *args, **kwargs, use_thread=True)
 
     async def execute_and_unwrap(self, *args: Any, **kwargs: Any) -> Any:
-        """Execute tool and unwrap ToolResult if present.
-
-        This is a convenience method for tests and direct tool usage that want
-        plain content instead of ToolResult objects.
-
-        Returns:
-            If tool returns ToolResult, returns ToolResult.content.
-            Otherwise returns the raw result.
-        """
+        """Execute tool and unwrap ToolResult if present."""
         result = await self.execute(*args, **kwargs)
         if isinstance(result, ToolResult):
             return result.content
@@ -302,22 +291,20 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
         **kwargs: Any,
     ) -> FunctionTool[TOutputType]:
         """Create a FunctionTool from a callable or import path string."""
+        from agentpool.utils import importing
+
         if isinstance(fn, str):
             import_path = fn
-            from agentpool.utils import importing
-
             callable_obj = importing.import_callable(fn)
             name = getattr(callable_obj, "__name__", "unknown")
         else:
             callable_obj = fn
-            module = fn.__module__
             if hasattr(fn, "__qualname__"):  # Regular function
                 name = get_fn_name(fn)
-                import_path = f"{module}.{get_fn_qualname(fn)}"
+                import_path = f"{fn.__module__}.{get_fn_qualname(fn)}"
             else:  # Instance with __call__ method
                 name = fn.__class__.__name__
-                import_path = f"{module}.{fn.__class__.__qualname__}"
-
+                import_path = f"{fn.__module__}.{fn.__class__.__qualname__}"
         return cls(
             name=name_override or name,
             description=description_override or inspect.getdoc(callable_obj) or "",
