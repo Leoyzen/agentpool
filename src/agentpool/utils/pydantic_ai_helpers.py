@@ -13,8 +13,69 @@ from agentpool.common_types import PathReference
 
 if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
+    from mcp.types import ToolAnnotations
     from pydantic_ai import FileUrl, MultiModalContent, UserContent
     from pydantic_ai.messages import ToolCallPartDelta
+
+
+def get_builtin_tool_annotations(kind: str) -> ToolAnnotations:
+    """Return MCP ToolAnnotations for a pydantic-ai builtin tool kind.
+
+    Args:
+        kind: The builtin tool kind string (e.g. 'web_search', 'code_execution').
+
+    Returns:
+        ToolAnnotations with appropriate hints for the tool kind.
+        Unknown kinds return annotations with only a title set.
+    """
+    from mcp.types import ToolAnnotations
+
+    title = kind.replace("_", " ").title()
+    annotations: dict[str, ToolAnnotations] = {
+        "web_search": ToolAnnotations(
+            title=title,
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+        "web_fetch": ToolAnnotations(
+            title=title,
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=True,
+        ),
+        "code_execution": ToolAnnotations(
+            title=title,
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+        "image_generation": ToolAnnotations(
+            title=title,
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+        "memory": ToolAnnotations(
+            title=title,
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        "file_search": ToolAnnotations(
+            title=title,
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    }
+    return annotations.get(kind, ToolAnnotations(title=title))
 
 
 def safe_args_as_dict(
