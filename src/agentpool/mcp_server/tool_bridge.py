@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any, Self, cast, get_args, get_origin
 from uuid import uuid4
 
 import anyio
-from pydantic import BaseModel
 from pydantic_ai import RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
@@ -117,37 +116,6 @@ def _create_stub_run_context(
         tool_name=ctx.tool_name,
         tool_call_id=ctx.tool_call_id,
     )
-
-
-def _convert_to_tool_result(result: Any) -> FastMCPToolResult:
-    """Convert a tool's return value to a FastMCP ToolResult.
-
-    Handles different result types appropriately:
-    - FastMCP ToolResult: Pass through unchanged
-    - AgentPool ToolResult: Convert to FastMCP format
-    - dict: Use as structured_content (enables programmatic access by clients)
-    - Pydantic models: Serialize to dict for structured_content
-    - Other types: Pass to ToolResult(content=...) which handles conversion internally
-    """
-    from fastmcp.tools.tool import ToolResult as FastMCPToolResult
-
-    from agentpool.tools.base import ToolResult as AgentPoolToolResult
-
-    match result:
-        case FastMCPToolResult():
-            return result
-        case AgentPoolToolResult():
-            return FastMCPToolResult(
-                content=result.content,
-                structured_content=result.structured_content,
-                meta=result.metadata,
-            )
-        case dict():
-            return FastMCPToolResult(structured_content=result)
-        case BaseModel():
-            return FastMCPToolResult(structured_content=result.model_dump(mode="json"))
-        case _:
-            return FastMCPToolResult(content=result if result is not None else "")
 
 
 def _append_injection_to_result(result: Any, injection: str) -> Any:
@@ -408,13 +376,14 @@ class ToolManagerBridge:
                 run_context_params = _get_context_param_names(fn, "RunContext")
                 all_context_params = context_params | run_context_params
                 filtered_schema = filter_schema_params(input_schema, all_context_params)
-                desc = tool.description or "No description"
+                # Use output schema from function schema if more specific than default
+                returns = tool.schema_obj.returns
                 super().__init__(
                     name=tool.name,
-                    description=desc,
+                    description=tool.description or "No description",
                     parameters=cast(dict[str, Any], filtered_schema),
                     annotations=tool.get_mcp_tool_annotations(),
-                    # output_schema=...,
+                    output_schema=returns if returns != {"type": "object"} else None,
                 )
                 # Set these AFTER super().__init__() to avoid being overwritten
                 self._tool = tool
@@ -423,6 +392,7 @@ class ToolManagerBridge:
             async def run(self, arguments: dict[str, Any]) -> FastMCPToolResult:
                 """Execute the wrapped tool with context bridging."""
                 from fastmcp.server.dependencies import get_context
+                from fastmcp.tools.tool import ToolResult as FastMCPToolResult
 
                 from agentpool.tools.base import ToolResult as AgentPoolToolResult
 
@@ -457,14 +427,17 @@ class ToolManagerBridge:
                 if isinstance(result, AgentPoolToolResult) and result.metadata:
                     logger.info("Storing tool result metadata", tool_call_id=tc_id)
                     self._bridge.tool_metadata[tc_id] = result.metadata
-
                 # Consume pending injection and append to result
-                if self._bridge.injection_manager and (
-                    injection := await self._bridge.injection_manager.consume()
-                ):
+                if (m := self._bridge.injection_manager) and (injection := await m.consume()):
                     result = _append_injection_to_result(result, injection)
-
-                return _convert_to_tool_result(result)
+                # Convert AgentPool ToolResult to FastMCP ToolResult
+                if isinstance(result, AgentPoolToolResult):
+                    return FastMCPToolResult(
+                        content=result.content,
+                        structured_content=result.structured_content,
+                        meta=result.metadata,
+                    )
+                return self.convert_result(result)
 
         # Create a custom FastMCP Tool that wraps our tool
         bridge_tool = _BridgeTool(tool=tool, bridge=self)
