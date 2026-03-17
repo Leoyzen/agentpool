@@ -92,7 +92,7 @@ class MCPMessageHandler:
                     case types.TaskStatusNotification():
                         await self.on_task_status(root)
                     case _ as unreachable:
-                        assert_never(unreachable)
+                        assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
             case Exception():
                 await self.on_exception(message)
@@ -182,7 +182,4 @@ class MCPMessageHandler:
 
         Sent by servers when a URL mode elicitation completes out-of-band.
         """
-        logger.info(
-            "MCP elicitation completed",
-            elicitation_id=message.params.elicitationId,
-        )
+        logger.info("MCP elicitation completed", elicitation_id=message.params.elicitationId)

@@ -19,7 +19,7 @@ from agentpool.utils.pydantic_ai_helpers import url_from_mime_type
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from fastmcp import Client
     from mcp.types import (
@@ -37,36 +37,34 @@ logger = get_logger(__name__)
 
 def to_mcp_messages(
     part: ModelRequestPart | ModelResponsePart,
-) -> list[PromptMessage]:
+) -> Iterator[PromptMessage]:
     """Convert internal PromptMessage to MCP PromptMessage."""
     from mcp.types import AudioContent, ImageContent, PromptMessage, TextContent
 
-    messages = []
     match part:
         case UserPromptPart(content=str() as c):
             content = TextContent(type="text", text=c)
-            messages.append(PromptMessage(role="user", content=content))
+            yield PromptMessage(role="user", content=content)
         case UserPromptPart(content=content_items):
             for item in content_items:
                 match item:
                     case BinaryContent(data=data, media_type=media_type) if item.is_audio:
                         encoded = base64.b64encode(data).decode()
                         audio = AudioContent(type="audio", data=encoded, mimeType=media_type)
-                        messages.append(PromptMessage(role="user", content=audio))
+                        yield PromptMessage(role="user", content=audio)
                     case BinaryContent(data=data, media_type=media_type) if item.is_image:
                         encoded = base64.b64encode(data).decode()
                         image = ImageContent(type="image", data=encoded, mimeType=media_type)
-                        messages.append(PromptMessage(role="user", content=image))
+                        yield PromptMessage(role="user", content=image)
                     case FileUrl(url=url):
                         content = TextContent(type="text", text=url)
-                        messages.append(PromptMessage(role="user", content=content))
+                        yield PromptMessage(role="user", content=content)
 
         case SystemPromptPart(content=msg):
-            messages.append(PromptMessage(role="user", content=TextContent(type="text", text=msg)))
+            yield PromptMessage(role="user", content=TextContent(type="text", text=msg))
         case TextPart(content=msg):
             text_content = TextContent(type="text", text=msg)
-            messages.append(PromptMessage(role="assistant", content=text_content))
-    return messages
+            yield PromptMessage(role="assistant", content=text_content)
 
 
 def sampling_messages_to_user_content(msgs: list[SamplingMessage]) -> list[UserContent]:
@@ -89,12 +87,12 @@ def content_block_to_user_content(content: SamplingMessageContentBlock) -> UserC
     match content:
         case types.TextContent(text=text):
             return text
-        case types.ImageContent(data=data, mimeType=mime_type):
-            binary_data = base64.b64decode(data)
-            return BinaryImage(data=binary_data, media_type=mime_type)
-        case types.AudioContent(data=data, mimeType=mime_type):
-            binary_data = base64.b64decode(data)
-            return BinaryContent(data=binary_data, media_type=mime_type)
+        case (
+            types.ImageContent(data=data, mimeType=mime)
+            | types.AudioContent(data=data, mimeType=mime)
+        ):
+            bin_content = BinaryContent(data=base64.b64decode(data), media_type=mime)
+            return BinaryContent.narrow_type(bin_content)
         case types.ToolUseContent() | types.ToolResultContent():
             return None
         case _ as unreachable:

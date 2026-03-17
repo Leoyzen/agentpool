@@ -495,16 +495,12 @@ class ToolManagerBridge:
         fn = tool.get_callable()
         # Inject AgentContext parameters
         context_param_names = _get_context_param_names(fn, "AgentContext")
-        for param_name in context_param_names:
-            if param_name not in kwargs:
-                kwargs[param_name] = ctx
+        kwargs |= {name: ctx for name in context_param_names if name not in kwargs}
         # Inject RunContext parameters (as stub since we're outside pydantic-ai)
         run_context_param_names = _get_context_param_names(fn, "RunContext")
         if run_context_param_names:
             stub_run_ctx = _create_stub_run_context(ctx, prompt=self._current_prompt)
-            for param_name in run_context_param_names:
-                if param_name not in kwargs:
-                    kwargs[param_name] = stub_run_ctx
+            kwargs |= {name: stub_run_ctx for name in run_context_param_names if name not in kwargs}
 
         start_time = time.perf_counter()
         result = fn(**kwargs)
