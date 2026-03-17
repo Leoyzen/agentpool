@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import ConfigDict, Field, ImportString
 from schemez import Schema
 
 
 if TYPE_CHECKING:
+    from mcp.types import ToolAnnotations
+
     from agentpool.tools.base import Tool
 
 
@@ -28,6 +30,16 @@ class ToolHints(Schema):
     open_world: bool | None = Field(default=None, title="External resource access")
     """Hints that this tool can access / interact with external resources beyond the
     current system"""
+
+    @classmethod
+    def from_mcp(cls, annotations: ToolAnnotations) -> Self:
+        """Create a ToolHints instance from MCP tool annotations."""
+        return cls(
+            read_only=annotations.readOnlyHint,
+            destructive=annotations.destructiveHint,
+            idempotent=annotations.idempotentHint,
+            open_world=annotations.openWorldHint,
+        )
 
 
 class BaseToolConfig(Schema):

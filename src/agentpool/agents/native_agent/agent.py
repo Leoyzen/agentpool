@@ -211,7 +211,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from agentpool_commands.pool import CompactCommand
         from agentpool_config.session import MemoryConfig
 
-        self.model_settings = model_settings
         memory_cfg = (
             session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
         )
@@ -262,6 +261,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             session_config=memory_cfg,
             resources=resources,
         )
+        self.model_settings = model_settings
         if isinstance(model, str):
             self._model, settings = self._resolve_model_string(model)
             if settings:

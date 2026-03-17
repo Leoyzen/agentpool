@@ -21,11 +21,7 @@ from schemez import FunctionSchema
 from agentpool.agents.context import AgentContext
 from agentpool.log import get_logger
 from agentpool.mcp_server.constants import MCP_TO_LOGGING
-from agentpool.mcp_server.helpers import (
-    extract_text_content,
-    mcp_annotations_to_hints,
-    mcp_tool_to_input_schema,
-)
+from agentpool.mcp_server.helpers import extract_text_content, mcp_tool_to_input_schema
 from agentpool.mcp_server.message_handler import MCPMessageHandler
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
@@ -64,6 +60,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+MetaDict = dict[str, Any]
 
 
 class MCPClient:
@@ -75,9 +72,9 @@ class MCPClient:
         sampling_callback: SamplingHandler[Any, Any] | None = None,
         message_handler: MessageHandlerT | MessageHandler | None = None,
         accessible_roots: list[str] | None = None,
-        tool_change_callback: Callable[[], Awaitable[None]] | None = None,
-        prompt_change_callback: Callable[[], Awaitable[None]] | None = None,
-        resource_change_callback: Callable[[], Awaitable[None]] | None = None,
+        tool_change_callback: Callable[[MetaDict], Awaitable[None]] | None = None,
+        prompt_change_callback: Callable[[MetaDict], Awaitable[None]] | None = None,
+        resource_change_callback: Callable[[MetaDict], Awaitable[None]] | None = None,
         client_name: str | None = None,
         client_title: str | None = None,
         client_website_url: str | None = None,
@@ -321,6 +318,7 @@ class MCPClient:
 
     def convert_tool(self, tool: MCPTool) -> FunctionTool:
         """Create a properly typed callable from MCP tool schema."""
+        from agentpool_config.tools import ToolHints
 
         async def tool_callable(
             ctx: RunContext, agent_ctx: AgentContext[Any], **kwargs: Any
@@ -352,7 +350,7 @@ class MCPClient:
         tool_callable.__annotations__ = annotations
         tool_callable.__name__ = tool.name
         tool_callable.__doc__ = tool.description or "No description provided."
-        hints = mcp_annotations_to_hints(tool.annotations)
+        hints = ToolHints.from_mcp(tool.annotations) if tool.annotations else None
         return FunctionTool.from_callable(tool_callable, source="mcp", hints=hints)
 
     async def call_tool(
