@@ -122,7 +122,7 @@ class MCPResourceProvider(ResourceProvider):
             logger.exception(msg, exc_info=e)
             raise RuntimeError(msg) from e
 
-    async def _on_tools_changed(self) -> None:
+    async def _on_tools_changed(self, _meta: dict[str, Any]) -> None:
         """Callback when tools change on the MCP server."""
         logger.info("MCP tool list changed, refreshing provider cache")
         self._saved_enabled_states = {t.name: t.enabled for t in self._tools_cache or []}
@@ -130,14 +130,14 @@ class MCPResourceProvider(ResourceProvider):
         # Notify subscribers via signal
         await self.tools_changed.emit(self.create_change_event("tools"))
 
-    async def _on_prompts_changed(self) -> None:
+    async def _on_prompts_changed(self, _meta: dict[str, Any]) -> None:
         """Callback when prompts change on the MCP server."""
         logger.info("MCP prompt list changed, refreshing provider cache")
         self._prompts_cache = None
         # Notify subscribers via signal
         await self.prompts_changed.emit(self.create_change_event("prompts"))
 
-    async def _on_resources_changed(self) -> None:
+    async def _on_resources_changed(self, _meta: dict[str, Any]) -> None:
         """Callback when resources change on the MCP server."""
         logger.info("MCP resource list changed, refreshing provider cache")
         self._resources_cache = None
