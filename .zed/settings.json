@@ -1,6 +1,6 @@
 {
 	"languages": {
-		"Python": { "language_servers": ["ty", "ruff"] },
+		"Python": { "language_servers": ["ty", "ruff", "basedpyright"] },
 		"TypeScript": { "language_servers": [] }
 	}
 }
