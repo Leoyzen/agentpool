@@ -149,6 +149,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
         BetaToolUseBlock as AnthToolUseBlock,
     )
     from clawd_code_sdk.models import (
+        APIRetrySystemMessage,
         AssistantMessage,
         CompactBoundarySystemMessage,
         MessageUnion,
@@ -337,6 +338,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 | FilesPersistedSystemMessage()
                 | ElicitationCompleteMessage()
                 | LocalCommandOutputMessage()
+                | APIRetrySystemMessage()
             ):
                 pass
             case _ as unreachable:
