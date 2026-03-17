@@ -26,17 +26,35 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Add agent_type and sdk_session_id columns to conversation table."""
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_columns = {col["name"] for col in inspector.get_columns("conversation")}
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("conversation")}
+
     with op.batch_alter_table("conversation") as batch_op:
-        batch_op.add_column(sa.Column("agent_type", sa.String(), nullable=True))
-        batch_op.add_column(sa.Column("sdk_session_id", sa.String(), nullable=True))
-        batch_op.create_index("ix_conversation_agent_type", ["agent_type"])
-        batch_op.create_index("ix_conversation_sdk_session_id", ["sdk_session_id"])
+        if "agent_type" not in existing_columns:
+            batch_op.add_column(sa.Column("agent_type", sa.String(), nullable=True))
+        if "ix_conversation_agent_type" not in existing_indexes:
+            batch_op.create_index("ix_conversation_agent_type", ["agent_type"])
+        if "sdk_session_id" not in existing_columns:
+            batch_op.add_column(sa.Column("sdk_session_id", sa.String(), nullable=True))
+        if "ix_conversation_sdk_session_id" not in existing_indexes:
+            batch_op.create_index("ix_conversation_sdk_session_id", ["sdk_session_id"])
 
 
 def downgrade() -> None:
     """Remove agent_type and sdk_session_id columns from conversation table."""
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_columns = {col["name"] for col in inspector.get_columns("conversation")}
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("conversation")}
+
     with op.batch_alter_table("conversation") as batch_op:
-        batch_op.drop_index("ix_conversation_sdk_session_id")
-        batch_op.drop_index("ix_conversation_agent_type")
-        batch_op.drop_column("sdk_session_id")
-        batch_op.drop_column("agent_type")
+        if "ix_conversation_sdk_session_id" in existing_indexes:
+            batch_op.drop_index("ix_conversation_sdk_session_id")
+        if "ix_conversation_agent_type" in existing_indexes:
+            batch_op.drop_index("ix_conversation_agent_type")
+        if "sdk_session_id" in existing_columns:
+            batch_op.drop_column("sdk_session_id")
+        if "agent_type" in existing_columns:
+            batch_op.drop_column("agent_type")
