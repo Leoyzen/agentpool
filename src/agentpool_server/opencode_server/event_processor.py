@@ -268,8 +268,8 @@ class EventProcessor:
         Yields:
             PartUpdatedEvent for the created reasoning part.
         """
-        # Skip empty reasoning content
-        if not delta or not delta.strip():
+        # Skip empty reasoning content (but preserve whitespace-only like newlines)
+        if not delta:
             return
 
         reasoning_part_id = identifier.ascending("part")
@@ -298,8 +298,8 @@ class EventProcessor:
         Yields:
             PartUpdatedEvent for the updated or created reasoning part.
         """
-        # Skip empty reasoning content
-        if not delta or not delta.strip():
+        # Skip empty reasoning content (but preserve whitespace-only like newlines)
+        if not delta:
             return
 
         if ctx.reasoning_part is not None:
