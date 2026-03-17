@@ -77,7 +77,7 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageHistory
-    from agentpool.models.claude_code_agents import ClaudeCodeAgentConfig, SettingSource
+    from agentpool.models.claude_code_agents import ClaudeCodeAgentConfig, SettingSource, ToolName
     from agentpool.resource_providers import ResourceProvider
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
@@ -147,8 +147,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         deps_type: type[TDeps] | None = None,
         description: str | None = None,
         display_name: str | None = None,
-        allowed_tools: list[str] | None = None,
-        disallowed_tools: list[str] | None = None,
+        allowed_tools: list[ToolName | str] | None = None,
+        disallowed_tools: list[ToolName | str] | None = None,
         system_prompt: str | Sequence[str | AnyPromptType] | None = None,
         include_builtin_system_prompt: bool = True,
         model: AnthropicMaxModelName | str | None = "opus",
@@ -160,7 +160,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         mcp_servers: Sequence[MCPServerConfig] | None = None,
         env_vars: dict[str, str] | None = None,
         add_dir: list[str] | None = None,
-        builtin_tools: list[str] | None = None,
+        builtin_tools: list[ToolName | str] | None = None,
         fallback_model: AnthropicMaxModelName | str | None = None,
         setting_sources: list[SettingSource] | None = None,
         use_subscription: bool = False,

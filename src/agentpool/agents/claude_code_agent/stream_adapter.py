@@ -181,14 +181,13 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     match block:
                         case ToolUseBlock(id=tc_id, name=name, input=input_data):
                             pending_tool_calls[tc_id] = block
-                            display_name = _strip_mcp_prefix(name)
                             # Emit progress update with complete args
                             # (ToolCallStartEvent was already emitted via streaming
                             # with empty args; now we have the full picture)
                             rich_info = derive_rich_tool_info(name, input_data)
                             yield ToolCallProgressEvent(
                                 tool_call_id=tc_id,
-                                tool_name=display_name,
+                                tool_name=_strip_mcp_prefix(name),
                                 title=rich_info.title,
                                 tool_input=cast(dict[str, Any], input_data),
                             )
