@@ -63,36 +63,77 @@ ToolName = Literal[
 class AgentDefinition(Schema):
     """Agent definition configuration."""
 
-    description: str
-    """Description of the agent."""
+    description: str = Field(..., title="Agent Description", examples=["QA Assistant"])
+    """A brief description of the agent's purpose."""
 
-    prompt: str
-    """Prompt for the agent."""
+    prompt: str = Field(..., title="Agent Prompt", examples=["Do XY"])
+    """The prompt to use for this agent."""
 
-    tools: list[str] | None = None
-    """List of tools the agent can use."""
+    tools: list[str] | None = Field(default=None, title="Agent Tools", examples=["Bash"])
+    """The tools this agent has access to."""
 
-    model: Literal["sonnet", "opus", "haiku", "inherit"] | None = None
-    """Model to use for the agent."""
+    model: Literal["sonnet", "opus", "haiku", "inherit"] | str | None = Field(  # noqa: PYI051
+        default=None,
+        title="Agent Model",
+        examples=["sonnet"],
+    )
+    """The model to use for this agent."""
 
-    memory: SettingSource | None = None
-    """Memory type for the agent."""
+    memory: SettingSource | None = Field(
+        default=None,
+        title="Agent Memory",
+        examples=["user", "project"],
+    )
 
-    disallowed_tools: list[str] | None = None
-    """List of tools the agent cannot use."""
+    disallowed_tools: list[str] | None = Field(
+        default=None,
+        title="Disallowed Tools",
+        examples=["Bash"],
+    )
+    """Tools this agent is not allowed to use."""
 
-    skills: list[str] | None = None
-    """List of skills the agent can use."""
+    critical_system_reminder_experimental: str | None = Field(
+        default=None,
+        title="Critical System Reminder",
+        alias="criticalSystemReminder_EXPERIMENTAL",
+    )
+    """Critical system reminder message to display to the user."""
 
-    max_turns: int | None = None
-    """Maximum number of turns the agent can take."""
+    skills: list[str] | None = Field(default=None, title="Skills", examples=["my-skill"])
+    """Skills this agent has."""
+
+    max_turns: int | None = Field(default=None, title="Max Turns")
+    """Maximum number of agentic turns (API round-trips) before stopping."""
+
+    background: bool | None = Field(default=None, title="Run in Background")
+    """Whether this agent runs in the background."""
+
+    # hooks: AgentHooksConfig | None = Field(default=None, title="Agent Hooks")
+    # """Hook configurations for this agent."""
+
+    effort: Literal["low", "medium", "high", "max"] | int | None = Field(
+        default=None,
+        title="Reasoning effort",
+        examples=["high"],
+    )
+    """Effort level for thinking depth."""
+
+    permission_mode: PermissionMode | None = Field(
+        default=None,
+        title="Permission Mode",
+        examples=["bypassPermissions"],
+    )
+    """Permission mode for this agent."""
+
+    isolation: Literal["worktree"] | None = Field(
+        default=None,
+        title="Isolation Mode",
+        examples=["worktree"],
+    )
+    """Isolation mode. ``"worktree"`` runs the agent in a separate git worktree."""
 
     mcp_servers: dict[str, MCPServerConfig] | None = None
     """Configuration for MCP servers."""
-
-    background: bool | None = None
-    """Run as background agent."""
-    # critical_system_reminder_experimental: str | None = None
 
 
 class ClaudeCodeAgentConfig(BaseAgentConfig):
