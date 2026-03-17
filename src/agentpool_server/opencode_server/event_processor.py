@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent
 from pydantic_ai.messages import (
-    PartDeltaEvent,
+    PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
     TextPart as PydanticTextPart,
     TextPartDelta,
@@ -46,6 +46,7 @@ from agentpool_server.opencode_server.models import (
     MessageTime,
     MessageUpdatedEvent,
     MessageWithParts,
+    PartDeltaEvent,
     PartUpdatedEvent,
     TimeCreated,
     TokenCache,
@@ -112,7 +113,7 @@ class EventProcessor:
                 for e in self._process_text_start(ctx, delta):
                     yield e
 
-            case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
+            case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
                 for e in self._process_text_delta(ctx, delta):
                     yield e
 
@@ -120,7 +121,7 @@ class EventProcessor:
                 for e in self._process_thinking_start(ctx, delta):
                     yield e
 
-            case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)):
+            case PydanticPartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)):
                 for e in self._process_thinking_delta(ctx, delta):
                     yield e
 
@@ -207,7 +208,7 @@ class EventProcessor:
         )
         ctx.text_part = text_part
         ctx.assistant_msg.parts.append(text_part)
-        yield PartUpdatedEvent.create(text_part, delta=delta)
+        yield PartUpdatedEvent.create(text_part)
 
     def _process_text_delta(
         self,
@@ -233,7 +234,12 @@ class EventProcessor:
             )
             ctx.assistant_msg.update_part(updated)
             ctx.text_part = updated
-            yield PartUpdatedEvent.create(updated, delta=delta)
+            yield PartDeltaEvent.create(
+                session_id=ctx.session_id,
+                message_id=ctx.assistant_msg_id,
+                part_id=updated.id,
+                delta=delta,
+            )
         else:
             # No text part exists yet (no PartStartEvent received)
             # Create one now with the accumulated text
@@ -245,7 +251,12 @@ class EventProcessor:
             )
             ctx.text_part = text_part
             ctx.assistant_msg.parts.append(text_part)
-            yield PartUpdatedEvent.create(text_part, delta=delta)
+            yield PartDeltaEvent.create(
+                session_id=ctx.session_id,
+                message_id=ctx.assistant_msg_id,
+                part_id=text_part.id,
+                delta=delta,
+            )
 
     def _process_thinking_start(
         self,
@@ -306,7 +317,12 @@ class EventProcessor:
             )
             ctx.assistant_msg.update_part(updated)
             ctx.reasoning_part = updated
-            yield PartUpdatedEvent.create(updated, delta=delta)
+            yield PartDeltaEvent.create(
+                session_id=ctx.session_id,
+                message_id=ctx.assistant_msg_id,
+                part_id=updated.id,
+                delta=delta,
+            )
         else:
             # No reasoning part exists yet (e.g., after text reset or orphaned delta)
             # Create a new reasoning part with the delta content
@@ -320,7 +336,12 @@ class EventProcessor:
             )
             ctx.reasoning_part = reasoning_part
             ctx.assistant_msg.parts.append(reasoning_part)
-            yield PartUpdatedEvent.create(reasoning_part, delta=delta)
+            yield PartDeltaEvent.create(
+                session_id=ctx.session_id,
+                message_id=ctx.assistant_msg_id,
+                part_id=reasoning_part.id,
+                delta=delta,
+            )
 
     def _process_tool_call_start(
         self,

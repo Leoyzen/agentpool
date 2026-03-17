@@ -31,6 +31,7 @@ from agentpool_server.opencode_server.models import (
     MessageUpdatedEvent,
     MessageWithParts,
     OpenCodeBaseModel,
+    PartDeltaEvent,
     PartUpdatedEvent,
     PermissionAskedProperties,
     PermissionReplyRequest,
@@ -705,7 +706,7 @@ async def summarize_session(  # noqa: PLR0915
     The summary message is marked with summary=true for UI display.
     """
     from pydantic_ai.messages import (
-        PartDeltaEvent,
+        PartDeltaEvent as PydanticPartDeltaEvent,
         PartStartEvent,
         TextPart as PydanticTextPart,
         TextPartDelta,
@@ -773,10 +774,10 @@ async def summarize_session(  # noqa: PLR0915
                         text=delta,
                     )
                     assistant_msg_with_parts.parts.append(text_part)
-                    await state.broadcast_event(PartUpdatedEvent.create(text_part, delta=delta))
+                    await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
                 # Text streaming delta
-                case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
+                case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
                     response_text += delta
                     if text_part is not None:
                         text_part = TextPart(
@@ -790,7 +791,14 @@ async def summarize_session(  # noqa: PLR0915
                             if isinstance(p, TextPart) and p.id == text_part.id:
                                 assistant_msg_with_parts.parts[i] = text_part
                                 break
-                        await state.broadcast_event(PartUpdatedEvent.create(text_part, delta=delta))
+                        await state.broadcast_event(
+                            PartDeltaEvent.create(
+                                session_id=session_id,
+                                message_id=assistant_msg_id,
+                                part_id=text_part.id,
+                                delta=delta,
+                            )
+                        )
 
                 # Stream complete - extract token usage
                 case StreamCompleteEvent(message=msg) if msg and msg.usage:
