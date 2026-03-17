@@ -251,12 +251,8 @@ class EventProcessor:
             )
             ctx.text_part = text_part
             ctx.assistant_msg.parts.append(text_part)
-            yield PartDeltaEvent.create(
-                session_id=ctx.session_id,
-                message_id=ctx.assistant_msg_id,
-                part_id=text_part.id,
-                delta=delta,
-            )
+            # Part doesn't exist on frontend yet, send full PartUpdatedEvent
+            yield PartUpdatedEvent.create(text_part)
 
     def _process_thinking_start(
         self,
@@ -336,12 +332,8 @@ class EventProcessor:
             )
             ctx.reasoning_part = reasoning_part
             ctx.assistant_msg.parts.append(reasoning_part)
-            yield PartDeltaEvent.create(
-                session_id=ctx.session_id,
-                message_id=ctx.assistant_msg_id,
-                part_id=reasoning_part.id,
-                delta=delta,
-            )
+            # Part doesn't exist on frontend yet, send full PartUpdatedEvent
+            yield PartUpdatedEvent.create(reasoning_part)
 
     def _process_tool_call_start(
         self,
