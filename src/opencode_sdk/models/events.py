@@ -28,6 +28,9 @@ Variant = Literal["info", "success", "warning", "error"]
 FileUpdateEvent = Literal["add", "change", "unlink"]
 ConnectionStatus = Literal["connected", "error"]
 
+PermissionReply = Literal["once", "always", "reject"]
+"""Permission reply type matching OpenCode's PermissionNext.Reply."""
+
 
 class EmptyProperties(OpenCodeBaseModel):
     """Empty properties object."""
@@ -297,10 +300,6 @@ class PartRemovedEvent(OpenCodeBaseModel):
         """Create part removed event."""
         props = PartRemovedProperties(session_id=session_id, message_id=message_id, part_id=part_id)
         return cls(properties=props)
-
-
-PermissionReply = Literal["once", "always", "reject"]
-"""Permission reply type matching OpenCode's PermissionNext.Reply."""
 
 
 class PermissionReplyRequest(OpenCodeBaseModel):

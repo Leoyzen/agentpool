@@ -607,6 +607,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         builtin_tools = filter_builtin_tools(self._builtin_tools, model_)
         agent = PydanticAgent(
             name=self.name,
+            description=self.description,
             model=model_,
             model_settings=self.model_settings,
             instructions=self._formatted_system_prompt,
