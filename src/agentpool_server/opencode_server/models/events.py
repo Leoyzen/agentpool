@@ -231,6 +231,7 @@ class PartDeltaEventProperties(OpenCodeBaseModel):
     session_id: str
     message_id: str
     part_id: str
+    field: str  # Field being updated, e.g., "text" for TextPart/ReasoningPart
     delta: str
 
 
@@ -247,12 +248,14 @@ class PartDeltaEvent(OpenCodeBaseModel):
         message_id: str,
         part_id: str,
         delta: str,
+        field: str = "text",
     ) -> Self:
         return cls(
             properties=PartDeltaEventProperties(
                 session_id=session_id,
                 message_id=message_id,
                 part_id=part_id,
+                field=field,
                 delta=delta,
             )
         )
