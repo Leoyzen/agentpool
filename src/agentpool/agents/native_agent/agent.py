@@ -618,12 +618,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             builtin_tools=builtin_tools,
             history_processors=self._history_processors or None,
         )
-
         context_for_tools = self.get_context(input_provider=input_provider)
-
         for tool in tools:
             wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
-
             prepare_fn = None
             if tool.schema_override:
 
@@ -720,9 +717,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Build response message
             response_time = time.perf_counter() - start_time
             if self._cancelled:
-                partial_content = extract_text_from_messages(
-                    agent_run.all_messages(), include_interruption_note=True
-                )
+                msgs = agent_run.all_messages()
+                partial_content = extract_text_from_messages(mmsgs, include_interruption_note=True)
                 response_msg = ChatMessage(
                     content=partial_content,
                     role="assistant",
