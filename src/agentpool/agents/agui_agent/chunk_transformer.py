@@ -191,7 +191,7 @@ class ChunkTransformer:
         # Start new reasoning message if needed
         if self._active_reasoning is None and message_id:
             self._active_reasoning = message_id
-            start_event = ReasoningMessageStartEvent(message_id=message_id, role="assistant")
+            start_event = ReasoningMessageStartEvent(message_id=message_id, role="reasoning")
             result.append(start_event)
 
         # Emit content if we have delta and active reasoning message
