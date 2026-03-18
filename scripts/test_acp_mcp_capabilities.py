@@ -16,7 +16,7 @@ from typing import Any
 
 from acp.client.implementations import NoOpClient
 from acp.schema import InitializeRequest
-from acp.schema.capabilities import ClientCapabilities, FileSystemCapability
+from acp.schema.capabilities import ClientCapabilities, FileSystemCapabilities
 from acp.schema.common import Implementation
 from acp.stdio import spawn_agent_process
 
@@ -76,7 +76,7 @@ async def test_agent_capabilities(config: AgentTestConfig) -> dict:
                     client_info=Implementation(title="Tester", name="cap-test", version="0.1.0"),
                     client_capabilities=ClientCapabilities(
                         terminal=True,
-                        fs=FileSystemCapability(read_text_file=True, write_text_file=True),
+                        fs=FileSystemCapabilities(read_text_file=True, write_text_file=True),
                     ),
                 )
 

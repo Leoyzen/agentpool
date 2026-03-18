@@ -8,7 +8,7 @@ from typing import Any, Self
 from pydantic import Field
 
 from acp.schema.base import Request
-from acp.schema.capabilities import AuthCapabilities, ClientCapabilities, FileSystemCapability
+from acp.schema.capabilities import AuthCapabilities, ClientCapabilities, FileSystemCapabilities
 from acp.schema.common import Implementation
 from acp.schema.content_blocks import ContentBlock  # noqa: TC001
 from acp.schema.mcp import McpServer  # noqa: TC001
@@ -229,7 +229,7 @@ class InitializeRequest(Request):
         metadata: dict[str, Any] | None = None,
     ) -> Self:
         """Create a new InitializeRequest instance."""
-        fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
+        fs = FileSystemCapabilities(read_text_file=read_text_file, write_text_file=write_text_file)
         auth = AuthCapabilities(terminal=terminal_auth) if terminal_auth else None
         caps = ClientCapabilities(terminal=terminal, fs=fs, auth=auth)
         impl = Implementation(title=title, name=name, version=version)

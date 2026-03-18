@@ -23,7 +23,7 @@ from acp.schema import (
     CreateTerminalRequest,
     ClientCapabilities,
     SessionMode,
-    FileSystemCapability,
+    FileSystemCapabilities,
     AgentMessageChunk,
     UserMessageChunk,
     TextContentBlock,
@@ -194,7 +194,7 @@ __all__ = [  # noqa: RUF022
     "run_agent",
     "connect_to_agent",
     # split protocols
-    "FileSystemCapability",
+    "FileSystemCapabilities",
     # stdio helper
     "stdio_streams",
     # transport

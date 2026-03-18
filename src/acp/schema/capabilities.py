@@ -9,7 +9,7 @@ from pydantic import Field
 from acp.schema.base import AnnotatedObject
 
 
-class FileSystemCapability(AnnotatedObject):
+class FileSystemCapabilities(AnnotatedObject):
     """File system capabilities that a client may support.
 
     See protocol docs: [FileSystem](https://agentclientprotocol.com/protocol/initialization#filesystem)
@@ -73,7 +73,7 @@ class ClientCapabilities(AnnotatedObject):
         Returns:
             A new instance of ClientCapabilities.
         """
-        fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
+        fs = FileSystemCapabilities(read_text_file=read_text_file, write_text_file=write_text_file)
         return cls(fs=fs, terminal=terminal, auth=auth)
 
 

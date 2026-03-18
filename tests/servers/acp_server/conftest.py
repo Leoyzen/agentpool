@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from acp import ClientCapabilities, DefaultACPClient, FileSystemCapability
+from acp import ClientCapabilities, DefaultACPClient, FileSystemCapabilities
 from acp.agent.implementations import TestAgent
 from agentpool import Agent
 from agentpool.delegation import AgentPool
@@ -60,7 +60,7 @@ def default_test_agent(mock_agent_pool_with_agent: tuple[AgentPool, Agent]) -> A
 @pytest.fixture
 def client_capabilities():
     """Create client capabilities for testing."""
-    fs_caps = FileSystemCapability(read_text_file=True, write_text_file=True)
+    fs_caps = FileSystemCapabilities(read_text_file=True, write_text_file=True)
     return ClientCapabilities(fs=fs_caps, terminal=True)
 
 
