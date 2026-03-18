@@ -6,17 +6,69 @@ allowing tools and agents to browse messages as files.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Required, overload
 
 import anyenv
-from fsspec.asyn import AsyncFileSystem
+from upathtools.filesystems.base import BaseAsyncFileFileSystem, BaseUPath, FileInfo
 
 
 if TYPE_CHECKING:
     from agentpool.messaging.message_container import ChatMessageList
 
 
-class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
+class ChatMessageInfo(FileInfo):
+    """Info dict for ACP filesystem paths."""
+
+    size: Required[int]
+
+
+class ChatMessagePath(BaseUPath[ChatMessageInfo]):
+    """Path for ACP filesystem."""
+
+    __slots__ = ()
+
+
+def _get_file_entries(messages: ChatMessageList) -> dict[str, bytes]:
+    """Generate file entries from current messages."""
+    entries: dict[str, bytes] = {}
+
+    for msg in messages:
+        timestamp = msg.timestamp.strftime("%Y%m%d_%H%M%S_%f")
+        base_name = f"{timestamp}_{msg.role}_{msg.message_id}"
+
+        # Content file
+        content_path = f"/messages/{base_name}.txt"
+        entries[content_path] = str(msg.content).encode("utf-8")
+
+        # Metadata file
+        metadata = {
+            "message_id": msg.message_id,
+            "role": msg.role,
+            "timestamp": msg.timestamp.isoformat(),
+            "parent_id": msg.parent_id,
+            "model_name": msg.model_name,
+            "tokens": msg.usage.total_tokens if msg.usage else None,
+            "cost": float(msg.cost_info.total_cost) if msg.cost_info else None,
+        }
+        metadata_path = f"/messages/{base_name}.json"
+        entries[metadata_path] = anyenv.dump_json(metadata, indent=True).encode()
+
+    # Summary file
+    summary = {
+        "total_messages": len(messages),
+        "total_tokens": messages.get_history_tokens(),
+        "total_cost": messages.get_total_cost(),
+        "roles": {
+            "user": len([m for m in messages if m.role == "user"]),
+            "assistant": len([m for m in messages if m.role == "assistant"]),
+        },
+    }
+    entries["/summary.json"] = anyenv.dump_json(summary, indent=True).encode("utf-8")
+
+    return entries
+
+
+class ChatMessageFileSystem(BaseAsyncFileFileSystem[ChatMessagePath, ChatMessageInfo]):
     """Read-only filesystem exposing ChatMessages as files.
 
     Structure:
@@ -48,45 +100,6 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
         super().__init__(**kwargs)
         self._messages = messages
 
-    def _get_file_entries(self) -> dict[str, bytes]:
-        """Generate file entries from current messages."""
-        entries: dict[str, bytes] = {}
-
-        for msg in self._messages:
-            timestamp = msg.timestamp.strftime("%Y%m%d_%H%M%S_%f")
-            base_name = f"{timestamp}_{msg.role}_{msg.message_id}"
-
-            # Content file
-            content_path = f"/messages/{base_name}.txt"
-            entries[content_path] = str(msg.content).encode("utf-8")
-
-            # Metadata file
-            metadata = {
-                "message_id": msg.message_id,
-                "role": msg.role,
-                "timestamp": msg.timestamp.isoformat(),
-                "parent_id": msg.parent_id,
-                "model_name": msg.model_name,
-                "tokens": msg.usage.total_tokens if msg.usage else None,
-                "cost": float(msg.cost_info.total_cost) if msg.cost_info else None,
-            }
-            metadata_path = f"/messages/{base_name}.json"
-            entries[metadata_path] = anyenv.dump_json(metadata, indent=True).encode()
-
-        # Summary file
-        summary = {
-            "total_messages": len(self._messages),
-            "total_tokens": self._messages.get_history_tokens(),
-            "total_cost": self._messages.get_total_cost(),
-            "roles": {
-                "user": len([m for m in self._messages if m.role == "user"]),
-                "assistant": len([m for m in self._messages if m.role == "assistant"]),
-            },
-        }
-        entries["/summary.json"] = anyenv.dump_json(summary, indent=True).encode("utf-8")
-
-        return entries
-
     def _get_dirs(self) -> set[str]:
         """Get all virtual directories."""
         return {"/", "/messages", "/by_role", "/by_role/user", "/by_role/assistant"}
@@ -97,45 +110,59 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
             path = "/" + path
         return path.rstrip("/") or "/"
 
+    @overload
+    async def _ls(
+        self, path: str, detail: Literal[True] = ..., **kwargs: Any
+    ) -> list[ChatMessageInfo]: ...
+
+    @overload
+    async def _ls(self, path: str, detail: Literal[False], **kwargs: Any) -> list[str]: ...
+
     async def _ls(
         self,
         path: str,
         detail: bool = True,
         **kwargs: Any,
-    ) -> list[dict[str, Any]] | list[str]:
+    ) -> list[ChatMessageInfo] | list[str]:
         """List directory contents."""
         path = self._normalize_path(path)
-        file_entries = self._get_file_entries()
+        file_entries = _get_file_entries(self._messages)
 
-        entries: list[dict[str, Any]] = []
+        entries: list[ChatMessageInfo] = []
         match path:
             case "/":
                 entries = [
-                    {"name": "/messages", "type": "directory", "size": 0},
-                    {"name": "/by_role", "type": "directory", "size": 0},
-                    {
-                        "name": "/summary.json",
-                        "type": "file",
-                        "size": len(file_entries.get("/summary.json", b"")),
-                    },
+                    ChatMessageInfo(name="/messages", type="directory", size=0),
+                    ChatMessageInfo(name="/by_role", type="directory", size=0),
+                    ChatMessageInfo(
+                        name="/summary.json",
+                        type="file",
+                        size=len(file_entries.get("/summary.json", b"")),
+                    ),
                 ]
             case "/messages":
                 for file_path, content in file_entries.items():
                     if file_path.startswith("/messages/"):
-                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+                        entries.append(
+                            ChatMessageInfo(name=file_path, type="file", size=len(content))
+                        )
             case "/by_role":
                 entries = [
-                    {"name": "/by_role/user", "type": "directory", "size": 0},
-                    {"name": "/by_role/assistant", "type": "directory", "size": 0},
+                    ChatMessageInfo(name="/by_role/user", type="directory", size=0),
+                    ChatMessageInfo(name="/by_role/assistant", type="directory", size=0),
                 ]
             case "/by_role/user":
                 for file_path, content in file_entries.items():
                     if file_path.startswith("/messages/") and "_user_" in file_path:
-                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+                        entries.append(
+                            ChatMessageInfo(name=file_path, type="file", size=len(content))
+                        )
             case "/by_role/assistant":
                 for file_path, content in file_entries.items():
                     if file_path.startswith("/messages/") and "_assistant_" in file_path:
-                        entries.append({"name": file_path, "type": "file", "size": len(content)})
+                        entries.append(
+                            ChatMessageInfo(name=file_path, type="file", size=len(content))
+                        )
 
         return entries if detail else [e["name"] for e in entries]
 
@@ -148,32 +175,28 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
     ) -> bytes:
         """Read file content."""
         path = self._normalize_path(path)
-        file_entries = self._get_file_entries()
+        file_entries = _get_file_entries(self._messages)
         if path in file_entries:
             return file_entries[path]
         raise FileNotFoundError(f"File not found: {path}")
 
-    async def _info(self, path: str, **kwargs: Any) -> dict[str, Any]:
+    async def _info(self, path: str, **kwargs: Any) -> ChatMessageInfo:
         """Get file/directory info."""
         path = self._normalize_path(path)
 
         if path in self._get_dirs():
-            return {"name": path, "type": "directory", "size": 0}
+            return ChatMessageInfo(name=path, type="directory", size=0)
 
-        file_entries = self._get_file_entries()
+        file_entries = _get_file_entries(self._messages)
         if path in file_entries:
-            return {
-                "name": path,
-                "type": "file",
-                "size": len(file_entries[path]),
-            }
+            return ChatMessageInfo(name=path, type="file", size=len(file_entries[path]))
 
         raise FileNotFoundError(f"Path not found: {path}")
 
     async def _exists(self, path: str, **kwargs: Any) -> bool:
         """Check if path exists."""
         path = self._normalize_path(path)
-        return path in self._get_dirs() or path in self._get_file_entries()
+        return path in self._get_dirs() or path in _get_file_entries(self._messages)
 
     async def _isdir(self, path: str) -> bool:
         """Check if path is a directory."""
@@ -183,7 +206,7 @@ class ChatMessageFileSystem(AsyncFileSystem):  # type: ignore[misc]
     async def _isfile(self, path: str) -> bool:
         """Check if path is a file."""
         path = self._normalize_path(path)
-        return path in self._get_file_entries()
+        return path in _get_file_entries(self._messages)
 
     # Write operations - all raise since this is read-only
 
