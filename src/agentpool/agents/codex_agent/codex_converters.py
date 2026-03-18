@@ -36,7 +36,6 @@ from pydantic_ai import (
     TextPart,
     ThinkingPart,
     ToolCallPart,
-    ToolReturnPart,
     UploadedFile,
     UserContent,
     UserPromptPart,
@@ -47,7 +46,7 @@ from agentpool.sessions import SessionData
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
     from codexed.models import (
         CodexEvent,
@@ -168,9 +167,7 @@ def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelI
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     model_id = model_data.model or model_data.id
-    input_modalities: set[Modality] = {
-        _MODALITY_MAP[m] for m in model_data.input_modalities if m in _MODALITY_MAP
-    }
+    input_modalities = {_MODALITY_MAP[m] for m in model_data.input_modalities if m in _MODALITY_MAP}
     return TokoModelInfo(
         id=model_id,
         name=model_data.display_name or model_data.id,
@@ -203,29 +200,25 @@ def to_session_data(thread_data: ThreadData, agent_name: str, cwd: str | None) -
     )
 
 
-def user_content_to_codex(content: list[UserContent]) -> list[UserInput]:
+def user_content_to_codex(content: list[UserContent]) -> Iterator[UserInput]:
     """Convert pydantic-ai UserContent list to Codex UserInput list."""
     from codexed.models import UserInputImage, UserInputText
 
-    result: list[UserInput] = []
     for item in content:
         match item:
             case str():
-                result.append(UserInputText(text=item))
+                yield UserInputText(text=item)
             case ImageUrl(url=url):
-                result.append(UserInputImage(url=url))
+                yield UserInputImage(url=url)
             case BinaryContent(data=data, media_type=media_type, is_image=is_image) if is_image:
-                result.append(UserInputImage.from_bytes(data=data, media_type=media_type))
+                yield UserInputImage.from_bytes(data=data, media_type=media_type)
             case FileUrl() | BinaryContent() | CachePoint() | UploadedFile():
                 pass
             case _ as unreachable:
                 assert_never(unreachable)
-    return result
 
 
-async def _format_tool_result(
-    item: ThreadItem,
-) -> str | list[str | BinaryContent]:
+async def _format_tool_result(item: ThreadItem) -> str | list[str | BinaryContent]:
     """Format tool result from a completed ThreadItem.
 
     Args:
@@ -261,47 +254,6 @@ async def _format_tool_result(
             return ""
         case _:
             return ""
-
-
-async def _thread_item_to_tool_return_part(
-    item: ThreadItem,
-) -> ToolReturnPart | BuiltinToolReturnPart | None:
-    """Convert a completed ThreadItem to a ToolReturnPart or BuiltinToolReturnPart.
-
-    Codex built-in tools (bash, file changes, web search, etc.) are converted to
-    BuiltinToolReturnPart since they're provided by the remote Codex agent.
-    MCP tools are converted to ToolReturnPart (they may be from local ToolBridge).
-
-    Args:
-        item: Completed thread item from Codex
-
-    Returns:
-        ToolReturnPart for MCP tools, BuiltinToolReturnPart for Codex built-ins, or None
-    """
-    from codexed.models import (
-        ThreadItemCommandExecution,
-        ThreadItemFileChange,
-        ThreadItemImageView,
-        ThreadItemMcpToolCall,
-        ThreadItemWebSearch,
-    )
-
-    result = await _format_tool_result(item)
-    match item:
-        case ThreadItemCommandExecution(status="completed", id=tc_id):
-            return BuiltinToolReturnPart(tool_name="bash", content=result, tool_call_id=tc_id)
-        case ThreadItemFileChange(status="completed", id=tc_id):
-            return BuiltinToolReturnPart("file_change", content=result, tool_call_id=tc_id)
-        case ThreadItemWebSearch(id=tc_id):
-            return BuiltinToolReturnPart("web_search", content=result, tool_call_id=tc_id)
-        case ThreadItemImageView(id=tc_id):
-            return BuiltinToolReturnPart("image_view", content=result, tool_call_id=tc_id)
-        case ThreadItemMcpToolCall(status="completed", id=tc_id, tool=tool):
-            # TODO: Distinguish between local (ToolBridge) and remote MCP tools
-            # See matching TODO in _thread_item_to_tool_call_part
-            return ToolReturnPart(tool_name=tool, content=result, tool_call_id=tc_id)
-        case _:
-            return None
 
 
 def _thread_item_to_tool_call_part(item: ThreadItem) -> ToolCallPart | BuiltinToolCallPart | None:
@@ -500,49 +452,6 @@ async def convert_codex_stream(  # noqa: PLR0915
                 pass
 
 
-async def event_to_part(
-    event: CodexEvent,
-) -> (
-    TextPart
-    | ThinkingPart
-    | ToolCallPart
-    | BuiltinToolCallPart
-    | ToolReturnPart
-    | BuiltinToolReturnPart
-    | None
-):
-    """Convert Codex event to part for message construction.
-
-    This is for building final messages, not for streaming.
-
-    Handles both tool calls (item/started) and tool returns (item/completed).
-
-    Args:
-        event: Codex event
-
-    Returns:
-        Part or None
-    """
-    from codexed.models import (
-        AgentMessageDeltaEvent,
-        ItemCompletedEvent,
-        ItemStartedEvent,
-        ReasoningTextDeltaEvent,
-    )
-
-    match event:
-        case AgentMessageDeltaEvent(data=data):
-            return TextPart(content=data.delta)
-        case ReasoningTextDeltaEvent(data=data):
-            return ThinkingPart(content=data.delta)
-        case ItemStartedEvent(data=data):
-            return _thread_item_to_tool_call_part(data.item)
-        case ItemCompletedEvent(data=data):
-            return await _thread_item_to_tool_return_part(data.item)
-        case _:
-            return None
-
-
 def _user_input_to_content(inp: UserInput) -> UserContent:
     """Convert Codex UserInput to pydantic-ai UserContent."""
     from codexed.models import (
@@ -617,9 +526,10 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 assistant_display_parts.append(display)
                 cmd_args = {"command": cmd, "cwd": cwd}
                 bash_call = BuiltinToolCallPart(tool_name="bash", args=cmd_args, tool_call_id=tc_id)
-                bash_ret = ToolReturnPart(tool_name="bash", content=output, tool_call_id=tc_id)
-                assistant_responses.append(ModelResponse(parts=[bash_call]))
-                assistant_responses.append(ModelRequest(parts=[bash_ret]))
+                bash_ret = BuiltinToolReturnPart(
+                    tool_name="bash", content=output, tool_call_id=tc_id
+                )
+                assistant_responses.append(ModelResponse(parts=[bash_call, bash_ret]))
 
             case ThreadItemFileChange(changes=changes, id=tc_id):
                 paths = [c.path for c in changes]
@@ -632,9 +542,8 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 text = "\n".join(diffs) or "OK"
                 args = {"files": paths}
                 edit_call = ToolCallPart(tool_name="edit", args=args, tool_call_id=tc_id)
-                edit_ret = ToolReturnPart(tool_name="edit", content=text, tool_call_id=tc_id)
-                assistant_responses.append(ModelResponse(parts=[edit_call]))
-                assistant_responses.append(ModelRequest(parts=[edit_ret]))
+                edit_ret = BuiltinToolReturnPart(tool_name="edit", content=text, tool_call_id=tc_id)
+                assistant_responses.append(ModelResponse(parts=[edit_call, edit_ret]))
 
             case ThreadItemMcpToolCall(result=mcp_result, arguments=args, id=tc_id, tool=tool):
                 result_text = ""
@@ -644,43 +553,40 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 assistant_display_parts.append(f"[Tool: {tool}] {result_text[:100]}")
                 mcp_args = args if isinstance(args, dict) else {}
                 mcp_call = BuiltinToolCallPart(tool_name=tool, args=mcp_args, tool_call_id=tc_id)
-                mcp_ret = ToolReturnPart(tool_name=tool, content=result_text, tool_call_id=tc_id)
-                assistant_responses.append(ModelResponse(parts=[mcp_call]))
-                assistant_responses.append(ModelRequest(parts=[mcp_ret]))
+                mcp_ret = BuiltinToolReturnPart(
+                    tool_name=tool, content=result_text, tool_call_id=tc_id
+                )
+                assistant_responses.append(ModelResponse(parts=[mcp_call, mcp_ret]))
 
             case ThreadItemWebSearch(query=query, id=tc_id):
                 assistant_display_parts.append(f"[Web Search: {query}]")
                 search_call = BuiltinToolCallPart(
                     tool_name="web_search", args={"query": query}, tool_call_id=tc_id
                 )
-                search_ret = ToolReturnPart(
+                search_ret = BuiltinToolReturnPart(
                     tool_name="web_search", content="Search completed", tool_call_id=tc_id
                 )
-                assistant_responses.append(ModelResponse(parts=[search_call]))
-                assistant_responses.append(ModelRequest(parts=[search_ret]))
+                assistant_responses.append(ModelResponse(parts=[search_call, search_ret]))
 
             case ThreadItemImageView(path=path, id=tc_id):
                 assistant_display_parts.append(f"[Viewed Image: {path}]")
                 view_call = BuiltinToolCallPart(
                     tool_name="view_image", args={"path": path}, tool_call_id=tc_id
                 )
-                view_ret = ToolReturnPart(
+                view_ret = BuiltinToolReturnPart(
                     tool_name="view_image", content="Image viewed", tool_call_id=tc_id
                 )
-                assistant_responses.append(ModelResponse(parts=[view_call]))
-                assistant_responses.append(ModelRequest(parts=[view_ret]))
+                assistant_responses.append(ModelResponse(parts=[view_call, view_ret]))
 
             case ThreadItemEnteredReviewMode(review=review):
                 assistant_display_parts.append(f"[Entered Review Mode: {review}]")
-                assistant_responses.append(
-                    ModelResponse(parts=[TextPart(content=f"Entered review mode: {review}")])
-                )
+                tp = TextPart(content=f"Entered review mode: {review}")
+                assistant_responses.append(ModelResponse(parts=[tp]))
 
             case ThreadItemExitedReviewMode(review=review):
                 assistant_display_parts.append(f"[Exited Review Mode: {review}]")
-                assistant_responses.append(
-                    ModelResponse(parts=[TextPart(content=f"Exited review mode: {review}")])
-                )
+                tp = TextPart(content=f"Exited review mode: {review}")
+                assistant_responses.append(ModelResponse(parts=[tp]))
 
             case ThreadItemCollabAgentToolCall(
                 tool=tool,
@@ -696,10 +602,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 receiver_ids = ", ".join(receiver_thread_ids)
                 display = f"[Collab Agent: {tool}] {receiver_ids} ({status})"
                 assistant_display_parts.append(display)
-                collab_args: dict[str, Any] = {
-                    "tool": tool,
-                    "sender_thread_id": sender_thread_id,
-                }
+                collab_args: dict[str, Any] = {"tool": tool, "sender_thread_id": sender_thread_id}
                 if receiver_thread_ids:
                     collab_args["receiver_thread_ids"] = receiver_thread_ids
                 if prompt:
@@ -707,11 +610,10 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 collab_call = BuiltinToolCallPart(
                     tool_name="collab_agent", args=collab_args, tool_call_id=tc_id
                 )
-                collab_ret = ToolReturnPart(
+                collab_ret = BuiltinToolReturnPart(
                     tool_name="collab_agent", content=f"Status: {status}", tool_call_id=tc_id
                 )
-                assistant_responses.append(ModelResponse(parts=[collab_call]))
-                assistant_responses.append(ModelRequest(parts=[collab_ret]))
+                assistant_responses.append(ModelResponse(parts=[collab_call, collab_ret]))
             case ThreadItemPlan() | ThreadItemDynamicToolCall() | ThreadItemContextCompaction():
                 pass
             case _ as unreachable:

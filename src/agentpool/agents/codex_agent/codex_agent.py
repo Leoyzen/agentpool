@@ -422,7 +422,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         if not self._client or not self._sdk_session_id:
             raise AgentNotInitializedError
 
-        input_items = user_content_to_codex(prompts)
+        input_items = list(user_content_to_codex(prompts))
         # Generate IDs if not provided
         run_id = str(uuid4())
         final_message_id = message_id or str(uuid4())

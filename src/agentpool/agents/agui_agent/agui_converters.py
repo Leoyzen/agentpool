@@ -10,7 +10,6 @@ client-side tool execution.
 from __future__ import annotations
 
 import base64
-from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -30,7 +29,7 @@ from agentpool.utils.todos import PlanEntry
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from ag_ui.core import BaseEvent, InputContent, Message, Tool as AGUITool
     from pydantic_ai import ModelMessage, UserContent
