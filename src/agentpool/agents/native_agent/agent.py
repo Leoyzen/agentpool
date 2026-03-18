@@ -572,7 +572,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 self.conversation.set_history(history)
             result = await self.run(prompt)
             if history:
-                self.conversation.set_history(old)
+                self.conversation.set_history(history)
             return result.data
 
         # Set the correct return annotation dynamically
