@@ -10,11 +10,22 @@ client-side tool execution.
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 from uuid import uuid4
 
 import anyenv
-from pydantic_ai import BinaryContent, FileUrl
+from pydantic_ai import (
+    BinaryContent,
+    FileUrl,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 
 from agentpool.agents.events import (
     CustomEvent,
@@ -31,14 +42,14 @@ from agentpool.utils.todos import PlanEntry
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from ag_ui.core import BaseEvent, InputContent, Message, Tool as AGUITool
+    from ag_ui.core import Event, InputContent, Message, Tool as AGUITool
     from pydantic_ai import ModelMessage, UserContent
 
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.tools.base import Tool
 
 
-def agui_to_native_event(event: BaseEvent) -> RichAgentStreamEvent[Any] | None:  # noqa: PLR0911
+def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # noqa: PLR0911
     """Convert AG-UI event to native streaming event.
 
     Args:
@@ -61,9 +72,12 @@ def agui_to_native_event(event: BaseEvent) -> RichAgentStreamEvent[Any] | None: 
         ReasoningMessageStartEvent,
         ReasoningStartEvent,
         RunErrorEvent as AGUIRunErrorEvent,
+        RunFinishedEvent,
         RunStartedEvent as AGUIRunStartedEvent,
         StateDeltaEvent,
         StateSnapshotEvent,
+        StepFinishedEvent,
+        StepStartedEvent,
         TextMessageChunkEvent,
         TextMessageContentEvent,
         TextMessageEndEvent,
@@ -185,8 +199,18 @@ def agui_to_native_event(event: BaseEvent) -> RichAgentStreamEvent[Any] | None: 
         case AGUICustomEvent(name=name, value=value):
             return CustomEvent(event_data=value, event_type=name, source="ag-ui")
 
-        case _:
+        case (
+            TextMessageChunkEvent()
+            | ToolCallChunkEvent()
+            | RunFinishedEvent()
+            | StepStartedEvent()
+            | StepFinishedEvent()
+            | ReasoningMessageChunkEvent()
+        ):
             return None
+
+        case _ as unreachable:
+            assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
 
 def _content_to_plan_entries(content: list[Any]) -> list[PlanEntry]:
@@ -270,16 +294,6 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> Iterator[Message
         ToolCall,
         ToolMessage,
         UserMessage,
-    )
-    from pydantic_ai import (
-        ModelRequest,
-        ModelResponse,
-        SystemPromptPart,
-        TextPart,
-        ThinkingPart,
-        ToolCallPart,
-        ToolReturnPart,
-        UserPromptPart,
     )
 
     for msg in messages:

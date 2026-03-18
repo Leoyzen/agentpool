@@ -14,6 +14,7 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     from ag_ui.core import (
         BaseEvent,
+        Event,
         ReasoningMessageChunkEvent,
         TextMessageChunkEvent,
         ToolCallChunkEvent,
@@ -43,7 +44,7 @@ class ChunkTransformer:
         # Track active reasoning message: message_id
         self._active_reasoning: str | None = None
 
-    def transform(self, event: BaseEvent) -> list[BaseEvent]:
+    def transform(self, event: Event) -> list[Event]:
         """Transform a single event, potentially expanding chunks.
 
         Args:
@@ -82,11 +83,11 @@ class ChunkTransformer:
                 # Pass through other events unchanged
                 return [event]
 
-    def _handle_text_chunk(self, event: TextMessageChunkEvent) -> list[BaseEvent]:
+    def _handle_text_chunk(self, event: TextMessageChunkEvent) -> list[Event]:
         """Handle TEXT_MESSAGE_CHUNK event."""
         from ag_ui.core import TextMessageContentEvent, TextMessageStartEvent
 
-        result: list[BaseEvent] = []
+        result: list[Event] = []
         message_id = event.message_id
         role = event.role or "assistant"
         delta = event.delta
@@ -111,11 +112,11 @@ class ChunkTransformer:
 
         return result
 
-    def _handle_tool_chunk(self, event: ToolCallChunkEvent) -> list[BaseEvent]:
+    def _handle_tool_chunk(self, event: ToolCallChunkEvent) -> list[Event]:
         """Handle TOOL_CALL_CHUNK event."""
         from ag_ui.core import ToolCallArgsEvent, ToolCallStartEvent
 
-        result: list[BaseEvent] = []
+        result: list[Event] = []
         tool_call_id = event.tool_call_id
         tool_name = event.tool_call_name
         parent_id = event.parent_message_id
@@ -145,7 +146,7 @@ class ChunkTransformer:
 
         return result
 
-    def _close_text_message(self) -> list[BaseEvent]:
+    def _close_text_message(self) -> list[Event]:
         """Close active text message."""
         from ag_ui.core import TextMessageEndEvent
 
@@ -159,7 +160,7 @@ class ChunkTransformer:
         logger.debug("Chunk transformer: TEXT_MESSAGE_END", message_id=message_id)
         return [end_event]
 
-    def _close_tool_call(self) -> list[BaseEvent]:
+    def _close_tool_call(self) -> list[Event]:
         """Close active tool call."""
         from ag_ui.core import ToolCallEndEvent
 
@@ -201,7 +202,7 @@ class ChunkTransformer:
 
         return result
 
-    def _close_reasoning_message(self) -> list[BaseEvent]:
+    def _close_reasoning_message(self) -> list[Event]:
         """Close active reasoning message."""
         from ag_ui.core import ReasoningMessageEndEvent
 
@@ -215,15 +216,15 @@ class ChunkTransformer:
         logger.debug("Chunk transformer: REASONING_MESSAGE_END", message_id=message_id)
         return [end_event]
 
-    def _close_all_pending(self) -> list[BaseEvent]:
+    def _close_all_pending(self) -> list[Event]:
         """Close all pending chunks (text, tool, and reasoning)."""
-        result: list[BaseEvent] = []
+        result: list[Event] = []
         result.extend(self._close_text_message())
         result.extend(self._close_tool_call())
         result.extend(self._close_reasoning_message())
         return result
 
-    def flush(self) -> list[BaseEvent]:
+    def flush(self) -> list[Event]:
         """Flush any pending events at end of stream.
 
         Call this when the stream ends to ensure all pending
