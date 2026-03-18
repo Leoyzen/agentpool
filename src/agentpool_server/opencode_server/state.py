@@ -115,19 +115,6 @@ class ServerState:
         return self.agent.env.get_fs()
 
     @property
-    def storage(self) -> Any:
-        """Get the storage manager from the agent's pool.
-
-        Returns:
-            StorageManager: The storage manager for session persistence.
-
-        Raises:
-            RuntimeError: If agent storage is not initialized.
-        """
-        assert self.agent.storage is not None, "Agent storage is not initialized"
-        return self.agent.storage
-
-    @property
     def base_path(self) -> str:
         """Get the resolved root directory for file operations."""
         raw_path = self.agent.env.cwd or self.working_dir

@@ -11,7 +11,15 @@ hide:
 
 ## Key Features
 
-### 🔌 ACP Integration
+### Slash Commands
+
+Skills exposed as slash commands across all supported protocols (ACP, AG-UI, OpenCode):
+
+- Define reusable skill instructions in SKILL.md files
+- Automatically exposed as protocol-native commands
+- Use `/skill:my-skill` in OpenCode, `skill__my-skill` tool in AG-UI, or slash commands in ACP
+
+### ACP Integration
 
 First-class support for the Agent Client Protocol (ACP):
 

@@ -15,7 +15,7 @@ from agentpool.utils.baseregistry import BaseRegistry
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from upathtools import JoinablePathLike, UPath
 
@@ -35,6 +35,10 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             self.skills_dirs = [to_upath(i).expanduser() for i in skills_dirs]
         else:
             self.skills_dirs = [to_upath(i).expanduser() for i in self.DEFAULT_SKILL_PATHS]
+
+        # Event handlers for skill lifecycle changes
+        self._skill_added_handlers: list[Callable[[str, Skill], None]] = []
+        self._skill_removed_handlers: list[Callable[[str, None], None]] = []
 
     async def discover_skills(self) -> None:
         """Scan filesystem and register all found skills."""
@@ -143,6 +147,47 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
         """Lazy load full instructions for a skill."""
         skill = self.get(skill_name)
         return skill.load_instructions()
+
+    def on_skill_added(self, callback: Callable[[str, Skill], None]) -> None:
+        """Register a callback to be called when a skill is added.
+
+        Args:
+            callback: A callable that receives the skill name and skill instance.
+        """
+        self._skill_added_handlers.append(callback)
+
+    def on_skill_removed(self, callback: Callable[[str, None], None]) -> None:
+        """Register a callback to be called when a skill is removed.
+
+        Args:
+            callback: A callable that receives the skill name and None.
+        """
+        self._skill_removed_handlers.append(callback)
+
+    def register(self, key: str, item: Skill | Any, replace: bool = False) -> None:
+        """Register a skill and emit events to registered callbacks.
+
+        Args:
+            key: The skill name to register.
+            item: The skill instance or data to register.
+            replace: Whether to replace an existing skill with the same name.
+        """
+        super().register(key, item, replace)
+        for handler in self._skill_added_handlers:
+            handler(key, item)
+
+    def __delitem__(self, key: str) -> None:
+        """Remove a skill and emit events to registered callbacks.
+
+        Args:
+            key: The skill name to remove.
+        """
+        if key in self._items:
+            for handler in self._skill_removed_handlers:
+                handler(key, None)
+            del self._items[key]
+        else:
+            raise self._error_class(f"Item not found: {key}")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from agentpool.common_types import NodeName, SupportsStructuredOutput
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
 from agentpool.messaging import MessageNode
+from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.talk import TeamTalk
 from agentpool.talk.registry import ConnectionRegistry
 from agentpool.tasks import TaskRegistry
@@ -157,6 +158,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 owner="pool",
             )
             self._tasks = TaskRegistry()
+            self._skill_commands: SkillCommandRegistry | None = None
             self.prompt_manager = PromptManager(self.manifest.prompts)
             # Main agent name: explicit param > manifest.default_agent > None (will use first)
             self._main_agent_name = main_agent_name or self.manifest.default_agent
@@ -195,6 +197,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 # Initialize MCP manager first, then add aggregating provider
                 await self.exit_stack.enter_async_context(self.mcp)
                 await self.exit_stack.enter_async_context(self.skills)
+                # Initialize skill command registry after skills are loaded
+                self._skill_commands = SkillCommandRegistry(self.skills.registry)
+                await self._skill_commands.initialize()
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 agents = list(self.all_agents.values())
                 teams = list(self.teams.values())
@@ -248,6 +253,15 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     def is_running(self) -> bool:
         """Check if the agent pool is running."""
         return bool(self._running_count)
+
+    @property
+    def skill_commands(self) -> SkillCommandRegistry | None:
+        """Get the skill command registry.
+
+        Returns the SkillCommandRegistry when skills are configured,
+        or None if no skills are available.
+        """
+        return self._skill_commands
 
     async def cleanup(self) -> None:
         """Clean up all agents."""

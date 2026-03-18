@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from agentpool.log import get_logger
 from agentpool_server.agui_server.base_agent_adapter import BaseAgentAGUIAdapter
+from agentpool_server.agui_server.skill_tools import AGUISkillBridge
 from agentpool_server.http_server import HTTPServer
 
 
@@ -69,6 +70,15 @@ class AGUIServer(HTTPServer):
             raise_exceptions: Whether to raise exceptions during server start
         """
         super().__init__(pool, name=name, host=host, port=port, raise_exceptions=raise_exceptions)
+        # Setup skill command bridge if pool has skill commands configured
+        self._skill_bridge: AGUISkillBridge | None = None
+        if pool.skill_commands is not None:
+            self._skill_bridge = AGUISkillBridge()
+            pool.skill_commands.on_command_change(self._skill_bridge.handle_change)
+            logger.debug(
+                "AG-UI skill bridge setup complete",
+                command_count=len(pool.skill_commands),
+            )
 
     async def get_routes(self) -> list[Route]:
         """Get Starlette routes for AG-UI protocol.

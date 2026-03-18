@@ -31,6 +31,7 @@ from agentpool_server.opencode_server.routes import (
     session_router,
     tui_router,
 )
+from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 from agentpool_server.opencode_server.state import ServerState
 
 
@@ -116,6 +117,15 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         raise ValueError(msg)
 
     state = ServerState(working_dir=working_dir or str(Path.cwd()), agent=agent)
+
+    # Setup skill command bridge if pool has skill commands configured
+    if state.pool.skill_commands is not None:
+        state.skill_bridge = OpenCodeSkillBridge()
+        state.pool.skill_commands.on_command_change(state.skill_bridge.handle_change)
+        logger.debug(
+            "OpenCode skill bridge setup complete",
+            command_count=len(state.pool.skill_commands),
+        )
 
     # Set up todo change callback to broadcast events
     async def on_todo_change(tracker: TodoTracker) -> None:

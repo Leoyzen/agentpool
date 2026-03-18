@@ -184,6 +184,7 @@ The **ACP server** is ideal for IDE integration - it provides real-time tool con
 
 ### Additional Capabilities
 
+- **Skill Commands**: Expose SKILLS.md files as slash commands across ACP, AG-UI, and OpenCode protocols
 - **Structured Output**: Define response schemas inline or import Python types
 - **Storage & Analytics**: Track all interactions with configurable providers
 - **File Abstraction**: UPath-backed operations work on local and remote sources

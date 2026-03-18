@@ -7,6 +7,7 @@ from typing import Self
 from pydantic import Field
 
 from acp.schema.base import AnnotatedObject
+from acp.schema.slash_commands import AvailableCommand
 
 
 class FileSystemCapability(AnnotatedObject):
@@ -227,6 +228,13 @@ class AgentCapabilities(AnnotatedObject):
     session_capabilities: SessionCapabilities | None = Field(default_factory=SessionCapabilities)
     """Session capabilities supported by the agent."""
 
+    slash_commands: list[AvailableCommand] = Field(default_factory=list)
+    """Available slash commands that can be invoked by the client.
+
+    These commands are exposed by the agent for direct invocation
+    via slash command interfaces. Empty list means no commands available.
+    """
+
     @classmethod
     def create(
         cls,
@@ -239,6 +247,7 @@ class AgentCapabilities(AnnotatedObject):
         list_sessions: bool = False,
         resume_session: bool = False,
         stop_session: bool = False,
+        slash_commands: list[AvailableCommand] | None = None,
     ) -> Self:
         """Create an instance of AgentCapabilities.
 
@@ -252,6 +261,7 @@ class AgentCapabilities(AnnotatedObject):
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
             stop_session: Whether the agent supports `session/stop` (unstable).
+            slash_commands: Available slash commands exposed by the agent.
         """
         session_caps = SessionCapabilities(
             list=SessionListCapabilities() if list_sessions else None,
@@ -267,4 +277,5 @@ class AgentCapabilities(AnnotatedObject):
                 image=image_prompts,
             ),
             session_capabilities=session_caps,
+            slash_commands=slash_commands or [],
         )

@@ -113,13 +113,24 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
 async def list_commands(state: StateDep) -> list[Command]:
     """List available slash commands.
 
-    Commands are derived from MCP prompts available to the agent.
+    Commands are derived from MCP prompts available to the agent,
+    plus skill commands from the skill bridge.
     """
+    commands: list[Command] = []
+
+    # Add MCP prompts as commands
     try:
         prompts = await state.agent.tools.list_prompts()
-        return [Command(name=p.name, description=p.description or "") for p in prompts]
+        commands.extend([Command(name=p.name, description=p.description or "") for p in prompts])
     except Exception:  # noqa: BLE001
-        return []
+        pass
+
+    # Add skill commands from the bridge
+    if state.skill_bridge is not None:
+        for skill_cmd in state.skill_bridge.get_commands():
+            commands.append(Command(name=skill_cmd.name, description=skill_cmd.description))
+
+    return commands
 
 
 @router.get("/mcp")
