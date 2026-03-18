@@ -12,6 +12,7 @@ into ChatMessage objects (the reverse of replaying).
 from __future__ import annotations
 
 import base64
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, assert_never, overload
 from uuid import uuid4
@@ -20,11 +21,16 @@ from pydantic_ai import (
     AudioUrl,
     BinaryContent,
     BinaryImage,
+    BuiltinToolCallPart,
+    BuiltinToolReturnPart,
     CachePoint,
     DocumentUrl,
+    FilePart,
     ImageUrl,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
+    SystemPromptPart,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -49,10 +55,13 @@ from acp.schema import (
     SessionConfigSelectOption,
     TerminalToolCallContent,
     TextContentBlock,
+    TextResourceContents,
+    ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
     UserMessageChunk,
 )
+from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
     DiffContentItem,
     LocationContentItem,
@@ -63,10 +72,11 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
+from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
     from pydantic_ai import FinishReason, ModelMessage, ModelResponsePart, UserContent
 
@@ -82,7 +92,6 @@ if TYPE_CHECKING:
         StdioMcpServer,
         StopReason,
         ToolCallContent,
-        ToolCallLocation,
     )
     from agentpool.agents.events import RichAgentStreamEvent, ToolCallContentItem
     from agentpool.agents.modes import ModeCategory, ModeInfo
@@ -101,6 +110,149 @@ STOP_REASON_MAP: dict[StopReason, FinishReason] = {
     "refusal": "content_filter",
     "cancelled": "error",
 }
+
+
+def model_messages_to_session_updates(
+    messages: Sequence[ModelMessage],
+) -> Iterator[SessionUpdate]:
+    """Convert pydantic-ai ModelMessages to ACP SessionUpdate objects.
+
+    This is a pure conversion function with no I/O. It yields one or more
+    SessionUpdate instances for each message part.
+
+    Args:
+        messages: Sequence of pydantic-ai model messages to convert.
+
+    Yields:
+        SessionUpdate instances ready to be sent via a client.
+    """
+    from pydantic_ai import TextPart, ThinkingPart, ToolCallPart
+
+    tool_call_inputs: dict[str, dict[str, Any]] = {}
+    for message in messages:
+        for part in message.parts:
+            match part:
+                case TextPart(content=content):
+                    yield AgentMessageChunk.text(text=content)
+
+                case ThinkingPart(content=content):
+                    yield AgentThoughtChunk.text(text=content)
+
+                case (
+                    ToolCallPart(tool_call_id=tool_call_id, tool_name=tool_name)
+                    | BuiltinToolCallPart(tool_call_id=tool_call_id, tool_name=tool_name)
+                ):
+                    tool_input = safe_args_as_dict(part)
+                    tool_call_inputs[tool_call_id] = tool_input
+                    title = generate_tool_title(tool_name, tool_input)
+                    yield ToolCallStart(
+                        tool_call_id=tool_call_id,
+                        status="pending",
+                        title=title,
+                        kind=infer_tool_kind(tool_name),
+                        raw_input=tool_input,
+                    )
+
+                case FilePart(content=content) if content.is_image:
+                    yield AgentMessageChunk.image(
+                        data=content.data,
+                        mime_type=content.media_type,
+                    )
+                case FilePart(content=content) if content.is_audio:
+                    yield AgentMessageChunk.audio(
+                        data=content.data,
+                        mime_type=content.media_type,
+                    )
+                case FilePart():
+                    pass
+
+                case UserPromptPart(content=str(content)):
+                    yield UserMessageChunk.text(text=content)
+
+                case UserPromptPart(content=content):
+                    yield from _user_content_to_updates(content)
+
+                case (
+                    ToolReturnPart(content=content, tool_name=tool_name, tool_call_id=tool_call_id)
+                    | BuiltinToolReturnPart(
+                        content=content, tool_name=tool_name, tool_call_id=tool_call_id
+                    )
+                ):
+                    converted = to_acp_content_blocks(content)
+                    tool_input = tool_call_inputs.get(tool_call_id, {})
+                    acp_content = [ContentToolCallContent(content=block) for block in converted]
+                    locations = [
+                        ToolCallLocation(path=value)
+                        for key, value in tool_input.items()
+                        if key in {"path", "file_path", "filepath"} and isinstance(value, str)
+                    ]
+                    title = generate_tool_title(tool_name, tool_input)
+                    yield ToolCallProgress(
+                        tool_call_id=tool_call_id,
+                        title=title,
+                        status="completed",
+                        locations=locations or None,
+                        content=acp_content or None,
+                        raw_output=converted,
+                    )
+                    tool_call_inputs.pop(tool_call_id, None)
+
+                case SystemPromptPart() | RetryPromptPart():
+                    pass
+                case _ as unreachable:
+                    assert_never(unreachable)
+
+
+def _user_content_to_updates(content: Any) -> Iterator[SessionUpdate]:
+    """Convert multi-modal user content to ACP session updates."""
+    converted_content = to_acp_content_blocks(content)
+    for block in converted_content:
+        match block:
+            case TextContentBlock(text=text):
+                yield UserMessageChunk.text(text=text)
+            case ImageContentBlock(annotations=annots) as img_block:
+                yield UserMessageChunk.image(
+                    data=img_block.data,
+                    mime_type=img_block.mime_type,
+                    uri=img_block.uri,
+                    audience=annots.audience if annots else None,
+                    last_modified=annots.last_modified if annots else None,
+                    priority=annots.priority if annots else None,
+                )
+            case AudioContentBlock(annotations=annots) as audio_block:
+                yield UserMessageChunk.audio(
+                    data=audio_block.data,
+                    mime_type=audio_block.mime_type,
+                    audience=annots.audience if annots else None,
+                    last_modified=annots.last_modified if annots else None,
+                    priority=annots.priority if annots else None,
+                )
+            case ResourceContentBlock(annotations=annots) as resource_block:
+                yield UserMessageChunk.resource(
+                    uri=resource_block.uri,
+                    name=resource_block.name,
+                    description=resource_block.description,
+                    mime_type=resource_block.mime_type,
+                    size=resource_block.size,
+                    title=resource_block.title,
+                    audience=annots.audience if annots else None,
+                    last_modified=annots.last_modified if annots else None,
+                    priority=annots.priority if annots else None,
+                )
+            case EmbeddedResourceContentBlock(resource=resource):
+                match resource:
+                    case TextResourceContents(text=text):
+                        yield UserMessageChunk.text(text=text)
+                    case BlobResourceContents(blob=blob, mime_type=mime_type):
+                        blob_size = len(blob) * 3 // 4
+                        size_mb = blob_size / (1024 * 1024)
+                        mime = mime_type or "unknown"
+                        msg = f"Embedded resource: {mime} ({size_mb:.2f} MB)"
+                        yield UserMessageChunk.text(text=msg)
+                    case _ as unreachable:
+                        assert_never(unreachable)  # ty: ignore[type-assertion-failure]
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 def get_modes(

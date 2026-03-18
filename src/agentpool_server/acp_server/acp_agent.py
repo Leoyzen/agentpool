@@ -313,6 +313,7 @@ class AgentPoolACPAgent(ACPAgent):
         Then replays the conversation to the client via ACP notifications.
         """
         from agentpool.agents.acp_agent import ACPAgent as ACPAgentClient
+        from agentpool.agents.acp_agent.acp_converters import model_messages_to_session_updates
 
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
@@ -348,7 +349,8 @@ class AgentPoolACPAgent(ACPAgent):
                 for chat_msg in msgs:
                     if chat_msg.messages:
                         model_messages.extend(chat_msg.messages)
-                await session.notifications.replay(model_messages)
+                for update in model_messages_to_session_updates(model_messages):
+                    await session.notifications.send_update(update)
                 logger.info(
                     "Conversation replayed",
                     session_id=params.session_id,
