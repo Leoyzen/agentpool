@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from agentpool.tools.base import Tool
 
 
-def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # noqa: PLR0911
+def agui_to_native_event(event: Event) -> Iterator[RichAgentStreamEvent[Any]]:
     """Convert AG-UI event to native streaming event.
 
     Args:
@@ -98,17 +98,17 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
         # === Lifecycle Events ===
 
         case AGUIRunStartedEvent(thread_id=thread_id, run_id=run_id):
-            return RunStartedEvent(session_id=thread_id, run_id=run_id)
+            yield RunStartedEvent(session_id=thread_id, run_id=run_id)
 
         case AGUIRunErrorEvent(message=message, code=code):
-            return RunErrorEvent(message=message, code=code)
+            yield RunErrorEvent(message=message, code=code)
 
         # === Text Message Events ===
         case TextMessageContentEvent(delta=delta) | TextMessageChunkEvent(delta=str() as delta):
-            return PartDeltaEvent.text(index=0, content=delta)
+            yield PartDeltaEvent.text(index=0, content=delta)
 
         case TextMessageStartEvent() | TextMessageEndEvent():
-            return None
+            pass
 
         # === Thinking/Reasoning Events ===
 
@@ -117,7 +117,7 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
             | ReasoningMessageContentEvent(delta=delta)
             | ReasoningMessageChunkEvent(delta=str() as delta)
         ):
-            return PartDeltaEvent.thinking(index=0, content=delta)
+            yield PartDeltaEvent.thinking(index=0, content=delta)
 
         case (
             ThinkingStartEvent()
@@ -126,7 +126,7 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
             | ThinkingTextMessageEndEvent()
         ):
             # These mark thinking blocks but don't carry content
-            return None
+            pass
 
         case (
             ReasoningStartEvent()
@@ -136,24 +136,24 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
             | ReasoningEncryptedValueEvent()
         ):
             # These mark reasoning blocks but don't carry streamable content
-            return None
+            pass
 
         # === Tool Call Events ===
 
         case ToolCallStartEvent(tool_call_id=str() as tc_id, tool_call_name=name):
-            return NativeToolCallStartEvent(tool_call_id=tc_id, tool_name=name, title=name)
+            yield NativeToolCallStartEvent(tool_call_id=tc_id, tool_name=name, title=name)
 
         case ToolCallChunkEvent(tool_call_id=str() as tc_id, tool_call_name=str() as name):
-            return NativeToolCallStartEvent(tool_call_id=tc_id, tool_name=name, title=name)
+            yield NativeToolCallStartEvent(tool_call_id=tc_id, tool_name=name, title=name)
 
         case ToolCallArgsEvent(tool_call_id=tc_id, delta=_):
-            return ToolCallProgressEvent(tool_call_id=tc_id, status="in_progress")
+            yield ToolCallProgressEvent(tool_call_id=tc_id, status="in_progress")
 
         case ToolCallResultEvent(tool_call_id=tc_id, content=content, message_id=_):
-            return ToolCallProgressEvent(tool_call_id=tc_id, status="completed", message=content)
+            yield ToolCallProgressEvent(tool_call_id=tc_id, status="completed", message=content)
 
         case ToolCallEndEvent(tool_call_id=tc_id):
-            return ToolCallProgressEvent(tool_call_id=tc_id, status="completed")
+            yield ToolCallProgressEvent(tool_call_id=tc_id, status="completed")
 
         # === Activity Events -> PlanUpdateEvent ===
 
@@ -164,16 +164,16 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
                 and isinstance(content, list)
                 and (entries := _content_to_plan_entries(content))
             ):
-                return PlanUpdateEvent(entries=entries)
+                yield PlanUpdateEvent(entries=entries)
             # For other activity types, wrap as custom event
-            return CustomEvent(
+            yield CustomEvent(
                 event_data={"activity_type": activity_type, "content": content},
                 event_type=f"activity_{activity_type.lower()}",
                 source="ag-ui",
             )
 
         case ActivityDeltaEvent(activity_type=activity_type, patch=patch):
-            return CustomEvent(
+            yield CustomEvent(
                 event_data={"activity_type": activity_type, "patch": patch},
                 event_type=f"activity_delta_{activity_type.lower()}",
                 source="ag-ui",
@@ -182,22 +182,22 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
         # === State Management Events ===
 
         case StateSnapshotEvent(snapshot=snapshot):
-            return CustomEvent(event_data=snapshot, event_type="state_snapshot", source="ag-ui")
+            yield CustomEvent(event_data=snapshot, event_type="state_snapshot", source="ag-ui")
 
         case StateDeltaEvent(delta=delta):
-            return CustomEvent(event_data=delta, event_type="state_delta", source="ag-ui")
+            yield CustomEvent(event_data=delta, event_type="state_delta", source="ag-ui")
 
         case MessagesSnapshotEvent(messages=messages):
             data = [m.model_dump() for m in messages]
-            return CustomEvent(event_data=data, event_type="messages_snapshot", source="ag-ui")
+            yield CustomEvent(event_data=data, event_type="messages_snapshot", source="ag-ui")
 
         # === Special Events ===
 
         case RawEvent(event=raw_event, source=source):
-            return CustomEvent(event_data=raw_event, event_type="raw", source=source or "ag-ui")
+            yield CustomEvent(event_data=raw_event, event_type="raw", source=source or "ag-ui")
 
         case AGUICustomEvent(name=name, value=value):
-            return CustomEvent(event_data=value, event_type=name, source="ag-ui")
+            yield CustomEvent(event_data=value, event_type=name, source="ag-ui")
 
         case (
             TextMessageChunkEvent()
@@ -207,7 +207,7 @@ def agui_to_native_event(event: Event) -> RichAgentStreamEvent[Any] | None:  # n
             | StepFinishedEvent()
             | ReasoningMessageChunkEvent()
         ):
-            return None
+            pass
 
         case _ as unreachable:
             assert_never(unreachable)  # ty:ignore[type-assertion-failure]

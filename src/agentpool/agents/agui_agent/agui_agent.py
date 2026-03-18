@@ -477,22 +477,18 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                             tool_name, args = result
                             tool_calls_pending[tc_id] = (tool_name, args)
                             # Emit PartStartEvent so reconstructor can track the tool call
-                            part = ToolCallPart(
-                                tool_name=tool_name,
-                                args=args,
-                                tool_call_id=tc_id,
-                            )
+                            part = ToolCallPart(tool_name=tool_name, args=args, tool_call_id=tc_id)
                             yield PartStartEvent(index=0, part=part)
 
                 # Convert to native event and distribute to handlers
-                if native_event := agui_to_native_event(event):
+                for native_event in agui_to_native_event(event):
                     async for e in self._drain_event_queue():
                         yield e
                     yield native_event
 
         # Flush any pending chunk events at end of stream
         for event in chunk_transformer.flush():
-            if native_event := agui_to_native_event(event):
+            for native_event in agui_to_native_event(event):
                 yield native_event
 
     @property
