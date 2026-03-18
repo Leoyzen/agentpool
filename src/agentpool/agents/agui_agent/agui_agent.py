@@ -18,11 +18,7 @@ from uuid import uuid4
 from anyenv.processes import hard_kill
 import anyio
 import httpx
-from pydantic_ai import (
-    ModelRequest,
-    ToolCallPart,
-    ToolReturnPart,
-)
+from pydantic_ai import ModelRequest, ToolReturnPart
 
 from agentpool.agents.agui_agent.helpers import execute_tool_call, parse_sse_stream
 from agentpool.agents.base_agent import BaseAgent
@@ -458,7 +454,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         from agentpool.agents.agui_agent.chunk_transformer import ChunkTransformer
         from agentpool.agents.tool_call_accumulator import ToolCallAccumulator
 
-        tool_accumulator = ToolCallAccumulator()
+        accumulator = ToolCallAccumulator()
         chunk_transformer = ChunkTransformer()  # Create chunk transformer for this run
         async for raw_event in parse_sse_stream(response):
             # Check for cancellation during streaming
@@ -469,16 +465,21 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             for event in chunk_transformer.transform(raw_event):
                 match event:  # Handle events for tool call accumulation
                     case AGUIToolCallStartEvent(tool_call_id=tc_id, tool_call_name=name) if name:
-                        tool_accumulator.start(tc_id, name)
+                        accumulator.start(tc_id, name)
                     case AGUIToolCallArgsEvent(tool_call_id=tc_id, delta=delta):
-                        tool_accumulator.add_args(tc_id, delta)
-                    case AGUIToolCallEndEvent(tool_call_id=tc_id):
-                        if result := tool_accumulator.complete(tc_id):
-                            tool_name, args = result
-                            tool_calls_pending[tc_id] = (tool_name, args)
-                            # Emit PartStartEvent so reconstructor can track the tool call
-                            part = ToolCallPart(tool_name=tool_name, args=args, tool_call_id=tc_id)
-                            yield PartStartEvent(index=0, part=part)
+                        accumulator.add_args(tc_id, delta)
+                    case AGUIToolCallEndEvent(tool_call_id=tc_id) if result := accumulator.complete(
+                        tc_id
+                    ):
+                        tool_name, args = result
+                        tool_calls_pending[tc_id] = (tool_name, args)
+                        # Emit PartStartEvent so reconstructor can track the tool call
+                        yield PartStartEvent.tool_call(
+                            index=0,
+                            tool_name=tool_name,
+                            args=args,
+                            tool_call_id=tc_id,
+                        )
 
                 # Convert to native event and distribute to handlers
                 for native_event in agui_to_native_event(event):

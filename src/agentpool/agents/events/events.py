@@ -28,6 +28,7 @@ from pydantic_ai import (
     TextPartDelta,
     ThinkingPart,
     ThinkingPartDelta,
+    ToolCallPart,
     ToolCallPartDelta,
 )
 
@@ -58,6 +59,13 @@ class PartStartEvent(PyAIPartStartEvent):
     @classmethod
     def text(cls, index: int, content: str) -> PartStartEvent:
         return cls(index=index, part=TextPart(content=content))
+
+    @classmethod
+    def tool_call(
+        cls, index: int, tool_name: str, args: str | dict[str, Any], tool_call_id: str
+    ) -> PartStartEvent:
+        part = ToolCallPart(tool_name=tool_name, args=args, tool_call_id=tool_call_id)
+        return cls(index=index, part=part)
 
 
 class PartDeltaEvent(PyAIPartDeltaEvent):
