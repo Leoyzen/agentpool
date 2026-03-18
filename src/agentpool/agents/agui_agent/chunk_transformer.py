@@ -13,7 +13,6 @@ from agentpool.log import get_logger
 
 if TYPE_CHECKING:
     from ag_ui.core import (
-        BaseEvent,
         Event,
         ReasoningMessageChunkEvent,
         TextMessageChunkEvent,
@@ -53,28 +52,40 @@ class ChunkTransformer:
         Returns:
             List of output events (may be empty, single, or multiple)
         """
-        from ag_ui.core import EventType
+        from ag_ui.core import (
+            ReasoningMessageChunkEvent,
+            ReasoningMessageEndEvent,
+            ReasoningMessageStartEvent,
+            RunErrorEvent,
+            RunFinishedEvent,
+            TextMessageChunkEvent,
+            TextMessageEndEvent,
+            TextMessageStartEvent,
+            ToolCallChunkEvent,
+            ToolCallEndEvent,
+            ToolCallStartEvent,
+        )
 
-        match event.type:
-            case EventType.TEXT_MESSAGE_CHUNK:
-                return self._handle_text_chunk(event)  # type: ignore[arg-type]
+        match event:
+            case TextMessageChunkEvent():
+                return self._handle_text_chunk(event)
 
-            case EventType.TOOL_CALL_CHUNK:
-                return self._handle_tool_chunk(event)  # type: ignore[arg-type]
+            case ToolCallChunkEvent():
+                return self._handle_tool_chunk(event)
 
-            case EventType.REASONING_MESSAGE_CHUNK:
-                return self._handle_reasoning_chunk(event)  # type: ignore[arg-type]
+            case ReasoningMessageChunkEvent():
+                return self._handle_reasoning_chunk(event)
 
             # These events close any pending chunks
             case (
-                EventType.TEXT_MESSAGE_START
-                | EventType.TEXT_MESSAGE_END
-                | EventType.TOOL_CALL_START
-                | EventType.TOOL_CALL_END
-                | EventType.REASONING_MESSAGE_START
-                | EventType.REASONING_MESSAGE_END
-                | EventType.RUN_FINISHED
-                | EventType.RUN_ERROR
+                TextMessageStartEvent()
+                | TextMessageEndEvent()
+                | ToolCallStartEvent()
+                | ToolCallEndEvent()
+                | ReasoningMessageStartEvent()
+                | ReasoningMessageEndEvent()
+                | RunFinishedEvent()
+                | RunErrorEvent()
             ):
                 close_events = self._close_all_pending()
                 return [*close_events, event]
@@ -173,11 +184,11 @@ class ChunkTransformer:
         logger.debug("Chunk transformer: TOOL_CALL_END", tool_call_id=tool_call_id)
         return [end_event]
 
-    def _handle_reasoning_chunk(self, event: ReasoningMessageChunkEvent) -> list[BaseEvent]:
+    def _handle_reasoning_chunk(self, event: ReasoningMessageChunkEvent) -> list[Event]:
         """Handle REASONING_MESSAGE_CHUNK event."""
         from ag_ui.core import ReasoningMessageContentEvent, ReasoningMessageStartEvent
 
-        result: list[BaseEvent] = []
+        result: list[Event] = []
         message_id = event.message_id
         delta = event.delta
 
