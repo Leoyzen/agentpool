@@ -566,13 +566,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 await self.conversation.clear()
 
             history = None
+            old = []
             if pass_message_history and parent:
                 history = parent.conversation.get_history()
                 old = self.conversation.get_history()
                 self.conversation.set_history(history)
             result = await self.run(prompt)
             if history:
-                self.conversation.set_history(history)
+                self.conversation.set_history(old)
             return result.data
 
         # Set the correct return annotation dynamically
@@ -718,7 +719,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             response_time = time.perf_counter() - start_time
             if self._cancelled:
                 msgs = agent_run.all_messages()
-                partial_content = extract_text_from_messages(mmsgs, include_interruption_note=True)
+                partial_content = extract_text_from_messages(msgs, include_interruption_note=True)
                 response_msg = ChatMessage(
                     content=partial_content,
                     role="assistant",

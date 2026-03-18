@@ -46,7 +46,7 @@ from agentpool.sessions import SessionData
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Iterator, Sequence
 
     from codexed.models import (
         CodexEvent,
@@ -167,14 +167,13 @@ def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelI
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     model_id = model_data.model or model_data.id
-    input_modalities = {_MODALITY_MAP[m] for m in model_data.input_modalities if m in _MODALITY_MAP}
     return TokoModelInfo(
         id=model_id,
         name=model_data.display_name or model_data.id,
         provider=provider,
         description=model_data.description or None,
         id_override=model_id,
-        input_modalities=input_modalities or {"text"},  # ty:ignore[invalid-argument-type]
+        input_modalities={_MODALITY_MAP[m] for m in model_data.input_modalities},
         metadata={
             k: v
             for k, v in {
@@ -200,7 +199,7 @@ def to_session_data(thread_data: ThreadData, agent_name: str, cwd: str | None) -
     )
 
 
-def user_content_to_codex(content: list[UserContent]) -> Iterator[UserInput]:
+def user_content_to_codex(content: Sequence[UserContent]) -> Iterator[UserInput]:
     """Convert pydantic-ai UserContent list to Codex UserInput list."""
     from codexed.models import UserInputImage, UserInputText
 
