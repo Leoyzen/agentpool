@@ -1579,13 +1579,19 @@
       "description": "Agent definition configuration.",
       "properties": {
         "description": {
-          "description": "Description of the agent.",
-          "title": "Description",
+          "description": "A brief description of the agent's purpose.",
+          "examples": [
+            "QA Assistant"
+          ],
+          "title": "Agent Description",
           "type": "string"
         },
         "prompt": {
-          "description": "Prompt for the agent.",
-          "title": "Prompt",
+          "description": "The prompt to use for this agent.",
+          "examples": [
+            "Do XY"
+          ],
+          "title": "Agent Prompt",
           "type": "string"
         },
         "tools": {
@@ -1601,8 +1607,11 @@
             }
           ],
           "default": null,
-          "description": "List of tools the agent can use.",
-          "title": "Tools"
+          "description": "The tools this agent has access to.",
+          "examples": [
+            "Bash"
+          ],
+          "title": "Agent Tools"
         },
         "model": {
           "anyOf": [
@@ -1616,12 +1625,18 @@
               "type": "string"
             },
             {
+              "type": "string"
+            },
+            {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Model to use for the agent.",
-          "title": "Model"
+          "description": "The model to use for this agent.",
+          "examples": [
+            "sonnet"
+          ],
+          "title": "Agent Model"
         },
         "memory": {
           "anyOf": [
@@ -1638,8 +1653,11 @@
             }
           ],
           "default": null,
-          "description": "Memory type for the agent.",
-          "title": "Memory"
+          "examples": [
+            "user",
+            "project"
+          ],
+          "title": "Agent Memory"
         },
         "disallowed_tools": {
           "anyOf": [
@@ -1654,8 +1672,20 @@
             }
           ],
           "default": null,
-          "description": "List of tools the agent cannot use.",
+          "description": "Tools this agent is not allowed to use.",
+          "examples": [
+            "Bash"
+          ],
           "title": "Disallowed Tools"
+        },
+        "criticalSystemReminder_EXPERIMENTAL": {
+          "default": null,
+          "description": "Critical system reminder message to display to the user.",
+          "title": "Critical System Reminder",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "skills": {
           "anyOf": [
@@ -1670,17 +1700,93 @@
             }
           ],
           "default": null,
-          "description": "List of skills the agent can use.",
+          "description": "Skills this agent has.",
+          "examples": [
+            "my-skill"
+          ],
           "title": "Skills"
         },
         "max_turns": {
           "default": null,
-          "description": "Maximum number of turns the agent can take.",
+          "description": "Maximum number of agentic turns (API round-trips) before stopping.",
           "title": "Max Turns",
           "type": [
             "integer",
             "null"
           ]
+        },
+        "background": {
+          "default": null,
+          "description": "Whether this agent runs in the background.",
+          "title": "Run in Background",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "max"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Effort level for thinking depth.",
+          "examples": [
+            "high"
+          ],
+          "title": "Reasoning effort"
+        },
+        "permission_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "default",
+                "acceptEdits",
+                "plan",
+                "bypassPermissions"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Permission mode for this agent.",
+          "examples": [
+            "bypassPermissions"
+          ],
+          "title": "Permission Mode"
+        },
+        "isolation": {
+          "anyOf": [
+            {
+              "const": "worktree",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Isolation mode. ``\"worktree\"`` runs the agent in a separate git worktree.",
+          "examples": [
+            "worktree"
+          ],
+          "title": "Isolation Mode"
         },
         "mcp_servers": {
           "anyOf": [
@@ -1715,15 +1821,6 @@
           "default": null,
           "description": "Configuration for MCP servers.",
           "title": "Mcp Servers"
-        },
-        "background": {
-          "default": null,
-          "description": "Run as background agent.",
-          "title": "Background",
-          "type": [
-            "boolean",
-            "null"
-          ]
         }
       },
       "required": [
