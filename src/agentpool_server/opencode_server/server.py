@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request  # noqa: TC002
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from slashed import CommandStore
 
 from agentpool import log
 from agentpool_server.opencode_server.routes import (
@@ -122,6 +123,10 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     if state.pool.skill_commands is not None:
         state.skill_bridge = OpenCodeSkillBridge()
         state.pool.skill_commands.on_command_change(state.skill_bridge.handle_change)
+
+        # Initialize CommandStore with skill commands
+        state.command_store = CommandStore(commands=state.skill_bridge.get_commands())
+
         logger.debug(
             "OpenCode skill bridge setup complete",
             command_count=len(state.pool.skill_commands),
