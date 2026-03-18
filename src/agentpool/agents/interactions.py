@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
+from pydantic import create_model
 from schemez import Schema
 
 from agentpool.log import get_logger
@@ -386,13 +387,9 @@ List your selections, one per line, followed by your reasoning."""
         """
         item_model = Schema.for_class_ctor(as_type)
         final_prompt = prompt or f"Extract {as_type.__name__} from: {text}"
-
-        class Extraction(Schema):
-            instance: item_model  # type: ignore[valid-type]
-            # explanation: str | None = None
-
+        cls = create_model("Extraction", instance=item_model)
         # Use structured output via context manager
-        async with self._with_structured_output(Extraction) as structured_agent:
+        async with self._with_structured_output(cls) as structured_agent:
             result = await structured_agent.run(final_prompt)
         return as_type(**result.content.instance.model_dump())
 

@@ -57,13 +57,15 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
     if tool_lower in ("read", "read_file"):
         path = input_data.get("file_path") or input_data.get("path", "")
         offset = input_data.get("offset") or input_data.get("line")
+        assert offset is None or isinstance(offset, int)
         suffix = ""
         if limit := input_data.get("limit"):
-            start = (offset or 0) + 1  # type: ignore[operator]
-            end = (offset or 0) + limit  # type: ignore[operator]
+            assert isinstance(limit, int)
+            start = (offset or 0) + 1
+            end = (offset or 0) + limit
             suffix = f" ({start}-{end})"
         elif offset:
-            suffix = f" (from line {offset + 1})"  # type: ignore[operator]
+            suffix = f" (from line {offset + 1})"
         title = f"Read {path}{suffix}" if path else "Read File"
         locations = [LocationContentItem(path=path, line=offset or 0)] if path else []  # type: ignore[arg-type]
         return RichToolInfo(title=title, kind="read", locations=locations)

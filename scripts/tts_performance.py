@@ -74,9 +74,10 @@ async def run_single(mode: TTSMode, provider: TTSProvider = "openai") -> float:
     start_time = time.perf_counter()
 
     async with agent:
+        ctx = agent.get_context()
         async for event in agent.run_stream(prompt):
-            await print_handler(None, event)  # type: ignore
-            await handler(None, event)  # type: ignore
+            await print_handler(ctx, event)
+            await handler(ctx, event)  # pyright: ignore[reportArgumentType]
 
     stream_time = time.perf_counter() - start_time
     print(f"\n\nStream completed in: {stream_time:.2f}s")
@@ -112,8 +113,9 @@ async def run_sequential(mode: TTSMode, provider: TTSProvider = "openai") -> Non
             start_time = time.perf_counter()
 
             async for event in agent.run_stream(prompt):
-                await print_handler(None, event)  # type: ignore
-                await handler(None, event)  # type: ignore
+                ctx = agent.get_context()
+                await print_handler(ctx, event)
+                await handler(ctx, event)  # pyright: ignore[reportArgumentType]
 
             stream_time = time.perf_counter() - start_time
             print(f"\n\nStream completed in: {stream_time:.2f}s")
@@ -131,7 +133,7 @@ async def compare_all_modes(provider: TTSProvider = "openai") -> None:
 
     for mode in ("sync_sentence", "sync_run", "async_queue", "async_cancel"):
         input(f"\nPress Enter to test mode: {mode}")
-        results[mode] = await run_single(mode, provider)  # type: ignore
+        results[mode] = await run_single(mode, provider)
         await anyio.sleep(2)
 
     print("\n" + "=" * 60)
@@ -192,10 +194,8 @@ async def main():
     }
 
     if choice in mode_map:
-        provider = input("Provider (openai/edge) [openai]: ").strip().lower() or "openai"
-        if provider not in ("openai", "edge"):
-            provider = "openai"
-        await run_single(mode_map[choice], provider)  # type: ignore
+        provider = input("Provider (openai/edge) [openai]: ").strip().lower()
+        await run_single(mode_map[choice], provider="openai" if provider == "openai" else "edge")
     elif choice == "a":
         await compare_all_modes("openai")
     elif choice == "b":
