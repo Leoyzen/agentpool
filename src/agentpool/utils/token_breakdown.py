@@ -7,25 +7,24 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import anyenv
-from pydantic_ai.messages import (
+from pydantic_ai import (
     ModelRequest,
     ModelResponse,
+    RequestUsage,
+    RunUsage,
     SystemPromptPart,
     ThinkingPart,
     ToolCallPart,
+    ToolDefinition,
 )
 from pydantic_ai.models import ModelRequestParameters
-from pydantic_ai.tools import ToolDefinition
-from pydantic_ai.usage import RequestUsage, RunUsage
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from pydantic_ai import ModelResponsePart
-    from pydantic_ai.messages import ModelMessage, TextPart
+    from pydantic_ai import ModelMessage, ModelResponsePart, ModelSettings, TextPart
     from pydantic_ai.models import Model
-    from pydantic_ai.settings import ModelSettings
 
     from agentpool.messaging.messages import TokenCost
 
@@ -344,18 +343,18 @@ def format_breakdown(breakdown: TokenBreakdown, detailed: bool = False) -> str:
 if __name__ == "__main__":
     import asyncio
 
-    from pydantic_ai.messages import (
+    from pydantic_ai import (
         ImageUrl,
         ModelRequest,
         ModelResponse,
         SystemPromptPart,
         TextPart,
         ToolCallPart,
+        ToolDefinition,
         ToolReturnPart,
         UserPromptPart,
     )
     from pydantic_ai.models.test import TestModel
-    from pydantic_ai.tools import ToolDefinition
 
     async def main() -> None:
         # Create sample tool definitions

@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
-from clawd_code_sdk.models.content_blocks import (
+from clawd_code_sdk.models import (
     TextBlock as ClaudeTextBlock,
     ThinkingBlock as ClaudeThinkingBlock,
     ToolResultBlock as ClaudeToolResultBlock,
@@ -18,17 +18,17 @@ from clawd_code_sdk.storage.models import (
     ClaudeUserEntry,
     ClaudeUserMessage,
 )
-from pydantic_ai import RunUsage
-from pydantic_ai.messages import (
+from pydantic_ai import (
     ModelRequest,
     ModelResponse,
+    RequestUsage,
+    RunUsage,
     TextPart,
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.usage import RequestUsage
 
 from agentpool.messaging import ChatMessage, TokenCost
 from agentpool.utils.time_utils import parse_iso_timestamp
@@ -288,7 +288,7 @@ def build_pydantic_message(
 #         conversation = get_main_conversation(entries, include_sidechains=include_sidechains)
 #     else:
 #         conversation = entries
-#     from pydantic_ai.messages import (
+#     from pydantic_ai import (
 #         TextPart,
 #         ThinkingPart,
 #         ToolCallPart,

@@ -14,8 +14,7 @@ from agentpool.common_types import PathReference
 if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from mcp.types import ToolAnnotations
-    from pydantic_ai import FileUrl, MultiModalContent, UserContent
-    from pydantic_ai.messages import ToolCallPartDelta
+    from pydantic_ai import FileUrl, MultiModalContent, ToolCallPartDelta, UserContent
 
 
 def get_builtin_tool_annotations(kind: str) -> ToolAnnotations:

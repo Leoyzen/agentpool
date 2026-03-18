@@ -5,8 +5,7 @@ from __future__ import annotations
 import base64
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import BinaryContent, ToolReturn
-from pydantic_ai.messages import AudioUrl, DocumentUrl, ImageUrl, VideoUrl
+from pydantic_ai import AudioUrl, BinaryContent, DocumentUrl, ImageUrl, ToolReturn, VideoUrl
 
 from acp.schema import (
     AudioContentBlock,

@@ -13,7 +13,7 @@ import uuid
 
 import anyio
 from pydantic import TypeAdapter
-from pydantic_ai.usage import RequestUsage
+from pydantic_ai import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.claude_code_agent.converters import (

@@ -27,6 +27,7 @@ from acp.schema import (
     StdioMcpServer,
     TextContentBlock,
     TextResourceContents,
+    Usage,
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import (
@@ -44,12 +45,9 @@ from agentpool_config.mcp_server import (
 if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import UserContent
+    from pydantic_ai.usage import UsageBase
 
-    from acp.schema import (
-        ContentBlock,
-        McpServer,
-        SelectSessionConfigOption,
-    )
+    from acp.schema import ContentBlock, McpServer, SelectSessionConfigOption
     from acp.schema.content_blocks import ResourceContents
     from agentpool.agents.modes import ModeCategory, ModeInfo
     from agentpool.common_types import PathReference
@@ -202,3 +200,14 @@ def agent_to_mode(agent: MessageNode[Any, Any]) -> SessionMode:
     """Convert agent to a session mode."""
     desc = agent.description or f"Switch to {agent.name} agent"
     return SessionMode(id=agent.name, name=agent.display_name, description=desc)
+
+
+def to_usage(usage: UsageBase) -> Usage:
+    return Usage(
+        total_tokens=usage.total_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        thought_tokens=usage.details.get("reasoning_tokens") or None,
+        cached_read_tokens=usage.cache_read_tokens or None,
+        cached_write_tokens=usage.cache_write_tokens or None,
+    )

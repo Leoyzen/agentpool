@@ -7,8 +7,7 @@ import datetime
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic_ai import ModelRetry
-from pydantic_ai.messages import TextPartDelta, ThinkingPartDelta
+from pydantic_ai import ModelRetry, TextPartDelta, ThinkingPartDelta
 from upathtools.filesystems.base import WrapperFileSystem
 
 from agentpool.agents.context import AgentContext  # noqa: TC001

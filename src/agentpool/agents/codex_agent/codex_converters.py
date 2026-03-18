@@ -49,20 +49,20 @@ from agentpool.sessions import SessionData
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from codexed import TokenUsageBreakdown
     from codexed.models import (
         CodexEvent,
         HttpMcpServer,
+        InputModality,
         McpServerConfig,
         MiscTurnStatusValue,
         ModelData,
         StdioMcpServer,
         ThreadData,
         ThreadItem,
+        TokenUsageBreakdown,
         Turn,
         UserInput,
     )
-    from codexed.models.codex_types import InputModality
     from pydantic_ai import FinishReason
     from tokonomics.model_discovery.model_info import Modality, ModelInfo as TokoModelInfo
 
@@ -134,7 +134,7 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
     Returns:
         Tuple of (server name, Codex-compatible MCP server configuration)
     """
-    from codexed.models.mcp_server import HttpMcpServer, StdioMcpServer
+    from codexed.models import HttpMcpServer, StdioMcpServer
 
     from agentpool_config.mcp_server import (
         SSEMCPServerConfig,
@@ -373,11 +373,6 @@ async def convert_codex_stream(  # noqa: PLR0915
         Native AgentPool stream events
     """
     from codexed.models import (
-        ThreadItemCommandExecution,
-        ThreadItemFileChange,
-        ThreadItemMcpToolCall,
-    )
-    from codexed.models.events import (
         AgentMessageDeltaEvent,
         CommandExecutionOutputDeltaEvent,
         FileChangeOutputDeltaEvent,
@@ -386,6 +381,9 @@ async def convert_codex_stream(  # noqa: PLR0915
         McpToolCallProgressEvent,
         ReasoningTextDeltaEvent,
         ThreadCompactedEvent,
+        ThreadItemCommandExecution,
+        ThreadItemFileChange,
+        ThreadItemMcpToolCall,
         TurnPlanUpdatedEvent,
     )
 
@@ -525,7 +523,7 @@ async def event_to_part(
     Returns:
         Part or None
     """
-    from codexed.models.events import (
+    from codexed.models import (
         AgentMessageDeltaEvent,
         ItemCompletedEvent,
         ItemStartedEvent,

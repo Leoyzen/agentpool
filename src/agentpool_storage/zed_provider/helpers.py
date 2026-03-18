@@ -9,7 +9,7 @@ import base64
 import io
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic_ai.messages import (
+from pydantic_ai import (
     BinaryContent,
     ModelRequest,
     ModelResponse,

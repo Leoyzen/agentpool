@@ -10,14 +10,12 @@ client-side tool execution.
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import anyenv
-from pydantic_ai import (
-    BinaryContent,
-    FileUrl,
-)
+from pydantic_ai import BinaryContent, FileUrl
 
 from agentpool.agents.events import (
     CustomEvent,
@@ -249,12 +247,12 @@ def to_agui_tool(tool: Tool) -> AGUITool:
     func_schema = tool.schema["function"]
     return AGUITool(
         name=func_schema["name"],
-        description=func_schema.get("description", ""),
-        parameters=func_schema.get("parameters", {"type": "object", "properties": {}}),
+        description=func_schema["description"],
+        parameters=func_schema["parameters"],
     )
 
 
-def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
+def model_messages_to_agui(messages: Sequence[ModelMessage]) -> Iterator[Message]:
     """Convert pydantic-ai ModelMessage sequence to AG-UI Message format.
 
     This converts the conversation history from pydantic-ai's internal format
@@ -285,8 +283,6 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
         UserPromptPart,
     )
 
-    result: list[Message] = []
-
     for msg in messages:
         match msg:
             case ModelRequest(parts=request_parts):
@@ -294,18 +290,18 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                 for req_part in request_parts:
                     match req_part:
                         case UserPromptPart(content=str() as content):
-                            result.append(UserMessage(id=str(uuid4()), content=content))
+                            yield UserMessage(id=str(uuid4()), content=content)
 
                         case UserPromptPart(content=list() as content):
                             # Join text parts
                             text = " ".join(p if isinstance(p, str) else str(p) for p in content)
-                            result.append(UserMessage(id=str(uuid4()), content=text))
+                            yield UserMessage(id=str(uuid4()), content=text)
 
                         case UserPromptPart(content=content):
-                            result.append(UserMessage(id=str(uuid4()), content=str(content)))
+                            yield UserMessage(id=str(uuid4()), content=str(content))
 
                         case SystemPromptPart(content=content):
-                            result.append(SystemMessage(id=str(uuid4()), content=content))
+                            yield SystemMessage(id=str(uuid4()), content=content)
 
                         case ToolReturnPart(tool_call_id=tool_call_id, content=content):
                             # Convert content to string
@@ -313,12 +309,11 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                                 content_str = content
                             else:
                                 content_str = anyenv.dump_json(content)
-                            tool_msg = ToolMessage(
+                            yield ToolMessage(
                                 id=str(uuid4()),
                                 tool_call_id=tool_call_id,
                                 content=content_str,
                             )
-                            result.append(tool_msg)
 
             case ModelResponse(parts=response_parts):
                 # ModelResponse contains assistant content and/or tool calls
@@ -335,11 +330,7 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                             if content:
                                 text_parts.append(f"[thinking] {content}")
 
-                        case ToolCallPart(
-                            tool_call_id=tool_call_id,
-                            tool_name=tool_name,
-                            args=args,
-                        ):
+                        case ToolCallPart(tool_call_id=tc_id, tool_name=tool_name, args=args):
                             # Convert args to JSON string
                             match args:
                                 case str():
@@ -349,15 +340,12 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> list[Message]:
                                 case _:
                                     args_str = str(args)
                             call = FunctionCall(name=tool_name, arguments=args_str)
-                            tc = ToolCall(id=tool_call_id, type="function", function=call)
+                            tc = ToolCall(id=tc_id, type="function", function=call)
                             tool_calls.append(tc)
 
                 # Create AssistantMessage with content and/or tool_calls
-                assistant_msg = AssistantMessage(
+                yield AssistantMessage(
                     id=str(uuid4()),
                     content=" ".join(text_parts) if text_parts else None,
                     tool_calls=tool_calls or None,
                 )
-                result.append(assistant_msg)
-
-    return result

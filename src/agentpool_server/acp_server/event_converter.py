@@ -46,7 +46,6 @@ from acp.schema import (
     ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
-    Usage,
     UsageUpdate,
 )
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
@@ -69,27 +68,18 @@ from agentpool.agents.events import (
 )
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
+from agentpool_server.acp_server.converters import to_usage
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from acp.schema import SessionUpdate, Usage
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.events.events import SubAgentType
 
 logger = get_logger(__name__)
-
-
-# Type alias for all session updates the converter can yield
-ACPSessionUpdate = (
-    AgentMessageChunk
-    | AgentThoughtChunk
-    | ToolCallStart
-    | ToolCallProgress
-    | AgentPlanUpdate
-    | UsageUpdate
-)
 
 
 @dataclass
@@ -201,7 +191,7 @@ class ACPEventConverter:
 
     async def convert(  # noqa: PLR0915
         self, event: RichAgentStreamEvent[Any]
-    ) -> AsyncIterator[ACPSessionUpdate]:
+    ) -> AsyncIterator[SessionUpdate]:
         """Convert an agent event to zero or more ACP session updates."""
         from acp.schema import (
             FileEditToolCallContent,
@@ -447,21 +437,10 @@ class ACPEventConverter:
             case StreamCompleteEvent(message=message):
                 request_usage = message.usage
                 if request_usage.total_tokens > 0:
-                    thought = request_usage.details.get("reasoning_tokens") or None
-                    self.last_usage = Usage(
-                        total_tokens=request_usage.total_tokens,
-                        input_tokens=request_usage.input_tokens,
-                        output_tokens=request_usage.output_tokens,
-                        thought_tokens=thought,
-                        cached_read_tokens=request_usage.cache_read_tokens or None,
-                        cached_write_tokens=request_usage.cache_write_tokens or None,
-                    )
+                    self.last_usage = to_usage(request_usage)
                     cost_obj: Cost | None = None
                     if message.cost_info and message.cost_info.total_cost:
-                        cost_obj = Cost(
-                            amount=float(message.cost_info.total_cost),
-                            currency="USD",
-                        )
+                        cost_obj = Cost(amount=float(message.cost_info.total_cost), currency="USD")
                     yield UsageUpdate(
                         used=request_usage.total_tokens,
                         size=request_usage.total_tokens,  # best approximation
@@ -511,7 +490,7 @@ class ACPEventConverter:
         source_type: SubAgentType,
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
-    ) -> AsyncIterator[ACPSessionUpdate]:
+    ) -> AsyncIterator[SessionUpdate]:
         """Convert subagent event to inline text notifications."""
         indent = "  " * depth
         icon = "🤖" if source_type == "agent" else "👥"
@@ -597,7 +576,7 @@ class ACPEventConverter:
         source_type: SubAgentType,
         inner_event: RichAgentStreamEvent[Any],
         depth: int,
-    ) -> AsyncIterator[ACPSessionUpdate]:
+    ) -> AsyncIterator[SessionUpdate]:
         """Convert subagent event to tool box notifications."""
         state_key = f"subagent:{source_name}:{depth}"
         icon = "🤖" if source_type == "agent" else "👥"
@@ -684,7 +663,7 @@ class ACPEventConverter:
 
     async def _emit_subagent_progress(
         self, state_key: str, title: str
-    ) -> AsyncIterator[ACPSessionUpdate]:
+    ) -> AsyncIterator[SessionUpdate]:
         """Emit tool call notifications for subagent content."""
         accumulated = self._subagent_content.get(state_key, [])
         content_text = "".join(accumulated)

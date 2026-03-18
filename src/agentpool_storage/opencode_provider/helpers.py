@@ -41,7 +41,7 @@ from opencode_sdk.models import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from pydantic_ai.messages import UserContent
+    from pydantic_ai import UserContent
 
     from opencode_sdk.models import MessageInfo, Part
 

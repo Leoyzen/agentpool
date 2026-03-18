@@ -35,11 +35,10 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import BaseToolCallPart, UsageLimits, UserContent
+    from pydantic_ai import BaseToolCallPart, ModelSettings, UsageLimits, UserContent
     from pydantic_ai.builtin_tools import AbstractBuiltinTool
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
-    from pydantic_ai.settings import ModelSettings
     from slashed import BaseCommand
     from tokonomics.model_discovery import ProviderType
     from tokonomics.model_discovery.model_info import ModelInfo

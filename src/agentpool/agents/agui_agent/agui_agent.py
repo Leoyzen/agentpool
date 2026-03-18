@@ -312,7 +312,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         # AG-UI protocol expects full history with each request (stateless server)
         # Extract ModelMessages from ChatMessages
         model_msgs = [m for chat_msg in message_history.get_history() for m in chat_msg.messages]
-        history_messages = model_messages_to_agui(model_msgs)
+        history_messages = [msg for msg in model_messages_to_agui(model_msgs)]
         # Convert new user message content to AG-UI format
         final_content = to_agui_input_content(prompts)
         user_message = UserMessage(id=str(uuid4()), content=final_content)

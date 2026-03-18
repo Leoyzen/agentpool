@@ -35,10 +35,10 @@ from pydantic_ai import (
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
+    UploadedFile,
     UserPromptPart,
     VideoUrl,
 )
-from pydantic_ai.messages import UploadedFile
 
 from acp.schema import (
     AgentMessageChunk,

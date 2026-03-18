@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
-    from pydantic_ai import RunContext
-    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai import ModelMessage, RunContext
 
 
 def keep_recent(messages: list[ModelMessage]) -> list[ModelMessage]:

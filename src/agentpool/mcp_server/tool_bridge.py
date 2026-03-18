@@ -20,9 +20,8 @@ from typing import TYPE_CHECKING, Any, Self, cast, get_args, get_origin
 from uuid import uuid4
 
 import anyio
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, RunUsage
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.usage import RunUsage
 
 from agentpool.agents import Agent
 from agentpool.log import get_logger
@@ -34,7 +33,7 @@ if TYPE_CHECKING:
 
     from fastmcp import Context, FastMCP
     from fastmcp.tools.tool import ToolResult as FastMCPToolResult
-    from pydantic_ai.messages import UserContent
+    from pydantic_ai import UserContent
     from uvicorn import Server
 
     from agentpool.agents import AgentContext

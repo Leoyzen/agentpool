@@ -50,7 +50,7 @@ from pydantic_ai import PartDeltaEvent, TextPartDelta
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from pydantic_ai.messages import ModelRequest, ModelResponse
+    from pydantic_ai import ModelRequest, ModelResponse
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.agents.context import AgentContext

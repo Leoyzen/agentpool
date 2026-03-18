@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyenv
-from clawd_code_sdk.models.content_blocks import ToolUseBlock as ClaudeToolUseBlock
+from clawd_code_sdk.models import ToolUseBlock as ClaudeToolUseBlock
 from clawd_code_sdk.storage.helpers import (
     count_session_messages,
     encode_project_path,

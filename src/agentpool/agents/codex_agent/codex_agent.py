@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import anyenv
 from pydantic import TypeAdapter
-from pydantic_ai.usage import RequestUsage
+from pydantic_ai import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
@@ -285,7 +285,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _setup_toolsets(self) -> None:
         """Setup toolsets and start the tool bridge."""
-        from codexed.models.mcp_server import HttpMcpServer as CodexHttpMcpServer
+        from codexed.models import HttpMcpServer as CodexHttpMcpServer
 
         if not self._toolsets:
             return
@@ -410,7 +410,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream events from Codex turn execution."""
-        from codexed.models.events import (
+        from codexed.models import (
             ThreadTokenUsageUpdatedEvent,
             TurnCompletedEvent,
             TurnStartedEvent,
@@ -435,10 +435,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         if self.storage and self.session_id and self._sdk_session_id:
             await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
         # Stream turn events with bridge context set
-        reconstructor = MessageReconstructor(
-            initial_prompts=prompts,
-            model_name=self.model_name,
-        )
+        reconstructor = MessageReconstructor(initial_prompts=prompts, model_name=self.model_name)
         self._token_usage_data = None
         self._turn_status: MiscTurnStatusValue | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
