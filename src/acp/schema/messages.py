@@ -21,6 +21,7 @@ from acp.schema.notifications import (  # noqa: TC001
 AgentMethod = Literal[
     "authenticate",
     "initialize",
+    "logout",
     "session/cancel",
     "session/load",
     "session/new",
@@ -36,6 +37,8 @@ AgentMethod = Literal[
 ClientMethod = Literal[
     "fs/read_text_file",
     "fs/write_text_file",
+    "session/elicitation",
+    "session/elicitation/complete",
     "session/request_permission",
     "session/update",
     "terminal/create",

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
         InitializeRequest,
         ListSessionsRequest,
         LoadSessionRequest,
+        LogoutRequest,
         NewSessionRequest,
         PromptRequest,
         ResumeSessionRequest,
@@ -484,6 +485,10 @@ class AgentPoolACPAgent(ACPAgent):
     async def authenticate(self, params: AuthenticateRequest) -> None:
         """Authenticate with the agent."""
         logger.info("Authentication requested", method_id=params.method_id)
+
+    async def logout(self, params: LogoutRequest) -> None:
+        """Log out of the current authenticated state."""
+        logger.info("Logout requested")
 
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         """Process a prompt request."""

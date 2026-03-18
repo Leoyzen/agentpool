@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from acp.schema.base import AnnotatedObject
+from acp.schema.elicitation import ElicitationCompleteNotification
 from acp.schema.session_updates import SessionUpdate  # noqa: TC001
 
 
@@ -60,7 +61,7 @@ class ExtNotification(AnnotatedObject):
     """Optional parameters for the notification."""
 
 
-AgentNotification = SessionNotification | ExtNotification
+AgentNotification = SessionNotification | ElicitationCompleteNotification | ExtNotification
 """All possible notifications that an agent can send to a client.
 
 This is used internally for routing RPC notifications.

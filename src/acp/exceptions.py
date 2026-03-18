@@ -57,6 +57,11 @@ class RequestError(Exception):
     ) -> Self:
         return cls(-32000, "Authentication required", data, auth_methods=auth_methods)
 
+    @classmethod
+    def url_elicitation_required(cls, data: dict[str, Any] | None = None) -> Self:
+        """**UNSTABLE**: The agent requires user input via a URL-based elicitation."""
+        return cls(-32042, "URL elicitation required", data)
+
     def to_error_obj(self) -> dict[str, Any]:
         result: dict[str, Any] = {"code": self.code, "message": str(self), "data": self.data}
         if self.auth_methods:

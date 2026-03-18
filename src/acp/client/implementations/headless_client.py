@@ -39,6 +39,11 @@ if TYPE_CHECKING:
         WaitForTerminalExitRequest,
         WriteTextFileRequest,
     )
+    from acp.schema.elicitation import (
+        ElicitationCompleteNotification,
+        ElicitationRequest,
+        ElicitationResponse,
+    )
 
 logger = structlog.get_logger(__name__)
 
@@ -256,6 +261,15 @@ class HeadlessACPClient(Client):
         """Handle extension method calls."""
         logger.debug("Extension method called", method=method)
         return {"ok": True, "method": method, "params": params}
+
+    async def elicitation(self, params: ElicitationRequest) -> ElicitationResponse:
+        """Decline elicitation by default."""
+        from acp.schema.elicitation import ElicitationDeclineAction, ElicitationResponse
+
+        return ElicitationResponse(action=ElicitationDeclineAction())
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Ignore elicitation complete notifications."""
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications."""

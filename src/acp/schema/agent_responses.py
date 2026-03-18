@@ -253,6 +253,10 @@ class AuthenticateResponse(Response):
     """Response to authenticate method."""
 
 
+class LogoutResponse(Response):
+    """**UNSTABLE**: Response to the ``logout`` method."""
+
+
 class InitializeResponse(Response):
     """Response from the initialize method.
 
@@ -352,6 +356,7 @@ class ListSessionsResponse(Response):
 AgentResponse = (
     InitializeResponse
     | AuthenticateResponse
+    | LogoutResponse
     | NewSessionResponse
     | LoadSessionResponse
     | ForkSessionResponse

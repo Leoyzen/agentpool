@@ -34,6 +34,11 @@ if TYPE_CHECKING:
         WaitForTerminalExitResponse,
         WriteTextFileRequest,
     )
+    from acp.schema.elicitation import (
+        ElicitationCompleteNotification,
+        ElicitationRequest,
+        ElicitationResponse,
+    )
 
 logger = structlog.get_logger(__name__)
 
@@ -181,6 +186,15 @@ class DefaultACPClient(Client):
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self.ext_calls.append((method, params))
         return {"ok": True, "method": method}
+
+    async def elicitation(self, params: ElicitationRequest) -> ElicitationResponse:
+        """Decline elicitation by default."""
+        from acp.schema.elicitation import ElicitationDeclineAction, ElicitationResponse
+
+        return ElicitationResponse(action=ElicitationDeclineAction())
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Ignore elicitation complete notifications."""
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         self.ext_notes.append((method, params))

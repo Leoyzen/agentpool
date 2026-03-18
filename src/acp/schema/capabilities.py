@@ -7,6 +7,7 @@ from typing import Self
 from pydantic import Field
 
 from acp.schema.base import AnnotatedObject
+from acp.schema.elicitation import ElicitationCapabilities  # noqa: TC001
 
 
 class FileSystemCapabilities(AnnotatedObject):
@@ -45,7 +46,13 @@ class ClientCapabilities(AnnotatedObject):
     auth: AuthCapabilities | None = None
     """**UNSTABLE**: Authentication capabilities supported by the client."""
 
-    fs: FileSystemCapability | None = Field(default_factory=FileSystemCapability)
+    elicitation: ElicitationCapabilities | None = None
+    """**UNSTABLE**: Elicitation capabilities supported by the client.
+
+    Determines which elicitation modes the agent may use.
+    """
+
+    fs: FileSystemCapabilities | None = Field(default_factory=FileSystemCapabilities)
     """File system capabilities supported by the client.
 
     Determines which file operations the agent can request.
@@ -206,6 +213,23 @@ class SessionCapabilities(AnnotatedObject):
     """
 
 
+class LogoutCapabilities(AnnotatedObject):
+    """**UNSTABLE**: Logout capabilities supported by the agent.
+
+    By supplying ``{}`` it means that the agent supports the logout method.
+    """
+
+
+class AgentAuthCapabilities(AnnotatedObject):
+    """**UNSTABLE**: Authentication-related capabilities supported by the agent."""
+
+    logout: LogoutCapabilities | None = None
+    """Whether the agent supports the logout method.
+
+    By supplying ``{}`` it means that the agent supports the logout method.
+    """
+
+
 class AgentCapabilities(AnnotatedObject):
     """Capabilities supported by the agent.
 
@@ -214,6 +238,9 @@ class AgentCapabilities(AnnotatedObject):
 
     See protocol docs: [Agent Capabilities](https://agentclientprotocol.com/protocol/initialization#agent-capabilities)
     """
+
+    auth: AgentAuthCapabilities | None = Field(default_factory=AgentAuthCapabilities)
+    """**UNSTABLE**: Authentication-related capabilities supported by the agent."""
 
     load_session: bool | None = False
     """Whether the agent supports `session/load`."""

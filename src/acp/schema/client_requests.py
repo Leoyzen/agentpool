@@ -295,9 +295,20 @@ class AuthenticateRequest(Request):
     """
 
 
+class LogoutRequest(Request):
+    """**UNSTABLE**: Request parameters for the logout method.
+
+    Terminates the current authenticated session.
+
+    After a successful logout, all new sessions will require authentication.
+    There is no guarantee about the behavior of already running sessions.
+    """
+
+
 ClientRequest = (
     InitializeRequest
     | AuthenticateRequest
+    | LogoutRequest
     | NewSessionRequest
     | LoadSessionRequest
     | ListSessionsRequest

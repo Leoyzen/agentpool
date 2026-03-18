@@ -33,6 +33,11 @@ if TYPE_CHECKING:
         WriteTextFileRequest,
         WriteTextFileResponse,
     )
+    from acp.schema.elicitation import (
+        ElicitationCompleteNotification,
+        ElicitationRequest,
+        ElicitationResponse,
+    )
 
 
 class NoOpClient(Client):
@@ -105,6 +110,15 @@ class NoOpClient(Client):
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Return empty dict for extension methods."""
         return {}
+
+    async def elicitation(self, params: ElicitationRequest) -> ElicitationResponse:
+        """Decline elicitation by default."""
+        from acp.schema.elicitation import ElicitationDeclineAction, ElicitationResponse
+
+        return ElicitationResponse(action=ElicitationDeclineAction())
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Ignore elicitation complete notifications."""
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Ignore extension notifications."""

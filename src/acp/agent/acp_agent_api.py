@@ -12,6 +12,7 @@ from acp.schema import (
     InitializeRequest,
     ListSessionsRequest,
     LoadSessionRequest,
+    LogoutRequest,
     NewSessionRequest,
     PromptRequest,
     ResumeSessionRequest,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
         InitializeResponse,
         ListSessionsResponse,
         LoadSessionResponse,
+        LogoutResponse,
         NewSessionResponse,
         PromptResponse,
         ResumeSessionResponse,
@@ -221,6 +223,11 @@ class ACPAgentAPI:
         """Authenticate with the agent."""
         request = AuthenticateRequest(method_id=method_id)
         return await self.connection.authenticate(request)
+
+    async def logout(self) -> LogoutResponse | None:
+        """Log out of the current authenticated state."""
+        request = LogoutRequest()
+        return await self.connection.logout(request)
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Call an extension method on the agent."""

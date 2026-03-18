@@ -23,6 +23,7 @@ from acp.schema import (
     KillTerminalCommandResponse,
     ListSessionsRequest,
     LoadSessionRequest,
+    LogoutRequest,
     NewSessionRequest,
     PromptRequest,
     ReadTextFileRequest,
@@ -41,6 +42,11 @@ from acp.schema import (
     WaitForTerminalExitResponse,
     WriteTextFileRequest,
     WriteTextFileResponse,
+)
+from acp.schema.elicitation import (
+    ElicitationCompleteNotification,
+    ElicitationRequest,
+    ElicitationResponse,
 )
 from acp.task import DebuggingMessageStateStore
 
@@ -196,6 +202,17 @@ class AgentSideConnection(Client):
         resp = await self._conn.send_request("terminal/kill", dct)
         return KillTerminalCommandResponse.model_validate(resp)
 
+    async def elicitation(self, params: ElicitationRequest) -> ElicitationResponse:
+        """Request structured user input from the client."""
+        dct = params.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
+        resp = await self._conn.send_request("session/elicitation", dct)
+        return ElicitationResponse.model_validate(resp)
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Notify the client that a URL-based elicitation has completed."""
+        dct = params.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
+        await self._conn.send_notification("session/elicitation/complete", dct)
+
     async def close(self) -> None:
         """Close the connection."""
         await self._conn.close()
@@ -273,6 +290,10 @@ async def _agent_handler(  # noqa: PLR0911
         case "authenticate":
             p = AuthenticateRequest.model_validate(params)
             result = await agent.authenticate(p)
+            return result.model_dump(by_alias=True, exclude_none=True) if result else {}
+        case "logout":
+            p = LogoutRequest.model_validate(params)
+            result = await agent.logout(p)
             return result.model_dump(by_alias=True, exclude_none=True) if result else {}
         case str() if method.startswith("_") and is_notification:
             await agent.ext_notification(method[1:], params or {})

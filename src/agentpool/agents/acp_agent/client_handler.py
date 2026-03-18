@@ -43,6 +43,11 @@ if TYPE_CHECKING:
         WaitForTerminalExitRequest,
         WriteTextFileRequest,
     )
+    from acp.schema.elicitation import (
+        ElicitationCompleteNotification,
+        ElicitationRequest,
+        ElicitationResponse,
+    )
     from agentpool.agents.acp_agent import ACPAgent
     from agentpool.agents.acp_agent.session_state import ACPSessionState
     from agentpool.ui.base import InputProvider
@@ -382,6 +387,15 @@ class ACPClientHandler(Client):
         """Handle extension methods."""
         logger.debug("Extension method called", method=method)
         return {"ok": True, "method": method}
+
+    async def elicitation(self, params: ElicitationRequest) -> ElicitationResponse:
+        """Decline elicitation by default."""
+        from acp.schema.elicitation import ElicitationDeclineAction, ElicitationResponse
+
+        return ElicitationResponse(action=ElicitationDeclineAction())
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Ignore elicitation complete notifications."""
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications."""

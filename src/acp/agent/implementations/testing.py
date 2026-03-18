@@ -17,6 +17,7 @@ from acp.schema import (
     CloseSessionResponse,
     ForkSessionResponse,
     ListSessionsResponse,
+    LogoutResponse,
     ResumeSessionResponse,
 )
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
         InitializeRequest,
         ListSessionsRequest,
         LoadSessionRequest,
+        LogoutRequest,
         NewSessionRequest,
         PromptRequest,
         ResumeSessionRequest,
@@ -63,6 +65,9 @@ class TestAgent(Agent):
 
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None:
         return AuthenticateResponse()
+
+    async def logout(self, params: LogoutRequest) -> LogoutResponse | None:
+        return LogoutResponse()
 
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         self.prompts.append(params)

@@ -20,6 +20,8 @@ if TYPE_CHECKING:
         ListSessionsResponse,
         LoadSessionRequest,
         LoadSessionResponse,
+        LogoutRequest,
+        LogoutResponse,
         NewSessionRequest,
         NewSessionResponse,
         PromptRequest,
@@ -57,6 +59,8 @@ class Agent(Protocol):
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse: ...
 
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None: ...
+
+    async def logout(self, params: LogoutRequest) -> LogoutResponse | None: ...
 
     async def set_session_mode(
         self, params: SetSessionModeRequest

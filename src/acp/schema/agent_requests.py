@@ -6,6 +6,7 @@ from pydantic import Field
 
 from acp.schema.base import Request
 from acp.schema.common import EnvVariable  # noqa: TC001
+from acp.schema.elicitation import ElicitationRequest
 from acp.schema.tool_call import PermissionOption, ToolCall  # noqa: TC001
 
 
@@ -123,4 +124,5 @@ AgentRequest = (
     | ReleaseTerminalRequest
     | WaitForTerminalExitRequest
     | KillTerminalCommandRequest
+    | ElicitationRequest
 )

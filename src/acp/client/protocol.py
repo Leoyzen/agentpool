@@ -23,6 +23,11 @@ if TYPE_CHECKING:
         WriteTextFileRequest,
         WriteTextFileResponse,
     )
+    from acp.schema.elicitation import (
+        ElicitationCompleteNotification,
+        ElicitationRequest,
+        ElicitationResponse,
+    )
 
 
 class Client(Protocol):
@@ -55,6 +60,10 @@ class Client(Protocol):
     async def kill_terminal(
         self, params: KillTerminalCommandRequest
     ) -> KillTerminalCommandResponse | None: ...
+
+    async def elicitation(self, params: ElicitationRequest) -> ElicitationResponse: ...
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None: ...
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]: ...
 

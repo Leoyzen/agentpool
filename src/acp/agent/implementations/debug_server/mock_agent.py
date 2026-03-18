@@ -19,6 +19,7 @@ from acp.schema import (
     InitializeResponse,
     ListSessionsResponse,
     LoadSessionResponse,
+    LogoutResponse,
     NewSessionResponse,
     PromptResponse,
     ReadTextFileResponse,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
         InitializeRequest,
         ListSessionsRequest,
         LoadSessionRequest,
+        LogoutRequest,
         NewSessionRequest,
         PromptRequest,
         ReadTextFileRequest,
@@ -106,6 +108,10 @@ class MockAgent(Agent):
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None:
         """Mock authentication - always succeeds."""
         return AuthenticateResponse()
+
+    async def logout(self, params: LogoutRequest) -> LogoutResponse | None:
+        """Mock logout - always succeeds."""
+        return LogoutResponse()
 
     async def read_text_file(self, params: ReadTextFileRequest) -> ReadTextFileResponse:
         """Mock file reading."""

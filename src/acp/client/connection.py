@@ -19,6 +19,7 @@ from acp.schema import (
     KillTerminalCommandRequest,
     ListSessionsResponse,
     LoadSessionResponse,
+    LogoutResponse,
     NewSessionResponse,
     PromptResponse,
     ReadTextFileRequest,
@@ -32,6 +33,10 @@ from acp.schema import (
     TerminalOutputRequest,
     WaitForTerminalExitRequest,
     WriteTextFileRequest,
+)
+from acp.schema.elicitation import (
+    ElicitationCompleteNotification,
+    ElicitationRequest,
 )
 
 
@@ -53,6 +58,7 @@ if TYPE_CHECKING:
         KillTerminalCommandResponse,
         ListSessionsRequest,
         LoadSessionRequest,
+        LogoutRequest,
         NewSessionRequest,
         PromptRequest,
         ReadTextFileResponse,
@@ -177,6 +183,14 @@ class ClientSideConnection(Agent):
         payload = resp if isinstance(resp, dict) else {}
         return AuthenticateResponse.model_validate(payload)
 
+    async def logout(self, params: LogoutRequest) -> LogoutResponse:
+        dct = params.model_dump(
+            mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
+        )
+        resp = await self._conn.send_request("logout", dct)
+        payload = resp if isinstance(resp, dict) else {}
+        return LogoutResponse.model_validate(payload)
+
     async def prompt(self, params: PromptRequest) -> PromptResponse:
         # Don't exclude_defaults here - the 'type' field in content blocks has a default
         # value but is required for discriminated unions to work
@@ -255,6 +269,13 @@ async def _handle_client_method(  # noqa: PLR0911
         case "terminal/kill":
             kill_request = KillTerminalCommandRequest.model_validate(params)
             return await client.kill_terminal(kill_request)
+        case "session/elicitation":
+            elicitation_request = ElicitationRequest.model_validate(params)
+            return await client.elicitation(elicitation_request)
+        case "session/elicitation/complete":
+            complete_notification = ElicitationCompleteNotification.model_validate(params)
+            await client.elicitation_complete(complete_notification)
+            return None
         case str() if method.startswith("_") and is_notification:
             await client.ext_notification(method[1:], params or {})
             return None
