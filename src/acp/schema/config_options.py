@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Annotated, Literal
 
-from pydantic import Discriminator, Field, Tag
+from pydantic import Discriminator, Field
 
 from acp.schema.base import AnnotatedObject
 
@@ -22,20 +22,12 @@ SessionConfigGroupId = str
 
 
 SessionConfigOptionCategory = Literal["mode", "model", "thought_level", "other"]
-"""**UNSTABLE**: This capability is not part of the spec yet.
-
-Semantic category for a session configuration option.
+"""Semantic category for a session configuration option.
 
 This is intended to help Clients distinguish broadly common selectors (e.g. model selector vs
 session mode selector vs thought/reasoning level) for UX purposes (keyboard shortcuts, icons,
 placement). It MUST NOT be required for correctness. Clients MUST handle missing or unknown
 categories gracefully (treat as `other`).
-
-Values:
-    - "mode": Session mode selector
-    - "model": Model selector
-    - "thought_level": Thought/reasoning level selector
-    - "other": Unknown / uncategorized selector
 """
 
 
@@ -91,6 +83,9 @@ class SelectSessionConfigOption(BaseSessionConfigOption):
     """A select-type session configuration option.
 
     Single-value selector (dropdown) with a list of options.
+
+    Advertised by the agent to describe an available select config option and its current state.
+    See ``SessionConfigOptionValueId`` for the value sent by the client when changing it.
     """
 
     type: Literal["select"] = Field(default="select", init=False)
@@ -107,6 +102,9 @@ class BooleanSessionConfigOption(BaseSessionConfigOption):
     """**UNSTABLE**: This capability is not part of the spec yet.
 
     A boolean on/off toggle session configuration option.
+
+    Advertised by the agent to describe an available boolean config option and its current state.
+    See ``SessionConfigOptionValueBoolean`` for the value sent by the client when changing it.
     """
 
     type: Literal["boolean"] = Field(default="boolean", init=False)
@@ -117,8 +115,7 @@ class BooleanSessionConfigOption(BaseSessionConfigOption):
 
 
 SessionConfigOption = Annotated[
-    Annotated[SelectSessionConfigOption, Tag("select")]
-    | Annotated[BooleanSessionConfigOption, Tag("boolean")],
+    SelectSessionConfigOption | BooleanSessionConfigOption,
     Discriminator("type"),
 ]
 """A session configuration option, discriminated by ``type``.
@@ -131,7 +128,11 @@ are present. For ``type: "boolean"`` only ``current_value`` (bool) is present.""
 
 
 class SessionConfigOptionValueBoolean(AnnotatedObject):
-    """A boolean value for setting a config option (type: "boolean")."""
+    """A boolean value for setting a config option (type: "boolean").
+
+    Sent by the client to change a boolean config option.
+    See ``BooleanSessionConfigOption`` for the option definition advertised by the agent.
+    """
 
     type: Literal["boolean"] = Field(default="boolean", init=False)
     """Discriminator value."""
@@ -145,6 +146,9 @@ class SessionConfigOptionValueId(AnnotatedObject):
 
     This is the default when ``type`` is absent on the wire. Unknown ``type``
     values with string payloads also gracefully deserialize into this variant.
+
+    Sent by the client to change a select config option.
+    See ``SelectSessionConfigOption`` for the option definition advertised by the agent.
     """
 
     value: SessionConfigValueId

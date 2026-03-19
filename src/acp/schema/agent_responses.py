@@ -61,12 +61,7 @@ class NewSessionResponse(Response):
     """
 
     config_options: Sequence[SessionConfigOption] | None = None
-    """**UNSTABLE**
-
-    Configuration options for this session.
-
-    See RFD: Session Config Options
-    """
+    """**Configuration options for this session."""
 
     session_id: str
     """Unique identifier for the created session.
