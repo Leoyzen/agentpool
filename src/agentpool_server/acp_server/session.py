@@ -252,7 +252,8 @@ class ACPSession:
 
         update: CurrentModeUpdate | ConfigOptionUpdate
         match state:
-            case ModeInfo(id=mode_id):
+            case ModeInfo(value=mode_id, category_id="mode"):
+                assert isinstance(mode_id, str)
                 update = CurrentModeUpdate(current_mode_id=mode_id)
                 self.log.debug("Forwarding mode change to client", mode_id=mode_id)
             case ModelInfo(id=model_id):
