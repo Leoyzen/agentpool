@@ -17,9 +17,11 @@ from acp.schema import (
     NewSessionResponse,
     PromptResponse,
     ResumeSessionResponse,
+    SessionInfoUpdate,
     SessionMode,
     SessionModelState,
     SessionModeState,
+    SessionNotification,
     SetSessionConfigOptionResponse,
     SetSessionModelRequest,
     SetSessionModelResponse,
@@ -186,22 +188,14 @@ class AgentPoolACPAgent(ACPAgent):
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
         self.client_info: Implementation | None = None
-        pool = self.agent_pool
-        if pool is None:
-            msg = "Default agent has no associated pool"
-            raise RuntimeError(msg)
-        self.session_manager = ACPSessionManager(pool=pool)
+        self.session_manager = ACPSessionManager(pool=self.agent_pool)
         self.tasks = TaskManager()
         self._initialized = False
-        self._sessions_cache: ListSessionsResponse | None = None
-        self._sessions_cache_time: float = 0.0
         # Connect to title generation signal to notify clients of session updates
-        pool.storage.metadata_generated.connect(self._on_metadata_generated)
+        self.agent_pool.storage.metadata_generated.connect(self._on_metadata_generated)
 
     async def _on_metadata_generated(self, event: SessionMetadataGeneratedEvent) -> None:
         """Handle metadata generation - notify active sessions of the update."""
-        from acp.schema import SessionInfoUpdate, SessionNotification
-
         session = self.session_manager.get_session(event.session_id)
         if session is None:
             logger.debug("Metadata generated for inactive session", session_id=event.session_id)
@@ -221,8 +215,9 @@ class AgentPoolACPAgent(ACPAgent):
             logger.exception("Failed to send session info update", session_id=event.session_id)
 
     @property
-    def agent_pool(self) -> AgentPool[Any] | None:
+    def agent_pool(self) -> AgentPool[Any]:
         """Get the agent pool from the default agent."""
+        assert self.default_agent.agent_pool
         return self.default_agent.agent_pool
 
         # Note: Tool registration happens after initialize() when we know client caps
@@ -381,17 +376,8 @@ class AgentPoolACPAgent(ACPAgent):
         Uses a short TTL cache to avoid redundant expensive storage reads
         when clients request the list multiple times in quick succession.
         """
-        import time
-
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
-
-        # Return cached result if fresh (within 10 seconds)
-        cache_ttl = 10.0
-        now = time.monotonic()
-        if self._sessions_cache and (now - self._sessions_cache_time) < cache_ttl:
-            logger.debug("Returning cached sessions list", count=len(self._sessions_cache.sessions))
-            return self._sessions_cache
 
         # Get agent from first active session, or fall back to default
         first_session = next(iter(self.session_manager._active.values()), None)
@@ -401,16 +387,12 @@ class AgentPoolACPAgent(ACPAgent):
             agent_sessions = await agent.list_sessions()
             logger.info("Agent returned sessions", count=len(agent_sessions))
             sessions = [to_session_info(s) for s in agent_sessions]
-            logger.info("Listed sessions", count=len(sessions))
-            response = ListSessionsResponse(sessions=sessions)
         except Exception:
             logger.exception("Failed to list sessions")
             return ListSessionsResponse(sessions=[])
         else:
-            # Cache the result
-            self._sessions_cache = response
-            self._sessions_cache_time = now
-            return response
+            logger.info("Listed sessions", count=len(sessions))
+            return ListSessionsResponse(sessions=sessions)
 
     async def fork_session(self, params: ForkSessionRequest) -> ForkSessionResponse:
         """Fork an existing session.
@@ -718,9 +700,7 @@ class AgentPoolACPAgent(ACPAgent):
         # 3. Update internal references
         self.default_agent = new_agent
         pool = new_agent.agent_pool
-        if pool is None:
-            msg = "New agent has no associated pool"
-            raise RuntimeError(msg)
+        assert pool
         self.session_manager._pool = pool
         agent_names = list(pool.all_agents.keys())
         logger.info("Pool swap complete", agent_names=agent_names)
