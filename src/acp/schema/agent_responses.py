@@ -8,12 +8,8 @@ from pydantic import Field
 from acp.schema.base import Response
 from acp.schema.capabilities import AgentCapabilities
 from acp.schema.common import AuthMethod, Implementation  # noqa: TC001
-from acp.schema.session_state import (  # noqa: TC001
-    SessionConfigOption,
-    SessionInfo,
-    SessionModelState,
-    SessionModeState,
-)
+from acp.schema.config_options import SessionConfigOption  # noqa: TC001
+from acp.schema.session_state import SessionInfo, SessionModelState, SessionModeState  # noqa: TC001
 from acp.schema.session_updates import Usage  # noqa: TC001
 
 

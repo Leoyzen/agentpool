@@ -140,8 +140,14 @@ from acp.schema.notifications import (
 
 # ElicitationCompleteNotification is re-exported from elicitation above
 from acp.schema.session_state import (
-    BooleanSessionConfigOption,
     ModelInfo,
+    SessionInfo,
+    SessionMode,
+    SessionModeState,
+    SessionModelState,
+)
+from acp.schema.config_options import (
+    BooleanSessionConfigOption,
     SelectSessionConfigOption,
     SessionConfigOption,
     SessionConfigOptionCategory,
@@ -151,10 +157,6 @@ from acp.schema.session_state import (
     SessionConfigSelectGroup,
     SessionConfigSelectOption,
     SessionConfigSelectOptions,
-    SessionInfo,
-    SessionMode,
-    SessionModeState,
-    SessionModelState,
 )
 from acp.schema.slash_commands import (
     AvailableCommand,

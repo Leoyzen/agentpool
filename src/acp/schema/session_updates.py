@@ -10,6 +10,7 @@ from pydantic import Field
 
 from acp.schema.agent_plan import PlanEntry  # noqa: TC001
 from acp.schema.base import AnnotatedObject
+from acp.schema.config_options import SessionConfigOption  # noqa: TC001
 from acp.schema.content_blocks import (  # noqa: TC001
     Annotations,
     Audience,
@@ -22,7 +23,6 @@ from acp.schema.content_blocks import (  # noqa: TC001
     TextContentBlock,
     TextResourceContents,
 )
-from acp.schema.session_state import SessionConfigOption  # noqa: TC001
 from acp.schema.slash_commands import AvailableCommand  # noqa: TC001
 from acp.schema.tool_call import (  # noqa: TC001
     ToolCallContent,
