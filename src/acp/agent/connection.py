@@ -44,8 +44,6 @@ from acp.schema import (
     WriteTextFileResponse,
 )
 from acp.schema.elicitation import (
-    ElicitationCompleteNotification,
-    ElicitationRequest,
     ElicitationResponse,
 )
 from acp.task import DebuggingMessageStateStore
@@ -60,14 +58,9 @@ if TYPE_CHECKING:
     from acp.connection import StreamObserver
     from acp.schema import (
         AgentMethod,
-        CloseSessionResponse,
+        AgentResponse,
         CreateTerminalRequest,
-        InitializeResponse,
         KillTerminalCommandRequest,
-        ListSessionsResponse,
-        LoadSessionResponse,
-        NewSessionResponse,
-        PromptResponse,
         ReadTextFileRequest,
         ReleaseTerminalRequest,
         RequestPermissionRequest,
@@ -76,6 +69,7 @@ if TYPE_CHECKING:
         WaitForTerminalExitRequest,
         WriteTextFileRequest,
     )
+    from acp.schema.elicitation import ElicitationCompleteNotification, ElicitationRequest
 
 log = structlog.get_logger(__name__)
 
@@ -232,16 +226,7 @@ async def _agent_handler(  # noqa: PLR0911
     method: AgentMethod | str,
     params: dict[str, Any] | None,
     is_notification: bool,
-) -> (
-    NewSessionResponse
-    | InitializeResponse
-    | PromptResponse
-    | LoadSessionResponse
-    | ListSessionsResponse
-    | CloseSessionResponse
-    | dict[str, Any]
-    | None
-):
+) -> AgentResponse | dict[str, Any] | None:
     """Handle an agent request."""
     match method:
         case "initialize":
@@ -258,11 +243,7 @@ async def _agent_handler(  # noqa: PLR0911
             return await agent.list_sessions(list_request)
         case "session/set_mode":
             set_mode_request = SetSessionModeRequest.model_validate(params)
-            return (
-                session_resp.model_dump(by_alias=True, exclude_none=True)
-                if (session_resp := await agent.set_session_mode(set_mode_request))
-                else {}
-            )
+            return await agent.set_session_mode(set_mode_request)
         case "session/prompt":
             prompt_request = PromptRequest.model_validate(params)
             return await agent.prompt(prompt_request)
@@ -272,33 +253,23 @@ async def _agent_handler(  # noqa: PLR0911
             return None
         case "session/set_model":
             set_model_request = SetSessionModelRequest.model_validate(params)
-            return (
-                model_result.model_dump(by_alias=True, exclude_none=True)
-                if (model_result := await agent.set_session_model(set_model_request))
-                else {}
-            )
+            return await agent.set_session_model(set_model_request)
         case "session/close":
             stop_request = CloseSessionRequest.model_validate(params)
             return await agent.close_session(stop_request)
         case "session/set_config_option":
             set_config_request = SetSessionConfigOptionRequest.model_validate(params)
-            return (
-                config_result.model_dump(by_alias=True, exclude_none=True)
-                if (config_result := await agent.set_session_config_option(set_config_request))
-                else {}
-            )
+            return await agent.set_session_config_option(set_config_request)
         case "authenticate":
-            p = AuthenticateRequest.model_validate(params)
-            result = await agent.authenticate(p)
-            return result.model_dump(by_alias=True, exclude_none=True) if result else {}
+            auth_request = AuthenticateRequest.model_validate(params)
+            return await agent.authenticate(auth_request)
         case "logout":
-            p = LogoutRequest.model_validate(params)
-            result = await agent.logout(p)
-            return result.model_dump(by_alias=True, exclude_none=True) if result else {}
+            logout_request = LogoutRequest.model_validate(params)
+            return await agent.logout(logout_request)
         case str() if method.startswith("_") and is_notification:
             await agent.ext_notification(method[1:], params or {})
             return None
         case str() if method.startswith("_"):
             return await agent.ext_method(method[1:], params or {})
-        case _:
-            raise RequestError.method_not_found(method)
+        case _ as unknown_method:
+            raise RequestError.method_not_found(unknown_method)

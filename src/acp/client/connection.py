@@ -51,26 +51,19 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         CancelNotification,
         ClientMethod,
+        ClientResponse,
         CloseSessionRequest,
-        CreateTerminalResponse,
         ForkSessionRequest,
         InitializeRequest,
-        KillTerminalCommandResponse,
         ListSessionsRequest,
         LoadSessionRequest,
         LogoutRequest,
         NewSessionRequest,
         PromptRequest,
-        ReadTextFileResponse,
-        ReleaseTerminalResponse,
-        RequestPermissionResponse,
         ResumeSessionRequest,
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        TerminalOutputResponse,
-        WaitForTerminalExitResponse,
-        WriteTextFileResponse,
     )
 
 
@@ -226,19 +219,7 @@ async def _handle_client_method(  # noqa: PLR0911
     method: ClientMethod | str,
     params: dict[str, Any] | None,
     is_notification: bool,
-) -> (
-    WriteTextFileResponse
-    | ReadTextFileResponse
-    | RequestPermissionResponse
-    | SessionNotification
-    | CreateTerminalResponse
-    | TerminalOutputResponse
-    | WaitForTerminalExitResponse
-    | ReleaseTerminalResponse
-    | KillTerminalCommandResponse
-    | dict[str, Any]
-    | None
-):
+) -> ClientResponse | dict[str, Any] | None:
     """Handle client method calls."""
     match method:
         case "fs/write_text_file":

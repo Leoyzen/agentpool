@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, assert_never
 
 from acp import Agent as ACPAgent
 from acp.schema import (
@@ -653,14 +653,16 @@ class AgentPoolACPAgent(ACPAgent):
             session_id=params.session_id,
         )
         try:
-            if isinstance(params.value, bool):
-                # Boolean config option — forward as string mode_id
-                await session.agent.set_mode(
-                    str(params.value).lower(), category_id=params.config_id
-                )
-            else:
-                # Select config option — config_id maps to category_id, value to mode_id
-                await session.agent.set_mode(params.value, category_id=params.config_id)
+            match params.value:
+                case bool():
+                    # Boolean config option — forward as string mode_id
+                    bool_str = str(params.value).lower()
+                    await session.agent.set_mode(bool_str, category_id=params.config_id)
+                case str():
+                    # Select config option — config_id maps to category_id, value to mode_id
+                    await session.agent.set_mode(params.value, category_id=params.config_id)
+                case _ as unreachable:
+                    assert_never(unreachable)
             # Return updated config options
             config_options = await get_session_config_options(session.agent)
             return SetSessionConfigOptionResponse(config_options=config_options)
