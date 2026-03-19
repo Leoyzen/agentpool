@@ -606,12 +606,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available modes from the ACP session state."""
-        from agentpool.agents.acp_agent.acp_converters import get_modes
+        from agentpool.agents.acp_agent.acp_converters import to_native_modes
 
         if not self._state:
             return []
 
-        return get_modes(
+        return to_native_modes(
             self._state.config_options,
             available_modes=self._state.modes,
             available_models=self._state.models,

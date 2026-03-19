@@ -255,7 +255,7 @@ def _user_content_to_updates(content: Any) -> Iterator[SessionUpdate]:
                 assert_never(unreachable)
 
 
-def get_modes(
+def to_native_modes(
     config_options: list[SessionConfigOption],
     available_modes: SessionModeState | None,
     available_models: SessionModelState | None,
