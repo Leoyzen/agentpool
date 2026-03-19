@@ -41,6 +41,7 @@ from agentpool_server.opencode_server.models import (
     Session,
     SessionCreatedEvent,
     SessionCreateRequest,
+    SessionUpdatedEvent,
     SessionDeletedEvent,
     SessionDiffEvent,
     SessionForkRequest,
