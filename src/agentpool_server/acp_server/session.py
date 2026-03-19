@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import re
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 import anyio
 from exxec.acp_provider import ACPExecutionEnvironment
@@ -284,6 +284,10 @@ class ACPSession:
                     assert isinstance(value_id, str)
                     await self.notifications.update_session_mode(value_id)
                     self.log.debug("Also sent legacy mode update", mode_id=value_id)
+            case ModeInfo():
+                return
+            case _ as unreachable:
+                assert_never(unreachable)
         await self.notifications.send_update(update)
 
     async def initialize(self) -> None:
