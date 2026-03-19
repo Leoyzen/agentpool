@@ -617,7 +617,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             available_models=self._state.models,
         )
 
-    async def _set_mode(self, mode_id: str, category_id: str) -> None:
+    async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Forward mode change to remote ACP server."""
         if not self._api or not self._sdk_session_id or not self._state:
             raise RuntimeError("Not connected to ACP server")

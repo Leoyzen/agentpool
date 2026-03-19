@@ -873,7 +873,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             categories.append(model_category)
         return categories
 
-    async def _set_mode(self, mode_id: str, category_id: str) -> None:
+    async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle permissions and model mode switching."""
         match category_id:
             case "mode":

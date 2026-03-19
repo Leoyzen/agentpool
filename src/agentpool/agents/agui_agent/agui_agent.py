@@ -525,7 +525,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         """Get available modes for AG-UI agent (not supported)."""
         return []
 
-    async def _set_mode(self, mode_id: str, category_id: str) -> None:
+    async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """AG-UI doesn't support mode switching."""
         raise OperationNotAllowedError("mode switching (model is controlled by remote server)")
 

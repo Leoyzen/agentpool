@@ -970,7 +970,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         return categories
 
-    async def _set_mode(self, mode_id: str, category_id: str) -> None:
+    async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle permissions, model, thinking_level, and effort mode switching."""
         from clawd_code_sdk import PermissionMode
 

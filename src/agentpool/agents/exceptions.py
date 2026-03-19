@@ -30,8 +30,8 @@ class UnknownCategoryError(ValueError):
 class UnknownModeError(ValueError):
     """Raised when an unknown mode is encountered."""
 
-    def __init__(self, mode_id: str, available_modes: Sequence[str]):
-        msg = f"Unknown mode: {mode_id}. Available: {', '.join(available_modes)}"
+    def __init__(self, value: str | bool, available_modes: Sequence[str]):
+        msg = f"Unknown value: {value}. Available: {', '.join(available_modes)}"
         super().__init__(msg)
 
 

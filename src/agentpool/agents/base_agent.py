@@ -1107,10 +1107,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     async def set_mode(self, mode: ModeInfo) -> None: ...
 
     @overload
-    async def set_mode(self, mode: str, category_id: ModeCategoryId | str) -> None: ...
+    async def set_mode(self, mode: str | bool, category_id: ModeCategoryId | str) -> None: ...
 
     async def set_mode(
-        self, mode: ModeInfo | str, category_id: ModeCategoryId | str | None = None
+        self, mode: ModeInfo | str | bool, category_id: ModeCategoryId | str | None = None
     ) -> None:
         """Set a mode within a category.
 
@@ -1133,7 +1133,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         await self._set_mode(mode_id, resolved_category)
 
     @abstractmethod
-    async def _set_mode(self, mode_id: str, category_id: str) -> None:
+    async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Agent-specific mode switching implementation."""
         ...
 

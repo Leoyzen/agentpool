@@ -654,7 +654,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             )
         return categories
 
-    async def _set_mode(self, mode_id: str, category_id: str) -> None:
+    async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle approval_policy, reasoning_effort, and model mode switching."""
         match category_id:
             case "mode" if mode_id in VALID_POLICIES:
