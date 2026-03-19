@@ -881,6 +881,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     raise UnknownModeError(mode_id, VALID_MODES)
                 self.tool_confirmation_mode = mode_id  # type: ignore[assignment]
             case "model":
+                assert isinstance(mode_id, str)
                 self._model, settings = self._resolve_model_string(mode_id)
                 if settings:
                     self.model_settings = settings

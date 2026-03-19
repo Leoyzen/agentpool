@@ -35,8 +35,8 @@ class ModeInfo:
     Represents one selectable option within a mode category.
     """
 
-    id: str
-    """Unique identifier for this mode."""
+    value: str | bool
+    """Value for this mode."""
 
     name: str
     """Human-readable display name."""
@@ -59,7 +59,7 @@ class ConfigOptionChanged:
     config_id: str
     """ID of the config option that changed (e.g., 'permissions', 'model')."""
 
-    value_id: str
+    value_id: str | bool
     """New value ID for this config option."""
 
 

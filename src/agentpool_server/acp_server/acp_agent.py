@@ -133,7 +133,8 @@ async def get_session_mode_state(agent: BaseAgent) -> SessionModeState | None:
     if not category:
         return None
     acp_modes = [  # Convert ModeInfo to ACP SessionMode
-        SessionMode(id=mode.id, name=mode.name, description=mode.description)
+        # TODO: remove legacy stuff
+        SessionMode(id=str(mode.value), name=mode.name, description=mode.description)
         for mode in category.available_modes
     ]
     return SessionModeState(available_modes=acp_modes, current_mode_id=category.current_mode_id)

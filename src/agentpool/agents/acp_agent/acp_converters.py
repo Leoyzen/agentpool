@@ -275,7 +275,7 @@ def to_native_modes(
                 opts = [i] if isinstance(i, SessionConfigSelectOption) else i.options
                 mode_infos.extend(
                     ModeInfo(
-                        id=sub_opt.value,
+                        value=sub_opt.value,
                         name=sub_opt.name,
                         description=sub_opt.description or "",
                         category_id=config_opt.id,
@@ -298,7 +298,7 @@ def to_native_modes(
     if available_modes:
         modes = [
             ModeInfo(
-                id=m.id,
+                value=m.id,
                 name=m.name,
                 description=m.description or "",
                 category_id="mode",
@@ -319,7 +319,7 @@ def to_native_modes(
     if available_models:
         models = [
             ModeInfo(
-                id=m.model_id,
+                value=m.model_id,
                 name=m.name,
                 description=m.description or "",
                 category_id="model",

@@ -305,7 +305,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         return TeamRun([self, other])
 
-    async def update_state(self, config_id: str, value_id: str) -> None:
+    async def update_state(self, config_id: str, value_id: str | bool) -> None:
         from agentpool.agents.modes import ConfigOptionChanged
 
         self.log.info("Config option changed", config_id=config_id, mode=value_id)
@@ -1119,7 +1119,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             category_id: Category ID. Required if mode is a string, optional if ModeInfo.
         """
         if isinstance(mode, ModeInfo):
-            mode_id = mode.id
+            mode_id = mode.value
             resolved_category = category_id or mode.category_id
         else:
             mode_id = mode

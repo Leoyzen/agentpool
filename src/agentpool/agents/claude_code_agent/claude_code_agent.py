@@ -992,9 +992,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                     if mode_id not in valid_ids:
                         raise UnknownModeError(mode_id, list(valid_ids))
                 # Set the model directly
+                assert isinstance(mode_id, str)
                 self._model = mode_id
                 if self._client:
                     await self.ensure_initialized()
+                    assert isinstance(mode_id, str)
                     await self._client.set_model(mode_id)
             case "thought_level":
                 # Validate thinking mode

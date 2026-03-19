@@ -144,7 +144,7 @@ class ACPClientHandler(Client):
                         (m for m in self.state.modes.available_modes if m.id == mode_id), None
                     ):
                         mode_info = ModeInfo(
-                            id=acp_mode.id,
+                            value=acp_mode.id,
                             name=acp_mode.name,
                             description=acp_mode.description or "",
                             category_id="mode",  # Old modes API is for operational modes

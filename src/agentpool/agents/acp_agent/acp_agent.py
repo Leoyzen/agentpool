@@ -623,7 +623,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             raise RuntimeError("Not connected to ACP server")
         available_modes = await self.get_modes()
         if matching_category := next((c for c in available_modes if c.id == category_id), None):
-            valid_ids = {m.id for m in matching_category.available_modes}
+            valid_ids = {str(m.value) for m in matching_category.available_modes}
             if mode_id not in valid_ids:
                 raise UnknownModeError(mode_id, sorted(valid_ids))
         else:
@@ -637,10 +637,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             if response and response.config_options:
                 self._state.config_options = list(response.config_options)
         elif category_id == "mode":
+            assert isinstance(mode_id, str)
             await self._api.set_session_mode(self._sdk_session_id, mode_id)
             if self._state.modes:
                 self._state.modes.current_mode_id = mode_id
         elif category_id == "model":
+            assert isinstance(mode_id, str)
             if await self._api.set_session_model(self._sdk_session_id, mode_id):
                 self._state.current_model_id = mode_id
                 self.log.info("Model changed via legacy set_session_model")

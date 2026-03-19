@@ -105,7 +105,7 @@ async def _get_available_models() -> list[TokoModelInfo]:
     return await get_all_models(max_age=max_age)
 
 
-async def _get_variants_from_agent(agent: object) -> dict[str, dict[str, object]]:
+async def _get_variants_from_agent(agent: object) -> dict[str | bool, dict[str, object]]:
     """Get variants from agent's thought_level modes.
 
     Only supported for Codex and Claude Code agents which have static,
@@ -131,12 +131,12 @@ async def _get_variants_from_agent(agent: object) -> dict[str, dict[str, object]
     for category in mode_categories:
         if category.id == "thought_level":
             # Convert modes to variants - the actual config is handled by set_mode
-            return {mode.id: {} for mode in category.available_modes}
+            return {mode.value: {} for mode in category.available_modes}
     return {}
 
 
 def _apply_variants_to_providers(
-    providers: list[Provider], variants: dict[str, dict[str, object]]
+    providers: list[Provider], variants: dict[str | bool, dict[str, object]]
 ) -> list[Provider]:
     """Apply variants to all models in all providers.
 

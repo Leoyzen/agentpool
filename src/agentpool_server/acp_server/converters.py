@@ -171,7 +171,9 @@ def resource_to_content(resource: ResourceContents) -> str | BinaryImage | Binar
 
 
 def to_session_select_option(mode: ModeInfo) -> SessionConfigSelectOption:
-    return SessionConfigSelectOption(value=mode.id, name=mode.name, description=mode.description)
+    return SessionConfigSelectOption(
+        value=str(mode.value), name=mode.name, description=mode.description
+    )
 
 
 def to_session_config_option(category: ModeCategory) -> SelectSessionConfigOption:

@@ -273,12 +273,14 @@ class ACPSession:
                 config_options = await get_session_config_options(self.agent)
                 # Update the changed option's current_value
                 if opt := next((i for i in config_options if i.id == config_id), None):
+                    assert isinstance(value_id, str)
                     opt.current_value = value_id
                 # Convert our core type to ACP type with full config_options
                 update = ConfigOptionUpdate(config_options=config_options)
                 self.log.debug("Config option change", config_id=config_id, value_id=value_id)
                 # For permissions, also send legacy CurrentModeUpdate (still needed)
                 if config_id == "permissions":
+                    assert isinstance(value_id, str)
                     await self.notifications.update_session_mode(value_id)
                     self.log.debug("Also sent legacy mode update", mode_id=value_id)
         await self.notifications.send_update(update)

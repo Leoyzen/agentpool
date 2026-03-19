@@ -636,7 +636,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         if models := await self.get_available_models():
             model_modes = [
                 ModeInfo(
-                    id=m.id,
+                    value=m.id,
                     name=m.name or m.id,
                     description=m.description or "",
                     category_id="model",
@@ -666,6 +666,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             case "thought_level":
                 raise UnknownModeError(mode_id, VALID_EFFORTS)
             case "model":
+                assert isinstance(mode_id, str)
                 self._current_model = mode_id
             case "sandbox" if mode_id in VALID_SANDBOXES:
                 self._current_sandbox = mode_id  # type: ignore[assignment]

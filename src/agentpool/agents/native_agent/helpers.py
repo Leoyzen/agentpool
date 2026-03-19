@@ -132,19 +132,19 @@ def get_permission_category(current_mode: ToolConfirmationMode) -> ModeCategory:
         name="Tool Confirmation",
         available_modes=[
             ModeInfo(
-                id="always",
+                value="always",
                 name="Always",
                 description="Always require confirmation for all tools",
                 category_id="mode",
             ),
             ModeInfo(
-                id="never",
+                value="never",
                 name="Never",
                 description="Never require confirmation (auto-approve all)",
                 category_id="mode",
             ),
             ModeInfo(
-                id="per_tool",
+                value="per_tool",
                 name="Per Tool",
                 description="Require confirmation only for tools marked as needing it",
                 category_id="mode",
@@ -161,7 +161,7 @@ def get_model_category(current_model: str, models: list[ModelInfo]) -> ModeCateg
         name="Model",
         available_modes=[
             ModeInfo(
-                id=m.id,
+                value=m.id,
                 name=m.name or m.id,
                 description=m.description or "",
                 category_id="model",
