@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, assert_never
 from uuid import uuid4
 
 import anyenv
@@ -76,68 +76,6 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
     """MessageNode that wraps a Codex app-server instance."""
 
     AGENT_TYPE: ClassVar = "codex"
-
-    async def _on_user_input(
-        self,
-        params: ToolRequestUserInputParams,
-    ) -> ToolRequestUserInputResponse:
-        """Handle user input requests from Codex server.
-
-        Converts Codex's ToolRequestUserInputParams to MCP ElicitRequestFormParams,
-        delegates to the input provider's get_elicitation(), and converts back.
-
-        Args:
-            params: User input request with questions
-
-        Returns:
-            ToolRequestUserInputResponse with answers
-        """
-        from codexed.models import (
-            ToolRequestUserInputAnswer as _Answer,
-            ToolRequestUserInputResponse as _Response,
-        )
-        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
-
-        if self._tool_bridge._current_context is None:
-            raise RuntimeError("User input callback invoked outside of an active run")
-
-        input_provider = self._tool_bridge._current_context.get_input_provider()
-        answers: dict[str, _Answer] = {}
-
-        for question in params.questions:
-            # Build a JSON schema property for this question
-            schema: dict[str, Any] = {
-                "type": "object",
-                "properties": {question.id: question.to_schema_property()},
-                "required": [question.id],
-            }
-
-            # Build display message from header + question
-            message = (
-                f"{question.header}: {question.question}" if question.header else question.question
-            )
-            mcp_params = ElicitRequestFormParams(message=message, requestedSchema=schema)
-            result = await input_provider.get_elicitation(params=mcp_params)
-
-            if isinstance(result, ErrorData):
-                # Error - return empty answers for remaining questions
-                answers[question.id] = _Answer(answers=[])
-                continue
-
-            if isinstance(result, ElicitResult):
-                if result.action == "accept" and result.content:
-                    raw_value = result.content.get(question.id)
-                    if isinstance(raw_value, list):
-                        answers[question.id] = _Answer(answers=raw_value)
-                    elif raw_value is not None:
-                        answers[question.id] = _Answer(answers=[str(raw_value)])
-                    else:
-                        answers[question.id] = _Answer(answers=[])
-                else:
-                    # User declined or cancelled
-                    answers[question.id] = _Answer(answers=[])
-
-        return _Response(answers=answers)
 
     def __init__(
         self,
@@ -352,6 +290,66 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Clean up Codex client."""
         await self._cleanup()
         await super().__aexit__(exc_type, exc_val, exc_tb)
+
+    async def _on_user_input(
+        self,
+        params: ToolRequestUserInputParams,
+    ) -> ToolRequestUserInputResponse:
+        """Handle user input requests from Codex server.
+
+        Converts Codex's ToolRequestUserInputParams to MCP ElicitRequestFormParams,
+        delegates to the input provider's get_elicitation(), and converts back.
+
+        Args:
+            params: User input request with questions
+
+        Returns:
+            ToolRequestUserInputResponse with answers
+        """
+        from codexed.models import (
+            ToolRequestUserInputAnswer as _Answer,
+            ToolRequestUserInputResponse as _Response,
+        )
+        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
+
+        if self._tool_bridge._current_context is None:
+            raise RuntimeError("User input callback invoked outside of an active run")
+
+        input_provider = self._tool_bridge._current_context.get_input_provider()
+        answers: dict[str, _Answer] = {}
+        for question in params.questions:
+            # Build a JSON schema property for this question
+            props = {question.id: question.to_schema_property()}
+            schema = {"type": "object", "properties": props, "required": [question.id]}
+            # Build display message from header + question
+            message = (
+                f"{question.header}: {question.question}" if question.header else question.question
+            )
+            mcp_params = ElicitRequestFormParams(message=message, requestedSchema=schema)
+            result = await input_provider.get_elicitation(params=mcp_params)
+
+            match result:
+                case ErrorData():
+                    answers[question.id] = _Answer(answers=[])
+                    continue
+                case ElicitResult(action="accept", content=content) if content:
+                    raw_value = content.get(question.id)
+                    match raw_value:
+                        case list():
+                            answers[question.id] = _Answer(answers=raw_value)
+                        case None:
+                            answers[question.id] = _Answer(answers=[])
+                        case str() | int() | float() | bool():
+                            answers[question.id] = _Answer(answers=[str(raw_value)])
+                        case _ as unknown_type:
+                            assert_never(unknown_type)  # ty:ignore[type-assertion-failure]
+                case ElicitResult():
+                    # User declined or cancelled
+                    answers[question.id] = _Answer(answers=[])
+                case _ as unreachable:
+                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+
+        return _Response(answers=answers)
 
     async def get_mcp_server_info(self) -> dict[str, MCPServerStatus]:
         """Get MCP server status from connected Codex client.

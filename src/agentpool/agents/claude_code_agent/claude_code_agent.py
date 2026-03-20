@@ -537,7 +537,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         ctx = self._tool_bridge._current_context
         if ctx is None:
             raise RuntimeError("User question callback invoked outside of an active run")
-        return await handle_clarifying_questions(ctx, input_data, context)
+        return await handle_clarifying_questions(
+            agent_ctx=ctx,
+            input_data=input_data,
+            context=context,
+        )
 
     async def _on_elicitation(self, request: ElicitationRequest) -> ElicitationResult:
         """Handle MCP elicitation requests.
