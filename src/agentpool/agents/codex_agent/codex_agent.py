@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, assert_never
 from uuid import uuid4
 
 import anyenv
+from codexed.models import CommandExecutionRequestApprovalResponse, McpServerElicitationResponse
 from pydantic import TypeAdapter
 from pydantic_ai import RequestUsage
 
@@ -41,7 +42,9 @@ if TYPE_CHECKING:
     from codexed import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
     from codexed.models import (
         CodexEvent,
+        CommandExecutionRequestApprovalParams,
         McpServerConfig,
+        McpServerElicitationRequestParams,
         MiscTurnStatusValue,
         TokenUsageBreakdown,
         ToolRequestUserInputParams,
@@ -251,7 +254,12 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             mcp_config_to_codex(c) for c in self._external_mcp_servers
         )
         # Create and connect client with MCP servers and elicitation callback
-        self._client = CodexClient(mcp_servers=mcp_servers_dict, on_user_input=self._on_user_input)
+        self._client = CodexClient(
+            mcp_servers=mcp_servers_dict,
+            on_user_input=self._on_user_input,
+            on_mcp_elicitation=self._on_mcp_elicitation,
+            on_command_approval=self._on_command_approval,
+        )
         await self._client.__aenter__()
         cwd = str(self.env.cwd or Path.cwd())
         # Resume existing session or start new thread
@@ -290,6 +298,16 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Clean up Codex client."""
         await self._cleanup()
         await super().__aexit__(exc_type, exc_val, exc_tb)
+
+    async def _on_command_approval(
+        self, data: CommandExecutionRequestApprovalParams
+    ) -> CommandExecutionRequestApprovalResponse:
+        return CommandExecutionRequestApprovalResponse(decision="allow")
+
+    async def _on_mcp_elicitation(
+        self, data: McpServerElicitationRequestParams
+    ) -> McpServerElicitationResponse:
+        return McpServerElicitationResponse(action="accept")
 
     async def _on_user_input(
         self,
