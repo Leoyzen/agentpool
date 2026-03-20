@@ -65,7 +65,6 @@ if TYPE_CHECKING:
     )
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
-    from mcp.types import ElicitRequestParams
     from pydantic_ai import UserContent
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -558,8 +557,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         """
         from clawd_code_sdk.models import ElicitationResult
         from mcp.types import (
-            ElicitRequestFormParams,
-            ElicitRequestURLParams,
             ElicitResult,
             ErrorData,
         )
@@ -569,15 +566,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         input_provider = self._tool_bridge._current_context.get_input_provider()
 
         match request.mode:
-            case "url":
-                params: ElicitRequestParams = ElicitRequestURLParams(
-                    message=request.message,
-                    url=request.url or "",
-                    elicitationId=request.elicitation_id or "",
-                )
-            case "form":
-                schema = request.requested_schema or {}
-                params = ElicitRequestFormParams(message=request.message, requestedSchema=schema)
+            case "url" | "form":
+                params = request.to_mcp()
             case None:
                 raise ValueError("Elicitation request mode must be 'url' or 'form'")
             case _ as unreachable:
