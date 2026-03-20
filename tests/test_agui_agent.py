@@ -124,7 +124,7 @@ async def test_agui_agent_run(mock_sse_response):
 def test_agui_to_native_event_text_content():
     """Test conversion of text content events."""
     event = TextMessageContentEvent(message_id="msg1", delta="Test content")
-    native = agui_to_native_event(event)
+    native = next(agui_to_native_event(event))
     assert native is not None
     assert isinstance(native, PartDeltaEvent)
 
@@ -132,7 +132,7 @@ def test_agui_to_native_event_text_content():
 def test_agui_to_native_event_tool_call():
     """Test conversion of tool call events."""
     event = ToolCallStartEvent(tool_call_id="call1", tool_call_name="test_tool")
-    native = agui_to_native_event(event)
+    native = next(agui_to_native_event(event))
     assert native is not None
     assert isinstance(native, NativeToolCallStart)
     assert native.tool_call_id == "call1"
