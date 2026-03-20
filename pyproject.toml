@@ -33,6 +33,7 @@ classifiers = [
 dependencies = [
   "alembic>=1.16.5",
   "anyenv[httpx]>=0.3.0",
+  "bashkit>=0.1.11",
   "clawd-code-sdk>=0.1.36",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
   "codexed>=0.0.1",
