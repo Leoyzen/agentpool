@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence  # noqa: TC003
+from typing import Any
 
 from acp.schema.base import AnnotatedObject
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 class ModelInfo(AnnotatedObject):

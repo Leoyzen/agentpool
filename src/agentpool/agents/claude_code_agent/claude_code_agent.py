@@ -452,7 +452,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             add_dirs=self._add_dir or [],
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
-            on_permission=self._can_use_tool,
+            on_permission=self._on_permission,
             on_user_question=self._on_user_question,
             on_elicitation=self._on_elicitation,
             output_schema=self._output_type if self._output_type is not str else None,
@@ -466,7 +466,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         )
         return ClaudeSDKClient(opts)
 
-    async def _can_use_tool(
+    async def _on_permission(
         self,
         tool_name: str,
         input_data: ToolInput | dict[str, Any],
@@ -556,10 +556,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             ElicitationResult with user's response
         """
         from clawd_code_sdk.models import ElicitationResult
-        from mcp.types import (
-            ElicitResult,
-            ErrorData,
-        )
+        from mcp.types import ElicitResult, ErrorData
 
         if self._tool_bridge._current_context is None:
             raise RuntimeError("Elicitation callback invoked outside of an active run")
