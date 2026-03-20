@@ -562,14 +562,15 @@ class ChatMessage[TContent]:
         env.filters["to_yaml"] = yamling.dump_yaml
 
         match style:
+            case "custom" if not template:
+                raise ValueError("Custom style requires a template")
             case "custom":
-                if not template:
-                    raise ValueError("Custom style requires a template")
+                assert template
                 template_str = template
-            case _ if style in MESSAGE_TEMPLATES:
+            case "simple" | "detailed" | "markdown":
                 template_str = MESSAGE_TEMPLATES[style]
-            case _:
-                raise ValueError(f"Invalid style: {style}")
+            case _ as unreachable:
+                assert_never(unreachable)
         template_obj = env.from_string(template_str)
         vars_ = {**(self.__dict__), "show_metadata": show_metadata, "show_costs": show_costs}
         if variables:

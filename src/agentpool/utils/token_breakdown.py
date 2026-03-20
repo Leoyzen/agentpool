@@ -23,7 +23,13 @@ from pydantic_ai.models import ModelRequestParameters
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from pydantic_ai import ModelMessage, ModelResponsePart, ModelSettings, TextPart
+    from pydantic_ai import (
+        ModelMessage,
+        ModelResponsePart,
+        ModelSettings,
+        TextPart,
+        UserContent,
+    )
     from pydantic_ai.models import Model
 
     from agentpool.messaging.messages import TokenCost
@@ -111,7 +117,7 @@ def count_tokens(text: str, model_name: str | None = None) -> int:
 
 
 async def calculate_usage_from_parts(
-    input_parts: Sequence[Any],
+    input_parts: Sequence[UserContent],
     response_parts: Sequence[ModelResponsePart],
     text_content: str,
     model_name: str | None = None,

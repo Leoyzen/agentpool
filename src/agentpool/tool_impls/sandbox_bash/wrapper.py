@@ -77,16 +77,6 @@ class SandboxExecResult:
             parts.append(f"[Exit code: {self.exit_code}]")
         return "\n".join(parts) if parts else "[No output]"
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to a plain dictionary."""
-        return {
-            "stdout": self.stdout,
-            "stderr": self.stderr,
-            "exit_code": self.exit_code,
-            "error": self.error,
-            "success": self.success,
-        }
-
     @classmethod
     def from_native(cls, result: ExecResult) -> SandboxExecResult:
         """Create from a native bashkit ExecResult."""

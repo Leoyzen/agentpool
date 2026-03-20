@@ -221,10 +221,7 @@ class TodoTracker:
             self.entries.clear()
             self._notify_change()
 
-    def replace_all(
-        self,
-        entries: Sequence[PlanEntry],
-    ) -> None:
+    def replace_all(self, entries: Sequence[PlanEntry]) -> None:
         """Replace all entries with new ones (single notification).
 
         More efficient than clear() + multiple add() calls since it only
@@ -235,9 +232,8 @@ class TodoTracker:
         """
         self.entries.clear()
         for entry in entries:
-            id_ = self._next_id()
             todo = TodoEntry(
-                id=id_,
+                id=self._next_id(),
                 content=entry.content,
                 priority=entry.priority,
                 status=entry.status,
