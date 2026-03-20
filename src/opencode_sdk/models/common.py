@@ -11,6 +11,7 @@ from opencode_sdk.models.base import OpenCodeBaseModel
 
 
 if TYPE_CHECKING:
+    from pydantic_ai import RequestUsage, RunUsage
     from pydantic_ai.usage import UsageBase
 
     from agentpool.utils.streams import FileChange
@@ -85,6 +86,28 @@ class Tokens(OpenCodeBaseModel):
             reasoning=reasoning,
             cache=TokenCache(read=usage.cache_read_tokens, write=usage.cache_write_tokens),
             total=usage.total_tokens + reasoning,
+        )
+
+    def to_request_usage(self) -> RequestUsage:
+        """Convert to a pydantic-ai Usage object for request usage."""
+        from pydantic_ai import RequestUsage
+
+        return RequestUsage(
+            input_tokens=self.input,
+            output_tokens=self.output,
+            cache_read_tokens=self.cache.read,
+            cache_write_tokens=self.cache.write,
+        )
+
+    def to_run_usage(self) -> RunUsage:
+        """Convert to a pydantic-ai RunUsage object for run usage."""
+        from pydantic_ai import RunUsage
+
+        return RunUsage(
+            input_tokens=self.input,
+            output_tokens=self.output,
+            cache_read_tokens=self.cache.read,
+            cache_write_tokens=self.cache.write,
         )
 
 

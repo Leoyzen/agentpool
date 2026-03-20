@@ -389,12 +389,7 @@ def opencode_to_chat_message(
     else:
         model_name = info.model_id
         provider_name = info.provider_id
-        usage = RequestUsage(
-            input_tokens=info.tokens.input,
-            output_tokens=info.tokens.output,
-            cache_read_tokens=info.tokens.cache.read,
-            cache_write_tokens=info.tokens.cache.write,
-        )
+        usage = info.tokens.to_request_usage()
         finish_reason = info.finish
         # Assistant message - collect response parts and tool interactions
         response_parts: list[Any] = []
