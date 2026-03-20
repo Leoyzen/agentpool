@@ -57,14 +57,15 @@ if TYPE_CHECKING:
     )
     from clawd_code_sdk.models import (
         AskUserQuestionInput,
-        ElicitationRequest,
         ElicitationResult,
         ReasoningEffort,
+        SDKControlElicitationRequest,
         StopReason,
         ToolInput,
     )
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
+    from mcp.types import ElicitRequestParams
     from pydantic_ai import UserContent
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -543,7 +544,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             context=context,
         )
 
-    async def _on_elicitation(self, request: ElicitationRequest) -> ElicitationResult:
+    async def _on_elicitation(self, request: SDKControlElicitationRequest) -> ElicitationResult:
         """Handle MCP elicitation requests.
 
         Converts from Claude SDK's ElicitationRequest to MCP's ElicitRequestParams,
@@ -569,7 +570,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         match request.mode:
             case "url":
-                params: ElicitRequestURLParams | ElicitRequestFormParams = ElicitRequestURLParams(
+                params: ElicitRequestParams = ElicitRequestURLParams(
                     message=request.message,
                     url=request.url or "",
                     elicitationId=request.elicitation_id or "",
