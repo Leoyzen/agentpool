@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Self, assert_never
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, assert_never
 from uuid import uuid4
 
 import anyenv
@@ -39,10 +39,15 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
-    from codexed import ApprovalPolicy, CodexClient, Personality, ReasoningEffort, SandboxMode
+    from codexed import (
+        ApprovalPolicy,
+        CodexClient,
+        Personality,
+        ReasoningEffort,
+        SandboxMode,
+    )
     from codexed.models import (
         CodexEvent,
-        CommandExecutionRequestApprovalParams,
         McpServerConfig,
         McpServerElicitationRequestParams,
         MiscTurnStatusValue,
@@ -50,10 +55,12 @@ if TYPE_CHECKING:
         ToolRequestUserInputParams,
         ToolRequestUserInputResponse,
     )
+    from codexed.request_handlers import ApprovalParams, ApprovalResponse
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
     from tokonomics.model_discovery.model_info import ModelInfo
 
+    from agentpool.agents.context import ConfirmationResult
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType, MCPServerStatus, StrPath
@@ -258,7 +265,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             mcp_servers=mcp_servers_dict,
             on_user_input=self._on_user_input,
             on_mcp_elicitation=self._on_mcp_elicitation,
-            on_command_approval=self._on_command_approval,
+            on_approval=self._on_approval,
         )
         await self._client.__aenter__()
         cwd = str(self.env.cwd or Path.cwd())
@@ -299,39 +306,53 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         await self._cleanup()
         await super().__aexit__(exc_type, exc_val, exc_tb)
 
-    async def _on_command_approval(
-        self, data: CommandExecutionRequestApprovalParams
-    ) -> CommandExecutionRequestApprovalResponse:
-        return CommandExecutionRequestApprovalResponse(decision="allow")
+    async def _on_approval(self, data: ApprovalParams) -> ApprovalResponse:
+        from codexed.models import (
+            CommandExecutionRequestApprovalParams,
+            FileChangeRequestApprovalParams,
+            SkillRequestApprovalParams,
+        )
+        from codexed.models.misc import SkillRequestApprovalResponse
+        from codexed.models.responses import FileChangeRequestApprovalResponse
+
+        self.log.debug("Permission request")
+        ctx = self._tool_bridge._current_context
+        if ctx is None:
+            raise RuntimeError("Permission callback invoked outside of an active run")
+        input_provider = ctx.get_input_provider()
+        result = await input_provider.get_tool_confirmation(ctx)
+        mapping: dict[ConfirmationResult, Literal["allow"]] = {
+            "allow": "allow",
+            "skip": "allow",
+            "abort_run": "allow",
+            "abort_chain": "allow",
+        }
+        approval_decision = mapping[result]
+        # Auto-grant if bypassPermissions mode is active
+        match data:
+            case CommandExecutionRequestApprovalParams():
+                return CommandExecutionRequestApprovalResponse(decision=approval_decision)
+            case SkillRequestApprovalParams():
+                return SkillRequestApprovalResponse(decision=approval_decision)
+            case FileChangeRequestApprovalParams():
+                return FileChangeRequestApprovalResponse(decision=approval_decision)
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def _on_mcp_elicitation(
         self, data: McpServerElicitationRequestParams
     ) -> McpServerElicitationResponse:
-        from mcp.types import ElicitRequestFormParams, ElicitRequestURLParams, ErrorData
+        from mcp.types import ErrorData
 
         ctx = self._tool_bridge._current_context
         if ctx is None:
-            raise RuntimeError("User question callback invoked outside of an active run")
+            raise RuntimeError("MCP elicitation callback invoked outside of an active run")
         provider = ctx.get_input_provider()
-        match data.mode:
-            case "form":
-                form_params = ElicitRequestFormParams(
-                    message=data.message,
-                    requestedSchema=data.requested_schema or {},
-                    # task=TaskMetadata(),
-                )
-                result = await provider.get_elicitation(form_params)
-                if isinstance(result, ErrorData):
-                    return McpServerElicitationResponse(action="cancel")
-                return McpServerElicitationResponse(action=result.action, content=result.content)
-            case "url":
-                url_params = ElicitRequestURLParams(
-                    message=data.message,
-                    url=data.url or "",
-                    elicitationId=data.elicitation_id or "",
-                )
-                _result = await provider.get_elicitation(url_params)
-                return McpServerElicitationResponse(action="accept")
+        mcp_request = data.to_mcp()
+        result = await provider.get_elicitation(mcp_request)
+        if isinstance(result, ErrorData):
+            return McpServerElicitationResponse(action="cancel")
+        return McpServerElicitationResponse(action=result.action, content=result.content)
 
     async def _on_user_input(
         self,
