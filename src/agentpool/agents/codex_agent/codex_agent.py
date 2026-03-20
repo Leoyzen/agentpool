@@ -307,7 +307,31 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
     async def _on_mcp_elicitation(
         self, data: McpServerElicitationRequestParams
     ) -> McpServerElicitationResponse:
-        return McpServerElicitationResponse(action="accept")
+        from mcp.types import ElicitRequestFormParams, ElicitRequestURLParams, ErrorData
+
+        ctx = self._tool_bridge._current_context
+        if ctx is None:
+            raise RuntimeError("User question callback invoked outside of an active run")
+        provider = ctx.get_input_provider()
+        match data.mode:
+            case "form":
+                form_params = ElicitRequestFormParams(
+                    message=data.message,
+                    requestedSchema=data.requested_schema or {},
+                    # task=TaskMetadata(),
+                )
+                result = await provider.get_elicitation(form_params)
+                if isinstance(result, ErrorData):
+                    return McpServerElicitationResponse(action="cancel")
+                return McpServerElicitationResponse(action=result.action, content=result.content)
+            case "url":
+                url_params = ElicitRequestURLParams(
+                    message=data.message,
+                    url=data.url or "",
+                    elicitationId=data.elicitation_id or "",
+                )
+                _result = await provider.get_elicitation(url_params)
+                return McpServerElicitationResponse(action="accept")
 
     async def _on_user_input(
         self,
