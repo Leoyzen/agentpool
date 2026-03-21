@@ -38,6 +38,7 @@ from pydantic_ai import (
     ToolCallPart,
     UploadedFile,
     UserContent,
+    UserPromptPart,
 )
 
 from agentpool.messaging import ChatMessage
@@ -623,7 +624,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
         content=user_content,
         role="user",
         message_id=f"{turn.id}-user",
-        messages=[ModelRequest.user_text_prompt(user_content)],
+        messages=[ModelRequest(parts=[UserPromptPart(content=user_content)])],
     )
     result.append(user_msg)
 

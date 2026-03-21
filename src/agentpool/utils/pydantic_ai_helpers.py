@@ -8,6 +8,8 @@ from urllib.parse import unquote, urlparse
 from pydantic_ai import (
     AudioUrl,
     BinaryContent,
+    BuiltinToolCallPart,
+    BuiltinToolReturnPart,
     DocumentUrl,
     ImageUrl,
     RequestUsage,
@@ -295,3 +297,11 @@ def to_run_usage(usage: RequestUsage) -> RunUsage:
         cache_audio_read_tokens=usage.cache_audio_read_tokens,
         output_audio_tokens=usage.output_audio_tokens,
     )
+
+
+def get_builtin_tool_parts(
+    tool_name: str, tc_id: str, args: dict[str, Any], content: str
+) -> tuple[BuiltinToolCallPart, BuiltinToolReturnPart]:
+    call = BuiltinToolCallPart(tool_name=tool_name, args=args, tool_call_id=tc_id)
+    return_part = BuiltinToolReturnPart(tool_name=tool_name, content=content, tool_call_id=tc_id)
+    return (call, return_part)
