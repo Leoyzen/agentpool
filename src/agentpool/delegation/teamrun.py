@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from itertools import pairwise
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal, overload
 from uuid import uuid4
 
 import anyio
+from pydantic_ai import RunUsage
 
 from agentpool.common_types import SupportsRunStream
 from agentpool.delegation.base_team import BaseTeam
 from agentpool.log import get_logger
-from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
+from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse, TokenCost
 from agentpool.messaging.processing import finalize_message, prepare_prompts
 from agentpool.talk.talk import Talk, TeamTalk
 from agentpool.utils.time_utils import get_now
@@ -151,12 +153,18 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
             #     content = "\n".join(msg.format() for msg in all_messages)
             case _:
                 raise ValueError(f"Invalid result mode: {self.result_mode}")
-
+        run_usage = RunUsage()
+        cost = TokenCost(total_cost=Decimal(0))
+        for chat_message in all_messages:
+            run_usage.incr(chat_message.usage)
+            cost.incr(chat_message.cost_info)
         message = ChatMessage(
             content=content,
             messages=[m for chat_message in all_messages for m in chat_message.messages],
             role="assistant",
             name=self.name,
+            usage=run_usage,
+            cost_info=cost,
             associated_messages=all_messages,
             message_id=message_id,
             session_id=user_msg.session_id,

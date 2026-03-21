@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from anyenv.async_run import as_generated
 import anyio
+from pydantic_ai import RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import SubAgentEvent
 from agentpool.delegation.base_team import BaseTeam
 from agentpool.delegation.teamrun import TeamRun
 from agentpool.log import get_logger
-from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
+from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse, TokenCost
 from agentpool.messaging.processing import finalize_message, prepare_prompts
 from agentpool.utils.time_utils import get_now
 
@@ -135,12 +137,20 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         # Execute team logic
         result = await self.execute(*processed_prompts, **kwargs)
         message_id = str(uuid4())  # Always generate unique response ID
+        run_usage = RunUsage()
+        cost = TokenCost(total_cost=Decimal(0))
+        for msg in result:
+            if msg.message:
+                run_usage.incr(msg.message.usage)
+                cost.incr(msg.message.cost_info)
         message = ChatMessage(
             content=[r.message.content for r in result if r.message],
             messages=[m for r in result if r.message for m in r.message.messages],
             role="assistant",
             name=self.name,
             message_id=message_id,
+            usage=run_usage,
+            cost_info=cost,
             session_id=user_msg.session_id,
             parent_id=user_msg.message_id,
             metadata={

@@ -590,6 +590,7 @@ class StorageManager:
                     message_id=message.message_id,
                     parent_id=message.parent_id,
                     model_name=message.model_name,
+                    usage=message.usage,
                     cost_info=message.cost_info,
                     response_time=message.response_time,
                     timestamp=message.timestamp,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, assert_never
 
 import anyenv
@@ -18,6 +19,7 @@ from pydantic_ai import (
 )
 
 from agentpool import log
+from agentpool.messaging import TokenCost
 from agentpool.messaging.messages import ChatMessage
 from agentpool.sessions.models import SessionData
 from agentpool.tools.manager import ToolError
@@ -385,6 +387,7 @@ def opencode_to_chat_message(
         usage = RequestUsage()
         run_usage = RunUsage()
         finish_reason = None
+        total_cost = None
         text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]
         content = "\n".join(text_content) if text_content else ""
         model_messages.append(ModelRequest(parts=[UserPromptPart(content=content)]))
@@ -393,6 +396,7 @@ def opencode_to_chat_message(
         provider_name = info.provider_id
         usage = info.tokens.to_request_usage()
         run_usage = info.tokens.to_run_usage()
+        total_cost = info.cost
         finish_reason = info.finish
         # Assistant message - collect response parts and tool interactions
         response_parts: list[Any] = []
@@ -448,6 +452,7 @@ def opencode_to_chat_message(
         message_id=message_id,
         session_id=session_id or session_id,
         timestamp=timestamp,
+        cost_info=TokenCost(total_cost=Decimal(total_cost)) if total_cost else None,
         messages=model_messages,
         usage=run_usage,
         model_name=model_name,

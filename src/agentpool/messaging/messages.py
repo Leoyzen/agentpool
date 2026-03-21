@@ -108,12 +108,15 @@ MESSAGE_TEMPLATES = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(kw_only=True)
 class TokenCost:
     """Combined token and cost tracking."""
 
     total_cost: Decimal
     """Total cost in USD"""
+
+    def incr(self, other: TokenCost) -> None:
+        self.total_cost += other.total_cost
 
     @classmethod
     async def from_usage(

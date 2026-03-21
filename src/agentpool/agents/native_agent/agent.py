@@ -725,6 +725,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     role="assistant",
                     name=self.name,
                     message_id=message_id,
+                    usage=agent_run.usage(),
                     session_id=self.session_id,
                     parent_id=user_msg.message_id,
                     response_time=response_time,
