@@ -30,7 +30,7 @@ from clawd_code_sdk.storage.helpers import (
     write_entry,
 )
 from clawd_code_sdk.storage.models import ClaudeAssistantEntry, ClaudeEntry, ClaudeUserEntry
-from pydantic_ai import RequestUsage
+from pydantic_ai import RunUsage
 
 from agentpool.log import get_logger
 from agentpool.utils.thread_helpers import parallel_map
@@ -95,7 +95,7 @@ class ParsedSession:
     tool_mapping: dict[str, str]
     messages: list[ChatMessage[str]]
     first_timestamp: datetime | None
-    usage: RequestUsage
+    usage: RunUsage
 
 
 def _read_session_metadata(
@@ -201,7 +201,7 @@ def _parse_session_full(session_id: str, session_path: Path) -> ParsedSession | 
     tool_mapping = _build_tool_id_mapping(entries)
     messages: list[ChatMessage[str]] = []
     first_timestamp: datetime | None = None
-    usage = RequestUsage()
+    usage = RunUsage()
 
     for entry in entries:
         msg = entry_to_chat_message(entry, session_id, tool_mapping)

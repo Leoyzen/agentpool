@@ -161,14 +161,13 @@ class FileProvider(StorageProvider):
 
             # Convert to ChatMessage
             cost_info = None
-            if msg["token_usage"]:
-                usage = msg["token_usage"]
-                cost = Decimal(msg["cost"] or 0.0)
-                run_usage = RunUsage(
-                    input_tokens=usage["prompt"],
-                    output_tokens=usage["completion"],
-                )
-                cost_info = TokenCost(token_usage=run_usage, total_cost=cost)
+            usage = msg["token_usage"]
+            cost = Decimal(msg["cost"] or 0.0)
+            run_usage = RunUsage(
+                input_tokens=usage["prompt"] if usage else 0,
+                output_tokens=usage["completion"] if usage else 0,
+            )
+            cost_info = TokenCost(total_cost=cost)
 
             chat_message = ChatMessage[str](
                 content=msg["content"],
@@ -177,6 +176,7 @@ class FileProvider(StorageProvider):
                 name=msg["name"],
                 model_name=msg["model"],
                 cost_info=cost_info,
+                usage=run_usage,
                 response_time=msg["response_time"],
                 timestamp=datetime.fromisoformat(msg["timestamp"]),
                 provider_name=msg["provider_name"],
@@ -196,6 +196,7 @@ class FileProvider(StorageProvider):
         from agentpool.storage.serialization import serialize_messages
 
         cost_info = message.cost_info
+        usage = message.usage
         self._data["messages"].append({
             "session_id": message.session_id or "",
             "message_id": message.message_id,
@@ -206,9 +207,9 @@ class FileProvider(StorageProvider):
             "model": message.model_name,
             "cost": Decimal(cost_info.total_cost) if cost_info else None,
             "token_usage": TokenUsage(
-                prompt=cost_info.token_usage.input_tokens if cost_info else 0,
-                completion=cost_info.token_usage.output_tokens if cost_info else 0,
-                total=cost_info.token_usage.total_tokens if cost_info else 0,
+                prompt=usage.input_tokens,
+                completion=usage.output_tokens,
+                total=usage.total_tokens,
             ),
             "response_time": message.response_time,
             "provider_name": message.provider_name,
@@ -577,15 +578,13 @@ class FileProvider(StorageProvider):
 def _to_chat_message(msg: MessageData) -> ChatMessage[str]:
     """Convert stored message data to ChatMessage."""
     cost_info = None
-    if msg.get("token_usage"):
-        usage = msg["token_usage"]
-        cost_info = TokenCost(
-            token_usage=RunUsage(
-                input_tokens=usage.get("prompt", 0) if usage else 0,
-                output_tokens=usage.get("completion", 0) if usage else 0,
-            ),
-            total_cost=Decimal(str(msg.get("cost") or 0)),
-        )
+    usage = msg["token_usage"]
+    if usage:
+        cost_info = TokenCost(total_cost=Decimal(str(msg.get("cost") or 0)))
+    run_usage = RunUsage(
+        input_tokens=usage.get("prompt", 0) if usage else 0,
+        output_tokens=usage.get("completion", 0) if usage else 0,
+    )
 
     # Build kwargs, only including timestamp/message_id if they have values
     kwargs: dict[str, Any] = {
@@ -594,6 +593,7 @@ def _to_chat_message(msg: MessageData) -> ChatMessage[str]:
         "name": msg.get("name"),
         "model_name": msg.get("model"),
         "cost_info": cost_info,
+        "usage": run_usage,
         "response_time": msg.get("response_time"),
         "parent_id": msg.get("parent_id"),
         "session_id": msg.get("session_id"),

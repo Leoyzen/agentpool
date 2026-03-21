@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import RequestUsage, RunUsage
+from pydantic_ai import RunUsage
 from sqlalchemy import Column, and_
 from sqlmodel import select
 
@@ -34,21 +34,14 @@ logger = get_logger(__name__)
 
 
 def aggregate_token_usage(
-    messages: Sequence[Message | ChatMessage[str]],
+    messages: Sequence[ChatMessage[str]],
 ) -> TokenUsage:
     """Sum up tokens from a sequence of messages."""
-    from agentpool_storage.sql_provider.models import Message
-
     total = prompt = completion = 0
     for msg in messages:
-        if isinstance(msg, Message):
-            total += msg.total_tokens or 0
-            prompt += msg.input_tokens or 0
-            completion += msg.output_tokens or 0
-        elif msg.cost_info:
-            total += msg.cost_info.token_usage.total_tokens
-            prompt += msg.cost_info.token_usage.input_tokens
-            completion += msg.cost_info.token_usage.output_tokens
+        total += msg.usage.total_tokens
+        prompt += msg.usage.input_tokens
+        completion += msg.usage.output_tokens
     return {"total": total, "prompt": prompt, "completion": completion}
 
 
@@ -56,12 +49,7 @@ def to_chat_message(db_message: Message) -> ChatMessage[str]:
     """Convert database message to ChatMessage."""
     cost_info = None
     if db_message.total_tokens is not None:
-        usage = RunUsage(
-            input_tokens=db_message.input_tokens or 0,
-            output_tokens=db_message.output_tokens or 0,
-        )
-        cost_info = TokenCost(token_usage=usage, total_cost=Decimal(db_message.cost or 0.0))
-
+        cost_info = TokenCost(total_cost=Decimal(db_message.cost or 0.0))
     return ChatMessage[str](
         message_id=db_message.id,
         session_id=db_message.session_id,
@@ -70,7 +58,7 @@ def to_chat_message(db_message: Message) -> ChatMessage[str]:
         name=db_message.name,
         model_name=db_message.model,
         cost_info=cost_info,
-        usage=RequestUsage(
+        usage=RunUsage(
             input_tokens=db_message.input_tokens or 0,
             output_tokens=db_message.output_tokens or 0,
         ),

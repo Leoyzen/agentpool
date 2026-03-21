@@ -177,16 +177,13 @@ class TokenThresholdCondition(ConnectionCondition):
 
     async def check(self, context: EventContext[Any]) -> bool:
         """Check if token threshold is reached."""
-        if not context.message.cost_info:
-            return False
-
         match self.count_type:
             case "total":
                 return context.stats.token_count >= self.max_tokens
             case "prompt":
-                return context.message.cost_info.token_usage.input_tokens >= self.max_tokens
+                return context.message.usage.input_tokens >= self.max_tokens
             case "completion":
-                return context.message.cost_info.token_usage.output_tokens >= self.max_tokens
+                return context.message.usage.output_tokens >= self.max_tokens
             case _ as unreachable:
                 assert_never(unreachable)
 

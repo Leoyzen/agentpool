@@ -10,7 +10,6 @@ import anyenv
 from pydantic_ai import (
     ModelRequest,
     ModelResponse,
-    RequestUsage,
     RunUsage,
     SystemPromptPart,
     ThinkingPart,
@@ -122,7 +121,7 @@ async def calculate_usage_from_parts(
     text_content: str,
     model_name: str | None = None,
     provider: str | None = None,
-) -> tuple[RequestUsage, TokenCost | None]:
+) -> tuple[RunUsage, TokenCost | None]:
     """Calculate token usage and cost from input/output parts.
 
     This is used by agents that don't receive usage info from the backend
@@ -136,7 +135,7 @@ async def calculate_usage_from_parts(
         provider: Provider name for cost calculation
 
     Returns:
-        Tuple of (RequestUsage, TokenCost or None)
+        Tuple of (RunUsage, TokenCost or None)
     """
     from agentpool.messaging.messages import TokenCost
 
@@ -155,7 +154,7 @@ async def calculate_usage_from_parts(
     output_tokens = count_tokens(output_text, model_name)
 
     # Build usage
-    usage = RequestUsage(input_tokens=input_tokens, output_tokens=output_tokens)
+    usage = RunUsage(input_tokens=input_tokens, output_tokens=output_tokens)
     run_usage = RunUsage(input_tokens=input_tokens, output_tokens=output_tokens)
 
     # Calculate cost

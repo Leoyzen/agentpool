@@ -13,7 +13,7 @@ import uuid
 
 import anyio
 from pydantic import TypeAdapter
-from pydantic_ai import RequestUsage
+from pydantic_ai import RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.claude_code_agent.converters import (
@@ -21,7 +21,6 @@ from agentpool.agents.claude_code_agent.converters import (
     convert_mcp_servers_to_sdk_format,
     to_finish_reason,
     to_prompt_input,
-    to_request_usage,
     to_run_usage,
     to_thinking_config,
 )
@@ -843,13 +842,12 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # result_message.usage is last-API-call-only; client.query_usage
         # accumulates all API calls in the turn.
         cost_info: TokenCost | None = None
-        request_usage: RequestUsage | None = None
+        run_usage: RunUsage = RunUsage()
         stop_reason: StopReason | None = "end_turn"
         if result_message:
             run_usage = to_run_usage(client.query_usage)
             total_cost = Decimal(str(client.query_cost))
-            cost_info = TokenCost(token_usage=run_usage, total_cost=total_cost)
-            request_usage = to_request_usage(client.query_usage)
+            cost_info = TokenCost(total_cost=total_cost)
             stop_reason = result_message.stop_reason
         # Build metadata with SDK session ID
         msg_metadata = {}
@@ -868,7 +866,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             model_name=adapter_result.resolved_model or self.model_name,
             messages=reconstructor.model_messages,
             cost_info=cost_info,
-            usage=request_usage or RequestUsage(),
+            usage=run_usage,
             response_time=result_message.duration_ms / 1000 if result_message else None,
             finish_reason=finish_reason,
             metadata=msg_metadata,

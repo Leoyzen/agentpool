@@ -138,9 +138,9 @@ class OpenAIAPIServer(BaseServer):
             usage = None
             if response.cost_info:
                 usage = CompletionUsage(
-                    input_tokens=response.cost_info.token_usage.input_tokens,
-                    output_tokens=response.cost_info.token_usage.output_tokens,
-                    total_tokens=response.cost_info.token_usage.total_tokens,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    total_tokens=response.usage.total_tokens,
                 )
             completion_response = ChatCompletionResponse(
                 id=response.message_id,

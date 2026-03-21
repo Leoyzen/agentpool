@@ -46,7 +46,7 @@ async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -
     output = calls + output  # type: ignore[assignment, operator]
 
     usage_info: ResponseUsage | None = None
-    if message.cost_info and (token_usage := message.cost_info.token_usage):
+    if token_usage := message.usage:
         # Map the keys correctly from agent's dict to ResponseUsage TypedDict
         input_tk = token_usage.input_tokens
         output_tk = token_usage.output_tokens

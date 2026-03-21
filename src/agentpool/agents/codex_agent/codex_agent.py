@@ -10,7 +10,7 @@ from uuid import uuid4
 import anyenv
 from codexed.models import CommandExecutionRequestApprovalResponse, McpServerElicitationResponse
 from pydantic import TypeAdapter
-from pydantic_ai import RequestUsage
+from pydantic_ai import RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
@@ -18,7 +18,6 @@ from agentpool.agents.codex_agent.codex_converters import (
     mcp_config_to_codex,
     to_finish_reason,
     to_model_info,
-    to_request_usage,
     to_run_usage,
     to_session_data,
     turns_to_chat_messages,
@@ -549,13 +548,12 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         reconstructor.flush()
         final_text = reconstructor.text_content
         cost_info: TokenCost | None = None
-        request_usage = RequestUsage()
+        run_usage = RunUsage()
 
         if usage := self._token_usage_data:
             run_usage = to_run_usage(usage)
             # TODO: Calculate actual cost - for now set to 0
-            cost_info = TokenCost(token_usage=run_usage, total_cost=Decimal(0))
-            request_usage = to_request_usage(usage)
+            cost_info = TokenCost(total_cost=Decimal(0))
         # Parse structured output if output_type is not str
         final_content: OutputDataT
         if self._output_type not in (str, None):
@@ -576,7 +574,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             session_id=final_session_id,
             parent_id=parent_id,
             cost_info=cost_info,
-            usage=request_usage,
+            usage=run_usage,
             model_name=self.model_name,
             messages=reconstructor.model_messages,
             finish_reason=to_finish_reason(self._turn_status) if self._turn_status else None,

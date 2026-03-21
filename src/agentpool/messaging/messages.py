@@ -19,7 +19,7 @@ from pydantic_ai import (
     FileUrl,
     ModelRequest,
     ModelResponse,
-    RequestUsage,
+    RunUsage,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -31,7 +31,7 @@ import tokonomics
 from agentpool.common_types import MessageRole, SimpleJsonType  # noqa: TC001
 from agentpool.log import get_logger
 from agentpool.utils.inspection import dataclasses_no_defaults_repr
-from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
+from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_request_usage, to_run_usage
 from agentpool.utils.time_utils import get_now
 
 
@@ -44,7 +44,6 @@ if TYPE_CHECKING:
         ModelMessage,
         ModelRequestPart,
         ModelResponsePart,
-        RunUsage,
     )
 
     from agentpool.tools.tool_call_info import ToolCallInfo
@@ -111,8 +110,6 @@ MESSAGE_TEMPLATES = {
 class TokenCost:
     """Combined token and cost tracking."""
 
-    token_usage: RunUsage
-    """Token counts for prompt and completion"""
     total_cost: Decimal
     """Total cost in USD"""
 
@@ -160,7 +157,7 @@ class TokenCost:
                 )
                 price = Decimal(cost.total_cost if cost else 0)
 
-        return cls(token_usage=usage, total_cost=price)
+        return cls(total_cost=price)
 
 
 @dataclass
@@ -215,7 +212,7 @@ class ChatMessage[TContent]:
     messages: list[ModelMessage] = field(default_factory=list)
     """List of messages which were generated during the the creation of this messsage."""
 
-    usage: RequestUsage = field(default_factory=RequestUsage)
+    usage: RunUsage = field(default_factory=RunUsage)
     """Usage information for the request.
 
     This has a default to make tests easier,
@@ -274,7 +271,7 @@ class ChatMessage[TContent]:
                 return [
                     ModelResponse(
                         parts=self.parts,  # type: ignore[arg-type]
-                        usage=self.usage,
+                        usage=to_request_usage(self.usage),
                         model_name=self.model_name,
                         timestamp=self.timestamp,
                         provider_name=self.provider_name,
@@ -349,7 +346,7 @@ class ChatMessage[TContent]:
                     role="assistant",
                     content=content,
                     messages=[message],
-                    usage=usage,
+                    usage=to_run_usage(usage),
                     message_id=run_id or str(uuid.uuid4()),
                     session_id=session_id,
                     model_name=model_name,
@@ -392,13 +389,10 @@ class ChatMessage[TContent]:
         """
         # Calculate costs - prefer provider-reported cost if available
         run_usage = result.usage()
-        usage = result.response.usage
         provider_cost = (result.response.provider_details or {}).get("cost")
         if provider_cost is not None:
             # Use actual cost from provider (e.g., OpenRouter returns this)
-            cost_info: TokenCost | None = TokenCost(
-                token_usage=run_usage, total_cost=Decimal(str(provider_cost))
-            )
+            cost_info: TokenCost | None = TokenCost(total_cost=Decimal(str(provider_cost)))
         else:
             # Fall back to calculated cost
             cost_info = await TokenCost.from_usage(
@@ -415,14 +409,13 @@ class ChatMessage[TContent]:
             finish_reason=result.response.finish_reason,
             messages=result.new_messages(),
             provider_response_id=result.response.provider_response_id,
-            usage=usage,
+            usage=run_usage,
             provider_name=result.response.provider_name,
             message_id=message_id or str(uuid.uuid4()),
             session_id=session_id,
             parent_id=parent_id,
             cost_info=cost_info,
             response_time=response_time,
-            provider_details={},
             metadata=metadata or {},
         )
 
@@ -580,11 +573,7 @@ class ChatMessage[TContent]:
 
     def get_token_count(self) -> int:
         """Get token count, either from token usage or cost data."""
-        from agentpool.utils.count_tokens import count_tokens
-
-        if info := self.cost_info:
-            return info.token_usage.total_tokens
-        return count_tokens(str(self.usage.total_tokens), self.model_name)
+        return self.usage.total_tokens
 
 
 @dataclass

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, assert_never
 
-from pydantic_ai import FunctionToolCallEvent, RequestUsage
+from pydantic_ai import FunctionToolCallEvent, RunUsage
 from pydantic_ai.messages import (
     PartDeltaEvent,
     PartStartEvent,
@@ -92,7 +92,7 @@ class OpenCodeStreamAdapter:
 
     # --- mutable tracking state ---
     _response_text: str = field(default="", init=False)
-    _usage: RequestUsage = field(default_factory=RequestUsage, init=False)
+    _usage: RunUsage = field(default_factory=RunUsage, init=False)
     _cost_info: TokenCost | None = field(default=None, init=False)
 
     _tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
@@ -121,7 +121,7 @@ class OpenCodeStreamAdapter:
         return self._response_text
 
     @property
-    def usage(self) -> RequestUsage:
+    def usage(self) -> RunUsage:
         return self._usage
 
     @property
@@ -159,6 +159,7 @@ class OpenCodeStreamAdapter:
         """
         response_time = now_ms()
         # Final text part
+        time_ = TimeStartEndOptional(start=self._stream_start_ms, end=response_time)
         if self._response_text and self._text_part is None:
             # Text was never streamed incrementally — create a text part now
             text_part = TextPart(
@@ -166,12 +167,9 @@ class OpenCodeStreamAdapter:
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
                 text=self._response_text,
-                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
+                time=time_,
             )
-            text_part = self.assistant_msg.add_text_part(
-                text=self._response_text,
-                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
-            )
+            text_part = self.assistant_msg.add_text_part(text=self._response_text, time=time_)
             yield PartUpdatedEvent.create(text_part)
         elif self._text_part is not None:
             # Update streamed text part with final timing
@@ -180,7 +178,7 @@ class OpenCodeStreamAdapter:
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
                 text=self._response_text,
-                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
+                time=time_,
             )
             self.assistant_msg.update_part(final_text_part)
 

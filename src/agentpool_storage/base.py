@@ -14,8 +14,10 @@ if TYPE_CHECKING:
     from datetime import datetime
     from types import TracebackType
 
+    from pydantic_ai import RunUsage
+
     from agentpool.common_types import JsonValue
-    from agentpool.messaging import ChatMessage, TokenCost
+    from agentpool.messaging import ChatMessage
     from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_config.storage import BaseStorageProviderConfig
@@ -276,7 +278,7 @@ class StorageProvider:
 
     def aggregate_stats(
         self,
-        rows: Sequence[tuple[str | None, str | None, datetime, TokenCost | None]],
+        rows: Sequence[tuple[str | None, str | None, datetime, RunUsage]],
         group_by: GroupBy,
     ) -> dict[str, dict[str, Any]]:
         """Aggregate statistics data by specified grouping.
@@ -305,7 +307,7 @@ class StorageProvider:
             entry = stats[key]
             entry["messages"] += 1
             if token_usage:
-                entry["total_tokens"] += token_usage.token_usage.total_tokens
+                entry["total_tokens"] += token_usage.total_tokens
             if model:
                 entry["models"].add(model)
 

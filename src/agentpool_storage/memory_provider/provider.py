@@ -315,7 +315,7 @@ class MemoryStorageProvider(StorageProvider):
                 continue
             if filters.agent_name and msg.name != filters.agent_name:
                 continue
-            rows.append((msg.model_name, msg.name, msg.timestamp, msg.cost_info))
+            rows.append((msg.model_name, msg.name, msg.timestamp, msg.usage))
 
         # Use base class aggregation
         return self.aggregate_stats(rows, filters.group_by)
@@ -491,8 +491,7 @@ def _aggregate_token_usage(messages: Sequence[ChatMessage[Any]]) -> TokenUsage:
     """Sum up tokens from a sequence of messages."""
     total = prompt = completion = 0
     for msg in messages:
-        if msg.cost_info:
-            total += msg.cost_info.token_usage.total_tokens
-            prompt += msg.cost_info.token_usage.input_tokens
-            completion += msg.cost_info.token_usage.output_tokens
+        total += msg.usage.total_tokens
+        prompt += msg.usage.input_tokens
+        completion += msg.usage.output_tokens
     return {"total": total, "prompt": prompt, "completion": completion}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Self
 
 from pydantic_ai import RunUsage
@@ -10,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel, desc, select
 
 from agentpool.log import get_logger
-from agentpool.messaging import TokenCost
 from agentpool.utils.time_utils import get_now, parse_time_period
 from agentpool_config.storage import SQLStorageConfig
 from agentpool_storage.base import StorageProvider
@@ -117,7 +115,7 @@ class SQLModelProvider(StorageProvider):
 
         provider, model_name = parse_model_info(message.model_name)
         cost_info = message.cost_info
-
+        usage = message.usage
         async with AsyncSession(self.engine) as session:
             msg = Message(
                 session_id=message.session_id or "",
@@ -130,9 +128,9 @@ class SQLModelProvider(StorageProvider):
                 model_provider=provider,
                 model_name=model_name,
                 response_time=message.response_time,
-                total_tokens=cost_info.token_usage.total_tokens if cost_info else None,
-                input_tokens=cost_info.token_usage.input_tokens if cost_info else None,
-                output_tokens=cost_info.token_usage.output_tokens if cost_info else None,
+                total_tokens=usage.total_tokens,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
                 cost=float(cost_info.total_cost) if cost_info else None,
                 provider_name=message.provider_name,
                 provider_response_id=message.provider_response_id,
@@ -471,15 +469,7 @@ class SQLModelProvider(StorageProvider):
                     model,
                     agent,
                     timestamp,
-                    TokenCost(
-                        token_usage=RunUsage(
-                            input_tokens=input_tokens or 0,
-                            output_tokens=output_tokens or 0,
-                        ),
-                        total_cost=Decimal(0),  # We don't store this in DB
-                    )
-                    if total or input_tokens or output_tokens
-                    else None,
+                    RunUsage(input_tokens=input_tokens, output_tokens=output_tokens),
                 )
                 for model, agent, timestamp, total, input_tokens, output_tokens in result.all()
             ]

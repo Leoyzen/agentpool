@@ -161,6 +161,8 @@ def entry_to_chat_message(
     cost_info = None
     model = None
     finish_reason = None
+    input_tokens = 0
+    output_tokens = 0
     if isinstance(entry, ClaudeAssistantEntry) and isinstance(message, ClaudeApiMessage):
         usage = message.usage
         input_tokens = (
@@ -168,10 +170,7 @@ def entry_to_chat_message(
         )
         output_tokens = usage.output_tokens
         if input_tokens or output_tokens:
-            cost_info = TokenCost(
-                token_usage=RunUsage(input_tokens=input_tokens, output_tokens=output_tokens),
-                total_cost=Decimal(0),  # Claude doesn't store cost directly
-            )
+            cost_info = TokenCost(total_cost=Decimal(0))  # Claude doesn't store cost directly
         model = normalize_model_name(message.model)
         finish_reason = message.stop_reason
 
@@ -183,6 +182,7 @@ def entry_to_chat_message(
         name="claude" if isinstance(entry, ClaudeAssistantEntry) else None,
         model_name=model,
         cost_info=cost_info,
+        usage=RunUsage(input_tokens=input_tokens, output_tokens=output_tokens),
         timestamp=timestamp,
         parent_id=entry.parent_uuid,
         messages=[pydantic_message] if pydantic_message else [],

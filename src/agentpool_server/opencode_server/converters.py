@@ -10,6 +10,7 @@ from pydantic_ai import (
     ModelResponse,
     RequestUsage,
     RetryPromptPart,
+    RunUsage,
     TextPart as PydanticTextPart,
     ToolCallPart as PydanticToolCallPart,
     ToolReturnPart as PydanticToolReturnPart,
@@ -382,6 +383,7 @@ def opencode_to_chat_message(
         model_name = info.model.model_id
         provider_name = info.model.provider_id
         usage = RequestUsage()
+        run_usage = RunUsage()
         finish_reason = None
         text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]
         content = "\n".join(text_content) if text_content else ""
@@ -390,6 +392,7 @@ def opencode_to_chat_message(
         model_name = info.model_id
         provider_name = info.provider_id
         usage = info.tokens.to_request_usage()
+        run_usage = info.tokens.to_run_usage()
         finish_reason = info.finish
         # Assistant message - collect response parts and tool interactions
         response_parts: list[Any] = []
@@ -446,7 +449,7 @@ def opencode_to_chat_message(
         session_id=session_id or session_id,
         timestamp=timestamp,
         messages=model_messages,
-        usage=usage,
+        usage=run_usage,
         model_name=model_name,
         provider_name=provider_name,
         finish_reason=finish_reason,  # type: ignore[arg-type]

@@ -175,10 +175,8 @@ def to_chat_message(
         cache = tokens.cache
         input_tokens = tokens.input + cache.read
         output_tokens = tokens.output
-        if input_tokens or output_tokens:
-            usage = RunUsage(input_tokens=input_tokens, output_tokens=output_tokens)
-            cost = Decimal(str(msg.cost))
-            cost_info = TokenCost(token_usage=usage, total_cost=cost)
+        cost = Decimal(str(msg.cost))
+        cost_info = TokenCost(total_cost=cost)
         if msg.finish:
             provider_details["finish_reason"] = msg.finish
         parent_id = msg.parent_id
@@ -186,6 +184,8 @@ def to_chat_message(
         agent_name = msg.agent if msg.agent != "default" else None
     elif isinstance(msg, UserMessage) and msg.model is not None:
         model_name = msg.model.model_id
+        input_tokens = 0
+        output_tokens = 0
 
     return ChatMessage[str](
         content=content,
@@ -195,6 +195,7 @@ def to_chat_message(
         name=agent_name,
         model_name=model_name,
         cost_info=cost_info,
+        usage=RunUsage(input_tokens=input_tokens, output_tokens=output_tokens),
         timestamp=timestamp,
         parent_id=parent_id,
         messages=pydantic_messages,
