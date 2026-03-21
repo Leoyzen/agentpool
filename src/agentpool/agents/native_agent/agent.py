@@ -718,7 +718,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Build response message
             response_time = time.perf_counter() - start_time
             if self._cancelled:
-                msgs = agent_run.all_messages()
+                msgs = agent_run.new_messages()
                 partial_content = extract_text_from_messages(msgs, include_interruption_note=True)
                 response_msg = ChatMessage(
                     content=partial_content,
