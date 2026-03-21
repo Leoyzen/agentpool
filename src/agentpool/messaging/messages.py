@@ -11,12 +11,13 @@ import uuid
 from genai_prices import calc_price
 from pydantic import BaseModel
 from pydantic_ai import (
+    AudioUrl,
     BaseToolReturnPart,
     BinaryContent,
     BuiltinToolCallPart,
     BuiltinToolReturnPart,
     FilePart,
-    FileUrl,
+    ImageUrl,
     ModelRequest,
     ModelResponse,
     RunUsage,
@@ -25,6 +26,7 @@ from pydantic_ai import (
     ToolReturnPart,
     UserContent,
     UserPromptPart,
+    VideoUrl,
 )
 import tokonomics
 
@@ -448,15 +450,18 @@ class ChatMessage[TContent]:
                 case TextPart(content=content) | FilePart(content=content):
                     # Text & File parts (images, etc.) become user content directly
                     user_content.append(content)
-                case BaseToolReturnPart(content=(str() | FileUrl() | BinaryContent()) as content):
-                    user_content.append(content)  # type: ignore[arg-type]
-                case BaseToolReturnPart(content=list() as content_list):
-                    # Handle sequence of content items
-                    for item in content_list:
-                        if isinstance(item, str | FileUrl | BinaryContent):
-                            user_content.append(item)  # type: ignore[arg-type]
-                        else:
-                            user_content.append(str(item))
+                case BaseToolReturnPart(content=content):
+                    match content:
+                        case str() | ImageUrl() | AudioUrl() | VideoUrl() | BinaryContent():
+                            user_content.append(content)
+                        case list() as content_list:
+                            for item in content_list:
+                                if isinstance(
+                                    item, str | VideoUrl | AudioUrl | ImageUrl | BinaryContent
+                                ):
+                                    user_content.append(item)
+                                else:
+                                    user_content.append(str(item))
                 case BaseToolReturnPart():
                     # Other tool return parts become user content strings
                     user_content.append(part.model_response_str())

@@ -38,7 +38,6 @@ from pydantic_ai import (
     ToolCallPart,
     UploadedFile,
     UserContent,
-    UserPromptPart,
 )
 
 from agentpool.messaging import ChatMessage
@@ -90,19 +89,19 @@ def to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
             return "stop"
 
 
-def to_run_usage(usage_dict: TokenUsageBreakdown) -> RunUsage:
+def to_run_usage(usage: TokenUsageBreakdown) -> RunUsage:
     return RunUsage(
-        input_tokens=usage_dict.input_tokens,
-        output_tokens=usage_dict.output_tokens,
-        cache_read_tokens=usage_dict.cached_input_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cached_input_tokens,
     )
 
 
-def to_request_usage(usage_dict: TokenUsageBreakdown) -> RequestUsage:
+def to_request_usage(usage: TokenUsageBreakdown) -> RequestUsage:
     return RequestUsage(
-        input_tokens=usage_dict.input_tokens,
-        output_tokens=usage_dict.output_tokens,
-        cache_read_tokens=usage_dict.cached_input_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cached_input_tokens,
     )
 
 
@@ -145,10 +144,8 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
     server_name = config.name or f"server_{id(config)}"
     match config:
         case StdioMCPServerConfig(command=command, args=args, env=env, enabled=enabled):
-            return (
-                server_name,
-                StdioMcpServer(command=command, args=args, env=env, enabled=enabled),
-            )
+            stdio_server = StdioMcpServer(command=command, args=args, env=env, enabled=enabled)
+            return (server_name, stdio_server)
 
         case SSEMCPServerConfig(url=url, enabled=enabled):
             # Codex uses HTTP transport for SSE
@@ -159,8 +156,8 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
             # StreamableHTTP has headers field
             return (server_name, HttpMcpServer(url=str(url), http_headers=headers, enabled=enabled))
 
-        case _:
-            raise TypeError(f"Unsupported MCP server config type: {type(config)}")
+        case _ as unreachable:
+            raise assert_never(unreachable)
 
 
 def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelInfo:
@@ -626,7 +623,7 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
         content=user_content,
         role="user",
         message_id=f"{turn.id}-user",
-        messages=[ModelRequest(parts=[UserPromptPart(content=user_content)])],
+        messages=[ModelRequest.user_text_prompt(user_content)],
     )
     result.append(user_msg)
 
