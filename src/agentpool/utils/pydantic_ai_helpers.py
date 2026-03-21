@@ -5,7 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
-from pydantic_ai import AudioUrl, BinaryContent, DocumentUrl, ImageUrl, VideoUrl
+from pydantic_ai import (
+    AudioUrl,
+    BinaryContent,
+    DocumentUrl,
+    ImageUrl,
+    RequestUsage,
+    RunUsage,
+    VideoUrl,
+)
 from pydantic_ai.messages import BaseToolCallPart
 
 from agentpool.common_types import PathReference
@@ -14,7 +22,12 @@ from agentpool.common_types import PathReference
 if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
     from mcp.types import ToolAnnotations
-    from pydantic_ai import FileUrl, MultiModalContent, ToolCallPartDelta, UserContent
+    from pydantic_ai import (
+        FileUrl,
+        MultiModalContent,
+        ToolCallPartDelta,
+        UserContent,
+    )
 
 
 def get_builtin_tool_annotations(kind: str) -> ToolAnnotations:
@@ -258,3 +271,27 @@ def uri_to_path_reference(
         return None
     name = format_uri_as_link(uri)
     return PathReference(path=path, fs=fs, mime_type=mime_type, display_name=name)
+
+
+def to_request_usage(usage: RunUsage) -> RequestUsage:
+    return RequestUsage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        input_audio_tokens=usage.input_audio_tokens,
+        cache_audio_read_tokens=usage.cache_audio_read_tokens,
+        output_audio_tokens=usage.output_audio_tokens,
+    )
+
+
+def to_run_usage(usage: RequestUsage) -> RunUsage:
+    return RunUsage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        input_audio_tokens=usage.input_audio_tokens,
+        cache_audio_read_tokens=usage.cache_audio_read_tokens,
+        output_audio_tokens=usage.output_audio_tokens,
+    )
