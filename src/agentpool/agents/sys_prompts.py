@@ -47,7 +47,7 @@ class SystemPrompts:
         """Initialize prompt manager."""
         match prompts:
             case list():
-                self.prompts = prompts
+                self.prompts: list[AnyPromptType] = prompts  # ty:ignore[invalid-assignment]
             case None:
                 self.prompts = []
             case _:
@@ -88,7 +88,7 @@ class SystemPrompts:
 
         try:
             content = await self.prompt_manager.get(reference)
-            self.prompts.append(content)  # ty: ignore[invalid-argument-type]
+            self.prompts.append(content)
         except Exception as e:
             raise PromptResolutionError(f"failed to add prompt {reference!r}") from e
 
@@ -122,7 +122,7 @@ class SystemPrompts:
                 version=version,
                 variables=variables,
             )
-            self.prompts.append(content)  # ty: ignore[invalid-argument-type]
+            self.prompts.append(content)
         except Exception as e:
             ref = f"{provider + ':' if provider else ''}{identifier}"
             raise PromptResolutionError(f"failed to add prompt {ref!r}") from e
