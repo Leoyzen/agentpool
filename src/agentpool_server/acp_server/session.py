@@ -201,7 +201,6 @@ class ACPSession:
         self.log = logger.bind(session_id=self.session_id)
         self._task_lock = asyncio.Lock()
         self._cancelled = False
-        self._current_converter: ACPEventConverter | None = None
         self.last_usage: Usage | None = None
         self.fs = ACPFileSystem(self.client, session_id=self.session_id)
         self.command_store = CommandStore(commands=get_all_commands())
@@ -411,7 +410,6 @@ class ACPSession:
             event_count = 0
             # Create a new event converter for this prompt
             converter = ACPEventConverter(subagent_display_mode=self.subagent_display_mode)
-            self._current_converter = converter  # Track for cancellation
 
             try:  # Use the session's persistent input provider
                 # Staged content is automatically injected by run_stream
@@ -434,7 +432,6 @@ class ACPSession:
                         # This is needed because even though send() awaits the write, the client
                         # may process messages asynchronously or out of order.
                         await anyio.sleep(0.05)
-                        self._current_converter = None
                         return "cancelled"
 
                     event_count += 1
@@ -455,13 +452,11 @@ class ACPSession:
                 # CRITICAL: Allow time for client to process tool completion notifications
                 # before sending PromptResponse. See comment in cancellation branch above.
                 await anyio.sleep(0.05)
-                self._current_converter = None
                 return "cancelled"
             except UsageLimitExceeded as e:
                 self.log.info("Usage limit exceeded", error=str(e))
                 return infer_stop_reason(str(e))
             except Exception as e:
-                self._current_converter = None  # Clear converter reference
                 self.log.exception("Error during streaming")
                 # Send error notification asynchronously to avoid blocking response
                 coro = self._send_error_notification(f"❌ Agent error: {e}")
@@ -470,7 +465,6 @@ class ACPSession:
             else:
                 # Title generation is now handled automatically by log_session
                 self.last_usage = converter.last_usage
-                self._current_converter = None  # Clear converter reference
                 return "end_turn"
 
     async def _send_error_notification(self, message: str) -> None:
