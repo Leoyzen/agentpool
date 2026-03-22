@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-import httpx
+import anyenv
 
 from acp.registry.model import DistributionUnion, Registry, RegistryAgent, UvxDistribution
 
@@ -39,11 +39,12 @@ def _merge_builtin_agents(agents: list[RegistryAgent]) -> list[RegistryAgent]:
 
 async def fetch_registry() -> Registry:
     """Fetch the ACP registry data."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(REGISTRY_URL, headers={"User-Agent": "Mozilla/5.0"})
-        response.raise_for_status()
-        data = response.json()
-    return Registry.model_validate(data)
+    return await anyenv.get_json(
+        REGISTRY_URL,
+        headers={"User-Agent": "Mozilla/5.0"},
+        return_type=Registry,
+        cache=True,
+    )
 
 
 async def list_agents() -> list[RegistryAgent]:
