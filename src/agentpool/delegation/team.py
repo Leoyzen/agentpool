@@ -142,7 +142,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         for msg in result:
             if msg.message:
                 run_usage.incr(msg.message.usage)
-                cost.incr(msg.message.cost_info)
+                if msg.message.cost_info:
+                    cost.incr(msg.message.cost_info)
         message = ChatMessage(
             content=[r.message.content for r in result if r.message],
             messages=[m for r in result if r.message for m in r.message.messages],

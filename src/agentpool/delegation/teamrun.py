@@ -157,7 +157,8 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         cost = TokenCost(total_cost=Decimal(0))
         for chat_message in all_messages:
             run_usage.incr(chat_message.usage)
-            cost.incr(chat_message.cost_info)
+            if chat_message.cost_info:
+                cost.incr(chat_message.cost_info)
         message = ChatMessage(
             content=content,
             messages=[m for chat_message in all_messages for m in chat_message.messages],
