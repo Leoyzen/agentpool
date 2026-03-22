@@ -296,7 +296,7 @@ class MCPRegistryClient:
             response = await self.client.get(f"{self.base_url}/v0/servers")
             response.raise_for_status()
             data = response.json()
-            response_data = RegistryListResponse(**data)
+            response_data = RegistryListResponse.model_validate(data)
             # Find server by name
             target_wrapper = None
             for wrapper in response_data.servers:
@@ -322,7 +322,7 @@ class MCPRegistryClient:
         except (httpx.HTTPError, ValueError, KeyError) as e:
             raise MCPRegistryError(f"Failed to get server details: {e}") from e
         else:
-            server = RegistryServer(**server_data)
+            server = RegistryServer.model_validate(server_data)
             ts = time.time()
             self._cache_servers[cache_key] = GetServerCacheEntry(server=server, timestamp=ts)
             log.info("Successfully fetched server details for %s", server_id)

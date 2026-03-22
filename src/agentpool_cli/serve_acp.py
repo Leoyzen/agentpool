@@ -143,10 +143,7 @@ def acp_command(  # noqa: PLR0915
     # Resolve configuration from all layers
     # fallback_config is only used if no agents are defined in any layer
     try:
-        resolved = resolve_config(
-            explicit_path=config,
-            fallback_config=ACP_ASSISTANT,
-        )
+        resolved = resolve_config(explicit_path=config, fallback_config=ACP_ASSISTANT)
     except ValueError as e:
         raise t.BadParameter(str(e)) from e
 
