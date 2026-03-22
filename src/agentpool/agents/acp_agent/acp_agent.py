@@ -318,18 +318,18 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def _resolve_command(self) -> list[str]:
         """Resolve the command to run, either from explicit command or registry."""
+        from acp.registry import fetch_agent
+
         if self._command:
             return [self._command, *self._args]
         # Registry-based resolution
         assert self._registry_id is not None
-        from acp.registry import fetch_agent, prepare_agent
-
         agent = await fetch_agent(self._registry_id)
         if agent is None:
             raise RuntimeError(f"Agent {self._registry_id!r} not found in ACP registry")
         # Merge registry env vars (agent-specific take precedence)
         self._env_vars = {**agent.dist.env, **self._env_vars}
-        return await prepare_agent(agent, self._args)
+        return await agent.prepare(self._args)
 
     async def _start_process(self) -> Process:
         """Start the ACP server subprocess."""

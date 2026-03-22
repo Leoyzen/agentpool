@@ -13,7 +13,6 @@ from acp.registry.model import (
     RegistryAgent,
     UvxDistribution,
 )
-from acp.registry.prepare import prepare_agent
 
 __all__ = [
     "BaseDistribution",
@@ -27,5 +26,4 @@ __all__ = [
     "fetch_agent",
     "fetch_registry",
     "list_agents",
-    "prepare_agent",
 ]

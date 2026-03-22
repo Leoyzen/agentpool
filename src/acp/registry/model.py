@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from acp.registry.prepare import DEFAULT_BIN_DIR, prepare_binary, prepare_npx, prepare_uvx
+
 
 def get_platform_key() -> str:
     """Return a ``{system}-{arch}`` key for the current platform."""
@@ -118,6 +120,24 @@ class RegistryAgent(BaseModel):
                 if binary_distro is not None:
                     return binary_distro
                 raise ValueError(f"No binary distribution found for platform {platform_key!r}")
+            case _:
+                raise ValueError("Unsupported distribution type.")
+
+    async def prepare(
+        self,
+        extra_args: list[str] | None = None,
+        *,
+        bin_dir: Path = DEFAULT_BIN_DIR,
+    ) -> list[str]:
+        """Resolve this agent to a runnable command list."""
+        args = extra_args or []
+        match self.dist:
+            case NpxDistribution() as dist:
+                return prepare_npx(dist, args)
+            case UvxDistribution() as dist:
+                return prepare_uvx(dist, args)
+            case BinaryDistribution() as dist:
+                return await prepare_binary(dist, args, bin_dir)
             case _:
                 raise ValueError("Unsupported distribution type.")
 

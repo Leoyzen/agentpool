@@ -16,11 +16,10 @@ from typing import TYPE_CHECKING
 import httpx
 
 from acp.registry.archive import extract_binary
-from acp.registry.model import BinaryDistribution, NpxDistribution, UvxDistribution
 
 
 if TYPE_CHECKING:
-    from acp.registry.model import RegistryAgent
+    from acp.registry.model import BinaryDistribution, NpxDistribution, UvxDistribution
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,7 @@ def _find_program(*candidates: str) -> str | None:
     return None
 
 
-def _prepare_npx(dist: NpxDistribution, extra_args: list[str]) -> list[str]:
+def prepare_npx(dist: NpxDistribution, extra_args: list[str]) -> list[str]:
     """Build command list for an npx/bunx distribution."""
     runner = _find_program("bunx", "npx")
     if runner is None:
@@ -47,14 +46,14 @@ def _prepare_npx(dist: NpxDistribution, extra_args: list[str]) -> list[str]:
     return [*base, dist.package, *dist.args, *extra_args]
 
 
-def _prepare_uvx(dist: UvxDistribution, extra_args: list[str]) -> list[str]:
+def prepare_uvx(dist: UvxDistribution, extra_args: list[str]) -> list[str]:
     """Build command list for a uvx distribution."""
     if not shutil.which("uvx"):
         raise RuntimeError("uvx not found on PATH. Install uv.")
     return ["uvx", "--python", "3.13", dist.package, *dist.args, *extra_args]
 
 
-async def _prepare_binary(
+async def prepare_binary(
     dist: BinaryDistribution,
     extra_args: list[str],
     bin_dir: Path,
@@ -89,27 +88,3 @@ async def _prepare_binary(
     bin_path.chmod(0o755)
     logger.info("Binary installed to %s", bin_path)
     return cmd
-
-
-async def prepare_agent(
-    agent: RegistryAgent,
-    extra_args: list[str] | None = None,
-    *,
-    bin_dir: Path = DEFAULT_BIN_DIR,
-) -> list[str]:
-    """Resolve a registry agent to a runnable command list.
-
-    For uvx/npx this just builds the command. For binary distributions
-    this downloads and extracts the binary if not already present.
-
-    Returns:
-        A command list suitable for ``subprocess.Popen`` / ``anyio.open_process``.
-    """
-    args = extra_args or []
-    match agent.dist:
-        case NpxDistribution() as dist:
-            return _prepare_npx(dist, args)
-        case UvxDistribution() as dist:
-            return _prepare_uvx(dist, args)
-        case BinaryDistribution() as dist:
-            return await _prepare_binary(dist, args, bin_dir)
