@@ -40,7 +40,6 @@ async def prepare_prompts(
 
 async def finalize_message(
     message: ChatMessage[Any],
-    previous_message: ChatMessage[Any] | None,
     node: MessageNode[Any, Any],
     connections: ConnectionManager,
     wait_for_connections: bool | None = None,
@@ -49,7 +48,6 @@ async def finalize_message(
 
     Args:
         message: The response message to finalize
-        previous_message: The original user message (if any)
         node: The message node that produced the message
         connections: Connection manager for routing
         wait_for_connections: Whether to wait for connected nodes

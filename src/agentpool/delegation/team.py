@@ -165,15 +165,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if store_history:
             # Teams could implement their own history management here if needed
             pass
-
         # Finalize and route message
-        return await finalize_message(
-            message,
-            user_msg,
-            self,
-            self.connections,
-            wait_for_connections,
-        )
+        return await finalize_message(message, self, self.connections, wait_for_connections)
 
     async def run_stream(
         self,

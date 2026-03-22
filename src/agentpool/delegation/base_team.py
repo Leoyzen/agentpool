@@ -22,10 +22,7 @@ if TYPE_CHECKING:
 
     from agentpool import Agent, AgentPool, Team
     from agentpool.agents.base_agent import BaseAgent
-    from agentpool.common_types import (
-        ProcessorCallback,
-        PromptCompatible,
-    )
+    from agentpool.common_types import ProcessorCallback, PromptCompatible
     from agentpool.delegation.teamrun import ExtendedTeamTalk, TeamRun
     from agentpool.messaging import ChatMessage, TeamResponse
     from agentpool.talk.stats import AggregatedTalkStats
@@ -320,8 +317,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         shared_pool: AgentPool | None = None
 
         for agent in self.iter_agents():
-            pool = agent.agent_pool
-            if pool:
+            if pool := agent.agent_pool:
                 pool_id = id(pool)
                 if pool_id not in pool_ids:
                     pool_ids.add(pool_id)
@@ -338,12 +334,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
 
         if len(pool_ids) > 1:
             raise ValueError(f"Team members in {self.name} belong to different pools")
-        return TeamContext(
-            node=self,
-            pool=shared_pool,
-            input_provider=input_provider,
-            data=data,
-        )
+        return TeamContext(node=self, pool=shared_pool, input_provider=input_provider, data=data)
 
     @abstractmethod
     async def execute(

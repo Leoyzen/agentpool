@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from itertools import pairwise
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, overload
 from uuid import uuid4
 
 import anyio
@@ -34,8 +34,6 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-
-ResultMode = Literal["last", "concat"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -179,13 +177,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
         if store_history:
             pass  # Teams could implement their own history management here if needed
-        return await finalize_message(  # Finalize and route message
-            message,
-            user_msg,
-            self,
-            self.connections,
-            wait_for_connections,
-        )
+        return await finalize_message(message, self, self.connections, wait_for_connections)
 
     async def execute(
         self,
