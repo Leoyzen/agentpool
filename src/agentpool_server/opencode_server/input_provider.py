@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import time
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 from mcp import types
 
@@ -101,6 +101,8 @@ class OpenCodeInputProvider(InputProvider):
                     case "reject":
                         logger.debug("Auto-rejecting tool", tool_name=tool_name, reason="reject")
                         return "skip"
+                    case _ as unreachable:
+                        assert_never(unreachable)
 
             # Create a pending permission request
             permission_id = self._generate_permission_id()
@@ -165,9 +167,8 @@ class OpenCodeInputProvider(InputProvider):
                 return "allow"
             case "reject":
                 return "skip"
-            case _:
-                logger.warning("Unknown permission response", response=response)
-                return "abort_run"
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def resolve_permission(self, permission_id: str, response: PermissionReply) -> bool:
         """Resolve a pending permission request.
@@ -191,11 +192,7 @@ class OpenCodeInputProvider(InputProvider):
             return False
 
         pending.future.set_result(response)
-        logger.info(
-            "Permission resolved",
-            permission_id=permission_id,
-            response=response,
-        )
+        logger.info("Permission resolved", permission_id=permission_id, response=response)
         return True
 
     def get_pending_permissions(self) -> list[PermissionAskedProperties]:
@@ -250,6 +247,8 @@ class OpenCodeInputProvider(InputProvider):
                 # For other form elicitation, we don't have UI support yet
                 logger.info("Form elicitation request (not supported)", message=msg, schema=schema)
                 return types.ElicitResult(action="decline")
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def _handle_question_elicitation(
         self,
