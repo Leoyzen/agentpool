@@ -43,6 +43,7 @@ async def merge_queue_into_iterator[T, V](  # noqa: PLR0915
     # Create a queue for all merged events
     event_queue: asyncio.Queue[V | T | None] = asyncio.Queue()
     primary_done = asyncio.Event()
+    shutdown_event = asyncio.Event()
     primary_exception: BaseException | None = None
     # Track if we've signaled the end of streams
     end_signaled = False
@@ -52,6 +53,9 @@ async def merge_queue_into_iterator[T, V](  # noqa: PLR0915
         nonlocal primary_exception, end_signaled
         try:
             async for event in primary_stream:
+                # Check for shutdown signal to exit gracefully
+                if shutdown_event.is_set():
+                    break
                 await event_queue.put(event)
         except asyncio.CancelledError:
             # Signal completion and unblock merged_events before re-raising
@@ -70,6 +74,9 @@ async def merge_queue_into_iterator[T, V](  # noqa: PLR0915
         nonlocal end_signaled
         try:
             while not primary_done.is_set():
+                # Check for shutdown to exit more quickly
+                if shutdown_event.is_set():
+                    break
                 try:
                     secondary_event = await asyncio.wait_for(secondary_queue.get(), timeout=0.01)
                     await event_queue.put(secondary_event)
@@ -96,6 +103,9 @@ async def merge_queue_into_iterator[T, V](  # noqa: PLR0915
     primary_task_obj = asyncio.create_task(primary_task())
     secondary_task_obj = asyncio.create_task(secondary_task())
 
+    # Track the consumer task for detecting GeneratorExit context
+    consumer_task = asyncio.current_task()
+
     try:
         # Create async iterator that drains the merged queue
         async def merged_events() -> AsyncIterator[V | T]:
@@ -110,11 +120,46 @@ async def merge_queue_into_iterator[T, V](  # noqa: PLR0915
 
         yield merged_events()
 
+    except GeneratorExit:
+        # Consumer broke from iteration - signal graceful shutdown
+        # Do NOT cancel tasks here - that would cause CancelScope to exit
+        # in the wrong task context (consumer task instead of background task)
+        shutdown_event.set()
+        # Signal the queue to unblock the consumer
+        if not end_signaled:
+            await event_queue.put(None)
+        # Re-raise to let the generator exit properly
+        raise
+
     finally:
-        # Clean up tasks - cancel BOTH tasks
-        primary_task_obj.cancel()
-        secondary_task_obj.cancel()
-        await asyncio.gather(primary_task_obj, secondary_task_obj, return_exceptions=True)
+        # Clean up tasks
+        # Check if we're exiting due to GeneratorExit (in consumer task context)
+        # or normal completion (exceptions are being processed normally)
+        current_task = asyncio.current_task()
+        is_generator_exit_cleanup = current_task is consumer_task
+
+        if is_generator_exit_cleanup:
+            # During GeneratorExit, we already signaled shutdown above.
+            # Don't cancel the tasks - let them exit naturally in their own context.
+            # Use shield to avoid blocking on CancelScope cleanup in the consumer task.
+            # Use a timeout to avoid hanging indefinitely.
+            try:
+                # Shield prevents cancellation during the gather
+                await asyncio.wait_for(
+                    asyncio.shield(
+                        asyncio.gather(primary_task_obj, secondary_task_obj, return_exceptions=True)
+                    ),
+                    timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                # Tasks didn't complete in time - cancel them as last resort
+                primary_task_obj.cancel()
+                secondary_task_obj.cancel()
+        else:
+            # Normal cleanup - cancel tasks and wait for them
+            primary_task_obj.cancel()
+            secondary_task_obj.cancel()
+            await asyncio.gather(primary_task_obj, secondary_task_obj, return_exceptions=True)
 
 
 @dataclass

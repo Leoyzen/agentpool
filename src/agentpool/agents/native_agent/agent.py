@@ -949,7 +949,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         finally:
             # Signal iteration to stop
             iteration_done.set()
-            # Only set cancelled if the iteration task was actually cancelled
+            # Only set cancelled if iteration task was actually cancelled
             if iteration_task.cancelled():
                 run_ctx.cancelled = True
             # Cancel task if still running
