@@ -218,7 +218,7 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
 
     # Cancel any pending permissions and clean up input provider
     if input_provider := state.input_providers.pop(session_id, None):
-        input_provider.cancel_all_pending()
+        input_provider.permission_manager.cancel_all_pending()
 
     # Remove from cache
     state.sessions.pop(session_id, None)
@@ -576,7 +576,7 @@ async def get_pending_permissions(
     if input_provider is None:
         return []
 
-    return input_provider.get_pending_permissions()
+    return input_provider.permission_manager.get_pending_permissions(session_id)
 
 
 @router.post("/{session_id}/permissions/{permission_id}")
@@ -603,7 +603,7 @@ async def respond_to_permission(
         raise HTTPException(status_code=404, detail="No input provider for session")
 
     # Resolve the permission
-    resolved = input_provider.resolve_permission(permission_id, body.reply)
+    resolved = input_provider.permission_manager.resolve_permission(permission_id, body.reply)
     if not resolved:
         raise HTTPException(status_code=404, detail="Permission not found or already resolved")
     event = PermissionResolvedEvent.create(

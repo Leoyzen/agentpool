@@ -21,8 +21,8 @@ logger = log.get_logger(__name__)
 async def list_permissions(state: StateDep) -> list[PermissionAskedProperties]:
     """List all pending permission requests across all sessions."""
     result: list[PermissionAskedProperties] = []
-    for input_provider in state.input_providers.values():
-        result.extend(input_provider.get_pending_permissions())
+    for session_id, input_provider in state.input_providers.items():
+        result.extend(input_provider.permission_manager.get_pending_permissions(session_id))
     return result
 
 
@@ -46,10 +46,10 @@ async def reply_to_permission(
     # Find which session has this permission request
     for session_id, input_provider in state.input_providers.items():
         # Check if this permission belongs to this session
-        if permission_id not in input_provider._pending_permissions:
+        if permission_id not in input_provider.permission_manager._pending_permissions:
             continue
         # Resolve the permission
-        resolved = input_provider.resolve_permission(permission_id, body.reply)
+        resolved = input_provider.permission_manager.resolve_permission(permission_id, body.reply)
         logger.info("Resolved permission", resolved=resolved)
         if not resolved:
             detail = "Permission not found or already resolved"

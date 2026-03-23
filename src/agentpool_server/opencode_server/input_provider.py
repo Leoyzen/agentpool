@@ -41,6 +41,96 @@ class PendingPermission:
     created_at: float = field(default_factory=time.time)
 
 
+class PermissionManager:
+    """Manages pending permission requests for tools that need confirmation."""
+
+    def __init__(self) -> None:
+        """Initialize PermissionManager."""
+        self._pending_permissions: dict[str, PendingPermission] = {}
+
+    def add_pending_permission(
+        self,
+        permission_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        future: asyncio.Future[PermissionReply],
+    ) -> PendingPermission:
+        """Add a pending permission request."""
+        pending = PendingPermission(
+            permission_id=permission_id,
+            tool_name=tool_name,
+            args=args,
+            future=future,
+        )
+        self._pending_permissions[permission_id] = pending
+        return pending
+
+    def resolve_permission(self, permission_id: str, response: PermissionReply) -> bool:
+        """Resolve a pending permission request.
+
+        Called by the REST endpoint when the client responds.
+
+        Args:
+            permission_id: The permission request ID
+            response: The client's response ("once", "always", or "reject")
+
+        Returns:
+            True if the permission was found and resolved, False otherwise
+        """
+        pending = self._pending_permissions.get(permission_id)
+        if pending is None:
+            logger.warning("Permission not found", permission_id=permission_id)
+            return False
+
+        if pending.future.done():
+            logger.warning("Permission already resolved", permission_id=permission_id)
+            return False
+
+        pending.future.set_result(response)
+        logger.info("Permission resolved", permission_id=permission_id, response=response)
+        return True
+
+    def get_pending_permissions(self, session_id: str) -> list[PermissionAskedProperties]:
+        """Get all pending permission requests.
+
+        Returns:
+            List of pending permission properties
+        """
+        result: list[PermissionAskedProperties] = []
+        for p in self._pending_permissions.values():
+            args_preview = ", ".join(f"{k}={v!r}" for k, v in list(p.args.items())[:3])
+            pattern = f"{p.tool_name}: {args_preview}" if args_preview else p.tool_name
+            props = PermissionAskedProperties(
+                id=p.permission_id,
+                session_id=session_id,
+                permission=p.tool_name,
+                patterns=[pattern],
+                metadata=p.args,
+                always=[pattern],
+                tool=PermissionToolInfo(message_id="", call_id=None),
+            )
+            result.append(props)
+        return result
+
+    def cancel_all_pending(self) -> int:
+        """Cancel all pending permission requests.
+
+        Returns:
+            Number of permissions cancelled
+        """
+        count = 0
+        for pending in list(self._pending_permissions.values()):
+            if not pending.future.done():
+                pending.future.cancel()
+                count += 1
+        self._pending_permissions.clear()
+        logger.info("Cancelled all pending permissions", count=count)
+        return count
+
+    def pop(self, permission_id: str) -> PendingPermission | None:
+        return self._pending_permissions.pop(permission_id, None)
+
+
 class OpenCodeInputProvider(InputProvider):
     """Input provider that uses OpenCode SSE/REST for user interactions.
 
@@ -61,7 +151,7 @@ class OpenCodeInputProvider(InputProvider):
         """
         self.state = state
         self.session_id = session_id
-        self._pending_permissions: dict[str, PendingPermission] = {}
+        self.permission_manager = PermissionManager()
         # tool_name -> "always" | "reject"
         self._tool_approvals: dict[str, Literal["always", "reject"]] = {}
         self._id_counter = 0
@@ -107,13 +197,12 @@ class OpenCodeInputProvider(InputProvider):
             # Create a pending permission request
             permission_id = self._generate_permission_id()
             future: asyncio.Future[PermissionReply] = asyncio.get_event_loop().create_future()
-            pending = PendingPermission(
+            self.permission_manager.add_pending_permission(
                 permission_id=permission_id,
                 tool_name=tool_name,
                 args=args,
                 future=future,
             )
-            self._pending_permissions[permission_id] = pending
             max_preview_args = 3
             args_preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:max_preview_args])
             if len(args) > max_preview_args:
@@ -145,7 +234,7 @@ class OpenCodeInputProvider(InputProvider):
                 return "skip"
             finally:
                 # Clean up the pending permission
-                self._pending_permissions.pop(permission_id, None)
+                self.permission_manager.pop(permission_id)
 
             # Map OpenCode response to our confirmation result
             return self._handle_permission_response(response, tool_name)
@@ -169,53 +258,6 @@ class OpenCodeInputProvider(InputProvider):
                 return "skip"
             case _ as unreachable:
                 assert_never(unreachable)
-
-    def resolve_permission(self, permission_id: str, response: PermissionReply) -> bool:
-        """Resolve a pending permission request.
-
-        Called by the REST endpoint when the client responds.
-
-        Args:
-            permission_id: The permission request ID
-            response: The client's response ("once", "always", or "reject")
-
-        Returns:
-            True if the permission was found and resolved, False otherwise
-        """
-        pending = self._pending_permissions.get(permission_id)
-        if pending is None:
-            logger.warning("Permission not found", permission_id=permission_id)
-            return False
-
-        if pending.future.done():
-            logger.warning("Permission already resolved", permission_id=permission_id)
-            return False
-
-        pending.future.set_result(response)
-        logger.info("Permission resolved", permission_id=permission_id, response=response)
-        return True
-
-    def get_pending_permissions(self) -> list[PermissionAskedProperties]:
-        """Get all pending permission requests.
-
-        Returns:
-            List of pending permission properties
-        """
-        result: list[PermissionAskedProperties] = []
-        for p in self._pending_permissions.values():
-            args_preview = ", ".join(f"{k}={v!r}" for k, v in list(p.args.items())[:3])
-            pattern = f"{p.tool_name}: {args_preview}" if args_preview else p.tool_name
-            props = PermissionAskedProperties(
-                id=p.permission_id,
-                session_id=self.session_id,
-                permission=p.tool_name,
-                patterns=[pattern],
-                metadata=p.args,
-                always=[pattern],
-                tool=PermissionToolInfo(message_id="", call_id=None),
-            )
-            result.append(props)
-        return result
 
     async def get_elicitation(
         self,
@@ -408,18 +450,3 @@ class OpenCodeInputProvider(InputProvider):
         future.set_result(answers)
         logger.info("Question resolved", question_id=question_id, answers=answers)
         return True
-
-    def cancel_all_pending(self) -> int:
-        """Cancel all pending permission requests.
-
-        Returns:
-            Number of permissions cancelled
-        """
-        count = 0
-        for pending in list(self._pending_permissions.values()):
-            if not pending.future.done():
-                pending.future.cancel()
-                count += 1
-        self._pending_permissions.clear()
-        logger.info("Cancelled all pending permissions", count=count)
-        return count
