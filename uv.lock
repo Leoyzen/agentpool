@@ -1127,16 +1127,16 @@ wheels = [
 
 [[package]]
 name = "codexed"
-version = "0.0.9"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyenv" },
     { name = "pydantic" },
     { name = "schemez" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/ec/f0bf46fd1f2e684674f0fef9c08945211cd565db6131793d5cb0fb7deb01/codexed-0.0.9.tar.gz", hash = "sha256:3c7751b095123261714827c298fa0881e8cb4a9e8e460d6a12bb255a7ef27cd4", size = 48565, upload-time = "2026-03-22T18:16:16.165Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/8e/819db92f42166583956760e5079f76cef4f5ebfe47dfd1035971b92b768b/codexed-0.1.0.tar.gz", hash = "sha256:81d46eda5cb40f9d7fff58a1f2cc118bf18aee864b02ff28571845b5999bbbb2", size = 52150, upload-time = "2026-03-23T11:07:22.836Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/43/4c312437990b4818956a24960ae40b992b086adfb582a5d332621a6d8266/codexed-0.0.9-py3-none-any.whl", hash = "sha256:69c55f74b591957b911c88e9ad22e7625311f6a270bba0cc48caf59b9e64c3ab", size = 56687, upload-time = "2026-03-22T18:16:14.624Z" },
+    { url = "https://files.pythonhosted.org/packages/93/2f/08746c4794bee5c0763d0eb7607809919b3fce7c554319c5df9c0cd975ea/codexed-0.1.0-py3-none-any.whl", hash = "sha256:f2eb09d151d7947eeb98292ef206e37a2f847e1423510d61da9956c5040eb41f", size = 61709, upload-time = "2026-03-23T11:07:28.392Z" },
 ]
 
 [[package]]
