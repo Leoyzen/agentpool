@@ -28,7 +28,9 @@ from agentpool.utils.time_utils import parse_iso_timestamp
 from agentpool_storage.zed_provider.models import (
     ZedAgentMessage,
     ZedFlatMessage,
+    ZedImage,
     ZedImageContent,
+    ZedMention,
     ZedMentionContent,
     ZedNestedMessage,
     ZedRedactedThinkingBlock,
@@ -42,6 +44,8 @@ from agentpool_storage.zed_provider.models import (
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+    from pydantic_ai import ModelMessage
 
     from agentpool_storage.zed_provider.models import (
         ZedAgentContent,
@@ -58,7 +62,7 @@ logger = get_logger(__name__)
 _ZSTD_DECOMPRESSOR = zstandard.ZstdDecompressor()
 
 
-def _decompress(data: bytes, data_type: Literal["zstd", "plain"]) -> bytes:
+def decompress(data: bytes, data_type: Literal["zstd", "plain"]) -> bytes:
     """Decompress thread data.
 
     Args:
@@ -93,14 +97,12 @@ def parse_user_content(
             case ZedTextContent(Text=text):
                 display_parts.append(text)
                 pydantic_content.append(text)
-            case ZedImageContent(Image=image):
-                binary_data = base64.b64decode(image.source)
+            case ZedImageContent(Image=ZedImage(source=source)):
+                binary_data = base64.b64decode(source)
                 media_type = detect_image_media_type(binary_data)
                 pydantic_content.append(BinaryContent(data=binary_data, media_type=media_type))
                 display_parts.append("[image]")
-            case ZedMentionContent(Mention=mention):
-                uri = mention.uri
-                content = mention.content
+            case ZedMentionContent(Mention=ZedMention(uri=uri, content=content)):
                 if uri.File:
                     formatted = f"[File: {uri.File.get('abs_path', '')}]\n{content}"
                 elif uri.Directory:
@@ -146,7 +148,7 @@ def parse_agent_content(
                 pydantic_parts.append(
                     ThinkingPart(content=thinking.text, signature=thinking.signature)
                 )
-            case ZedRedactedThinkingBlock(RedactedThinking=data):
+            case ZedRedactedThinkingBlock(RedactedThinking=_data):
                 display_parts.append("<redacted_thinking/>")
             case ZedToolUseBlock(ToolUse=tool_use):
                 display_parts.append(f"[Tool: {tool_use.name}]")
@@ -254,7 +256,7 @@ def _convert_nested_message(
         case ZedNestedMessage(Agent=ZedAgentMessage(content=content, tool_results=tool_results)):
             display_text, pydantic_parts = parse_agent_content(content)
             model_response = ModelResponse(parts=pydantic_parts, model_name=model_name)
-            pydantic_messages: list[ModelResponse | ModelRequest] = [model_response]
+            pydantic_messages: list[ModelMessage] = [model_response]
             if tool_return_parts := parse_tool_results(tool_results):
                 pydantic_messages.append(ModelRequest(parts=tool_return_parts))
             return ChatMessage[str](

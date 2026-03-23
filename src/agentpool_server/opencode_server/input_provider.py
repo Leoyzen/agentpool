@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+import time
+from typing import TYPE_CHECKING, Any, Literal
 
 from mcp import types
 
@@ -14,6 +15,9 @@ from opencode_sdk.models import (
     PermissionAskedProperties,
     PermissionRequestEvent,
     PermissionToolInfo,
+    QuestionAskedEvent,
+    QuestionInfo,
+    QuestionOption,
 )
 
 
@@ -33,7 +37,7 @@ class PendingPermission:
     tool_name: str
     args: dict[str, Any]
     future: asyncio.Future[PermissionReply]
-    created_at: float = field(default_factory=lambda: __import__("time").time())
+    created_at: float = field(default_factory=time.time)
 
 
 class OpenCodeInputProvider(InputProvider):
@@ -57,13 +61,14 @@ class OpenCodeInputProvider(InputProvider):
         self.state = state
         self.session_id = session_id
         self._pending_permissions: dict[str, PendingPermission] = {}
-        self._tool_approvals: dict[str, str] = {}  # tool_name -> "always" | "reject"
+        # tool_name -> "always" | "reject"
+        self._tool_approvals: dict[str, Literal["always", "reject"]] = {}
         self._id_counter = 0
 
     def _generate_permission_id(self) -> str:
         """Generate a unique permission ID."""
         self._id_counter += 1
-        return f"perm_{self._id_counter}_{int(__import__('time').time() * 1000)}"
+        return f"perm_{self._id_counter}_{int(time.time() * 1000)}"
 
     async def get_tool_confirmation(
         self,
@@ -260,7 +265,6 @@ class OpenCodeInputProvider(InputProvider):
             Elicit result with user's answer
         """
         from agentpool_server.opencode_server.state import PendingQuestion
-        from opencode_sdk.models import QuestionAskedEvent, QuestionInfo, QuestionOption
 
         # Extract enum values
         match schema:
@@ -341,16 +345,11 @@ class OpenCodeInputProvider(InputProvider):
             Elicit result with user's text response
         """
         from agentpool_server.opencode_server.state import PendingQuestion
-        from opencode_sdk.models import QuestionAskedEvent, QuestionInfo, QuestionOption
 
         question_id = self._generate_permission_id()
-        question_info = QuestionInfo(
-            question=params.message,
-            header=params.message[:12],
-            options=[
-                QuestionOption(label="Other", description="Type your answer"),
-            ],
-        )
+        opts = [QuestionOption(label="Other", description="Type your answer")]
+        header = params.message[:12]
+        question_info = QuestionInfo(question=params.message, header=header, options=opts)
         future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
         self.state.pending_questions[question_id] = PendingQuestion(
             session_id=self.session_id,

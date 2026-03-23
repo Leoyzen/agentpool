@@ -14,6 +14,7 @@ from pydantic_ai import (
     TextPart,
 )
 
+from agentpool import log
 from agentpool.agents.events import ToolCallCompleteEvent
 from agentpool.agents.modes import ModeCategory, ModeInfo
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool_config.nodes import ToolConfirmationMode
 
-logger = __import__("logging").getLogger(__name__)
+logger = log.get_logger(__name__)
 
 
 def filter_builtin_tools(

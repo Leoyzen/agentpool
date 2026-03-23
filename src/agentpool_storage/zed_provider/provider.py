@@ -264,7 +264,7 @@ class ZedStorageProvider(StorageProvider):
             conn = self._get_connection()
             cursor = conn.execute("SELECT data_type, data FROM threads")
             for data_type, data in cursor:
-                json_data = helpers._decompress(data, data_type)
+                json_data = helpers.decompress(data, data_type)
                 thread_dict = anyenv.load_json(json_data, return_type=dict)
                 if (messages := thread_dict.get("messages")) is not None:
                     conv_count += 1

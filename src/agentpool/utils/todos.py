@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Any, Literal
 
 
@@ -48,7 +49,7 @@ class TodoEntry(PlanEntry):
     id: str
     """Unique identifier for this entry."""
 
-    created_at: float = field(default_factory=lambda: __import__("time").time())
+    created_at: float = field(default_factory=time.time)
     """Unix timestamp when the entry was created."""
 
     def to_dict(self) -> dict[str, Any]:
