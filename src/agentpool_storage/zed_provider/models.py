@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import io
+import sys
 from typing import Any, Literal
 
 import anyenv
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
+IS_DEV = "pytest" in sys.modules
+
+
 class ZedBaseModel(BaseModel):
     """Base model with Zed storage."""
 
-    model_config = ConfigDict(use_attribute_docstrings=True, extra="forbid")
+    model_config = ConfigDict(
+        use_attribute_docstrings=True,
+        extra="forbid" if IS_DEV else "ignore",
+    )
 
 
 class ZedMentionUri(ZedBaseModel):
@@ -27,6 +34,10 @@ class ZedMentionUri(ZedBaseModel):
     Rule: dict[str, Any] | None = None
     Fetch: dict[str, Any] | None = None
     PastedImage: bool | None = None
+    Diagnostics: dict[str, Any] | None = None
+    TerminalSelection: dict[str, Any] | None = None
+    GitDiff: dict[str, Any] | None = None
+    MergeConflict: dict[str, Any] | None = None
 
 
 class ZedMention(ZedBaseModel):
@@ -83,7 +94,7 @@ class ZedUserMessage(ZedBaseModel):
 class ZedAgentMessage(ZedBaseModel):
     """Agent message in Zed thread (v0.2.0+ format)."""
 
-    content: list[dict[str, Any]]  # Can contain Text, Thinking, ToolUse
+    content: list[dict[str, Any]]  # Can contain Text, Thinking, ToolUse, RedactedThinking
     tool_results: dict[str, ZedToolResult] = Field(default_factory=dict)
     reasoning_details: Any | None = None
 
@@ -91,19 +102,29 @@ class ZedAgentMessage(ZedBaseModel):
 class ZedNestedMessage(ZedBaseModel):
     """A message in Zed thread v0.2.0+ - nested under User or Agent key."""
 
-    User: ZedUserMessage | None = None
-    Agent: ZedAgentMessage | None = None
+    User: ZedUserMessage | None = Field(default=None)
+    Agent: ZedAgentMessage | None = Field(default=None)
 
 
 # Flat message format (v0.1.0, v0.2.0)
 
 
+class ZedCrease(ZedBaseModel):
+    """A foldable region in the assistant panel."""
+
+    start: int
+    end: int
+    icon_path: str = ""
+    label: str = ""
+
+
 class ZedSegment(ZedBaseModel):
     """A segment in a flat message."""
 
-    type: Literal["text", "thinking"]
+    type: Literal["text", "thinking", "RedactedThinking"]
     text: str | None = None
     signature: str | None = None  # For thinking segments
+    data: str | None = None  # For RedactedThinking segments
 
 
 class ZedFlatMessage(ZedBaseModel):
@@ -115,7 +136,7 @@ class ZedFlatMessage(ZedBaseModel):
     tool_uses: list[dict[str, Any]] = Field(default_factory=list)
     tool_results: list[dict[str, Any]] = Field(default_factory=list)
     context: str = ""
-    creases: list[Any] = Field(default_factory=list)
+    creases: list[ZedCrease] = Field(default_factory=list)
     is_hidden: bool = False
 
 
@@ -155,6 +176,20 @@ class ZedProjectSnapshot(ZedBaseModel):
     timestamp: str | None = None
 
 
+class ZedSubagentContext(ZedBaseModel):
+    """Context passed to a subagent thread for lifecycle management."""
+
+    parent_thread_id: str
+    depth: int
+
+
+class ZedScrollPosition(ZedBaseModel):
+    """Serialized scroll position in the UI."""
+
+    item_ix: int
+    offset_in_item: float
+
+
 class ZedThread(ZedBaseModel):
     """A Zed conversation thread."""
 
@@ -175,11 +210,15 @@ class ZedThread(ZedBaseModel):
         default_factory=list
     )
     model: ZedLanguageModel | None = None
-    completion_mode: str | None = None
     profile: str | None = None
-    exceeded_window_error: Any | None = None
     tool_use_limit_reached: bool = False
-    imported: bool = False  # Whether thread was imported from another source
+    imported: bool = False
+    subagent_context: ZedSubagentContext | None = None
+    speed: Literal["standard", "fast"] | None = None
+    thinking_enabled: bool = False
+    thinking_effort: str | None = None
+    draft_prompt: list[dict[str, Any]] | None = None
+    ui_scroll_position: ZedScrollPosition | None = None
 
     @classmethod
     def from_compressed(cls, data: bytes, data_type: Literal["zstd", "plain"]) -> ZedThread:
