@@ -25,6 +25,7 @@ from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.mime_utils import detect_image_media_type
 from agentpool.utils.time_utils import parse_iso_timestamp
+from agentpool_storage.zed_provider.models import ZedAgentMessage, ZedUserMessage
 
 
 if TYPE_CHECKING:
@@ -218,37 +219,35 @@ def _convert_nested_message(
 ) -> ChatMessage[str]:
     """Convert a v0.2.0+ nested message to ChatMessage."""
     msg_id = f"{thread_id}_{idx}"
+    match msg:
+        case ZedNestedMessage(User=ZedUserMessage(content=content, id=user_msg_id)):
+            display_text, pydantic_content = parse_user_content(content)
+            part = UserPromptPart(content=pydantic_content)
+            return ChatMessage[str](
+                content=display_text,
+                session_id=thread_id,
+                role="user",
+                message_id=user_msg_id or msg_id,
+                timestamp=updated_at,
+                messages=[ModelRequest(parts=[part])],
+            )
 
-    if msg.User is not None:
-        user_msg = msg.User
-        display_text, pydantic_content = parse_user_content(user_msg.content)
-        part = UserPromptPart(content=pydantic_content)
-        return ChatMessage[str](
-            content=display_text,
-            session_id=thread_id,
-            role="user",
-            message_id=user_msg.id or msg_id,
-            timestamp=updated_at,
-            messages=[ModelRequest(parts=[part])],
-        )
-
-    if msg.Agent is not None:
-        agent_msg = msg.Agent
-        display_text, pydantic_parts = parse_agent_content(agent_msg.content)
-        model_response = ModelResponse(parts=pydantic_parts, model_name=model_name)
-        pydantic_messages: list[ModelResponse | ModelRequest] = [model_response]
-        if tool_return_parts := parse_tool_results(agent_msg.tool_results):
-            pydantic_messages.append(ModelRequest(parts=tool_return_parts))
-        return ChatMessage[str](
-            content=display_text,
-            session_id=thread_id,
-            role="assistant",
-            message_id=msg_id,
-            name="zed",
-            model_name=model_name,
-            timestamp=updated_at,
-            messages=pydantic_messages,
-        )
+        case ZedNestedMessage(Agent=ZedAgentMessage(content=content, tool_results=tool_results)):
+            display_text, pydantic_parts = parse_agent_content(content)
+            model_response = ModelResponse(parts=pydantic_parts, model_name=model_name)
+            pydantic_messages: list[ModelResponse | ModelRequest] = [model_response]
+            if tool_return_parts := parse_tool_results(tool_results):
+                pydantic_messages.append(ModelRequest(parts=tool_return_parts))
+            return ChatMessage[str](
+                content=display_text,
+                session_id=thread_id,
+                role="assistant",
+                message_id=msg_id,
+                name="zed",
+                model_name=model_name,
+                timestamp=updated_at,
+                messages=pydantic_messages,
+            )
 
     raise ValueError("Unexpected message type")
 
