@@ -11,6 +11,7 @@ from mcp import types
 
 from agentpool.log import get_logger
 from agentpool.ui.base import InputProvider
+from agentpool.utils.time_utils import now_ms
 from opencode_sdk.models import (
     PermissionAskedProperties,
     PermissionRequestEvent,
@@ -68,7 +69,7 @@ class OpenCodeInputProvider(InputProvider):
     def _generate_permission_id(self) -> str:
         """Generate a unique permission ID."""
         self._id_counter += 1
-        return f"perm_{self._id_counter}_{int(time.time() * 1000)}"
+        return f"perm_{self._id_counter}_{now_ms()}"
 
     async def get_tool_confirmation(
         self,

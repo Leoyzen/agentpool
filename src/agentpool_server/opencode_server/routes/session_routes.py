@@ -696,11 +696,7 @@ async def summarize_session(  # noqa: PLR0915
                             session_id=session_id,
                             text=response_text,
                         )
-                        # Update in parts list
-                        for i, p in enumerate(assistant_msg_with_parts.parts):
-                            if isinstance(p, TextPart) and p.id == text_part.id:
-                                assistant_msg_with_parts.parts[i] = text_part
-                                break
+                        assistant_msg_with_parts.update_part(text_part)
                         await state.broadcast_event(PartUpdatedEvent.create(text_part, delta=delta))
 
                 # Stream complete - extract token usage
