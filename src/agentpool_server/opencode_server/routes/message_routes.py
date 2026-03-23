@@ -15,6 +15,7 @@ from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from opencode_sdk.models import (
     AgentPartInput,
+    AnyMessageWithParts,
     AssistantMessage,
     FilePartInput,
     MessagePath,
@@ -50,7 +51,7 @@ async def list_messages(
     session_id: str,
     state: StateDep,
     limit: int | None = Query(default=None),
-) -> list[MessageWithParts]:
+) -> list[AnyMessageWithParts]:
     """List messages in a session."""
     session = await state.get_or_load_session(session_id)
     if session is None:
@@ -64,7 +65,7 @@ async def _process_message(  # noqa: PLR0915
     session_id: str,
     request: MessageRequest,
     state: StateDep,
-) -> MessageWithParts:
+) -> MessageWithParts[AssistantMessage]:
     """Internal helper to process a message request.
 
     This does the actual work of creating messages, running the agent,
@@ -84,7 +85,7 @@ async def _process_message(  # noqa: PLR0915
         variant=request.variant,
     )
 
-    user_msg_with_parts = MessageWithParts(info=user_message)
+    user_msg_with_parts = MessageWithParts[UserMessage](info=user_message)
     for part in request.parts:
         match part:
             case TextPartInput(text=text):
@@ -138,7 +139,7 @@ async def _process_message(  # noqa: PLR0915
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now),
     )
-    assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
+    assistant_msg_with_parts = MessageWithParts[AssistantMessage](info=assistant_msg, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_msg))
     # Step-start part
@@ -195,7 +196,7 @@ async def send_message(
     session_id: str,
     request: MessageRequest,
     state: StateDep,
-) -> MessageWithParts:
+) -> MessageWithParts[AssistantMessage]:
     """Send a message and wait for the agent's response.
 
     This is the synchronous version - waits for completion before returning.
@@ -221,7 +222,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 
 
 @router.get("/message/{message_id}")
-async def get_message(session_id: str, message_id: str, state: StateDep) -> MessageWithParts:
+async def get_message(session_id: str, message_id: str, state: StateDep) -> AnyMessageWithParts:
     """Get a specific message."""
     session = await state.get_or_load_session(session_id)
     if session is None:

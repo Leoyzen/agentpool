@@ -27,6 +27,7 @@ from agentpool_server.opencode_server.converters import (
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from opencode_sdk.models import (
+    AnyMessageWithParts,
     AssistantMessage,
     CommandExecutedEvent,
     CommandRequest,
@@ -291,7 +292,7 @@ async def fork_session(  # noqa: D417
     # Get messages from the original session
     original_messages = state.messages.get(session_id, [])
     # Filter messages if message_id is specified
-    messages_to_copy: list[MessageWithParts] = []
+    messages_to_copy: list[AnyMessageWithParts] = []
     if request and request.message_id:
         # Copy messages up to and including the specified message_id
         for msg in original_messages:
@@ -333,15 +334,15 @@ async def fork_session(  # noqa: D417
     state.session_status[new_session_id] = SessionStatus(type="idle")
     state.todos[new_session_id] = []
     # Copy messages to the new session (with updated session_id references)
-    copied_messages: list[MessageWithParts] = []
+    copied_messages: list[AnyMessageWithParts] = []
     for msg_with_parts in messages_to_copy:
-        # Create new message info with updated session_id
         new_info = msg_with_parts.info.model_copy(update={"session_id": new_session_id})
-        # Copy parts with updated session_id
         new_parts = [
             part.model_copy(update={"session_id": new_session_id}) for part in msg_with_parts.parts
         ]
-        copied_messages.append(MessageWithParts(info=new_info, parts=new_parts))
+        copied_messages.append(
+            msg_with_parts.model_copy(update={"info": new_info, "parts": new_parts})
+        )
 
     state.messages[new_session_id] = copied_messages
     input_provider = OpenCodeInputProvider(state, new_session_id)
@@ -494,7 +495,7 @@ async def run_shell_command(
     session_id: str,
     request: ShellRequest,
     state: StateDep,
-) -> MessageWithParts:
+) -> MessageWithParts[AssistantMessage]:
     """Run a shell command directly."""
     session = await state.get_or_load_session(session_id)
     if session is None:
@@ -518,7 +519,7 @@ async def run_shell_command(
     )
 
     # Initialize message with empty parts
-    assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
+    assistant_msg_with_parts = MessageWithParts[AssistantMessage](info=assistant_message, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
     # Broadcast message created
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
@@ -623,7 +624,7 @@ async def summarize_session(  # noqa: PLR0915
     session_id: str,
     state: StateDep,
     request: SummarizeRequest | None = None,
-) -> MessageWithParts:
+) -> MessageWithParts[AssistantMessage]:
     """Summarize the session conversation.
 
     First runs the compaction pipeline to condense older messages,
@@ -659,7 +660,7 @@ async def summarize_session(  # noqa: PLR0915
         summary=True,  # Mark as summary message
     )
 
-    assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
+    assistant_msg_with_parts = MessageWithParts[AssistantMessage](info=assistant_message, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
     # Broadcast message created
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
@@ -744,11 +745,10 @@ async def summarize_session(  # noqa: PLR0915
     step_finish = assistant_msg_with_parts.add_step_finish_part(tokens=tokens, cost=cost)
     await state.broadcast_event(PartUpdatedEvent.create(step_finish))
     # Update message with completion time and tokens
-    msg_time = MessageTime(created=now, completed=response_time)
-    update = {"time": msg_time, "tokens": tokens, "cost": cost}
-    updated_assistant = assistant_message.model_copy(update=update)
-    assistant_msg_with_parts.info = updated_assistant
-    await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+    assistant_msg_with_parts.info.time = MessageTime(created=now, completed=response_time)
+    assistant_msg_with_parts.info.tokens = tokens
+    assistant_msg_with_parts.info.cost = cost
+    await state.broadcast_event(MessageUpdatedEvent.create(assistant_msg_with_parts.info))
     # Mark session as idle
     state.session_status[session_id] = SessionStatus(type="idle")
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
@@ -961,7 +961,7 @@ async def execute_command(  # noqa: PLR0915
     session_id: str,
     request: CommandRequest,
     state: StateDep,
-) -> MessageWithParts:
+) -> MessageWithParts[AssistantMessage]:
     """Execute a slash command (MCP prompt).
 
     Commands are mapped to MCP prompts. The command name is used to find
@@ -1001,7 +1001,7 @@ async def execute_command(  # noqa: PLR0915
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now),
     )
-    assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
+    assistant_msg_with_parts = MessageWithParts[AssistantMessage](info=assistant_message, parts=[])
     state.messages[session_id].append(assistant_msg_with_parts)
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
     # Mark session as busy

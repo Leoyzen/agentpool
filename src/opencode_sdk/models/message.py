@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -217,10 +217,13 @@ class AssistantMessage(OpenCodeBaseModel):
     variant: str | None = None
 
 
-class MessageWithParts(OpenCodeBaseModel):
-    """Message with its parts."""
+MessageInfo = UserMessage | AssistantMessage
 
-    info: MessageInfo
+
+class MessageWithParts[InfoT: MessageInfo = MessageInfo](OpenCodeBaseModel):
+    """Message with its parts, generic over the info type."""
+
+    info: InfoT
     parts: list[Part] = Field(default_factory=list)
 
     @classmethod
@@ -231,7 +234,7 @@ class MessageWithParts(OpenCodeBaseModel):
         time: TimeCreated,
         agent_name: str,
         model: ModelRef,
-    ) -> Self:
+    ) -> MessageWithParts[UserMessage]:
         user_msg = UserMessage(
             id=message_id,
             session_id=session_id,
@@ -239,7 +242,7 @@ class MessageWithParts(OpenCodeBaseModel):
             agent=agent_name,
             model=model,
         )
-        return cls(info=user_msg)
+        return MessageWithParts(info=user_msg)
 
     @classmethod
     def assistant(
@@ -258,7 +261,7 @@ class MessageWithParts(OpenCodeBaseModel):
         finish: str | None = None,
         error: MessageError | None = None,
         tokens: Tokens | None = None,
-    ) -> Self:
+    ) -> MessageWithParts[AssistantMessage]:
         user_msg = AssistantMessage(
             id=message_id,
             session_id=session_id,
@@ -275,7 +278,7 @@ class MessageWithParts(OpenCodeBaseModel):
             finish=finish,
             tokens=tokens or Tokens(),
         )
-        return cls(info=user_msg)
+        return MessageWithParts(info=user_msg)
 
     def update_part(self, updated: Part) -> None:
         """Replace a part in the assistant message's parts list by ID."""
@@ -523,4 +526,4 @@ class CommandRequest(OpenCodeBaseModel):
 
 # Type unions
 
-MessageInfo = UserMessage | AssistantMessage
+AnyMessageWithParts = MessageWithParts[UserMessage] | MessageWithParts[AssistantMessage]

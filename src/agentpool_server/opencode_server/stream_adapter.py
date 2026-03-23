@@ -68,7 +68,12 @@ if TYPE_CHECKING:
     from agentpool.agents.events import ToolCallContentItem
     from agentpool.agents.events.events import RichAgentStreamEvent, SubAgentType
     from agentpool.messaging.messages import TokenCost
-    from opencode_sdk.models import Event, MessageWithParts, ToolState
+    from opencode_sdk.models import (
+        AssistantMessage,
+        Event,
+        MessageWithParts,
+        ToolState,
+    )
 
 logger = get_logger(__name__)
 
@@ -81,7 +86,7 @@ class OpenCodeStreamAdapter:
     counters). Yields OpenCode ``Event`` objects ready for broadcasting.
     """
 
-    assistant_msg: MessageWithParts
+    assistant_msg: MessageWithParts[AssistantMessage]
     """The mutable assistant message to append parts to."""
 
     working_dir: str

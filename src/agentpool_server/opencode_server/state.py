@@ -34,8 +34,8 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
     from agentpool_server.opencode_server.provider_auth import ProviderAuthService
     from opencode_sdk.models import (
+        AnyMessageWithParts,
         Event,
-        MessageWithParts,
         QuestionInfo,
         QuestionToolInfo,
         Session,
@@ -91,10 +91,10 @@ class ServerState:
     session_status: dict[str, SessionStatus] = field(default_factory=dict)
     """Current status for each session."""
 
-    messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
+    messages: dict[str, list[AnyMessageWithParts]] = field(default_factory=dict)
     """Runtime message cache. Also persisted via storage."""
 
-    reverted_messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
+    reverted_messages: dict[str, list[AnyMessageWithParts]] = field(default_factory=dict)
     """Messages removed during revert, kept for unrevert."""
 
     todos: dict[str, list[Todo]] = field(default_factory=dict)
@@ -231,7 +231,7 @@ class ServerState:
 
     async def persist_message_to_storage(
         self,
-        msg: MessageWithParts,
+        msg: AnyMessageWithParts,
         session_id: str,
     ) -> None:
         """Persist an OpenCode message to storage.

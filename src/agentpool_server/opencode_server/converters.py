@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
     from opencode_sdk.models import (
+        AnyMessageWithParts,
         MCPConnectionStatus as OpenCodeMCPConnectionStatus,
         PartInput,
         ResourceSource,
@@ -211,7 +212,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
     agent_name: str = "default",
     model_id: str = "unknown",
     provider_id: str = "agentpool",
-) -> MessageWithParts:
+) -> AnyMessageWithParts:
     """Convert a ChatMessage to OpenCode MessageWithParts.
 
     Args:
@@ -228,7 +229,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
     message_id = msg.message_id
     created_ms = datetime_to_ms(msg.timestamp)
     if msg.role == "user":
-        result = MessageWithParts.user(
+        user_msg = MessageWithParts.user(
             message_id=message_id,
             session_id=session_id,
             time=TimeCreated(created=created_ms),
@@ -237,7 +238,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
         )
         if msg.content and isinstance(msg.content, str):
             ts_opt = TimeStartEndOptional(start=created_ms)
-            result.add_text_part(msg.content, time=ts_opt)
+            user_msg.add_text_part(msg.content, time=ts_opt)
         else:
             for model_msg in msg.messages:
                 if not isinstance(model_msg, ModelRequest):
@@ -252,117 +253,117 @@ def chat_message_to_opencode(  # noqa: PLR0915
                         text = " ".join(str(c) for c in content if isinstance(c, str))
                     if text:
                         ts_opt = TimeStartEndOptional(start=created_ms)
-                        result.add_text_part(text, time=ts_opt)
-    else:
-        # Assistant message
-        completed_ms = created_ms
-        if msg.response_time:
-            completed_ms = created_ms + int(msg.response_time * 1000)
+                        user_msg.add_text_part(text, time=ts_opt)
+        return user_msg
+    # Assistant message
+    completed_ms = created_ms
+    if msg.response_time:
+        completed_ms = created_ms + int(msg.response_time * 1000)
 
-        tokens = Tokens.from_pydantic_ai(msg.usage)
-        result = MessageWithParts.assistant(
-            message_id=message_id,
-            session_id=session_id,
-            parent_id="",  # Would need to track parent user message
-            model_id=msg.model_name or model_id,
-            provider_id=msg.provider_name or provider_id,
-            mode="default",
-            agent_name=agent_name,
-            path=MessagePath(cwd=working_dir, root=working_dir),
-            time=MessageTime(created=created_ms, completed=completed_ms),
-            tokens=tokens,
-            cost=float(msg.cost_info.total_cost) if msg.cost_info else 0.0,
-            finish=msg.finish_reason,
-        )
+    tokens = Tokens.from_pydantic_ai(msg.usage)
+    message = MessageWithParts.assistant(
+        message_id=message_id,
+        session_id=session_id,
+        parent_id="",  # Would need to track parent user message
+        model_id=msg.model_name or model_id,
+        provider_id=msg.provider_name or provider_id,
+        mode="default",
+        agent_name=agent_name,
+        path=MessagePath(cwd=working_dir, root=working_dir),
+        time=MessageTime(created=created_ms, completed=completed_ms),
+        tokens=tokens,
+        cost=float(msg.cost_info.total_cost) if msg.cost_info else 0.0,
+        finish=msg.finish_reason,
+    )
 
-        result.add_step_start_part()
-        # Process all model messages to extract parts
-        tool_calls: dict[str, ToolPart] = {}
-        for model_msg in msg.messages:
-            for p in model_msg.parts:
-                match p:
-                    case PydanticTextPart(content=content):
-                        ts_opt = TimeStartEndOptional(start=created_ms, end=completed_ms)
-                        result.add_text_part(content, time=ts_opt)
-                    case PydanticToolCallPart(tool_name=tool_name, tool_call_id=call_id):
-                        tool_input = _convert_params_for_ui(safe_args_as_dict(p))
-                        ts = TimeStart(start=created_ms)
-                        title = f"Running {tool_name}"
-                        running_state = ToolStateRunning(time=ts, input=tool_input, title=title)
-                        tool_part = result.add_tool_part(tool_name, call_id, state=running_state)
-                        tool_calls[call_id] = tool_part
-                    case RetryPromptPart(content=retry_content, tool_name=tool_name, timestamp=ts):
-                        retry_count = sum(
-                            1
-                            for m in msg.messages
-                            if isinstance(m, ModelRequest)
-                            for p in m.parts
-                            if isinstance(p, RetryPromptPart)
-                        )
-                        if isinstance(retry_content, list):
-                            error_type = "validation_error"
-                        elif tool_name:
-                            error_type = "tool_error"
+    message.add_step_start_part()
+    # Process all model messages to extract parts
+    tool_calls: dict[str, ToolPart] = {}
+    for model_msg in msg.messages:
+        for p in model_msg.parts:
+            match p:
+                case PydanticTextPart(content=content):
+                    ts_opt = TimeStartEndOptional(start=created_ms, end=completed_ms)
+                    message.add_text_part(content, time=ts_opt)
+                case PydanticToolCallPart(tool_name=tool_name, tool_call_id=call_id):
+                    tool_input = _convert_params_for_ui(safe_args_as_dict(p))
+                    ts = TimeStart(start=created_ms)
+                    title = f"Running {tool_name}"
+                    running_state = ToolStateRunning(time=ts, input=tool_input, title=title)
+                    tool_part = message.add_tool_part(tool_name, call_id, state=running_state)
+                    tool_calls[call_id] = tool_part
+                case RetryPromptPart(content=retry_content, tool_name=tool_name, timestamp=ts):
+                    retry_count = sum(
+                        1
+                        for m in msg.messages
+                        if isinstance(m, ModelRequest)
+                        for p in m.parts
+                        if isinstance(p, RetryPromptPart)
+                    )
+                    if isinstance(retry_content, list):
+                        error_type = "validation_error"
+                    elif tool_name:
+                        error_type = "tool_error"
+                    else:
+                        error_type = "retry"
+
+                    message.add_retry_part(
+                        attempt=retry_count,
+                        message=p.model_response(),
+                        created=int(ts.timestamp() * 1000),
+                        is_retryable=True,
+                        metadata={"error_type": error_type} if error_type else None,
+                    )
+                case PydanticToolReturnPart(
+                    tool_call_id=call_id,
+                    content=tool_content,
+                    tool_name=tool_name,
+                    timestamp=tool_ts,
+                ):
+                    end_ms = datetime_to_ms(tool_ts)
+                    match tool_content:
+                        case str():
+                            output = tool_content
+                        case dict():
+                            output = anyenv.dump_json(tool_content, indent=True)
+                        case None:
+                            output = ""
+                        case _:
+                            output = str(tool_content)
+                    if existing := tool_calls.get(call_id):
+                        existing_input = _get_input_from_state(existing.state)
+                        if isinstance(tool_content, dict) and "error" in tool_content:
+                            existing.state = ToolStateError(
+                                error=str(tool_content.get("error", "Unknown error")),
+                                input=existing_input,
+                                time=TimeStartEnd(start=created_ms, end=end_ms),
+                            )
                         else:
-                            error_type = "retry"
-
-                        result.add_retry_part(
-                            attempt=retry_count,
-                            message=p.model_response(),
-                            created=int(ts.timestamp() * 1000),
-                            is_retryable=True,
-                            metadata={"error_type": error_type} if error_type else None,
-                        )
-                    case PydanticToolReturnPart(
-                        tool_call_id=call_id,
-                        content=tool_content,
-                        tool_name=tool_name,
-                        timestamp=tool_ts,
-                    ):
-                        end_ms = datetime_to_ms(tool_ts)
-                        match tool_content:
-                            case str():
-                                output = tool_content
-                            case dict():
-                                output = anyenv.dump_json(tool_content, indent=True)
-                            case None:
-                                output = ""
-                            case _:
-                                output = str(tool_content)
-                        if existing := tool_calls.get(call_id):
-                            existing_input = _get_input_from_state(existing.state)
-                            if isinstance(tool_content, dict) and "error" in tool_content:
-                                existing.state = ToolStateError(
-                                    error=str(tool_content.get("error", "Unknown error")),
-                                    input=existing_input,
-                                    time=TimeStartEnd(start=created_ms, end=end_ms),
-                                )
-                            else:
-                                title = f"Completed {tool_name}"
-                                tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
-                                existing.state = ToolStateCompleted(
-                                    title=title, input=existing_input, output=output, time=tsc
-                                )
+                            title = f"Completed {tool_name}"
+                            tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
+                            existing.state = ToolStateCompleted(
+                                title=title, input=existing_input, output=output, time=tsc
+                            )
+                    else:
+                        # Orphan return - create completed tool part
+                        state: ToolStateCompleted | ToolStateError
+                        if isinstance(tool_content, dict) and "error" in tool_content:
+                            err = str(tool_content.get("error", "Unknown error"))
+                            ts_end = TimeStartEnd(start=created_ms, end=end_ms)
+                            state = ToolStateError(error=err, time=ts_end)
                         else:
-                            # Orphan return - create completed tool part
-                            state: ToolStateCompleted | ToolStateError
-                            if isinstance(tool_content, dict) and "error" in tool_content:
-                                err = str(tool_content.get("error", "Unknown error"))
-                                ts_end = TimeStartEnd(start=created_ms, end=end_ms)
-                                state = ToolStateError(error=err, time=ts_end)
-                            else:
-                                title = f"Completed {tool_name}"
-                                tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
-                                state = ToolStateCompleted(title=title, output=output, time=tsc)
-                            result.add_tool_part(tool_name, call_id, state=state)
-        cost = float(msg.cost_info.total_cost) if msg.cost_info else 0.0
-        result.add_step_finish_part(reason=msg.finish_reason or "stop", cost=cost, tokens=tokens)
+                            title = f"Completed {tool_name}"
+                            tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
+                            state = ToolStateCompleted(title=title, output=output, time=tsc)
+                        message.add_tool_part(tool_name, call_id, state=state)
+    cost = float(msg.cost_info.total_cost) if msg.cost_info else 0.0
+    message.add_step_finish_part(reason=msg.finish_reason or "stop", cost=cost, tokens=tokens)
 
-    return result
+    return message
 
 
 def opencode_to_chat_message(
-    msg: MessageWithParts,
+    msg: AnyMessageWithParts,
     session_id: str | None = None,
 ) -> ChatMessage[str]:
     """Convert OpenCode MessageWithParts to ChatMessage.
