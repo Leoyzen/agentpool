@@ -315,10 +315,10 @@ class OpenCodeInputProvider(InputProvider):
             # Wrap the answer in a dict with a "value" key
             # Multi-select: return list in dict
             # Single-select: return string in dict
-            content: dict[str, str | list[str]] = (
+            content: dict[str, Any] = (
                 {"value": answer} if is_multi else {"value": answer[0] if answer else ""}
             )
-            return types.ElicitResult(action="accept", content=content)  # ty: ignore[invalid-argument-type]
+            return types.ElicitResult(action="accept", content=content)
         except asyncio.CancelledError:
             logger.info("Question cancelled", question_id=question_id)
             return types.ElicitResult(action="cancel")
@@ -366,8 +366,8 @@ class OpenCodeInputProvider(InputProvider):
         try:
             answers = await future
             answer = answers[0][0] if answers and answers[0] else ""
-            content: dict[str, str] = {"value": answer}
-            return types.ElicitResult(action="accept", content=content)  # ty: ignore[invalid-argument-type]
+            content: dict[str, Any] = {"value": answer}
+            return types.ElicitResult(action="accept", content=content)
         except asyncio.CancelledError:
             logger.info("Question cancelled", question_id=question_id)
             return types.ElicitResult(action="cancel")
