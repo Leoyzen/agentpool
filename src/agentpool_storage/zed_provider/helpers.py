@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import base64
 import io
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic_ai import (
     BinaryContent,
@@ -25,17 +25,29 @@ from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.mime_utils import detect_image_media_type
 from agentpool.utils.time_utils import parse_iso_timestamp
-from agentpool_storage.zed_provider.models import ZedAgentMessage, ZedUserMessage
+from agentpool_storage.zed_provider.models import (
+    ZedAgentMessage,
+    ZedFlatMessage,
+    ZedImageContent,
+    ZedMentionContent,
+    ZedNestedMessage,
+    ZedRedactedThinkingBlock,
+    ZedTextBlock,
+    ZedTextContent,
+    ZedThinkingBlock,
+    ZedToolUseBlock,
+    ZedUserMessage,
+)
 
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from agentpool_storage.zed_provider.models import (
-        ZedFlatMessage,
-        ZedNestedMessage,
+        ZedAgentContent,
         ZedThread,
         ZedToolResult,
+        ZedUserContent,
     )
 
 
@@ -62,7 +74,9 @@ def _decompress(data: bytes, data_type: Literal["zstd", "plain"]) -> bytes:
     return data
 
 
-def parse_user_content(items: list[dict[str, Any]]) -> tuple[str, list[str | BinaryContent]]:
+def parse_user_content(
+    items: list[ZedUserContent],
+) -> tuple[str, list[str | BinaryContent]]:
     """Parse user message content blocks.
 
     Args:
@@ -76,29 +90,31 @@ def parse_user_content(items: list[dict[str, Any]]) -> tuple[str, list[str | Bin
 
     for item in items:
         match item:
-            case {"Text": text}:
+            case ZedTextContent(Text=text):
                 display_parts.append(text)
                 pydantic_content.append(text)
-
-            case {"Image": {"source": source}}:
-                binary_data = base64.b64decode(source)
+            case ZedImageContent(Image=image):
+                binary_data = base64.b64decode(image.source)
                 media_type = detect_image_media_type(binary_data)
                 pydantic_content.append(BinaryContent(data=binary_data, media_type=media_type))
                 display_parts.append("[image]")
-            case {"Mention": {"uri": uri, "content": content}}:
-                match uri:
-                    case {"File": {"abs_path": path}}:
-                        formatted = f"[File: {path}]\n{content}"
-                    case {"Directory": {"abs_path": path}}:
-                        formatted = f"[Directory: {path}]\n{content}"
-                    case {"Symbol": {"abs_path": path, "name": name}}:
-                        formatted = f"[Symbol: {name} in {path}]\n{content}"
-                    case {"Selection": {"abs_path": path}}:
-                        formatted = f"[Selection: {path}]\n{content}"
-                    case {"Fetch": {"url": url}}:
-                        formatted = f"[Fetched: {url}]\n{content}"
-                    case _:
-                        formatted = content
+            case ZedMentionContent(Mention=mention):
+                uri = mention.uri
+                content = mention.content
+                if uri.File:
+                    formatted = f"[File: {uri.File.get('abs_path', '')}]\n{content}"
+                elif uri.Directory:
+                    formatted = f"[Directory: {uri.Directory.get('abs_path', '')}]\n{content}"
+                elif uri.Symbol:
+                    path = uri.Symbol.get("abs_path", "")
+                    name = uri.Symbol.get("name", "")
+                    formatted = f"[Symbol: {name} in {path}]\n{content}"
+                elif uri.Selection:
+                    formatted = f"[Selection: {uri.Selection.get('abs_path', '')}]\n{content}"
+                elif uri.Fetch:
+                    formatted = f"[Fetched: {uri.Fetch.get('url', '')}]\n{content}"
+                else:
+                    formatted = content
                 display_parts.append(formatted)
                 pydantic_content.append(formatted)
 
@@ -107,7 +123,7 @@ def parse_user_content(items: list[dict[str, Any]]) -> tuple[str, list[str | Bin
 
 
 def parse_agent_content(
-    content_list: list[dict[str, Any]],
+    content_list: list[ZedAgentContent],
 ) -> tuple[str, list[TextPart | ThinkingPart | ToolCallPart]]:
     """Parse agent message content blocks.
 
@@ -122,20 +138,23 @@ def parse_agent_content(
 
     for item in content_list:
         match item:
-            case {"Text": text}:
+            case ZedTextBlock(Text=text):
                 display_parts.append(text)
                 pydantic_parts.append(TextPart(content=text))
-            case {"Thinking": {"text": text, **rest}}:
-                signature = rest.get("signature")
-                assert signature is None or isinstance(signature, str)
-                display_parts.append(f"<thinking>\n{text}\n</thinking>")
-                pydantic_parts.append(ThinkingPart(content=text, signature=signature))
-            case {"ToolUse": tool_use}:
-                tool_id = tool_use.get("id", "")
-                tool_name = tool_use.get("name", "")
-                tool_input = tool_use.get("input", {})
-                display_parts.append(f"[Tool: {tool_name}]")
-                part = ToolCallPart(tool_name=tool_name, args=tool_input, tool_call_id=tool_id)
+            case ZedThinkingBlock(Thinking=thinking):
+                display_parts.append(f"<thinking>\n{thinking.text}\n</thinking>")
+                pydantic_parts.append(
+                    ThinkingPart(content=thinking.text, signature=thinking.signature)
+                )
+            case ZedRedactedThinkingBlock(RedactedThinking=data):
+                display_parts.append("<redacted_thinking/>")
+            case ZedToolUseBlock(ToolUse=tool_use):
+                display_parts.append(f"[Tool: {tool_use.name}]")
+                part = ToolCallPart(
+                    tool_name=tool_use.name,
+                    args=tool_use.input,
+                    tool_call_id=tool_use.id,
+                )
                 pydantic_parts.append(part)
 
     display_text = "\n".join(display_parts)
@@ -264,8 +283,6 @@ def thread_to_chat_messages(thread: ZedThread, thread_id: str) -> list[ChatMessa
     Returns:
         List of ChatMessage objects
     """
-    from agentpool_storage.zed_provider.models import ZedFlatMessage, ZedNestedMessage
-
     messages: list[ChatMessage[str]] = []
     updated_at = parse_iso_timestamp(thread.updated_at)
     model_name = f"{thread.model.provider}:{thread.model.model}" if thread.model else None

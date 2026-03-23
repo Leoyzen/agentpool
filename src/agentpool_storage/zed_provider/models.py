@@ -81,6 +81,60 @@ class ZedToolResult(ZedBaseModel):
     output: dict[str, Any] | str | None = None
 
 
+# User message content blocks (v0.2.0+)
+
+
+class ZedTextContent(ZedBaseModel):
+    """Text content block."""
+
+    Text: str
+
+
+class ZedImageContent(ZedBaseModel):
+    """Image content block."""
+
+    Image: ZedImage
+
+
+class ZedMentionContent(ZedBaseModel):
+    """Mention content block."""
+
+    Mention: ZedMention
+
+
+ZedUserContent = ZedTextContent | ZedImageContent | ZedMentionContent
+
+
+# Agent message content blocks (v0.2.0+)
+
+
+class ZedTextBlock(ZedBaseModel):
+    """Text block in agent message."""
+
+    Text: str
+
+
+class ZedThinkingBlock(ZedBaseModel):
+    """Thinking block in agent message."""
+
+    Thinking: ZedThinking
+
+
+class ZedRedactedThinkingBlock(ZedBaseModel):
+    """Redacted thinking block in agent message."""
+
+    RedactedThinking: str
+
+
+class ZedToolUseBlock(ZedBaseModel):
+    """Tool use block in agent message."""
+
+    ToolUse: ZedToolUse
+
+
+ZedAgentContent = ZedTextBlock | ZedThinkingBlock | ZedRedactedThinkingBlock | ZedToolUseBlock
+
+
 # v0.2.0+ nested message format
 
 
@@ -88,13 +142,13 @@ class ZedUserMessage(ZedBaseModel):
     """User message in Zed thread (v0.2.0+ format)."""
 
     id: str
-    content: list[dict[str, Any]]  # Can contain Text, Image, Mention
+    content: list[ZedUserContent]
 
 
 class ZedAgentMessage(ZedBaseModel):
     """Agent message in Zed thread (v0.2.0+ format)."""
 
-    content: list[dict[str, Any]]  # Can contain Text, Thinking, ToolUse, RedactedThinking
+    content: list[ZedAgentContent]
     tool_results: dict[str, ZedToolResult] = Field(default_factory=dict)
     reasoning_details: Any | None = None
 
@@ -127,14 +181,31 @@ class ZedSegment(ZedBaseModel):
     data: str | None = None  # For RedactedThinking segments
 
 
+class ZedFlatToolUse(ZedBaseModel):
+    """Tool use in flat/legacy message format."""
+
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+class ZedFlatToolResult(ZedBaseModel):
+    """Tool result in flat/legacy message format."""
+
+    tool_use_id: str
+    is_error: bool = False
+    content: dict[str, Any] | str | None = None
+    output: dict[str, Any] | str | None = None
+
+
 class ZedFlatMessage(ZedBaseModel):
     """A message in flat format (used in v0.1.0 and v0.2.0)."""
 
     id: int
     role: Literal["user", "assistant"]
     segments: list[ZedSegment] = Field(default_factory=list)
-    tool_uses: list[dict[str, Any]] = Field(default_factory=list)
-    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    tool_uses: list[ZedFlatToolUse] = Field(default_factory=list)
+    tool_results: list[ZedFlatToolResult] = Field(default_factory=list)
     context: str = ""
     creases: list[ZedCrease] = Field(default_factory=list)
     is_hidden: bool = False
@@ -161,19 +232,27 @@ class ZedTokenUsage(ZedBaseModel):
     cache_read_input_tokens: int = 0
 
 
+class ZedGitState(ZedBaseModel):
+    """Git state for a worktree."""
+
+    remote_url: str | None = None
+    head_sha: str | None = None
+    current_branch: str | None = None
+    diff: str | None = None
+
+
 class ZedWorktreeSnapshot(ZedBaseModel):
     """Git worktree snapshot."""
 
     worktree_path: str
-    git_state: dict[str, Any] | None = None
+    git_state: ZedGitState | None = None
 
 
 class ZedProjectSnapshot(ZedBaseModel):
     """Project snapshot with git state."""
 
     worktree_snapshots: list[ZedWorktreeSnapshot] = Field(default_factory=list)
-    unsaved_buffer_paths: list[str] = Field(default_factory=list)
-    timestamp: str | None = None
+    timestamp: str
 
 
 class ZedSubagentContext(ZedBaseModel):
