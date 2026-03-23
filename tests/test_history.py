@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from pydantic_ai import RunUsage
 import pytest
 
 from agentpool.messaging import ChatMessage, TokenCost
@@ -50,6 +51,7 @@ async def sample_data(provider: SQLModelProvider):
             name="user",
             model_name="gpt-5",
             session_id="conv1",
+            usage=RunUsage(input_tokens=5, output_tokens=5),
             cost_info=TokenCost(total_cost=Decimal("0.001")),
         ),
         ChatMessage(
@@ -58,6 +60,7 @@ async def sample_data(provider: SQLModelProvider):
             name="test_agent",
             model_name="gpt-5",
             session_id="conv1",
+            usage=RunUsage(input_tokens=10, output_tokens=10),
             cost_info=TokenCost(total_cost=Decimal("0.002")),
         ),
         ChatMessage(
@@ -66,6 +69,7 @@ async def sample_data(provider: SQLModelProvider):
             name="user",
             model_name="gpt-3.5-turbo",
             session_id="conv2",
+            usage=RunUsage(input_tokens=7, output_tokens=8),
             cost_info=TokenCost(total_cost=Decimal("0.0015")),
         ),
     ]

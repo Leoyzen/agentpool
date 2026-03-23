@@ -153,12 +153,13 @@ class PlanProvider(ResourceProvider):
         await self._emit_plan_update(agent_ctx)
         # Build summary for user feedback
         entry_count = len(tracker.entries)
-        if entry_count == 0:
-            title = "Cleared plan"
-        elif entry_count == 1:
-            title = "Set plan with 1 task"
-        else:
-            title = f"Set plan with {entry_count} tasks"
+        match entry_count:
+            case 0:
+                title = "Cleared plan"
+            case 1:
+                title = "Set plan with 1 task"
+            case _:
+                title = f"Set plan with {entry_count} tasks"
 
         # Format entries list for details
         if tracker.entries:

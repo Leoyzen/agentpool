@@ -147,7 +147,7 @@ async def test_cost_tracking_with_real_model():
         # Verify cost info is present and non-zero
         assert result.cost_info is not None, "cost_info should not be None"
         assert result.cost_info.total_cost > 0, "total_cost should be greater than zero"
-        assert result.cost_info.token_usage.total_tokens > 0, "total_tokens should be > 0"
+        assert result.usage.total_tokens > 0, "total_tokens should be > 0"
 
 
 if __name__ == "__main__":
