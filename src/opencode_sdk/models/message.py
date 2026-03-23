@@ -423,18 +423,17 @@ class MessageWithParts[InfoT: MessageInfo = MessageInfo](OpenCodeBaseModel):
         metadata: dict[str, str] | None = None,
     ) -> RetryPart:
         """Create and append a retry part."""
+        error_data = APIErrorData(
+            message=message,
+            is_retryable=is_retryable,
+            metadata=metadata,
+        )
         part = RetryPart(
             id=identifier.ascending("part"),
             message_id=self.info.id,
             session_id=self.info.session_id,
             attempt=attempt,
-            error=APIError(
-                data=APIErrorData(
-                    message=message,
-                    is_retryable=is_retryable,
-                    metadata=metadata,
-                ),
-            ),
+            error=APIError(data=error_data),
             time=TimeCreated(created=created),
         )
         self.parts.append(part)
