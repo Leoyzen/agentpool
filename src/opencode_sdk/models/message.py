@@ -33,6 +33,9 @@ from opencode_sdk.models.parts import (  # noqa: TC001
 )
 
 
+FinishReason = Literal["stop", "length", "content-filter", "tool-calls", "error", "unknown"]
+
+
 class MessageSummary(OpenCodeBaseModel):
     """Summary information for a message."""
 
@@ -212,7 +215,8 @@ class AssistantMessage(OpenCodeBaseModel):
     """
     error: MessageError | None = None
     summary: bool | None = None
-    finish: str | None = None
+    # Known values from AI SDK's LanguageModelV2FinishReason; schema allows any string
+    finish: FinishReason | str | None = None
     structured: Any | None = None
     variant: str | None = None
 
@@ -258,7 +262,7 @@ class MessageWithParts[InfoT: MessageInfo = MessageInfo](OpenCodeBaseModel):
         mode: str = "default",
         cost: float = 0.0,
         summary: bool | None = None,
-        finish: str | None = None,
+        finish: FinishReason | str | None = None,
         error: MessageError | None = None,
         tokens: Tokens | None = None,
     ) -> MessageWithParts[AssistantMessage]:
