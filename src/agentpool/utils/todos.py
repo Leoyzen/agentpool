@@ -16,9 +16,6 @@ if TYPE_CHECKING:
 TodoPriority = Literal["high", "medium", "low"]
 TodoStatus = Literal["pending", "in_progress", "completed"]
 
-# Keep old names as aliases
-PlanEntryPriority = TodoPriority
-PlanEntryStatus = TodoStatus
 
 STATUS_ICONS = {"pending": "⬚", "in_progress": "◐", "completed": "✓"}
 PRIORITY_LABELS = {"high": "🔴", "medium": "🟡", "low": "🟢"}
