@@ -10,6 +10,8 @@ import anyenv
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic_ai import RunUsage
 
+from acp.schema.content_blocks import ContentBlock
+
 
 IS_DEV = "pytest" in sys.modules
 
@@ -23,22 +25,108 @@ class ZedBaseModel(BaseModel):
     )
 
 
-class ZedMentionUri(ZedBaseModel):
-    """Mention URI - can be File, Directory, Symbol, etc."""
+class ZedFileMention(ZedBaseModel):
+    """File mention."""
 
-    File: dict[str, Any] | None = None
-    Directory: dict[str, Any] | None = None
-    Symbol: dict[str, Any] | None = None
-    Selection: dict[str, Any] | None = None
-    Thread: dict[str, Any] | None = None
-    TextThread: dict[str, Any] | None = None
-    Rule: dict[str, Any] | None = None
-    Fetch: dict[str, Any] | None = None
+    abs_path: str
+
+
+class ZedDirectoryMention(ZedBaseModel):
+    """Directory mention."""
+
+    abs_path: str
+
+
+class ZedLineRange(ZedBaseModel):
+    """Inclusive line range (0-based, matching Rust's RangeInclusive<u32>)."""
+
+    start: int
+    end: int
+
+
+class ZedSymbolMention(ZedBaseModel):
+    """Symbol mention with location."""
+
+    abs_path: str
+    name: str
+    line_range: ZedLineRange
+
+
+class ZedSelectionMention(ZedBaseModel):
+    """Selection mention with optional path and line range."""
+
+    abs_path: str | None = None
+    line_range: ZedLineRange
+
+
+class ZedThreadMention(ZedBaseModel):
+    """Thread mention."""
+
+    id: str
+    name: str
+
+
+class ZedTextThreadMention(ZedBaseModel):
+    """Text thread mention."""
+
+    path: str
+    name: str
+
+
+class ZedRuleMention(ZedBaseModel):
+    """Rule mention."""
+
+    id: str
+    name: str
+
+
+class ZedDiagnosticsMention(ZedBaseModel):
+    """Diagnostics mention."""
+
+    include_errors: bool = True
+    include_warnings: bool = False
+
+
+class ZedFetchMention(ZedBaseModel):
+    """Fetch (URL) mention."""
+
+    url: str
+
+
+class ZedTerminalSelectionMention(ZedBaseModel):
+    """Terminal selection mention."""
+
+    line_count: int = 0
+
+
+class ZedGitDiffMention(ZedBaseModel):
+    """Git diff mention."""
+
+    base_ref: str
+
+
+class ZedMergeConflictMention(ZedBaseModel):
+    """Merge conflict mention."""
+
+    file_path: str
+
+
+class ZedMentionUri(ZedBaseModel):
+    """Mention URI - externally tagged enum matching Rust's MentionUri."""
+
+    File: ZedFileMention | None = None
+    Directory: ZedDirectoryMention | None = None
+    Symbol: ZedSymbolMention | None = None
+    Selection: ZedSelectionMention | None = None
+    Thread: ZedThreadMention | None = None
+    TextThread: ZedTextThreadMention | None = None
+    Rule: ZedRuleMention | None = None
+    Fetch: ZedFetchMention | None = None
     PastedImage: bool | None = None
-    Diagnostics: dict[str, Any] | None = None
-    TerminalSelection: dict[str, Any] | None = None
-    GitDiff: dict[str, Any] | None = None
-    MergeConflict: dict[str, Any] | None = None
+    Diagnostics: ZedDiagnosticsMention | None = None
+    TerminalSelection: ZedTerminalSelectionMention | None = None
+    GitDiff: ZedGitDiffMention | None = None
+    MergeConflict: ZedMergeConflictMention | None = None
 
 
 class ZedMention(ZedBaseModel):
@@ -48,10 +136,18 @@ class ZedMention(ZedBaseModel):
     content: str
 
 
+class ZedImageSize(ZedBaseModel):
+    """Image dimensions in device pixels."""
+
+    width: int
+    height: int
+
+
 class ZedImage(ZedBaseModel):
     """An image in Zed (base64 encoded)."""
 
-    source: str  # base64 encoded
+    source: str
+    size: ZedImageSize | None = None
 
 
 class ZedThinking(ZedBaseModel):
@@ -72,13 +168,20 @@ class ZedToolUse(ZedBaseModel):
     thought_signature: str | None = None
 
 
+class ZedToolResultContent(ZedBaseModel):
+    """Tool result content - externally tagged enum (Text or Image)."""
+
+    Text: str | None = None
+    Image: ZedImage | None = None
+
+
 class ZedToolResult(ZedBaseModel):
     """Tool result."""
 
     tool_use_id: str
     tool_name: str
     is_error: bool = False
-    content: dict[str, Any] | str | None = None
+    content: ZedToolResultContent | str | None = None
     output: dict[str, Any] | str | None = None
 
 
@@ -326,7 +429,7 @@ class ZedThread(ZedBaseModel):
     speed: Literal["standard", "fast"] | None = None
     thinking_enabled: bool = False
     thinking_effort: str | None = None
-    draft_prompt: list[dict[str, Any]] | None = None
+    draft_prompt: list[ContentBlock] | None = None
     ui_scroll_position: ZedScrollPosition | None = None
 
     @classmethod
