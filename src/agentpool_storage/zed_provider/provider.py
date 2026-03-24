@@ -79,7 +79,7 @@ class ZedStorageProvider(StorageProvider):
         *,
         since: datetime | None = None,
         limit: int | None = None,
-    ) -> list[tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str, str | None, str | None, str | None, str | None, str | None]]:
         """List threads with optional filtering.
 
         Args:
@@ -87,11 +87,15 @@ class ZedStorageProvider(StorageProvider):
             limit: Maximum number of threads to return
 
         Returns:
-            List of (id, summary, updated_at) tuples
+            List of (id, summary, updated_at, created_at, parent_id,
+            worktree_branch, folder_paths, folder_paths_order) tuples
         """
         try:
             conn = self._get_connection()
-            query = "SELECT id, summary, updated_at FROM threads"
+            query = (
+                "SELECT id, summary, updated_at, created_at, parent_id,"
+                " worktree_branch, folder_paths, folder_paths_order FROM threads"
+            )
             params: list[Any] = []
             if since:
                 query += " WHERE updated_at >= ?"
@@ -136,8 +140,8 @@ class ZedStorageProvider(StorageProvider):
         # Narrow thread list when a specific name is requested
         threads = self._list_threads()
         if query.name:
-            threads = [(tid, s, u) for tid, s, u in threads if query.name in (tid, s)]
-        for thread_id, _summary, _updated_at in threads:
+            threads = [t for t in threads if query.name in (t[0], t[1])]
+        for thread_id, _summary, _updated_at, *_rest in threads:
             thread = self._load_thread(thread_id)
             if thread is None:
                 continue
@@ -182,7 +186,9 @@ class ZedStorageProvider(StorageProvider):
         """Get filtered conversations with their messages."""
         result: list[ConversationData] = []
         # Use SQL-level filtering for efficiency
-        for thread_id, summary, updated_at_str in self._list_threads(since=filters.since):
+        for thread_id, summary, updated_at_str, created_at_str, *_rest in self._list_threads(
+            since=filters.since
+        ):
             updated_at = parse_iso_timestamp(updated_at_str)
             thread = self._load_thread(thread_id)
             if thread is None:
@@ -194,12 +200,13 @@ class ZedStorageProvider(StorageProvider):
                 continue
             if filters.query and not any(filters.query in m.content for m in messages):
                 continue
-            # Get token usage from thread-level cumulative data
+            # Use created_at for start_time when available, fall back to updated_at
+            start_time = parse_iso_timestamp(created_at_str) if created_at_str else updated_at
             conv_data = ConversationData(
                 id=thread_id,
                 agent="zed",
                 title=summary or thread.title,
-                start_time=updated_at.isoformat(),
+                start_time=start_time.isoformat(),
                 messages=messages,
                 token_usage=thread.cumulative_token_usage.to_run_usage(),
             )
@@ -216,7 +223,7 @@ class ZedStorageProvider(StorageProvider):
             lambda: {"usage": RunUsage(), "messages": 0, "models": set()}
         )
         # Use SQL-level filtering for efficiency
-        for thread_id, _summary, updated_at_str in self._list_threads(since=filters.cutoff):
+        for thread_id, _summary, updated_at_str, *_rest in self._list_threads(since=filters.cutoff):
             timestamp = parse_iso_timestamp(updated_at_str)
             thread = self._load_thread(thread_id)
             if thread is None:
@@ -317,8 +324,8 @@ class ZedStorageProvider(StorageProvider):
         Note:
             Zed doesn't store individual message IDs, so this searches threads.
         """
-        threads = [(session_id, None, None)] if session_id else self._list_threads()
-        for thread_id, _summary, _updated_at in threads:
+        threads = [(session_id,)] if session_id else self._list_threads()
+        for thread_id, *_rest in threads:
             if thread := self._load_thread(thread_id):
                 for msg in helpers.thread_to_chat_messages(thread, thread_id):
                     if msg.message_id == message_id:
