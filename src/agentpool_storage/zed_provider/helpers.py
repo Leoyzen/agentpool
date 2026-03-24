@@ -203,7 +203,7 @@ def _convert_flat_message(
     """Convert a v0.1.0 flat message to ChatMessage."""
     msg_id = f"{thread_id}_{msg.id}"
     # Extract text from segments
-    text_parts = [seg.text for seg in msg.segments if seg.text]
+    text_parts = [seg.text for seg in msg.text_segments]
     display_text = "\n".join(text_parts)
 
     if msg.role == "user":

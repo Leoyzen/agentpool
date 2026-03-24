@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import sys
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import anyenv
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -173,13 +173,30 @@ class ZedCrease(ZedBaseModel):
     label: str = ""
 
 
-class ZedSegment(ZedBaseModel):
+class ZedTextSegment(ZedBaseModel):
     """A segment in a flat message."""
 
-    type: Literal["text", "thinking", "RedactedThinking"]
-    text: str | None = None
-    signature: str | None = None  # For thinking segments
-    data: str | None = None  # For RedactedThinking segments
+    type: Literal["text"]
+    text: str
+
+
+class ZedThinkingSegment(ZedBaseModel):
+    """A segment in a flat message."""
+
+    type: Literal["thinking"]
+    signature: str
+
+
+class ZedRedactedThinkingSegment(ZedBaseModel):
+    """A segment in a flat message."""
+
+    type: Literal["RedactedThinking"] = "RedactedThinking"
+    data: str
+
+
+ZedSegment = Annotated[
+    ZedTextSegment | ZedThinkingSegment | ZedRedactedThinkingSegment, Field(discriminator="type")
+]
 
 
 class ZedFlatToolUse(ZedBaseModel):
@@ -210,6 +227,10 @@ class ZedFlatMessage(ZedBaseModel):
     context: str = ""
     creases: list[ZedCrease] = Field(default_factory=list)
     is_hidden: bool = False
+
+    @property
+    def text_segments(self) -> list[ZedTextSegment]:
+        return [segment for segment in self.segments if isinstance(segment, ZedTextSegment)]
 
 
 # Union of all message formats - put ZedFlatMessage first since it's more specific
