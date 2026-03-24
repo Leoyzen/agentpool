@@ -59,12 +59,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from fsspec.asyn import AsyncFileSystem
-    from pydantic_ai import ModelMessage, UserContent
+    from pydantic_ai import FinishReason, ModelMessage, UserContent
 
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
     from agentpool.tools.manager import ToolManager
     from opencode_sdk.models import (
         AnyMessageWithParts,
+        FinishReason as OCFinishReason,
         MCPConnectionStatus as OpenCodeMCPConnectionStatus,
         PartInput,
     )
@@ -444,8 +445,22 @@ def opencode_to_chat_message(
         usage=run_usage,
         model_name=model_name,
         provider_name=provider_name,
-        finish_reason=finish_reason,  # type: ignore[arg-type]
+        finish_reason=to_finish_reason(finish_reason),
     )
+
+
+def to_finish_reason(reason: str | OCFinishReason | None) -> FinishReason:
+    if reason is None:
+        return "stop"
+    mapping: dict[OCFinishReason | str, FinishReason] = {
+        "stop": "stop",
+        "length": "length",
+        "tool-calls": "tool_call",
+        "content-filter": "content_filter",
+        "error": "error",
+        "unknown": "stop",
+    }
+    return mapping.get(reason, "stop")
 
 
 # =============================================================================
