@@ -32,11 +32,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _to_chat_message(mwp: MessageWithParts) -> ChatMessage[str]:
-    """Convert a MessageWithParts to a ChatMessage."""
-    return helpers.to_chat_message(msg=mwp.info, parts=mwp.parts)
-
-
 class OpenCodeStorageProvider(StorageProvider):
     """Storage provider that reads OpenCode's native SQLite format.
 
@@ -61,7 +56,7 @@ class OpenCodeStorageProvider(StorageProvider):
         for session_id in session_ids:
             session_msgs = self.client.get_session_messages(session_id)
             for mwp in session_msgs:
-                chat_msg = _to_chat_message(mwp)
+                chat_msg = helpers.to_chat_message(mwp)
                 # Apply filters
                 if query.agents and chat_msg.name not in query.agents:
                     continue
@@ -113,7 +108,7 @@ class OpenCodeStorageProvider(StorageProvider):
             chat_messages: list[ChatMessage[str]] = []
             total_tokens = 0
             for mwp in session_msgs:
-                chat_msg = _to_chat_message(mwp)
+                chat_msg = helpers.to_chat_message(mwp)
                 chat_messages.append(chat_msg)
                 if isinstance(mwp.info, AssistantMessage):
                     total_tokens += mwp.info.tokens.input + mwp.info.tokens.output
@@ -196,7 +191,7 @@ class OpenCodeStorageProvider(StorageProvider):
     ) -> list[ChatMessage[str]]:
         """Get all messages for a session."""
         session_msgs = self.client.get_session_messages(session_id)
-        messages = [_to_chat_message(mwp) for mwp in session_msgs]
+        messages = [helpers.to_chat_message(mwp) for mwp in session_msgs]
 
         # Sort by timestamp
         now = get_now()
@@ -221,7 +216,7 @@ class OpenCodeStorageProvider(StorageProvider):
         mwp = self.client.get_message(message_id)
         if mwp is None:
             return None
-        return _to_chat_message(mwp)
+        return helpers.to_chat_message(mwp)
 
     async def get_message_ancestry(
         self,
@@ -245,7 +240,7 @@ class OpenCodeStorageProvider(StorageProvider):
                 mwp = msg_by_id.get(current_id)
                 if mwp is None:
                     break
-                chat_msg = _to_chat_message(mwp)
+                chat_msg = helpers.to_chat_message(mwp)
                 ancestors.append(chat_msg)
                 current_id = chat_msg.parent_id
             ancestors.reverse()

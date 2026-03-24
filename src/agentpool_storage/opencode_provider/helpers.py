@@ -40,18 +40,15 @@ from opencode_sdk.models import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from pydantic_ai import UserContent
+    from pydantic_ai import ModelMessage, UserContent
 
-    from opencode_sdk.models import MessageInfo, Part
+    from opencode_sdk.models import MessageInfo, MessageWithParts, Part
 
 
 logger = get_logger(__name__)
 
 
-def _build_user_pydantic_messages(
-    parts: list[Part],
-    timestamp: datetime,
-) -> list[ModelRequest | ModelResponse]:
+def _build_user_pydantic_messages(parts: list[Part], timestamp: datetime) -> list[ModelMessage]:
     """Build ModelRequest from user message parts."""
     user_content: list[UserContent] = []
     for part in parts:
@@ -72,9 +69,9 @@ def _build_assistant_pydantic_messages(
     msg: AssistantMessage,
     parts: list[Part],
     timestamp: datetime,
-) -> list[ModelRequest | ModelResponse]:
+) -> list[ModelMessage]:
     """Build ModelResponse (+ optional ModelRequest for tool returns) from assistant parts."""
-    result: list[ModelRequest | ModelResponse] = []
+    result: list[ModelMessage] = []
     response_parts: list[PydanticTextPart | ToolCallPart | ThinkingPart] = []
     tool_return_parts: list[ToolReturnPart] = []
 
@@ -115,7 +112,7 @@ def build_pydantic_messages(
     msg: MessageInfo,
     parts: list[Part],
     timestamp: datetime,
-) -> list[ModelRequest | ModelResponse]:
+) -> list[ModelMessage]:
     """Build pydantic-ai messages from typed OpenCode models.
 
     In OpenCode's model, assistant messages contain both tool calls AND their
@@ -136,54 +133,55 @@ def build_pydantic_messages(
     return _build_assistant_pydantic_messages(msg, parts, timestamp)
 
 
-def to_chat_message(*, msg: MessageInfo, parts: list[Part]) -> ChatMessage[str]:
+def to_chat_message(message: MessageWithParts) -> ChatMessage[str]:
     """Convert typed OpenCode message + parts to ChatMessage.
 
     Args:
-        msg: Typed UserMessage or AssistantMessage
-        parts: List of typed Part models
+        message: Message (with parts)
 
     Returns:
         ChatMessage with content, pydantic messages, cost info etc.
     """
     from agentpool_server.opencode_server.converters import to_native_finish_reason
 
+    msg = message.info
     timestamp = ms_to_datetime(msg.time.created)
-    content = extract_text_content(parts)
-    pydantic_messages = build_pydantic_messages(msg, parts, timestamp)
-
-    parent_id: str | None = None
-    model_name: str | None = None
-    agent_name: str | None = msg.agent if msg.agent != "default" else None
-
-    if isinstance(msg, AssistantMessage):
-        tokens = msg.tokens
-        cache = tokens.cache
-        input_tokens = tokens.input + cache.read
-        output_tokens = tokens.output
-        finish_reason = to_native_finish_reason(msg.finish)
-        cost = Decimal(str(msg.cost))
-        cost_info = TokenCost(total_cost=cost)
-        parent_id = msg.parent_id
-        model_name = msg.model_id
-        agent_name = msg.agent if msg.agent != "default" else None
-    elif isinstance(msg, UserMessage) and msg.model is not None:
-        model_name = msg.model.model_id
-        input_tokens = 0
-        output_tokens = 0
-        finish_reason = None
-        cost_info = None
-    return ChatMessage[str](
-        content=content,
-        session_id=msg.session_id,
-        role=msg.role,
-        message_id=msg.id,
-        name=agent_name,
-        model_name=model_name,
-        cost_info=cost_info,
-        finish_reason=finish_reason,
-        usage=RunUsage(input_tokens=input_tokens, output_tokens=output_tokens),
-        timestamp=timestamp,
-        parent_id=parent_id,
-        messages=pydantic_messages,
-    )
+    content = extract_text_content(message.parts)
+    pydantic_messages = build_pydantic_messages(msg, message.parts, timestamp)
+    agent_name = msg.agent if msg.agent != "default" else None
+    match msg:
+        case AssistantMessage(
+            tokens=tokens,
+            finish=finish,
+            cost=cost,
+            parent_id=parent_id,
+            model_id=model_name,
+            id=message_id,
+            session_id=session_id,
+        ):
+            return ChatMessage[str](
+                content=content,
+                session_id=session_id,
+                role="assistant",
+                message_id=message_id,
+                name=agent_name,
+                model_name=model_name,
+                cost_info=TokenCost(total_cost=Decimal(str(cost))),
+                finish_reason=to_native_finish_reason(finish),
+                usage=tokens.to_run_usage(),
+                timestamp=timestamp,
+                parent_id=parent_id,
+                messages=pydantic_messages,
+            )
+        case UserMessage(model=model, id=message_id, session_id=session_id):
+            return ChatMessage[str](
+                content=content,
+                session_id=session_id,
+                role="user",
+                message_id=message_id,
+                name=agent_name,
+                model_name=model.model_id,
+                usage=RunUsage(input_tokens=0, output_tokens=0),
+                timestamp=timestamp,
+                messages=pydantic_messages,
+            )
