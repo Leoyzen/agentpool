@@ -76,20 +76,54 @@ class OutputFormatJsonSchema(OpenCodeBaseModel):
 OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
 
-class UserMessage(OpenCodeBaseModel):
-    """User message."""
+class BaseMessage(OpenCodeBaseModel):
+    """Base class for messages."""
 
     id: str
-    role: Literal["user"] = "user"
     session_id: str
-    time: TimeCreated
     agent: str = "default"
+    variant: str | None = None
+
+
+class UserMessage(BaseMessage):
+    """User message."""
+
+    role: Literal["user"] = "user"
+    time: TimeCreated
     model: ModelRef
     format: OutputFormat | None = None
     summary: MessageSummary | None = None
     system: str | None = None
     tools: dict[str, bool] | None = None
-    variant: str | None = None
+
+
+class AssistantMessage(BaseMessage):
+    """Assistant message."""
+
+    role: Literal["assistant"] = "assistant"
+    parent_id: str  # Required - links to user message
+    model_id: str
+    provider_id: str
+    mode: str = "default"
+    path: MessagePath
+    time: MessageTime
+    tokens: Tokens = Field(default_factory=Tokens)
+    """Context window usage from the latest step.
+
+    Replaced (not accumulated) on each step. The TUI shows this from the
+    last assistant message as the session "Context" indicator.
+    """
+    cost: float = 0.0
+    """Per-message cost in USD.
+
+    The TUI sums this across all assistant messages for the session total,
+    so this must be per-message, not cumulative.
+    """
+    error: MessageError | None = None
+    summary: bool | None = None
+    # Known values from AI SDK's LanguageModelV2FinishReason; schema allows any string
+    finish: FinishReason | str | None = None
+    structured: Any | None = None
 
 
 # --- Assistant message error types ---
@@ -185,39 +219,6 @@ MessageError = (
     | StructuredOutputError
     | ContextOverflowError
 )
-
-
-class AssistantMessage(OpenCodeBaseModel):
-    """Assistant message."""
-
-    id: str
-    role: Literal["assistant"] = "assistant"
-    session_id: str
-    parent_id: str  # Required - links to user message
-    model_id: str
-    provider_id: str
-    mode: str = "default"
-    agent: str = "default"
-    path: MessagePath
-    time: MessageTime
-    tokens: Tokens = Field(default_factory=Tokens)
-    """Context window usage from the latest step.
-
-    Replaced (not accumulated) on each step. The TUI shows this from the
-    last assistant message as the session "Context" indicator.
-    """
-    cost: float = 0.0
-    """Per-message cost in USD.
-
-    The TUI sums this across all assistant messages for the session total,
-    so this must be per-message, not cumulative.
-    """
-    error: MessageError | None = None
-    summary: bool | None = None
-    # Known values from AI SDK's LanguageModelV2FinishReason; schema allows any string
-    finish: FinishReason | str | None = None
-    structured: Any | None = None
-    variant: str | None = None
 
 
 MessageInfo = UserMessage | AssistantMessage
