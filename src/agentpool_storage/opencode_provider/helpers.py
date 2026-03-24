@@ -13,7 +13,6 @@ from pydantic_ai import (
     BinaryContent,
     ModelRequest,
     ModelResponse,
-    RequestUsage,
     RunUsage,
     TextPart as PydanticTextPart,
     ThinkingPart,
@@ -79,15 +78,6 @@ def _build_assistant_pydantic_messages(
     response_parts: list[PydanticTextPart | ToolCallPart | ThinkingPart] = []
     tool_return_parts: list[ToolReturnPart] = []
 
-    tokens = msg.tokens
-    cache = tokens.cache
-    usage = RequestUsage(
-        input_tokens=tokens.input,
-        output_tokens=tokens.output,
-        cache_read_tokens=cache.read,
-        cache_write_tokens=cache.write,
-    )
-
     for part in parts:
         match part:
             case TextPart(text=text) if text:
@@ -109,7 +99,7 @@ def _build_assistant_pydantic_messages(
     if response_parts:
         model_response = ModelResponse(
             parts=response_parts,
-            usage=usage,
+            usage=msg.tokens.to_request_usage(),
             model_name=msg.model_id,
             timestamp=timestamp,
         )
@@ -146,11 +136,7 @@ def build_pydantic_messages(
     return _build_assistant_pydantic_messages(msg, parts, timestamp)
 
 
-def to_chat_message(
-    *,
-    msg: MessageInfo,
-    parts: list[Part],
-) -> ChatMessage[str]:
+def to_chat_message(*, msg: MessageInfo, parts: list[Part]) -> ChatMessage[str]:
     """Convert typed OpenCode message + parts to ChatMessage.
 
     Args:
