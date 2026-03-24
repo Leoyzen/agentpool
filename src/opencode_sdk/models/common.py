@@ -58,6 +58,10 @@ class TokenCache(OpenCodeBaseModel):
     read: int = 0
     write: int = 0
 
+    def add(self, tokens: TokenCache) -> None:
+        self.read += tokens.read
+        self.write += tokens.write
+
 
 class Tokens(OpenCodeBaseModel):
     """Token usage for one assistant message.
@@ -71,6 +75,13 @@ class Tokens(OpenCodeBaseModel):
     reasoning: int = 0
     cache: TokenCache = Field(default_factory=TokenCache)
     total: int | None = None
+
+    def add(self, tokens: Tokens) -> None:
+        self.input += tokens.input
+        self.output += tokens.output
+        self.reasoning += tokens.reasoning
+        self.cache.add(tokens.cache)
+        self.total = (self.total or 0) + (tokens.total or 0)
 
     @classmethod
     def from_pydantic_ai(cls, usage: UsageBase) -> Tokens:

@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 import anyenv
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic_ai import RunUsage
 
 
 IS_DEV = "pytest" in sys.modules
@@ -230,6 +231,14 @@ class ZedTokenUsage(ZedBaseModel):
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+
+    def to_run_usage(self) -> RunUsage:
+        return RunUsage(
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cache_write_tokens=self.cache_creation_input_tokens,
+            cache_read_tokens=self.cache_read_input_tokens,
+        )
 
 
 class ZedGitState(ZedBaseModel):
