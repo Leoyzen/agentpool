@@ -175,6 +175,62 @@ class ZedToolResultContent(ZedBaseModel):
     Image: ZedImage | None = None
 
 
+# Typed tool outputs
+
+
+class ZedEditFileOutput(ZedBaseModel):
+    """Output from edit_file tool."""
+
+    input_path: str
+    old_text: str = ""
+    new_text: str = ""
+    diff: str = ""
+    edit_agent_output: str | None = None
+
+
+class ZedEditFileOutputLegacy(ZedBaseModel):
+    """Legacy output from edit_file tool (older format)."""
+
+    original_path: str
+    old_text: str = ""
+    new_text: str = ""
+    raw_output: str = ""
+
+
+class ZedFindPathOutput(ZedBaseModel):
+    """Output from find_path tool."""
+
+    all_matches_len: int
+    current_matches_page: list[str] = Field(default_factory=list)
+    offset: int = 0
+
+
+class ZedWebSearchResult(ZedBaseModel):
+    """A single web search result."""
+
+    title: str = ""
+    url: str = ""
+    snippet: str = ""
+
+
+class ZedWebSearchOutput(ZedBaseModel):
+    """Output from web_search tool."""
+
+    results: list[ZedWebSearchResult] = Field(default_factory=list)
+
+
+ZedToolOutput = (
+    ZedEditFileOutput
+    | ZedEditFileOutputLegacy
+    | ZedFindPathOutput
+    | ZedWebSearchOutput
+    | ZedToolResultContent
+    | dict[str, Any]
+    | str
+    | None
+)
+
+
 class ZedToolResult(ZedBaseModel):
     """Tool result."""
 
@@ -182,7 +238,7 @@ class ZedToolResult(ZedBaseModel):
     tool_name: str
     is_error: bool = False
     content: ZedToolResultContent | str | None = None
-    output: dict[str, Any] | str | None = None
+    output: ZedToolOutput = None
 
 
 # User message content blocks (v0.2.0+)
@@ -316,7 +372,7 @@ class ZedFlatToolResult(ZedBaseModel):
     tool_use_id: str
     is_error: bool = False
     content: dict[str, Any] | str | None = None
-    output: dict[str, Any] | str | None = None
+    output: ZedToolOutput = None
 
 
 class ZedFlatMessage(ZedBaseModel):
