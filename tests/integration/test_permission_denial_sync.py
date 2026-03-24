@@ -23,11 +23,13 @@ import pytest
 
 from acp.schema import ToolCallStart
 from agentpool.agents.claude_code_agent import ClaudeCodeAgent
+from agentpool.ui.base import InputProvider
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
 if TYPE_CHECKING:
     from agentpool import AgentContext
+    from agentpool.agents.context import ConfirmationResult
 
 
 @dataclass
@@ -46,7 +48,7 @@ class EventTrace:
         self.permission_requests.append({"tool_name": tool_name, "tool_call_id": tool_call_id})
 
 
-class DenyingInputProvider:
+class DenyingInputProvider(InputProvider):
     """Input provider that denies all tool calls."""
 
     def __init__(self, trace: EventTrace, delay: float = 0.1):
@@ -58,7 +60,7 @@ class DenyingInputProvider:
         self,
         context: AgentContext[Any],
         tool_description: str = "",
-    ) -> str:
+    ) -> ConfirmationResult:
         """Deny all tool calls after a small delay."""
         tool_name = context.tool_name or "unknown"
         tool_call_id = context.tool_call_id or "unknown"
@@ -67,7 +69,7 @@ class DenyingInputProvider:
         self.denial_count += 1
         return "skip"
 
-    async def elicit_input(self, *args: Any, **kwargs: Any) -> Any:
+    async def get_elicitation(self, *args: Any, **kwargs: Any) -> Any:
         """Not used in this test."""
         return ElicitResult(action="cancel")
 

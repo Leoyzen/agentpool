@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from agentpool.agents.agui_agent import AGUIAgent
+from agentpool.agents.events import StreamCompleteEvent
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Hangs on Windows CI")
@@ -48,7 +49,9 @@ async def test_agui_agent_streaming_with_managed_server():
             events.append(event)  # noqa: PERF401
         assert len(events) > 0
         # Last event should be StreamCompleteEvent with final message
-        assert events[-1].message.content
+        complete_event = events[-1]
+        assert isinstance(complete_event, StreamCompleteEvent)
+        assert complete_event.message.content
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Hangs on Windows CI")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 
 # Hook state for testing
-hook_state: dict[str, list] = {"calls": [], "results": []}
+hook_state: dict[str, list[Any]] = {"calls": [], "results": []}
 
 
 def reset_hook_state():

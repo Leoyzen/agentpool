@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient, tool
 from clawd_code_sdk.models import McpHttpServerConfig, ResultMessage
@@ -214,7 +214,7 @@ async def test_claude_code_passes_tool_use_id_in_meta():
     """
 
     @tool(name="capture_meta", description="Captures the _meta field", input_schema={"value": int})
-    async def capture_meta_tool(input_data: dict) -> dict:
+    async def capture_meta_tool(input_data: dict[str, Any]) -> dict[str, Any]:
         """Tool that captures what _meta was passed."""
         # The _meta is not directly accessible here in SDK tools
         # We need a different approach - use our MCP bridge

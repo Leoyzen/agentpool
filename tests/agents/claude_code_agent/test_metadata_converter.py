@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from clawd_code_sdk.models import BashInput, BashOutput, TodoItem, TodoWriteOutput
 import pytest
@@ -22,7 +22,7 @@ class TestConvertToolResultToOpencodeMetadata:
 
     def test_write_tool_result(self) -> None:
         """Test conversion of Write tool result."""
-        sdk_result = {
+        sdk_result: dict[str, Any] = {
             "type": "create",
             "filePath": "/tmp/test/hello.py",
             "content": "def hello():\n    print('Hello')\n",
@@ -164,7 +164,7 @@ class TestConvertToolResultToOpencodeMetadata:
 
     def test_case_insensitive_tool_name(self) -> None:
         """Test that tool name matching is case-insensitive."""
-        sdk_result = {
+        sdk_result: dict[str, Any] = {
             "type": "create",
             "filePath": "/tmp/test.py",
             "content": "# test",
@@ -245,7 +245,7 @@ class TestTodoWriteConversion:
             oldTodos=[TodoItem(content="old", status="completed", activeForm="")], newTodos=[]
         )
         metadata = convert_to_opencode_metadata("TodoWrite", sdk_result)
-        assert metadata == {"todos": []}
+        assert metadata == TodoMetadata(todos=[])
 
     def test_todowrite_case_insensitive(self) -> None:
         """Test that tool name matching is case-insensitive."""

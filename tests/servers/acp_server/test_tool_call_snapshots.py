@@ -19,7 +19,7 @@ from .tool_call_harness import ToolCallTestHarness
 
 
 if TYPE_CHECKING:
-    from syrupy import SnapshotAssertion
+    from syrupy.assertion import SnapshotAssertion
 
 
 @pytest.fixture

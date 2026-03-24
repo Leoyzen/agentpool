@@ -24,9 +24,9 @@ if TYPE_CHECKING:
     from agentpool.agents.events import RichAgentStreamEvent
 
 
-def drain_event_queue(agent: Agent) -> list[RichAgentStreamEvent]:
+def drain_event_queue(agent: Agent) -> list[RichAgentStreamEvent[Any]]:
     """Drain all events from the agent's event queue."""
-    events: list[RichAgentStreamEvent] = []
+    events: list[RichAgentStreamEvent[Any]] = []
     while not agent._event_queue.empty():
         try:
             events.append(agent._event_queue.get_nowait())

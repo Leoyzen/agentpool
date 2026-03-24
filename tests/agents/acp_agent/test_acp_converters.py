@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic_ai import (
     ModelRequest,
     ModelResponse,
@@ -24,6 +26,10 @@ from agentpool.agents.acp_agent.acp_converters import (
     ACPMessageAccumulator,
     acp_notifications_to_messages,
 )
+
+
+if TYPE_CHECKING:
+    from acp.schema import SessionUpdate
 
 
 class TestACPMessageAccumulator:
@@ -220,7 +226,10 @@ class TestACPMessageAccumulator:
         """process_all handles list of updates."""
         accumulator = ACPMessageAccumulator()
 
-        updates = [UserMessageChunk.text("User"), AgentMessageChunk.text("Agent")]
+        updates: list[SessionUpdate] = [
+            UserMessageChunk.text("User"),
+            AgentMessageChunk.text("Agent"),
+        ]
         for item in updates:
             accumulator.process(item)
         messages = accumulator.finalize()
@@ -247,7 +256,10 @@ class TestACPNotificationsToMessages:
 
     def test_basic_conversion(self) -> None:
         """Basic conversion of notifications to messages."""
-        updates = [UserMessageChunk.text("Hi"), AgentMessageChunk.text("Hello")]
+        updates: list[SessionUpdate] = [
+            UserMessageChunk.text("Hi"),
+            AgentMessageChunk.text("Hello"),
+        ]
 
         messages = acp_notifications_to_messages(updates)
 

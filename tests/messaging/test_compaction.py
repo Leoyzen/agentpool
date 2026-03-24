@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic_ai import (
     ModelRequest,
     ModelResponse,
@@ -36,6 +38,10 @@ from agentpool_config.compaction import (
     TruncateToolOutputsConfig,
     WhenMessageCountExceedsConfig,
 )
+
+
+if TYPE_CHECKING:
+    from pydantic_ai import ModelMessage
 
 
 @pytest.fixture
@@ -98,7 +104,7 @@ async def test_filter_thinking(sample_messages):
 
 async def test_filter_retry_prompts():
     """Test that retry prompts are filtered out."""
-    messages = [
+    messages: list[ModelMessage] = [
         ModelRequest(
             parts=[
                 UserPromptPart(content="Do something"),
@@ -150,7 +156,7 @@ async def test_filter_tool_calls_include_only(messages_with_tools):
 
 async def test_filter_empty_messages():
     """Test that empty messages are removed."""
-    messages = [
+    messages: list[ModelMessage] = [
         ModelRequest(parts=[UserPromptPart(content="Hello")]),
         ModelResponse(parts=[TextPart(content="")]),  # Empty text
         ModelRequest(parts=[UserPromptPart(content="World")]),
@@ -234,7 +240,7 @@ async def test_keep_first_and_last(sample_messages):
 
 async def test_when_message_count_exceeds():
     """Test conditional step application."""
-    messages = [
+    messages: list[ModelMessage] = [
         ModelRequest(parts=[UserPromptPart(content="1")]),
         ModelResponse(parts=[TextPart(content="1")]),
     ]
