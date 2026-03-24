@@ -306,8 +306,7 @@ class StorageProvider:
 
             entry = stats[key]
             entry["messages"] += 1
-            if token_usage:
-                entry["usage"] += token_usage
+            entry["usage"] += token_usage
             if model:
                 entry["models"].add(model)
 
