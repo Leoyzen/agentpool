@@ -96,10 +96,7 @@ async def test_tool_call_event_ordering():
     # Track events per tool_call_id
     tool_call_events = defaultdict[str, list[str]](list)
 
-    async with ClaudeCodeAgent(
-        name="test-agent",
-        permission_mode="default",
-    ) as agent:
+    async with ClaudeCodeAgent(name="test-agent", permission_mode="default") as agent:
         prompt = (
             "Create a file at /tmp/test_event_order.txt with content 'hello'. "
             "Don't retry if denied."

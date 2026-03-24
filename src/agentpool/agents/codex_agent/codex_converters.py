@@ -56,7 +56,7 @@ if TYPE_CHECKING:
         MiscTurnStatusValue,
         ModelData,
         StdioMcpServer,
-        ThreadData,
+        Thread,
         ThreadItem,
         TokenUsageBreakdown,
         Turn,
@@ -185,7 +185,7 @@ def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelI
     )
 
 
-def to_session_data(thread_data: ThreadData, agent_name: str, cwd: str | None) -> SessionData:
+def to_session_data(thread_data: Thread, agent_name: str, cwd: str | None) -> SessionData:
     created_at = datetime.fromtimestamp(thread_data.created_at, tz=UTC)
     return SessionData(
         session_id=thread_data.id,
