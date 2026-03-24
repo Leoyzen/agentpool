@@ -106,23 +106,26 @@ class OpenCodeStorageProvider(StorageProvider):
                 continue
 
             chat_messages: list[ChatMessage[str]] = []
-            total_tokens = 0
+            input_tokens = 0
+            output_tokens = 0
             for mwp in session_msgs:
                 chat_msg = helpers.to_chat_message(mwp)
                 chat_messages.append(chat_msg)
                 if isinstance(mwp.info, AssistantMessage):
-                    total_tokens += mwp.info.tokens.input + mwp.info.tokens.output
-
-            if not chat_messages:
-                continue
-
+                    input_tokens += mwp.info.tokens.input
+                    output_tokens += mwp.info.tokens.output
+            total_tokens = input_tokens + output_tokens
             # Apply remaining filters
             if filters.agent_name and not any(m.name == filters.agent_name for m in chat_messages):
                 continue
             if filters.query and not any(filters.query in m.content for m in chat_messages):
                 continue
 
-            usage = TokenUsage(total=total_tokens, prompt=0, completion=0) if total_tokens else None
+            usage = (
+                TokenUsage(total=total_tokens, prompt=input_tokens, completion=output_tokens)
+                if total_tokens
+                else None
+            )
             conv_data = ConvData(
                 id=session.id,
                 agent=chat_messages[0].name or "opencode",
