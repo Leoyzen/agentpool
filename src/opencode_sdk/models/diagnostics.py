@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
+
+
+SeverityLevel = Literal[1, 2, 3, 4]
 
 
 class DiagnosticPosition(BaseModel):
@@ -37,7 +42,8 @@ class Diagnostic(BaseModel):
 
     range: DiagnosticRange
     message: str
-    severity: int | None = None  # 1=Error, 2=Warning, 3=Info, 4=Hint
+    severity: SeverityLevel | None = None
+    """1=Error, 2=Warning, 3=Info, 4=Hint"""
     code: str | int | None = None
     source: str | None = None
 

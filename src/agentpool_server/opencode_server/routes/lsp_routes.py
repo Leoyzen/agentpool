@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 import os
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -19,6 +20,10 @@ from opencode_sdk.models import (
     LspStatus,
     LspUpdatedEvent,
 )
+
+
+if TYPE_CHECKING:
+    from opencode_sdk.models.diagnostics import SeverityLevel
 
 
 router = APIRouter(tags=["lsp"])
@@ -175,9 +180,9 @@ async def get_diagnostics(
     return results
 
 
-def _severity_to_lsp(severity: str) -> int:
+def _severity_to_lsp(severity: str) -> SeverityLevel:
     """Convert severity string to LSP severity number."""
-    mapping = {"error": 1, "warning": 2, "info": 3, "hint": 4}
+    mapping: dict[str, SeverityLevel] = {"error": 1, "warning": 2, "info": 3, "hint": 4}
     return mapping.get(severity.lower(), 1)
 
 
