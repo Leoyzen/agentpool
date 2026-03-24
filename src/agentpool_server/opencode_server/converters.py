@@ -432,8 +432,15 @@ def opencode_to_chat_message(
         # Add tool returns as a follow-up request if any
         if tool_returns:
             model_messages.append(ModelRequest(parts=tool_returns, instructions=None))
-    # Extract content for the ChatMessage
-    content = next((p.text for p in msg.parts if isinstance(p, TextPart)), "")
+    # Extract content from text parts after the last tool call,
+    # matching pydantic-ai's behavior of only using the final response's text.
+    last_tool_idx = -1
+    for i, part in enumerate(msg.parts):
+        if isinstance(part, ToolPart):
+            last_tool_idx = i
+    content = "".join(
+        p.text for i, p in enumerate(msg.parts) if isinstance(p, TextPart) and i > last_tool_idx
+    )
     return ChatMessage(
         content=content,
         role=info.role,
