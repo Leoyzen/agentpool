@@ -8,22 +8,11 @@ from __future__ import annotations
 
 from contextlib import suppress
 import os
-from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter
 
 from agentpool_server.opencode_server.dependencies import StateDep
-from opencode_sdk.models import (
-    Diagnostic,
-    DiagnosticRange,
-    FormatterStatus,
-    LspStatus,
-    LspUpdatedEvent,
-)
-
-
-if TYPE_CHECKING:
-    from opencode_sdk.models.diagnostics import SeverityLevel
+from opencode_sdk.models import FormatterStatus, LspStatus
 
 
 router = APIRouter(tags=["lsp"])
@@ -55,155 +44,109 @@ async def list_lsp_servers(state: StateDep) -> list[LspStatus]:
     return servers
 
 
-@router.post("/lsp/start")
-async def start_lsp_server(
-    state: StateDep,
-    server_id: str = Query(..., description="LSP server ID (e.g., 'pyright', 'rust-analyzer')"),
-    root_uri: str | None = Query(None, description="Workspace root URI"),
-) -> LspStatus:
-    """Start an LSP server.
+# NOTE: The following routes are agentpool extensions that don't exist in upstream OpenCode.
+# Commented out until we confirm they're needed.
 
-    Starts the specified LSP server for the given workspace root.
-    If no root_uri is provided, uses the server's working directory.
-
-    Args:
-        state: Server state dependency (injected).
-        server_id: The LSP server identifier (e.g., 'pyright', 'typescript').
-        root_uri: Optional workspace root URI (file:// format).
-
-    Returns:
-        The started server's status.
-
-    Raises:
-        HTTPException: If the server fails to start or is not registered.
-    """
-    # Default to working directory if no root provided
-    if root_uri is None:
-        root_uri = f"file://{state.working_dir}"
-
-    try:
-        server_state = await state.lsp_manager.start_server(server_id, root_uri)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    # Emit lsp.updated event to notify clients of server status change
-    await state.broadcast_event(LspUpdatedEvent())
-    # Get relative root path for response
-    root_path = root_uri
-    if root_uri.startswith("file://"):
-        root_path = root_uri[7:]
-        with suppress(ValueError):
-            root_path = os.path.relpath(root_path, state.working_dir)
-    status = "connected" if server_state.initialized else "error"
-    return LspStatus(id=server_id, name=server_id, root=root_path, status=status)
+# @router.post("/lsp/start")
+# async def start_lsp_server(
+#     state: StateDep,
+#     server_id: str = Query(..., description="LSP server ID (e.g., 'pyright', 'rust-analyzer')"),
+#     root_uri: str | None = Query(None, description="Workspace root URI"),
+# ) -> LspStatus:
+#     """Start an LSP server."""
+#     from fastapi import HTTPException
+#     from opencode_sdk.models import LspUpdatedEvent
+#
+#     if root_uri is None:
+#         root_uri = f"file://{state.working_dir}"
+#
+#     try:
+#         server_state = await state.lsp_manager.start_server(server_id, root_uri)
+#     except ValueError as e:
+#         raise HTTPException(status_code=404, detail=str(e)) from e
+#     except RuntimeError as e:
+#         raise HTTPException(status_code=500, detail=str(e)) from e
+#
+#     await state.broadcast_event(LspUpdatedEvent())
+#     root_path = root_uri
+#     if root_uri.startswith("file://"):
+#         root_path = root_uri[7:]
+#         with suppress(ValueError):
+#             root_path = os.path.relpath(root_path, state.working_dir)
+#     status = "connected" if server_state.initialized else "error"
+#     return LspStatus(id=server_id, name=server_id, root=root_path, status=status)
 
 
-@router.post("/lsp/stop")
-async def stop_lsp_server(
-    state: StateDep,
-    server_id: str = Query(..., description="LSP server ID to stop"),
-) -> dict[str, str]:
-    """Stop an LSP server.
-
-    Args:
-        state: Server state dependency (injected).
-        server_id: The LSP server identifier to stop.
-
-    Returns:
-        Success message.
-    """
-    await state.lsp_manager.stop_server(server_id)
-    # Emit lsp.updated event to notify clients of server status change
-    await state.broadcast_event(LspUpdatedEvent())
-    return {"status": "ok", "message": f"Server {server_id} stopped"}
+# @router.post("/lsp/stop")
+# async def stop_lsp_server(
+#     state: StateDep,
+#     server_id: str = Query(..., description="LSP server ID to stop"),
+# ) -> dict[str, str]:
+#     """Stop an LSP server."""
+#     from opencode_sdk.models import LspUpdatedEvent
+#
+#     await state.lsp_manager.stop_server(server_id)
+#     await state.broadcast_event(LspUpdatedEvent())
+#     return {"status": "ok", "message": f"Server {server_id} stopped"}
 
 
-@router.get("/lsp/diagnostics")
-async def get_diagnostics(
-    state: StateDep,
-    path: str | None = Query(None, description="File path to get diagnostics for"),
-) -> dict[str, list[Diagnostic]]:
-    """Get diagnostics from all active LSP servers.
-
-    Returns diagnostics organized by file path. If a specific path is provided,
-    returns diagnostics only for that file using CLI diagnostics.
-
-    This uses CLI-based diagnostic tools (pyright, mypy, etc.) which are more
-    reliable for on-demand checks than the LSP push model.
-
-    Args:
-        state: Server state dependency (injected).
-        path: Optional file path to get diagnostics for.
-
-    Returns:
-        Dictionary mapping file paths to lists of diagnostic objects.
-    """
-    results: dict[str, list[Diagnostic]] = {}
-
-    # If a specific path is provided, run CLI diagnostics for it
-    if path:
-        # Make path absolute if needed
-        if not os.path.isabs(path):  # noqa: PTH117
-            path = os.path.join(state.working_dir, path)  # noqa: PTH118
-
-        # Find the appropriate server for this file
-        server_info = state.lsp_manager.get_server_for_file(path)
-        if server_info and server_info.has_cli_diagnostics:
-            try:
-                result = await state.lsp_manager.run_cli_diagnostics(server_info.id, [path])
-                if result.success and result.diagnostics:
-                    for diag in result.diagnostics:
-                        file_path = diag.file or path
-                        if file_path not in results:
-                            results[file_path] = []
-                        # Convert from 1-based (CLI tools) to 0-based (LSP)
-                        rng = DiagnosticRange.create(
-                            start_line=max(0, diag.line - 1),
-                            start_char=max(0, diag.column - 1),
-                            end_line=max(0, (diag.end_line or diag.line) - 1),
-                            end_char=max(0, (diag.end_column or diag.column) - 1),
-                        )
-                        diagnostics = Diagnostic(
-                            range=rng,
-                            message=diag.message,
-                            severity=_severity_to_lsp(diag.severity),
-                            code=diag.code,
-                            source=diag.source or server_info.id,
-                        )
-                        results[file_path].append(diagnostics)
-            except Exception:  # noqa: BLE001
-                # CLI diagnostics failed, return empty
-                pass
-
-    return results
+# @router.get("/lsp/diagnostics")
+# async def get_diagnostics(
+#     state: StateDep,
+#     path: str | None = Query(None, description="File path to get diagnostics for"),
+# ) -> dict[str, list[Diagnostic]]:
+#     """Get diagnostics from all active LSP servers."""
+#     from opencode_sdk.models import Diagnostic, DiagnosticRange
+#     from opencode_sdk.models.diagnostics import SeverityLevel
+#
+#     def _severity_to_lsp(severity: str) -> SeverityLevel:
+#         mapping: dict[str, SeverityLevel] = {"error": 1, "warning": 2, "info": 3, "hint": 4}
+#         return mapping.get(severity.lower(), 1)
+#
+#     results: dict[str, list[Diagnostic]] = {}
+#     if path:
+#         if not os.path.isabs(path):
+#             path = os.path.join(state.working_dir, path)
+#         server_info = state.lsp_manager.get_server_for_file(path)
+#         if server_info and server_info.has_cli_diagnostics:
+#             try:
+#                 result = await state.lsp_manager.run_cli_diagnostics(server_info.id, [path])
+#                 if result.success and result.diagnostics:
+#                     for diag in result.diagnostics:
+#                         file_path = diag.file or path
+#                         if file_path not in results:
+#                             results[file_path] = []
+#                         rng = DiagnosticRange.create(
+#                             start_line=max(0, diag.line - 1),
+#                             start_char=max(0, diag.column - 1),
+#                             end_line=max(0, (diag.end_line or diag.line) - 1),
+#                             end_char=max(0, (diag.end_column or diag.column) - 1),
+#                         )
+#                         results[file_path].append(
+#                             Diagnostic(
+#                                 range=rng,
+#                                 message=diag.message,
+#                                 severity=_severity_to_lsp(diag.severity),
+#                                 code=diag.code,
+#                                 source=diag.source or server_info.id,
+#                             )
+#                         )
+#             except Exception:
+#                 pass
+#     return results
 
 
-def _severity_to_lsp(severity: str) -> SeverityLevel:
-    """Convert severity string to LSP severity number."""
-    mapping: dict[str, SeverityLevel] = {"error": 1, "warning": 2, "info": 3, "hint": 4}
-    return mapping.get(severity.lower(), 1)
-
-
-@router.get("/lsp/servers")
-async def list_available_servers(state: StateDep) -> list[dict[str, object]]:
-    """List all registered (available) LSP servers.
-
-    Returns information about all LSP servers that can be started,
-    regardless of whether they are currently running.
-
-    Returns:
-        List of server configurations.
-    """
-    return [
-        {
-            "id": server_id,
-            "extensions": config.extensions,
-            "running": server_id in state.lsp_manager._servers,
-        }
-        for server_id, config in state.lsp_manager._server_configs.items()
-    ]
+# @router.get("/lsp/servers")
+# async def list_available_servers(state: StateDep) -> list[dict[str, object]]:
+#     """List all registered (available) LSP servers."""
+#     return [
+#         {
+#             "id": server_id,
+#             "extensions": config.extensions,
+#             "running": server_id in state.lsp_manager._servers,
+#         }
+#         for server_id, config in state.lsp_manager._server_configs.items()
+#     ]
 
 
 # =============================================================================
@@ -224,8 +167,5 @@ async def list_formatters(state: StateDep) -> list[FormatterStatus]:
     Returns:
         List of formatter status objects.
     """
-    # Stub implementation - formatters not yet implemented
-    # OpenCode has formatters like prettier, biome, etc.
-    # For now, return empty list
     _ = state  # Reserved for future use
     return []
