@@ -16,7 +16,6 @@ from agentpool.storage import deserialize_messages
 from agentpool.utils.time_utils import get_now
 from agentpool_config.storage import FileStorageConfig
 from agentpool_storage.base import StorageProvider
-from agentpool_storage.models import TokenUsage
 
 
 if TYPE_CHECKING:
@@ -39,7 +38,7 @@ class MessageData(TypedDict):
     name: str | None
     model: str | None
     cost: Decimal | None
-    token_usage: TokenUsage | None
+    token_usage: RunUsage | None
     response_time: float | None
     provider_name: str | None
     provider_response_id: str | None
@@ -158,25 +157,16 @@ class FileProvider(StorageProvider):
                 continue
             if query.roles and msg["role"] not in query.roles:
                 continue
-
             # Convert to ChatMessage
-            cost_info = None
-            usage = msg["token_usage"]
             cost = Decimal(msg["cost"] or 0.0)
-            run_usage = RunUsage(
-                input_tokens=usage["prompt"] if usage else 0,
-                output_tokens=usage["completion"] if usage else 0,
-            )
-            cost_info = TokenCost(total_cost=cost)
-
             chat_message = ChatMessage[str](
                 content=msg["content"],
                 session_id=msg["session_id"],
                 role=cast(MessageRole, msg["role"]),
                 name=msg["name"],
                 model_name=msg["model"],
-                cost_info=cost_info,
-                usage=run_usage,
+                cost_info=TokenCost(total_cost=cost),
+                usage=RunUsage(**msg["token_usage"]) if msg["token_usage"] else RunUsage(),
                 response_time=msg["response_time"],
                 timestamp=datetime.fromisoformat(msg["timestamp"]),
                 provider_name=msg["provider_name"],
@@ -195,8 +185,6 @@ class FileProvider(StorageProvider):
         """Log a new message."""
         from agentpool.storage.serialization import serialize_messages
 
-        cost_info = message.cost_info
-        usage = message.usage
         self._data["messages"].append({
             "session_id": message.session_id or "",
             "message_id": message.message_id,
@@ -205,12 +193,8 @@ class FileProvider(StorageProvider):
             "timestamp": get_now().isoformat(),
             "name": message.name,
             "model": message.model_name,
-            "cost": Decimal(cost_info.total_cost) if cost_info else None,
-            "token_usage": TokenUsage(
-                prompt=usage.input_tokens,
-                completion=usage.output_tokens,
-                total=usage.total_tokens,
-            ),
+            "cost": Decimal(info.total_cost) if (info := message.cost_info) else None,
+            "token_usage": message.usage,
             "response_time": message.response_time,
             "provider_name": message.provider_name,
             "provider_response_id": message.provider_response_id,
@@ -577,15 +561,7 @@ class FileProvider(StorageProvider):
 
 def _to_chat_message(msg: MessageData) -> ChatMessage[str]:
     """Convert stored message data to ChatMessage."""
-    cost_info = None
-    usage = msg["token_usage"]
-    if usage:
-        cost_info = TokenCost(total_cost=Decimal(str(msg.get("cost") or 0)))
-    run_usage = RunUsage(
-        input_tokens=usage.get("prompt", 0) if usage else 0,
-        output_tokens=usage.get("completion", 0) if usage else 0,
-    )
-
+    cost_info = TokenCost(total_cost=Decimal(str(msg.get("cost") or 0)))
     # Build kwargs, only including timestamp/message_id if they have values
     kwargs: dict[str, Any] = {
         "content": msg["content"],
@@ -593,7 +569,7 @@ def _to_chat_message(msg: MessageData) -> ChatMessage[str]:
         "name": msg.get("name"),
         "model_name": msg.get("model"),
         "cost_info": cost_info,
-        "usage": run_usage,
+        "usage": RunUsage(**msg["token_usage"]) if msg["token_usage"] else RunUsage(),
         "response_time": msg.get("response_time"),
         "parent_id": msg.get("parent_id"),
         "session_id": msg.get("session_id"),

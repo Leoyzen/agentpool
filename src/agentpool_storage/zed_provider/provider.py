@@ -14,7 +14,7 @@ from agentpool.log import get_logger
 from agentpool.utils.time_utils import get_now, parse_iso_timestamp
 from agentpool_config.storage import ZedStorageConfig
 from agentpool_storage.base import StorageProvider
-from agentpool_storage.models import ConversationData, TokenUsage
+from agentpool_storage.models import ConversationData
 from agentpool_storage.zed_provider import helpers
 from agentpool_storage.zed_provider.models import ZedThread
 
@@ -194,21 +194,13 @@ class ZedStorageProvider(StorageProvider):
             if filters.query and not any(filters.query in m.content for m in messages):
                 continue
             # Get token usage from thread-level cumulative data
-            usage = thread.cumulative_token_usage
-            total = usage.input_tokens + usage.output_tokens
-            token_usage_data = (
-                TokenUsage(total=total, prompt=usage.input_tokens, completion=usage.output_tokens)
-                if total
-                else None
-            )
-
             conv_data = ConversationData(
                 id=thread_id,
                 agent="zed",
                 title=summary or thread.title,
                 start_time=updated_at.isoformat(),
                 messages=messages,
-                token_usage=token_usage_data,
+                token_usage=thread.cumulative_token_usage.to_run_usage(),
             )
 
             result.append(conv_data)

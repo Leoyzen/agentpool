@@ -191,7 +191,7 @@ async def test_filtered_conversations(provider: SQLModelProvider, sample_data: N
     assert conv["agent"] == "test_agent"
     assert len(conv["messages"]) == 2
     assert conv["token_usage"] is not None
-    assert conv["token_usage"]["total"] == 30  # 10 + 20 tokens
+    assert conv["token_usage"].total_tokens == 30  # 10 + 20 tokens
 
 
 async def test_period_filtering(provider: SQLModelProvider, sample_data: None):

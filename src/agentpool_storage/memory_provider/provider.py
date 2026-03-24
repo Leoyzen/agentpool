@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai import RunUsage
+
 from agentpool.utils.time_utils import get_now
 from agentpool_config.storage import MemoryStorageConfig
 from agentpool_storage.base import StorageProvider
@@ -18,7 +20,7 @@ if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage
     from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.session import SessionQuery
-    from agentpool_storage.models import QueryFilters, StatsFilters, TokenUsage
+    from agentpool_storage.models import QueryFilters, StatsFilters
 
 
 class MemoryStorageProvider(StorageProvider):
@@ -487,11 +489,9 @@ class MemoryStorageProvider(StorageProvider):
                 return
 
 
-def _aggregate_token_usage(messages: Sequence[ChatMessage[Any]]) -> TokenUsage:
+def _aggregate_token_usage(messages: Sequence[ChatMessage[Any]]) -> RunUsage:
     """Sum up tokens from a sequence of messages."""
-    total = prompt = completion = 0
+    usage = RunUsage()
     for msg in messages:
-        total += msg.usage.total_tokens
-        prompt += msg.usage.input_tokens
-        completion += msg.usage.output_tokens
-    return {"total": total, "prompt": prompt, "completion": completion}
+        usage += msg.usage
+    return usage

@@ -70,9 +70,9 @@ def _print_conversation(console: Console, conv: ConversationData) -> None:
     if token_usage := conv.get("token_usage"):
         console.print(
             "[dim]"
-            f"Tokens: {token_usage['total']:,} total "
-            f"({token_usage['prompt']:,} prompt, "
-            f"{token_usage['completion']:,} completion)"
+            f"Tokens: {token_usage.total_tokens:,} total "
+            f"({token_usage.input_tokens:,} prompt, "
+            f"{token_usage.output_tokens:,} completion)"
             "[/]"
         )
         console.print()

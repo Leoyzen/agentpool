@@ -42,7 +42,6 @@ from agentpool_storage.claude_provider.converters import (
     entry_to_chat_message,
     normalize_model_name,
 )
-from agentpool_storage.models import TokenUsage
 
 
 if TYPE_CHECKING:
@@ -493,18 +492,13 @@ class ClaudeStorageProvider(StorageProvider):
             if filters.query and not any(filters.query in m.content for m in parsed.messages):
                 continue
 
-            token_usage_data = TokenUsage(
-                total=parsed.usage.total_tokens,
-                prompt=parsed.usage.input_tokens,
-                completion=parsed.usage.output_tokens,
-            )
             conv_data = ConversationData(
                 id=parsed.session_id,
                 agent=parsed.messages[0].name or "claude",
                 title=extract_title(parsed.path),
                 start_time=(parsed.first_timestamp or get_now()).isoformat(),
                 messages=parsed.messages,
-                token_usage=token_usage_data,
+                token_usage=parsed.usage,
             )
 
             result.append(conv_data)

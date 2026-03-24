@@ -9,21 +9,12 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from pydantic_ai import RunUsage
+
     from agentpool.messaging import ChatMessage
 
 
 GroupBy = Literal["agent", "model", "hour", "day"]
-
-
-class TokenUsage(TypedDict):
-    """Token usage statistics from model responses."""
-
-    total: int
-    """Total tokens used"""
-    prompt: int
-    """Tokens used in the prompt"""
-    completion: int
-    """Tokens used in the completion"""
 
 
 class ConversationData(TypedDict):
@@ -44,7 +35,7 @@ class ConversationData(TypedDict):
     messages: list[ChatMessage[Any]]
     """List of messages in this conversation"""
 
-    token_usage: TokenUsage | None
+    token_usage: RunUsage | None
     """Aggregated token usage for the entire conversation"""
 
 

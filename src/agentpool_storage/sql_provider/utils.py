@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from sqlmodel.sql.expression import SelectOfScalar
-    from tokonomics.toko_types import TokenUsage
 
     from agentpool_config.session import SessionQuery
     from agentpool_storage.sql_provider.models import Message
@@ -33,16 +32,12 @@ _migrated_databases: set[str] = set()
 logger = get_logger(__name__)
 
 
-def aggregate_token_usage(
-    messages: Sequence[ChatMessage[str]],
-) -> TokenUsage:
+def aggregate_token_usage(messages: Sequence[ChatMessage[str]]) -> RunUsage:
     """Sum up tokens from a sequence of messages."""
-    total = prompt = completion = 0
+    usage = RunUsage()
     for msg in messages:
-        total += msg.usage.total_tokens
-        prompt += msg.usage.input_tokens
-        completion += msg.usage.output_tokens
-    return {"total": total, "prompt": prompt, "completion": completion}
+        usage += msg.usage
+    return usage
 
 
 def to_chat_message(db_message: Message) -> ChatMessage[str]:
