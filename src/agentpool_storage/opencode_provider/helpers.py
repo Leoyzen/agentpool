@@ -7,7 +7,7 @@ SQLite-based format. Converts between raw database rows and domain models.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic_ai import (
     BinaryContent,
@@ -146,12 +146,12 @@ def to_chat_message(*, msg: MessageInfo, parts: list[Part]) -> ChatMessage[str]:
     Returns:
         ChatMessage with content, pydantic messages, cost info etc.
     """
+    from agentpool_server.opencode_server.converters import to_native_finish_reason
+
     timestamp = ms_to_datetime(msg.time.created)
     content = extract_text_content(parts)
     pydantic_messages = build_pydantic_messages(msg, parts, timestamp)
 
-    cost_info = None
-    provider_details: dict[str, Any] = {}
     parent_id: str | None = None
     model_name: str | None = None
     agent_name: str | None = msg.agent if msg.agent != "default" else None
@@ -161,10 +161,9 @@ def to_chat_message(*, msg: MessageInfo, parts: list[Part]) -> ChatMessage[str]:
         cache = tokens.cache
         input_tokens = tokens.input + cache.read
         output_tokens = tokens.output
+        finish_reason = to_native_finish_reason(msg.finish)
         cost = Decimal(str(msg.cost))
         cost_info = TokenCost(total_cost=cost)
-        if msg.finish:
-            provider_details["finish_reason"] = msg.finish
         parent_id = msg.parent_id
         model_name = msg.model_id
         agent_name = msg.agent if msg.agent != "default" else None
@@ -172,7 +171,8 @@ def to_chat_message(*, msg: MessageInfo, parts: list[Part]) -> ChatMessage[str]:
         model_name = msg.model.model_id
         input_tokens = 0
         output_tokens = 0
-
+        finish_reason = None
+        cost_info = None
     return ChatMessage[str](
         content=content,
         session_id=msg.session_id,
@@ -181,9 +181,9 @@ def to_chat_message(*, msg: MessageInfo, parts: list[Part]) -> ChatMessage[str]:
         name=agent_name,
         model_name=model_name,
         cost_info=cost_info,
+        finish_reason=finish_reason,
         usage=RunUsage(input_tokens=input_tokens, output_tokens=output_tokens),
         timestamp=timestamp,
         parent_id=parent_id,
         messages=pydantic_messages,
-        provider_details=provider_details,
     )
