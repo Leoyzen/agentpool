@@ -33,6 +33,7 @@ from opencode_sdk.models import (
     MessageTime,
     MessageWithParts,
     ModelRef,
+    ResourceSource,
     Session,
     SessionRevert,
     SessionShare,
@@ -66,8 +67,6 @@ if TYPE_CHECKING:
         AnyMessageWithParts,
         MCPConnectionStatus as OpenCodeMCPConnectionStatus,
         PartInput,
-        ResourceSource,
-        ToolState,
     )
 
 
@@ -111,16 +110,6 @@ def _convert_params_for_ui(params: dict[str, Any]) -> dict[str, Any]:
     return {_PARAM_NAME_MAP.get(k, k): v for k, v in params.items()}
 
 
-def _get_input_from_state(state: ToolState, *, convert_params: bool = False) -> dict[str, Any]:
-    """Extract input from any tool state type.
-
-    Args:
-        state: Tool state to extract input from
-        convert_params: If True, convert param names to camelCase for UI display
-    """
-    return _convert_params_for_ui(state.input) if convert_params else state.input
-
-
 async def _resolve_mcp_resource(source: ResourceSource, tools: ToolManager) -> str | None:
     """Resolve an MCP resource and return its content as text (or None if cant be read)."""
     try:
@@ -161,8 +150,6 @@ async def extract_user_prompt_from_parts(
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
     """
-    from opencode_sdk.models import ResourceSource
-
     result: list[UserContent | PathReference] = []
     for part in parts:
         match part:
@@ -331,18 +318,17 @@ def chat_message_to_opencode(  # noqa: PLR0915
                         case _:
                             output = str(tool_content)
                     if existing := tool_calls.get(call_id):
-                        existing_input = _get_input_from_state(existing.state)
                         if isinstance(tool_content, dict) and "error" in tool_content:
                             existing.state = ToolStateError(
                                 error=str(tool_content.get("error", "Unknown error")),
-                                input=existing_input,
+                                input=existing.state.input,
                                 time=TimeStartEnd(start=created_ms, end=end_ms),
                             )
                         else:
                             title = f"Completed {tool_name}"
                             tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
                             existing.state = ToolStateCompleted(
-                                title=title, input=existing_input, output=output, time=tsc
+                                title=title, input=existing.state.input, output=output, time=tsc
                             )
                     else:
                         # Orphan return - create completed tool part
@@ -411,7 +397,7 @@ def opencode_to_chat_message(
                         PydanticToolCallPart(
                             tool_name=tool_name,
                             tool_call_id=call_id,
-                            args=_get_input_from_state(state),
+                            args=state.input,
                         )
                     )
                     match state:
@@ -477,13 +463,6 @@ def session_data_to_opencode(data: SessionData) -> Session:
     created_ms = datetime_to_ms(data.created_at)
     updated_ms = datetime_to_ms(data.last_active)
     # Extract revert/share from metadata if present
-    revert = None
-    share = None
-    if "revert" in data.metadata:
-        revert = SessionRevert(**data.metadata["revert"])
-    if "share" in data.metadata:
-        share = SessionShare(**data.metadata["share"])
-
     return Session(
         id=data.session_id,
         project_id=data.project_id or "default",
@@ -492,8 +471,8 @@ def session_data_to_opencode(data: SessionData) -> Session:
         version=data.version,
         time=TimeCreatedUpdated(created=created_ms, updated=updated_ms),
         parent_id=data.parent_id,
-        revert=revert,
-        share=share,
+        revert=SessionRevert(**data.metadata["revert"]) if "revert" in data.metadata else None,
+        share=SessionShare(**data.metadata["share"]) if "share" in data.metadata else None,
     )
 
 
