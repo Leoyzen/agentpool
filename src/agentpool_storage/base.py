@@ -6,6 +6,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Self, assert_never
 
+from pydantic_ai import RunUsage
+
 from agentpool.utils.tasks import TaskManager
 
 
@@ -13,8 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
     from types import TracebackType
-
-    from pydantic_ai import RunUsage
 
     from agentpool.common_types import JsonValue
     from agentpool.messaging import ChatMessage
@@ -288,7 +288,7 @@ class StorageProvider:
             group_by: How to group the statistics
         """
         stats: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"total_tokens": 0, "messages": 0, "models": set()}
+            lambda: {"usage": RunUsage(), "messages": 0, "models": set()}
         )
 
         for model, agent, timestamp, token_usage in rows:
@@ -307,7 +307,7 @@ class StorageProvider:
             entry = stats[key]
             entry["messages"] += 1
             if token_usage:
-                entry["total_tokens"] += token_usage.total_tokens
+                entry["usage"] += token_usage
             if model:
                 entry["models"].add(model)
 

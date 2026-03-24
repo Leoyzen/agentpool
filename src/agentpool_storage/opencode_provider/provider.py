@@ -137,7 +137,7 @@ class OpenCodeStorageProvider(StorageProvider):
     async def get_session_stats(self, filters: StatsFilters) -> dict[str, dict[str, Any]]:
         """Get conversation statistics."""
         stats: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"total_tokens": 0, "messages": 0, "models": set(), "total_cost": 0.0}
+            lambda: {"usage": RunUsage(), "messages": 0, "models": set(), "total_cost": 0.0}
         )
         cutoff_ms = datetime_to_ms(filters.cutoff)
         messages_with_data = self.client.get_messages_with_data(since_ms=cutoff_ms)
@@ -147,7 +147,6 @@ class OpenCodeStorageProvider(StorageProvider):
             if not isinstance(msg, AssistantMessage):
                 continue
 
-            tokens = msg.tokens.input + msg.tokens.output
             msg_timestamp = ms_to_datetime(msg.time.created)
 
             match filters.group_by:
@@ -161,7 +160,7 @@ class OpenCodeStorageProvider(StorageProvider):
                     key = msg.agent if msg.agent != "default" else "opencode"
 
             stats[key]["messages"] += 1
-            stats[key]["total_tokens"] += tokens
+            stats[key]["usage"] += msg.tokens.to_run_usage()
             stats[key]["models"].add(msg.model_id)
             stats[key]["total_cost"] += msg.cost
 

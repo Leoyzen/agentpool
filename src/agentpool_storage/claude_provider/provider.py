@@ -510,7 +510,7 @@ class ClaudeStorageProvider(StorageProvider):
     async def get_session_stats(self, filters: StatsFilters) -> dict[str, dict[str, Any]]:
         """Get conversation statistics."""
         stats: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"total_tokens": 0, "messages": 0, "models": set()}
+            lambda: {"usage": RunUsage(), "messages": 0, "models": set()}
         )
         for _session_id, session_path in self._list_sessions():
             with session_path.open("r", encoding="utf-8") as f:
@@ -528,11 +528,13 @@ class ClaudeStorageProvider(StorageProvider):
                     if not isinstance(msg, dict) or msg.get("type") != "message":
                         continue
                     model = normalize_model_name(msg.get("model", "unknown"))
-                    usage = msg.get("usage", {})
-                    input_tokens = usage.get("input_tokens", 0) or 0
-                    output_tokens = usage.get("output_tokens", 0) or 0
-                    cache_read = usage.get("cache_read_input_tokens", 0) or 0
-                    total_tokens = input_tokens + output_tokens + cache_read
+                    raw_usage = msg.get("usage", {})
+                    run_usage = RunUsage(
+                        input_tokens=raw_usage.get("input_tokens", 0) or 0,
+                        output_tokens=raw_usage.get("output_tokens", 0) or 0,
+                        cache_read_tokens=raw_usage.get("cache_read_input_tokens", 0) or 0,
+                        cache_write_tokens=raw_usage.get("cache_creation_input_tokens", 0) or 0,
+                    )
                     timestamp_str = data.get("timestamp", "")
                     if not timestamp_str:
                         continue
@@ -551,7 +553,7 @@ class ClaudeStorageProvider(StorageProvider):
                             key = "claude"  # Default agent grouping
 
                     stats[key]["messages"] += 1
-                    stats[key]["total_tokens"] += total_tokens
+                    stats[key]["usage"] += run_usage
                     stats[key]["models"].add(model)
 
         # Convert sets to lists for JSON serialization

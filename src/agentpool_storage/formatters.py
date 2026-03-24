@@ -97,7 +97,14 @@ def _print_stats(console: Console, stats: dict[str, Any]) -> None:
     for entry in stats.get("entries", [stats]):
         console.print(f"[blue]{entry['name']}[/]")
         console.print(f"  Messages: {entry['messages']}")
-        console.print(f"  Total tokens: {entry['total_tokens']:,}")
+        usage = entry["usage"]
+        console.print(
+            f"  Tokens: {usage.total_tokens:,} total"
+            f" ({usage.input_tokens:,} input, {usage.output_tokens:,} output"
+            + (f", {usage.cache_read_tokens:,} cache read" if usage.cache_read_tokens else "")
+            + (f", {usage.cache_write_tokens:,} cache write" if usage.cache_write_tokens else "")
+            + ")"
+        )
         if "models" in entry:
             console.print("  Models: " + ", ".join(entry["models"]))
         console.print()
@@ -118,7 +125,7 @@ def format_stats(stats: dict[str, dict[str, Any]], period: str, group_by: str) -
         {
             "name": key,
             "messages": data["messages"],
-            "total_tokens": data["total_tokens"],
+            "usage": data["usage"],
             "models": sorted(data["models"]),
         }
         for key, data in stats.items()

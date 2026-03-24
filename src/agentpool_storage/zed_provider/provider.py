@@ -9,6 +9,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 import anyenv
+from pydantic_ai import RunUsage
 
 from agentpool.log import get_logger
 from agentpool.utils.time_utils import get_now, parse_iso_timestamp
@@ -212,7 +213,7 @@ class ZedStorageProvider(StorageProvider):
     async def get_session_stats(self, filters: StatsFilters) -> dict[str, dict[str, Any]]:
         """Get session statistics."""
         stats: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"total_tokens": 0, "messages": 0, "models": set()}
+            lambda: {"usage": RunUsage(), "messages": 0, "models": set()}
         )
         # Use SQL-level filtering for efficiency
         for thread_id, _summary, updated_at_str in self._list_threads(since=filters.cutoff):
@@ -232,9 +233,8 @@ class ZedStorageProvider(StorageProvider):
                 case _:
                     key = "zed"  # Default agent grouping
 
-            usage = thread.cumulative_token_usage
             stats[key]["messages"] += len(thread.messages)
-            stats[key]["total_tokens"] += usage.input_tokens + usage.output_tokens
+            stats[key]["usage"] += thread.cumulative_token_usage.to_run_usage()
             stats[key]["models"].add(model)
 
         # Convert sets to lists for JSON serialization
