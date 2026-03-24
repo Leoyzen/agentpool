@@ -1,7 +1,7 @@
 # OpenCode API Compatibility Checklist
 
 This document tracks the implementation status of OpenCode-compatible API endpoints.
-Last audited against OpenCode source: **2026-02-24**
+Last audited against OpenCode source: **2026-03-24**
 
 ## Status Legend
 - [ ] Not implemented
@@ -20,6 +20,7 @@ Last audited against OpenCode source: **2026-02-24**
 | [x] | GET | `/global/config` | Get global configuration |
 | [x] | PATCH | `/global/config` | Update global configuration |
 | [x] | POST | `/global/dispose` | Dispose all instances |
+| [~] | POST | `/global/upgrade` | Upgrade opencode (stub - not applicable) |
 
 ---
 
@@ -29,6 +30,7 @@ Last audited against OpenCode source: **2026-02-24**
 |--------|--------|------|-------------|
 | [x] | GET | `/project` | List all projects |
 | [x] | GET | `/project/current` | Get the current project |
+| [x] | POST | `/project/git/init` | Initialize git repository |
 | [x] | PATCH | `/project/{projectID}` | Update project (name, icon, commands) |
 | [x] | GET | `/path` | Get the current path |
 | [x] | GET | `/vcs` | Get VCS info for current project |
@@ -174,7 +176,7 @@ Last audited against OpenCode source: **2026-02-24**
 
 ---
 
-## Worktrees (Experimental)
+## Worktrees & Workspaces (Experimental)
 
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
@@ -193,11 +195,19 @@ Last audited against OpenCode source: **2026-02-24**
 | Status | Method | Path | Description |
 |--------|--------|------|-------------|
 | [x] | GET | `/lsp` | Get LSP server status |
-| [x] | POST | `/lsp/start` | Start an LSP server |
-| [x] | POST | `/lsp/stop` | Stop an LSP server |
-| [x] | GET | `/lsp/servers` | List available LSP servers |
-| [x] | GET | `/lsp/diagnostics` | Get LSP diagnostics (CLI-based) |
 | [x] | GET | `/formatter` | Get formatter status (stub) |
+
+### AgentPool Extensions (commented out, not in upstream OpenCode)
+
+These routes were agentpool-specific extensions. OpenCode handles diagnostics
+internally via tool call results, not HTTP endpoints.
+
+| Status | Method | Path | Description |
+|--------|--------|------|-------------|
+| [-] | POST | `/lsp/start` | Start an LSP server (commented out) |
+| [-] | POST | `/lsp/stop` | Stop an LSP server (commented out) |
+| [-] | GET | `/lsp/servers` | List available LSP servers (commented out) |
+| [-] | GET | `/lsp/diagnostics` | Get LSP diagnostics (commented out) |
 
 ---
 
@@ -416,3 +426,15 @@ _PARAM_NAME_MAP = {
     "line_hint": "lineHint",
 }
 ```
+
+---
+
+## Notes
+
+- **Diagnostics**: OpenCode does NOT expose diagnostics via HTTP routes. Diagnostics are
+  handled internally — LSP servers push them to in-process clients, and tools (`write`,
+  `edit`, `apply_patch`) include them in their return metadata after file operations.
+- **LSP extensions**: The `/lsp/start`, `/lsp/stop`, `/lsp/servers`, `/lsp/diagnostics`
+  routes are agentpool extensions commented out in `lsp_routes.py`.
+- **Upgrade**: The `/global/upgrade` route is stubbed since it's not applicable to agentpool.
+- **Git init**: The `/project/git/init` route is stubbed — could be implemented later.

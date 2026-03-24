@@ -114,6 +114,13 @@ async def global_dispose(state: StateDep) -> bool:
     return True
 
 
+@router.post("/global/upgrade")
+async def global_upgrade(state: StateDep) -> dict[str, object]:
+    """Upgrade opencode (stub - not applicable for agentpool)."""
+    _ = state
+    return {"success": False, "error": "Upgrade not supported in agentpool"}
+
+
 @router.post("/instance/dispose")
 async def instance_dispose(state: StateDep) -> bool:
     """Dispose the current instance."""

@@ -23,9 +23,7 @@ from opencode_sdk.models import (
     Agent,
     AuthInfo,
     Command,
-    FormatterStatus,
     LogRequest,
-    LspStatus,
     McpAuthorizationResponse,
     McpResource,
     MCPStatus,
@@ -482,33 +480,6 @@ async def list_tools_with_schemas(  # noqa: D417
         return []
     else:
         return result
-
-
-@router.get("/lsp")
-async def get_lsp_status(state: StateDep) -> list[LspStatus]:
-    """Get LSP server status.
-
-    Returns status of all running LSP servers.
-    """
-    return [
-        LspStatus(
-            id=server_id,
-            name=server_id,
-            status="connected" if server_state.initialized else "error",
-            root=server_state.root_uri or "",
-        )
-        for server_id, server_state in state.lsp_manager._servers.items()
-    ]
-
-
-@router.get("/formatter")
-async def get_formatter_status(state: StateDep) -> list[FormatterStatus]:
-    """Get formatter status.
-
-    Returns empty list - formatters not supported yet.
-    """
-    _ = state
-    return []
 
 
 @router.get("/provider/auth")

@@ -82,6 +82,15 @@ async def get_project_current(state: StateDep) -> Project:
     return _project_data_to_response(project)
 
 
+@router.post("/project/git/init")
+async def init_git(state: StateDep) -> Project:
+    """Initialize git repository for current project."""
+    cwd = state.agent.env.cwd or state.working_dir
+    await state.agent.env.execute_command(f"git init {cwd}")
+    project = await _get_current_project(state)
+    return _project_data_to_response(project)
+
+
 @router.patch("/project/{project_id}")
 async def update_project(project_id: str, update: ProjectUpdateRequest, state: StateDep) -> Project:
     """Update project metadata (name, settings).
