@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool
+
+
+if TYPE_CHECKING:
+    from agentpool.talk import Talk
 
 
 @pytest.fixture
@@ -24,7 +30,7 @@ async def pool():
 
 async def test_registry_captures_agent_interaction(pool: AgentPool):
     """Test that registry captures real agent interactions."""
-    messages = []
+    messages: list[Talk.ConnectionProcessed] = []
     pool.connection_registry.message_flow.connect(messages.append)
 
     # Get agents and set up connection
@@ -41,7 +47,7 @@ async def test_registry_captures_agent_interaction(pool: AgentPool):
 
 async def test_chained_communication(pool: AgentPool):
     """Test message flow through chain of agents."""
-    messages = []
+    messages: list[Talk.ConnectionProcessed] = []
     pool.connection_registry.message_flow.connect(messages.append)
 
     # Set up chain: agent1 -> agent2 -> agent3
@@ -66,7 +72,7 @@ async def test_chained_communication(pool: AgentPool):
 
 async def test_broadcast_communication(pool: AgentPool):
     """Test broadcasting to multiple agents."""
-    messages = []
+    messages: list[Talk.ConnectionProcessed] = []
     pool.connection_registry.message_flow.connect(messages.append)
 
     # Set up broadcast: agent1 -> [agent2, agent3]

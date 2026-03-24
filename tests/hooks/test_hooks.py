@@ -98,9 +98,10 @@ async def test_post_run_hook():
         await agent.run("Hello")
 
     assert len(hook_state["results"]) == 1
-    assert "Hello" in str(hook_state["results"][0]["prompt"])
-    assert hook_state["results"][0]["result"] is not None
-    assert hook_state["results"][0]["event"] == "post_run"
+    result = hook_state["results"][0]
+    assert "Hello" in str(result["prompt"])
+    assert result["result"] is not None
+    assert result["event"] == "post_run"
 
 
 # Tests for pre_tool_use hooks
