@@ -261,7 +261,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
         time=MessageTime(created=created_ms, completed=completed_ms),
         tokens=tokens,
         cost=float(msg.cost_info.total_cost) if msg.cost_info else 0.0,
-        finish=msg.finish_reason,
+        finish=to_oc_finish_reason(msg.finish_reason),
     )
 
     message.add_step_start_part()
@@ -452,11 +452,11 @@ def opencode_to_chat_message(
         usage=run_usage,
         model_name=model_name,
         provider_name=provider_name,
-        finish_reason=to_finish_reason(finish_reason),
+        finish_reason=to_native_finish_reason(finish_reason),
     )
 
 
-def to_finish_reason(reason: str | OCFinishReason | None) -> FinishReason:
+def to_native_finish_reason(reason: str | OCFinishReason | None) -> FinishReason:
     if reason is None:
         return "stop"
     mapping: dict[OCFinishReason | str, FinishReason] = {
@@ -466,6 +466,19 @@ def to_finish_reason(reason: str | OCFinishReason | None) -> FinishReason:
         "content-filter": "content_filter",
         "error": "error",
         "unknown": "stop",
+    }
+    return mapping.get(reason, "stop")
+
+
+def to_oc_finish_reason(reason: FinishReason | None) -> OCFinishReason | None:
+    if reason is None:
+        return None
+    mapping: dict[FinishReason, OCFinishReason] = {
+        "stop": "stop",
+        "length": "length",
+        "tool_call": "tool-calls",
+        "content_filter": "content-filter",
+        "error": "error",
     }
     return mapping.get(reason, "stop")
 

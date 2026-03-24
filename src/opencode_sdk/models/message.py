@@ -332,11 +332,7 @@ class MessageWithParts[InfoT: MessageInfo = MessageInfo](OpenCodeBaseModel):
         self.parts.append(part)
         return part
 
-    def add_agent_part(
-        self,
-        name: str,
-        source: TextSpan | None = None,
-    ) -> AgentPart:
+    def add_agent_part(self, name: str, source: TextSpan | None = None) -> AgentPart:
         """Create and append an agent mention part."""
         part = AgentPart(
             id=identifier.ascending("part"),
@@ -399,12 +395,7 @@ class MessageWithParts[InfoT: MessageInfo = MessageInfo](OpenCodeBaseModel):
         self.parts.append(part)
         return part
 
-    def add_tool_part(
-        self,
-        tool: str,
-        call_id: str,
-        state: ToolState,
-    ) -> ToolPart:
+    def add_tool_part(self, tool: str, call_id: str, state: ToolState) -> ToolPart:
         """Create and append a tool call part."""
         part = ToolPart(
             id=identifier.ascending("part"),
@@ -426,17 +417,13 @@ class MessageWithParts[InfoT: MessageInfo = MessageInfo](OpenCodeBaseModel):
         metadata: dict[str, str] | None = None,
     ) -> RetryPart:
         """Create and append a retry part."""
-        error_data = APIErrorData(
-            message=message,
-            is_retryable=is_retryable,
-            metadata=metadata,
-        )
+        error = APIErrorData(message=message, is_retryable=is_retryable, metadata=metadata)
         part = RetryPart(
             id=identifier.ascending("part"),
             message_id=self.info.id,
             session_id=self.info.session_id,
             attempt=attempt,
-            error=APIError(data=error_data),
+            error=APIError(data=error),
             time=TimeCreated(created=created),
         )
         self.parts.append(part)
