@@ -98,18 +98,13 @@ class Example:
         namespace: dict[str, str] = {}
         with init_file.open() as f:
             exec(f.read(), namespace)
-
         # Get metadata with defaults
-        title = namespace.get("TITLE", path.name.replace("_", " ").title())
-        icon = namespace.get("ICON", "octicon:code-16")
-        description = namespace.get("__doc__", "")
-
         return cls(
             name=path.name,
             path=path,
-            title=title,
-            description=description,
-            icon=icon,
+            title=namespace.get("TITLE", path.name.replace("_", " ").title()),
+            description=namespace.get("__doc__", ""),
+            icon=namespace.get("ICON", "octicon:code-16"),
         )
 
 
@@ -153,12 +148,9 @@ def get_discriminator_values(union_type: Any) -> dict[str, type]:
     if origin not in (Union, types.UnionType):
         raise TypeError(f"Expected Union type, got: {union_type}")
 
-    # Get all types in the union
-    union_args = get_args(union_type)
-
     # Extract discriminator values from each model
     result: dict[str, type] = {}
-    for model_cls in union_args:
+    for model_cls in get_args(union_type):
         if model_cls is type(None):
             continue
 
@@ -227,11 +219,9 @@ def _strip_docstring_sections(description: str) -> str:
     Returns:
         Just the summary/description part without parameter documentation
     """
-    lines = description.split("\n")
     result = []
     in_section = False
-
-    for line in lines:
+    for line in description.split("\n"):
         stripped = line.strip()
         # Check if we're entering a standard docstring section
         if stripped in ("Args:", "Arguments:", "Returns:", "Raises:", "Yields:", "Note:"):

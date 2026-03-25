@@ -114,8 +114,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             # If any failures occurred, raise error with details
             if failures:
                 error_details = "\n".join(f"- {name}: {error}" for name, error in failures.items())
-                error_msg = f"Some nodes failed to execute:\n{error_details}"
-                raise RuntimeError(error_msg)
+                raise RuntimeError(f"Some nodes failed to execute:\n{error_details}")
 
         finally:
             # Clean up any remaining tasks

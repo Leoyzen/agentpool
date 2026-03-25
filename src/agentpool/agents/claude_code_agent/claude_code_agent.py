@@ -1018,10 +1018,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         storage = self.storage
         if not storage:
             return []
-        session_ids = await storage.list_session_ids(agent_name=self.name)
         result: list[SessionData] = []
         default_cwd = str(self.env.cwd or Path.cwd())
-        for session_id in session_ids:
+        for session_id in await storage.list_session_ids(agent_name=self.name):
             if session_data := await storage.load_session(session_id):
                 if not session_data.cwd:
                     session_data = session_data.model_copy(update={"cwd": default_cwd})
