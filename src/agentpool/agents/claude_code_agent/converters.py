@@ -446,7 +446,8 @@ def build_sdk_hooks_from_agent_hooks(
             """Adapter for pre_tool_use hooks."""
             tool_name = input_data.get("tool_name", "")
             tool_input = input_data.get("tool_input", {})
-
+            assert isinstance(tool_name, str)
+            assert isinstance(tool_input, dict)
             pre_result = await hooks.run_pre_tool_hooks(
                 agent_name=agent_name,
                 tool_name=tool_name,

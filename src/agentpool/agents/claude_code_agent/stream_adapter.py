@@ -54,6 +54,7 @@ from clawd_code_sdk.models import (
     RateLimitMessage,
     ResultErrorMessage,
     ResultSuccessMessage,
+    SessionStateChangedMessage,
     StatusSystemMessage,
     TaskNotificationSystemMessage,
     TaskProgressSystemMessage,
@@ -335,6 +336,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                 | TaskProgressSystemMessage()
                 | TaskNotificationSystemMessage()
                 | FilesPersistedSystemMessage()
+                | SessionStateChangedMessage()
                 | ElicitationCompleteMessage()
                 | LocalCommandOutputMessage()
                 | APIRetrySystemMessage()

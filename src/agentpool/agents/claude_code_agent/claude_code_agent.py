@@ -56,7 +56,6 @@ if TYPE_CHECKING:
     )
     from clawd_code_sdk.models import (
         AskUserQuestionInput,
-        ElicitationResult,
         ReasoningEffort,
         SDKControlElicitationRequest,
         StopReason,
@@ -64,6 +63,7 @@ if TYPE_CHECKING:
     )
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
+    from mcp.types import ElicitResult
     from pydantic_ai import UserContent
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -80,7 +80,6 @@ if TYPE_CHECKING:
     from agentpool.resource_providers import ResourceProvider
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
-
 
 logger = get_logger(__name__)
 
@@ -542,7 +541,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             context=context,
         )
 
-    async def _on_elicitation(self, request: SDKControlElicitationRequest) -> ElicitationResult:
+    async def _on_elicitation(self, request: SDKControlElicitationRequest) -> ElicitResult:
         """Handle MCP elicitation requests.
 
         Converts from Claude SDK's ElicitationRequest to MCP's ElicitRequestParams,
@@ -554,7 +553,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         Returns:
             ElicitationResult with user's response
         """
-        from clawd_code_sdk.models import ElicitationResult
         from mcp.types import ElicitResult, ErrorData
 
         if self._tool_bridge._current_context is None:
@@ -570,10 +568,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 assert_never(unreachable)
 
         match await input_provider.get_elicitation(params=params):
-            case ElicitResult(action=action, content=content):
-                return ElicitationResult(action=action, content=dict(content) if content else None)
+            case ElicitResult() as result:
+                return result
             case ErrorData():
-                return ElicitationResult(action="decline")
+                return ElicitResult(action="decline")
             case _ as unreachable_:
                 assert_never(unreachable_)  # ty:ignore[type-assertion-failure]
 
