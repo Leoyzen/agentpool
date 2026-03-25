@@ -135,6 +135,36 @@ class ZedMention(ZedBaseModel):
     uri: ZedMentionUri
     content: str
 
+    def formatted(self) -> str:  # noqa: PLR0911
+        """Return a formatted string representation of the mention."""
+        if self.uri.File:
+            return f"[File: {self.uri.File.abs_path}]\n{self.content}"
+        if self.uri.Directory:
+            return f"[Directory: {self.uri.Directory.abs_path}]\n{self.content}"
+        if self.uri.Symbol:
+            return f"[Symbol: {self.uri.Symbol.name} in {self.uri.Symbol.abs_path}]\n{self.content}"
+        if self.uri.Selection:
+            return f"[Selection: {self.uri.Selection.abs_path or ''}]\n{self.content}"
+        if self.uri.Fetch:
+            return f"[Fetched: {self.uri.Fetch.url}]\n{self.content}"
+        if self.uri.Thread:
+            return f"[Thread: {self.uri.Thread.name}]\n{self.content}"
+        if self.uri.TextThread:
+            return f"[TextThread: {self.uri.TextThread.name}]\n{self.content}"
+        if self.uri.Rule:
+            return f"[Rule: {self.uri.Rule.name}]\n{self.content}"
+        if self.uri.Diagnostics:
+            return f"[Diagnostics]\n{self.content}"
+        if self.uri.TerminalSelection:
+            return f"[Terminal Selection]\n{self.content}"
+        if self.uri.GitDiff:
+            return f"[Git Diff: {self.uri.GitDiff.base_ref}]\n{self.content}"
+        if self.uri.MergeConflict:
+            return f"[Merge Conflict: {self.uri.MergeConflict.file_path}]\n{self.content}"
+        if self.uri.PastedImage:
+            return f"[Pasted Image]\n{self.content}"
+        return self.content
+
 
 class ZedImageSize(ZedBaseModel):
     """Image dimensions in device pixels."""

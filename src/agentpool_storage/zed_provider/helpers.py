@@ -30,7 +30,6 @@ from agentpool_storage.zed_provider.models import (
     ZedFlatMessage,
     ZedImage,
     ZedImageContent,
-    ZedMention,
     ZedMentionContent,
     ZedNestedMessage,
     ZedRedactedThinkingBlock,
@@ -102,35 +101,8 @@ def parse_user_content(
                 media_type = detect_image_media_type(binary_data)
                 pydantic_content.append(BinaryContent(data=binary_data, media_type=media_type))
                 display_parts.append("[image]")
-            case ZedMentionContent(Mention=ZedMention(uri=uri, content=content)):
-                if uri.File:
-                    formatted = f"[File: {uri.File.abs_path}]\n{content}"
-                elif uri.Directory:
-                    formatted = f"[Directory: {uri.Directory.abs_path}]\n{content}"
-                elif uri.Symbol:
-                    formatted = f"[Symbol: {uri.Symbol.name} in {uri.Symbol.abs_path}]\n{content}"
-                elif uri.Selection:
-                    formatted = f"[Selection: {uri.Selection.abs_path or ''}]\n{content}"
-                elif uri.Fetch:
-                    formatted = f"[Fetched: {uri.Fetch.url}]\n{content}"
-                elif uri.Thread:
-                    formatted = f"[Thread: {uri.Thread.name}]\n{content}"
-                elif uri.TextThread:
-                    formatted = f"[TextThread: {uri.TextThread.name}]\n{content}"
-                elif uri.Rule:
-                    formatted = f"[Rule: {uri.Rule.name}]\n{content}"
-                elif uri.Diagnostics:
-                    formatted = f"[Diagnostics]\n{content}"
-                elif uri.TerminalSelection:
-                    formatted = f"[Terminal Selection]\n{content}"
-                elif uri.GitDiff:
-                    formatted = f"[Git Diff: {uri.GitDiff.base_ref}]\n{content}"
-                elif uri.MergeConflict:
-                    formatted = f"[Merge Conflict: {uri.MergeConflict.file_path}]\n{content}"
-                elif uri.PastedImage:
-                    formatted = f"[Pasted Image]\n{content}"
-                else:
-                    formatted = content
+            case ZedMentionContent(Mention=mention):
+                formatted = mention.formatted()
                 display_parts.append(formatted)
                 pydantic_content.append(formatted)
 
