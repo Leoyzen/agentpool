@@ -530,7 +530,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             Self (same instance, not a copy)
         """
         self.log.debug("Setting result type", output_type=output_type)
-        self._output_type = to_type(output_type)  # type: ignore[assignment]
+        self._output_type = to_type(output_type)  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
         return self  # type: ignore
 
     @property
@@ -649,7 +649,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 agent.tool(prepare=prepare_fn)(wrapped)
             else:
                 agent.tool_plain(prepare=prepare_fn)(wrapped)
-        return agent  # type: ignore[return-value]
+        return agent  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     async def _stream_events(
         self,
@@ -698,12 +698,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         case ModelRequestNode() | CallToolsNode():
                             async with (
                                 node.stream(agent_run.ctx) as stream,
-                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
+                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                             ):
                                 async for event in merged:
                                     if self._cancelled:
                                         break
-                                    yield event
+                                    yield event  # ty:ignore[invalid-yield]
                                     if combined := process_tool_event(
                                         self.name,
                                         event,  # ty: ignore[invalid-argument-type]
@@ -876,11 +876,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle permissions and model mode switching."""
+        from agentpool_config.nodes import ToolConfirmationMode
+
         match category_id:
             case "mode":
                 if mode_id not in VALID_MODES:
                     raise UnknownModeError(mode_id, VALID_MODES)
-                self.tool_confirmation_mode = mode_id  # type: ignore[assignment]
+                self.tool_confirmation_mode = cast(ToolConfirmationMode, mode_id)
             case "model":
                 assert isinstance(mode_id, str)
                 self._model, settings = self._resolve_model_string(mode_id)

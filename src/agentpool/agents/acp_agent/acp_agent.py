@@ -509,7 +509,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             enriched_event = replace(enriched_event, metadata=meta)
                         event = enriched_event  # noqa: PLW2901
                     reconstructor.observe(event)  # ty: ignore[invalid-argument-type]
-                    yield event
+                    yield event  # ty:ignore[invalid-yield]
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             self._cancelled = True

@@ -140,12 +140,12 @@ class ToolCallReporter:
         if content is not None:
             content_list: list[ToolCallContent | str] = list(content)
             if replace:
-                self.content = content_list  # type: ignore[assignment]
+                self.content = content_list  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
             else:
-                self.content.extend(content_list)  # type: ignore[arg-type]
+                self.content.extend(content_list)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
 
         if message is not None:
-            self.content.append(message)  # type: ignore[arg-type]
+            self.content.append(message)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
 
         await self._notifications.tool_call_progress(
             tool_call_id=self.tool_call_id,
