@@ -115,7 +115,7 @@ async def test_get_session_stats(provider: SQLModelProvider, sample_data: None):
     # Check model grouping
     assert "gpt-5" in stats
     assert stats["gpt-5"]["messages"] == 2
-    assert stats["gpt-5"]["total_tokens"] == 30
+    assert stats["gpt-5"]["usage"].total_tokens == 30
     assert "gpt-3.5-turbo" in stats
     assert stats["gpt-3.5-turbo"]["messages"] == 1
 
