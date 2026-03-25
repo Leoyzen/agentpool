@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+from pydantic import TypeAdapter
 from pydantic_ai import FinishReason, RunUsage  # noqa: TC002
 from upathtools import to_upath
 
@@ -166,7 +167,9 @@ class FileProvider(StorageProvider):
                 name=msg["name"],
                 model_name=msg["model"],
                 cost_info=TokenCost(total_cost=cost),
-                usage=RunUsage(**msg["token_usage"]) if msg["token_usage"] else RunUsage(),
+                usage=TypeAdapter(RunUsage).validate_python(msg["token_usage"])
+                if msg["token_usage"]
+                else RunUsage(),
                 response_time=msg["response_time"],
                 timestamp=datetime.fromisoformat(msg["timestamp"]),
                 provider_name=msg["provider_name"],
@@ -569,7 +572,9 @@ def _to_chat_message(msg: MessageData) -> ChatMessage[str]:
         "name": msg.get("name"),
         "model_name": msg.get("model"),
         "cost_info": cost_info,
-        "usage": RunUsage(**msg["token_usage"]) if msg["token_usage"] else RunUsage(),
+        "usage": TypeAdapter(RunUsage).validate_python(msg["token_usage"])
+        if msg["token_usage"]
+        else RunUsage(),
         "response_time": msg.get("response_time"),
         "parent_id": msg.get("parent_id"),
         "session_id": msg.get("session_id"),

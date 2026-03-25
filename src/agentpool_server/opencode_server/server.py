@@ -9,7 +9,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI, Request  # noqa: TC002
 from fastapi.exceptions import RequestValidationError
@@ -184,7 +184,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         logger.info("GitBranchWatcher started", current_branch=branch_watcher.current_branch)
         # --- Project file watcher ---
         # Map watchfiles Change types to OpenCode event types
-        change_type_map: dict[Change, str] = {
+        change_type_map: dict[Change, Literal["add", "change", "unlink"]] = {
             Change.added: "add",
             Change.modified: "change",
             Change.deleted: "unlink",
@@ -217,7 +217,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
                 logger.info(
                     "Broadcasting file.watcher.updated", event_type=event_type, path=file_path
                 )
-                event = FileWatcherUpdatedEvent.create(file=file_path, event=event_type)  # type: ignore[arg-type]
+                event = FileWatcherUpdatedEvent.create(file=file_path, event=event_type)
                 await state.broadcast_event(event)
 
         logger.info("Setting up project FileWatcher", working_dir=state.working_dir)

@@ -55,12 +55,16 @@ from opencode_sdk.models.tool_metadata import (
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from clawd_code_sdk import McpServerConfig
     from clawd_code_sdk.models import (
+        HookContext,
         HookEvent,
+        HookInput,
+        HookJSONOutput,
+        McpServerConfig,
         PermissionResult,
         StopReason,
         StructuredPatchHunk,
+        SyncHookJSONOutput,
         ThinkingConfig,
         ToolInput,
         ToolUseResult,
@@ -435,10 +439,10 @@ def build_sdk_hooks_from_agent_hooks(
     if hooks.pre_tool_use:
 
         async def on_pre_tool_use(
-            input_data: Any,
+            input_data: HookInput,
             tool_use_id: str | None,
-            context: Any,
-        ) -> dict[str, Any]:
+            context: HookContext,
+        ) -> HookJSONOutput:
             """Adapter for pre_tool_use hooks."""
             tool_name = input_data.get("tool_name", "")
             tool_input = input_data.get("tool_input", {})
@@ -464,7 +468,7 @@ def build_sdk_hooks_from_agent_hooks(
                 }
 
             # Check for modified input
-            output: dict[str, Any] = {}
+            output: SyncHookJSONOutput = {}
             if modified := pre_result.get("modified_input"):
                 output["hookSpecificOutput"] = {
                     "hookEventName": "PreToolUse",
@@ -473,7 +477,7 @@ def build_sdk_hooks_from_agent_hooks(
 
             return output
 
-        result["PreToolUse"] = [HookMatcher(matcher="*", hooks=[on_pre_tool_use])]  # type: ignore[list-item]
+        result["PreToolUse"] = [HookMatcher(matcher="*", hooks=[on_pre_tool_use])]
 
     if hooks.post_tool_use:
 
@@ -500,6 +504,6 @@ def build_sdk_hooks_from_agent_hooks(
             # Post hooks are observation-only in SDK, can add context
             return {}
 
-        result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[on_post_tool_use])]  # type: ignore[list-item]
+        result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[on_post_tool_use])]  # type: ignore[list-item]  # ty:ignore[invalid-argument-type]
 
     return result

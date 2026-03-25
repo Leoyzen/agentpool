@@ -122,7 +122,7 @@ class BaseAgentAGUIAdapter:
                 # Transform compatible events through AGUIEventStream
                 # Our RichAgentStreamEvent is a superset - AGUIEventStream handles
                 # the pydantic-ai compatible events and ignores unknown types
-                async for agui_event in event_stream.handle_event(agent_event):  # type: ignore[arg-type]
+                async for agui_event in event_stream.handle_event(agent_event):  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                     yield agui_event
 
         except Exception as e:  # noqa: BLE001

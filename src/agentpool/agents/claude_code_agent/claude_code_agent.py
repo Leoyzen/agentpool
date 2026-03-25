@@ -338,7 +338,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             event_handlers=merged_handlers or None,
             input_provider=input_provider,
             agent_pool=agent_pool,
-            output_type=resolved_output_type,  # type: ignore[arg-type]
+            output_type=resolved_output_type,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             hooks=config.hooks.get_agent_hooks() if config.hooks else None,
         )
 
@@ -792,7 +792,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 adapter_result.resolved_model if adapter_result else None
             ) or self.model_name
             response_msg = ChatMessage[TResult](
-                content=reconstructor.text_content,  # type: ignore[arg-type]
+                content=reconstructor.text_content,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid.uuid4()),
@@ -834,7 +834,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             adapter = TypeAdapter(self._output_type)
             final_content = adapter.validate_python(result_message.structured_output)
         else:
-            final_content = content  # type: ignore[assignment]
+            final_content = content  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
 
         # Build cost_info and usage from client per-query tracking.
         # result_message.total_cost_usd is cumulative across the session,
@@ -962,7 +962,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
     async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle permissions, model, thinking_level, and effort mode switching."""
-        from clawd_code_sdk import PermissionMode
+        from clawd_code_sdk.models import PermissionMode, ReasoningEffort
 
         from agentpool.agents.claude_code_agent.static_info import VALID_MODES
 
@@ -992,7 +992,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 # Validate thinking mode
                 if mode_id not in THINKING_MODE_TOKENS:
                     raise UnknownModeError(mode_id, list(THINKING_MODE_TOKENS.keys()))
-                self._thinking_mode = mode_id  # type: ignore[assignment]
+                self._thinking_mode = cast(ThinkingMode, mode_id)
                 # Set thinking tokens via SDK
                 if self._client:
                     await self.ensure_initialized()
@@ -1002,7 +1002,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 # Validate effort level
                 if mode_id not in VALID_EFFORTS:
                     raise UnknownModeError(mode_id, list(VALID_EFFORTS))
-                self._effort = cast("ReasoningEffort", mode_id)
+                self._effort = cast(ReasoningEffort, mode_id)
                 # Effort is a CLI startup flag only - requires session reconnect
                 if self._client:
                     await self.reconnect(resume_session=True)

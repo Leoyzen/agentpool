@@ -448,7 +448,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         self,
         agent: AgentName | BaseAgent[Any, Any],
         *,
-        output_type: type[TResult] = str,  # type: ignore[assignment]
+        output_type: type[TResult] = str,  # type: ignore[assignment]  # ty:ignore[invalid-parameter-default]
     ) -> BaseAgent[TPoolDeps, TResult]: ...
 
     @overload
@@ -457,7 +457,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         agent: AgentName | BaseAgent[Any, Any],
         *,
         deps_type: type[TCustomDeps],
-        output_type: type[TResult] = str,  # type: ignore[assignment]
+        output_type: type[TResult] = str,  # type: ignore[assignment]  # ty:ignore[invalid-parameter-default]
     ) -> BaseAgent[TCustomDeps, TResult]: ...
 
     def get_agent(

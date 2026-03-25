@@ -17,6 +17,7 @@ from agentpool_bot.channels.base import BaseChannel
 
 
 if TYPE_CHECKING:
+    from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
     from slack_sdk.socket_mode.request import SocketModeRequest
 
     from agentpool_bot.bus import MessageBus, OutboundMessage
@@ -50,7 +51,7 @@ class SlackChannel(BaseChannel):
         self._running = True
         self._web_client = AsyncWebClient(token=self.config.bot_token)
         self._socket_client = SocketModeClient(self.config.app_token, web_client=self._web_client)
-        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)  # type: ignore[arg-type]
+        self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
 
         # Resolve bot user ID for mention handling
         try:
@@ -97,7 +98,7 @@ class SlackChannel(BaseChannel):
 
     async def _on_socket_request(  # noqa: PLR0911
         self,
-        client: SocketModeClient,
+        client: AsyncBaseSocketModeClient,
         req: SocketModeRequest,
     ) -> None:
         """Handle incoming Socket Mode requests."""

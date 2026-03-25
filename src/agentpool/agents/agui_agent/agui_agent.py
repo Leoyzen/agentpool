@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 from uuid import uuid4
 
 from anyenv.processes import hard_kill
@@ -255,10 +255,12 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         Raises:
             ValueError: If mode is not a valid ToolConfirmationMode
         """
+        from agentpool_config.nodes import ToolConfirmationMode
+
         valid_modes: set[str] = {"always", "never", "per_tool"}
         if mode not in valid_modes:
             raise UnknownModeError(mode, list(valid_modes))
-        self.tool_confirmation_mode = mode  # type: ignore[assignment]
+        self.tool_confirmation_mode = cast(ToolConfirmationMode, mode)
         self.log.info("Tool confirmation mode changed", mode=mode)
 
     async def _interrupt(self) -> None:

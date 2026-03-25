@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from agentpool.__main__ import run_command  # type: ignore[attr-defined]
+from agentpool_cli.run import run_command
 from agentpool.docs.utils import get_config_path, is_pyodide
 
 

@@ -55,7 +55,7 @@ async def test_session_command_immediate_execution():
     ):
         sent_messages.append(message)
 
-    session.notifications.send_agent_text = capture_message  # type: ignore[method-assign]
+    session.notifications.send_agent_text = capture_message  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
     await session.execute_slash_command("/help")
     assert len(sent_messages) > 0
 
@@ -104,7 +104,7 @@ async def test_immediate_send_with_slow_command():
         current_time = time.perf_counter()
         messages_with_time.append((message, current_time - start_time))
 
-    session.notifications.send_agent_text = capture_with_time  # type: ignore[method-assign, assignment]
+    session.notifications.send_agent_text = capture_with_time  # type: ignore[method-assign, assignment]  # ty:ignore[invalid-assignment]
     await session.execute_slash_command("/slow")
     # Verify we got multiple messages
     min_expected_messages = 3
@@ -173,7 +173,7 @@ async def test_immediate_send_error_handling(caplog: pytest.LogCaptureFixture):
     ):
         sent_messages.append(message)
 
-    session.notifications.send_agent_text = capture_message  # type: ignore[method-assign]
+    session.notifications.send_agent_text = capture_message  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
     # Execute failing command
     await session.execute_slash_command("/fail")
 

@@ -338,7 +338,7 @@ class MCPClient:
         schema = mcp_tool_to_input_schema(tool)
         fn_schema = FunctionSchema.from_dict(schema, output_schema=tool.outputSchema)
         sig = fn_schema.to_python_signature()
-        tool_callable.__signature__ = create_modified_signature(  # type: ignore[attr-defined]
+        tool_callable.__signature__ = create_modified_signature(  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
             sig, inject={"ctx": RunContext, "agent_ctx": AgentContext}
         )
         annotations = fn_schema.get_annotations()
@@ -346,7 +346,7 @@ class MCPClient:
         annotations["agent_ctx"] = AgentContext
         # Update return annotation to support multiple types
         if not tool.outputSchema:
-            annotations["return"] = str | Any | ToolReturn  # type: ignore[assignment]
+            annotations["return"] = str | Any | ToolReturn  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
         tool_callable.__annotations__ = annotations
         tool_callable.__name__ = tool.name
         tool_callable.__doc__ = tool.description or "No description provided."

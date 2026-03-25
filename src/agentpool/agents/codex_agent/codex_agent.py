@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, assert_never
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, assert_never, cast
 from uuid import uuid4
 
 import anyenv
@@ -103,7 +103,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         env: ExecutionEnvironment | StrPath | None = None,
         input_provider: InputProvider | None = None,
         env_vars: dict[str, str] | None = None,
-        output_type: type[OutputDataT] = str,  # type: ignore[assignment]
+        output_type: type[OutputDataT] = str,  # type: ignore[assignment]  # ty:ignore[invalid-parameter-default]
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         hooks: AgentHooks | None = None,
         session_id: str | None = None,
@@ -563,9 +563,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             except (anyenv.JsonLoadError, ValueError) as e:
                 msg = "Failed to parse structured output, returning raw text"
                 self.log.warning(msg, error=str(e), output_type=self._output_type)
-                final_content = final_text  # type: ignore[assignment]
+                final_content = final_text  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
         else:
-            final_content = final_text  # type: ignore[assignment]
+            final_content = final_text  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
 
         complete_msg: ChatMessage[OutputDataT] = ChatMessage(
             content=final_content,
@@ -606,8 +606,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         from agentpool.utils.result_utils import to_type
 
         self.log.debug("Setting result type", output_type=output_type)
-        self._output_type = to_type(output_type)  # type: ignore[assignment]
-        return self  # type: ignore[return-value]
+        self._output_type = to_type(output_type)  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
+        return self  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     async def set_model(self, model: str) -> None:
         """Set the model for this agent."""
@@ -717,22 +717,22 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Handle approval_policy, reasoning_effort, and model mode switching."""
         match category_id:
             case "mode" if mode_id in VALID_POLICIES:
-                self._approval_policy = mode_id  # type: ignore[assignment]
+                self._approval_policy = cast(ApprovalPolicy, mode_id)
             case "mode":
                 raise UnknownModeError(mode_id, VALID_POLICIES)
             case "thought_level" if mode_id in VALID_EFFORTS:
-                self._current_effort = mode_id  # type: ignore[assignment]
+                self._current_effort = cast(ReasoningEffort, mode_id)
             case "thought_level":
                 raise UnknownModeError(mode_id, VALID_EFFORTS)
             case "model":
                 assert isinstance(mode_id, str)
                 self._current_model = mode_id
             case "sandbox" if mode_id in VALID_SANDBOXES:
-                self._current_sandbox = mode_id  # type: ignore[assignment]
+                self._current_sandbox = cast(SandboxMode, mode_id)
             case "sandbox":
                 raise UnknownModeError(mode_id, VALID_SANDBOXES)
             case "personality" if mode_id in VALID_PERSONALITIES:
-                self._current_personality = mode_id  # type: ignore[assignment]
+                self._current_personality = cast(Personality, mode_id)
             case "personality":
                 raise UnknownModeError(mode_id, VALID_PERSONALITIES)
             case _:

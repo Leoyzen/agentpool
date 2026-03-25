@@ -167,7 +167,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # New shared parameters
         env: ExecutionEnvironment | StrPath | None = None,
         input_provider: InputProvider | None = None,
-        output_type: type[TResult] = str,  # type: ignore[assignment]
+        output_type: type[TResult] = str,  # type: ignore[assignment]  # ty:ignore[invalid-parameter-default]
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
@@ -482,7 +482,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     self.log.exception("Background run failed")
                     await anyio.sleep(interval)
             self.log.debug("Continuous run completed", iterations=count)
-            return latest  # type: ignore[return-value]
+            return latest  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
         await self.stop()  # Cancel any existing background task
         self._cancelled = False  # Reset cancellation flag for new run

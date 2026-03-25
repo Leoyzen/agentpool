@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, assert_never, overload
+from typing import Any, Literal, assert_never, overload
 
 from agentpool_commands.text_sharing.base import ShareResult, TextSharer, Visibility
 from agentpool_commands.text_sharing.github_gist import GistSharer
@@ -53,10 +53,7 @@ def get_sharer(
 ) -> ShittyCodingAgentSharer: ...
 
 
-def get_sharer(
-    provider: TextSharerStr,
-    **kwargs: str | None,
-) -> TextSharer:
+def get_sharer(provider: TextSharerStr, **kwargs: Any) -> TextSharer:
     """Get a text sharer based on provider name.
 
     Args:
@@ -98,7 +95,7 @@ def get_sharer(
         case "paste_rs":
             return PasteRsSharer()
         case "opencode":
-            return OpenCodeSharer(**kwargs)  # type: ignore[arg-type]
+            return OpenCodeSharer(**kwargs)
         case "shittycodingagent":
             return ShittyCodingAgentSharer(**kwargs)
         case _ as unreachable:

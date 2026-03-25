@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from schemez import OpenAIFunctionDefinition
 
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
@@ -64,13 +66,12 @@ class ComposioTools(ResourceProvider):
             tools = self.composio.tools.get(self.user_id, toolkits=self._toolkits)
 
             for tool_def in tools:
-                # In v3 SDK, tools are OpenAI formatted by default
-                if isinstance(tool_def, dict) and "function" in tool_def:
-                    tool_slug = tool_def["function"].get("name", "")
-                    if tool_slug:
-                        fn = self._create_tool_handler(tool_slug)
-                        tool = self.create_tool(fn, schema_override=tool_def["function"])  # type: ignore[arg-type]
-                        self._tools.append(tool)
+                schema = cast(OpenAIFunctionDefinition, tool_def["function"])
+                tool_slug = schema.get("name", "")
+                if tool_slug:
+                    fn = self._create_tool_handler(tool_slug)
+                    tool = self.create_tool(fn, schema_override=schema)
+                    self._tools.append(tool)
 
         except Exception:
             logger.exception("Error getting Composio tools")

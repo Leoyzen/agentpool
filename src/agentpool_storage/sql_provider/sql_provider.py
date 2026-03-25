@@ -157,7 +157,7 @@ class SQLModelProvider(StorageProvider):
 
         async with AsyncSession(self.engine) as session:
             existing = await session.execute(
-                select(Conversation.id).where(Conversation.id == session_id)  # type: ignore[call-overload]
+                select(Conversation.id).where(Conversation.id == session_id)  # type: ignore[call-overload]  # ty:ignore[no-matching-overload]
             )
             if existing.scalar_one_or_none() is not None:
                 return
@@ -454,7 +454,7 @@ class SQLModelProvider(StorageProvider):
                     Message.total_tokens,
                     Message.input_tokens,
                     Message.output_tokens,
-                )
+                )  # ty:ignore[no-matching-overload]
                 .join(Conversation, Message.session_id == Conversation.id)
                 .where(Message.timestamp > filters.cutoff)
             )
@@ -550,7 +550,7 @@ class SQLModelProvider(StorageProvider):
             count = count_result.scalar() or 0
             # Then delete
             await session.execute(
-                delete(Message).where(Message.session_id == session_id)  # type: ignore[arg-type]
+                delete(Message).where(Message.session_id == session_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             )
             await session.commit()
             return count
@@ -591,7 +591,7 @@ class SQLModelProvider(StorageProvider):
 
         async with AsyncSession(self.engine) as session:
             # Delete existing if present (upsert via delete+insert)
-            stmt = delete(Project).where(Project.project_id == project.project_id)  # type: ignore[arg-type]
+            stmt = delete(Project).where(Project.project_id == project.project_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             await session.execute(stmt)
             # Insert new/updated
             db_project = self._to_project_model(project)
@@ -637,10 +637,10 @@ class SQLModelProvider(StorageProvider):
         from sqlalchemy import delete
 
         async with AsyncSession(self.engine) as session:
-            stmt = delete(Project).where(Project.project_id == project_id)  # type: ignore[arg-type]
+            stmt = delete(Project).where(Project.project_id == project_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             result = await session.execute(stmt)
             await session.commit()
-            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]
+            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
             if deleted:
                 logger.debug("Deleted project", project_id=project_id)
             return deleted
@@ -652,7 +652,7 @@ class SQLModelProvider(StorageProvider):
         async with AsyncSession(self.engine) as session:
             stmt = (
                 update(Project)
-                .where(Project.project_id == project_id)  # type: ignore[arg-type]
+                .where(Project.project_id == project_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 .values(last_active=get_now())
             )
             await session.execute(stmt)
@@ -670,7 +670,7 @@ class SQLModelProvider(StorageProvider):
 
         async with AsyncSession(self.engine) as session:
             # Delete existing if present (upsert via delete+insert)
-            stmt = delete(Conversation).where(Conversation.id == data.session_id)  # type: ignore[arg-type]
+            stmt = delete(Conversation).where(Conversation.id == data.session_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             await session.execute(stmt)
             # Insert new/updated
             convo = Conversation(
@@ -722,10 +722,10 @@ class SQLModelProvider(StorageProvider):
         from sqlalchemy import delete
 
         async with AsyncSession(self.engine) as session:
-            stmt = delete(Conversation).where(Conversation.id == session_id)  # type: ignore[arg-type]
+            stmt = delete(Conversation).where(Conversation.id == session_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             result = await session.execute(stmt)
             await session.commit()
-            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]
+            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
             if deleted:
                 logger.debug("Deleted session", session_id=session_id)
             return deleted
@@ -742,7 +742,7 @@ class SQLModelProvider(StorageProvider):
                 stmt = stmt.where(Conversation.pool_id == pool_id)
             if agent_name is not None:
                 stmt = stmt.where(Conversation.agent_name == agent_name)
-            stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
+            stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
@@ -757,7 +757,7 @@ class SQLModelProvider(StorageProvider):
         async with AsyncSession(self.engine) as db:
             stmt = (
                 update(Conversation)
-                .where(Conversation.id == session_id)  # type: ignore[arg-type]
+                .where(Conversation.id == session_id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 .values(sdk_session_id=sdk_session_id)
             )
             await db.execute(stmt)

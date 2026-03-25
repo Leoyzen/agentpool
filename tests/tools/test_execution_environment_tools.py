@@ -241,7 +241,7 @@ class TestProcessLifecycle:
         ) -> str:
             raise FileNotFoundError("Command not found")
 
-        env.process_manager.start_process = failing_start  # type: ignore[method-assign]
+        env.process_manager.start_process = failing_start  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
         tools = ProcessManagementTools(env=env)
 
         result = await tools.start_process(agent_ctx, command="nonexistent")
@@ -452,7 +452,7 @@ class TestProcessLifecycle:
 
         # Start another process, then make info fail
         await tools.start_process(agent_ctx, command="echo", args=[])
-        env.process_manager.get_process_info = failing_get_info  # type: ignore[method-assign]
+        env.process_manager.get_process_info = failing_get_info  # type: ignore[method-assign]  # ty:ignore[invalid-assignment]
 
         result = await tools.list_processes(agent_ctx)
         # Tools now return formatted strings

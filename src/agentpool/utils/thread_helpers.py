@@ -151,22 +151,6 @@ async def gather_with_concurrency[T](
     return list(await asyncio.gather(*[limited(c) for c in coros_list]))
 
 
-def parallel_if_free_threaded[**P, R](
-    func: Callable[P, R],
-) -> Callable[P, R]:
-    """Decorator that marks a function for potential parallelization.
-
-    This is a no-op decorator that serves as documentation and could be
-    extended in the future to automatically parallelize marked functions.
-
-    Currently just returns the function unchanged but indicates the function
-    is safe for parallel execution on free-threaded builds.
-    """
-    # For now, just mark it - could be extended later
-    func._parallel_safe = True  # type: ignore[attr-defined]
-    return func
-
-
 def run_in_thread[**P, R](
     func: Callable[P, R],
 ) -> Callable[P, Awaitable[R]]:
@@ -193,7 +177,6 @@ __all__ = [
     "FREE_THREADED",
     "async_parallel_map",
     "gather_with_concurrency",
-    "parallel_if_free_threaded",
     "parallel_map",
     "parallel_starmap",
     "run_in_thread",

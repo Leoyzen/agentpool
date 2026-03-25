@@ -289,9 +289,9 @@ def create_bound_callable(  # noqa: PLR0915
     # Preserve introspection attributes
     wrapper.__name__ = getattr(original_callable, "__name__", "wrapper")
     wrapper.__doc__ = getattr(original_callable, "__doc__", None)
-    wrapper.__module__ = getattr(original_callable, "__module__", None)  # type: ignore[assignment]
-    wrapper.__wrapped__ = original_callable  # type: ignore[attr-defined]
-    wrapper.__agentpool_wrapped__ = original_callable  # type: ignore[attr-defined]
+    wrapper.__module__ = getattr(original_callable, "__module__", None)  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
+    wrapper.__wrapped__ = original_callable  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+    wrapper.__agentpool_wrapped__ = original_callable  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
 
     # Create modified signature without context parameters
     try:
@@ -305,7 +305,7 @@ def create_bound_callable(  # noqa: PLR0915
             if i not in context_positions and param.name not in bound_kwarg_names
         ]
         new_sig = sig.replace(parameters=new_params)
-        wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+        wrapper.__signature__ = new_sig  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
         wrapper.__annotations__ = {
             name: param.annotation for name, param in new_sig.parameters.items()
         }

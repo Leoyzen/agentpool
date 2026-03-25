@@ -155,6 +155,8 @@ class EventManager:
             timezone: Optional timezone (system default if None)
             skip_missed: Whether to skip missed executions
         """
+        from evented.timed_watcher import TimeEventSource
+
         config = TimeEventConfig(
             name=name or f"timed_{len(self._sources)}",
             schedule=schedule,
@@ -162,7 +164,9 @@ class EventManager:
             timezone=timezone,
             skip_missed=skip_missed,
         )
-        return await self.add_source(config)  # type: ignore[return-value]
+        source = await self.add_source(config)
+        assert isinstance(source, TimeEventSource)
+        return source
 
     async def add_email_watch(
         self,

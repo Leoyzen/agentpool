@@ -1,6 +1,7 @@
 """Helper functions for running examples in different environments."""
 
 from __future__ import annotations
+from collections.abc import Coroutine
 
 import asyncio
 import types
@@ -22,7 +23,7 @@ EXAMPLES_DIR = Path("src/agentpool_docs/examples")
 def is_pyodide() -> bool:
     """Check if code is running in a Pyodide environment."""
     try:
-        from js import Object  # type: ignore[import-not-found] # noqa: F401
+        from js import Object  # type: ignore[import-not-found] # noqa: F401  # ty:ignore[unresolved-import]
 
         return True  # noqa: TRY300
     except ImportError:
@@ -46,7 +47,7 @@ def get_config_path(module_path: str | None = None, filename: str = "config.yml"
     return Path(module_path).parent / filename
 
 
-def run[T](coro: Awaitable[T]) -> T:
+def run[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run a coroutine in both normal Python and Pyodide environments."""
     try:
         # Check if we're in an event loop
@@ -55,7 +56,7 @@ def run[T](coro: Awaitable[T]) -> T:
         return asyncio.get_event_loop().run_until_complete(coro)
     except RuntimeError:
         # No running event loop, create one
-        return asyncio.run(coro)  # type: ignore[arg-type]
+        return asyncio.run(coro)
 
 
 @dataclass

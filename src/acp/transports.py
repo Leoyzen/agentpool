@@ -316,7 +316,7 @@ def _ensure_factory(
 
     # Wrap instance in factory
     def factory(connection: AgentSideConnection) -> Agent:
-        return agent  # type: ignore[return-value]
+        return agent  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
 
     return factory
 

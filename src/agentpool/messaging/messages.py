@@ -271,11 +271,11 @@ class ChatMessage[TContent]:
             return self.messages
         match self.kind:
             case "request":
-                return [ModelRequest(parts=self.parts, instructions=None, run_id=self.message_id)]  # type: ignore[arg-type]
+                return [ModelRequest(parts=self.parts, instructions=None, run_id=self.message_id)]  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             case "response":
                 return [
                     ModelResponse(
-                        parts=self.parts,  # type: ignore[arg-type]
+                        parts=self.parts,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                         usage=to_request_usage(self.usage),
                         model_name=self.model_name,
                         timestamp=self.timestamp,

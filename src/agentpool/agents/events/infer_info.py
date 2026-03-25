@@ -74,29 +74,35 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
     if tool_lower in ("write", "write_file"):
         path = input_data.get("file_path") or input_data.get("path", "")
         content = input_data.get("content", "")
+        assert isinstance(path, str)
+        assert isinstance(content, str)
         return RichToolInfo(
             title=f"Write {path}" if path else "Write File",
             kind="edit",
-            locations=[LocationContentItem(path=path)] if path else [],  # type: ignore[arg-type]
-            content=[DiffContentItem(path=path, old_text=None, new_text=content)] if path else [],  # type: ignore[arg-type]
+            locations=[LocationContentItem(path=path)] if path else [],
+            content=[DiffContentItem(path=path, old_text=None, new_text=content)] if path else [],
         )
     # Edit operations
     if tool_lower in ("edit", "edit_file"):
         path = input_data.get("file_path") or input_data.get("path", "")
         old_string = input_data.get("old_string") or input_data.get("old_text", "")
         new_string = input_data.get("new_string") or input_data.get("new_text", "")
+        assert isinstance(path, str)
+        assert isinstance(old_string, str)
+        assert isinstance(new_string, str)
         return RichToolInfo(
             title=f"Edit {path}" if path else "Edit File",
             kind="edit",
-            locations=[LocationContentItem(path=path)] if path else [],  # type: ignore[arg-type]
-            content=[DiffContentItem(path=path, old_text=old_string, new_text=new_string)]  # type: ignore[arg-type]
+            locations=[LocationContentItem(path=path)] if path else [],
+            content=[DiffContentItem(path=path, old_text=old_string, new_text=new_string)]
             if path
             else [],
         )
     # Delete operations
     if tool_lower in ("delete", "delete_path", "delete_file"):
         path = input_data.get("file_path") or input_data.get("path", "")
-        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
+        assert isinstance(path, str)
+        locations = [LocationContentItem(path=path)] if path else []
         title = f"Delete {path}" if path else "Delete"
         return RichToolInfo(title=title, kind="delete", locations=locations)
     # Bash/terminal operations
