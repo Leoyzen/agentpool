@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai import ModelMessage, UserContent
 
-    from opencode_sdk.models import MessageInfo, MessageWithParts, Part
+    from opencode_sdk.models import MessageWithParts, Part
 
 
 logger = get_logger(__name__)
@@ -108,31 +108,6 @@ def _build_assistant_pydantic_messages(
     return result
 
 
-def build_pydantic_messages(
-    msg: MessageInfo,
-    parts: list[Part],
-    timestamp: datetime,
-) -> list[ModelMessage]:
-    """Build pydantic-ai messages from typed OpenCode models.
-
-    In OpenCode's model, assistant messages contain both tool calls AND their
-    results in the same message. We split these into:
-    - ModelResponse with ToolCallPart (the call)
-    - ModelRequest with ToolReturnPart (the result)
-
-    Args:
-        msg: Typed UserMessage or AssistantMessage
-        parts: List of typed Part models
-        timestamp: Message timestamp
-
-    Returns:
-        List of pydantic-ai messages (ModelRequest and/or ModelResponse)
-    """
-    if isinstance(msg, UserMessage):
-        return _build_user_pydantic_messages(parts, timestamp)
-    return _build_assistant_pydantic_messages(msg, parts, timestamp)
-
-
 def to_chat_message(message: MessageWithParts) -> ChatMessage[str]:
     """Convert typed OpenCode message + parts to ChatMessage.
 
@@ -147,7 +122,6 @@ def to_chat_message(message: MessageWithParts) -> ChatMessage[str]:
     msg = message.info
     timestamp = ms_to_datetime(msg.time.created)
     content = extract_text_content(message.parts)
-    pydantic_messages = build_pydantic_messages(msg, message.parts, timestamp)
     agent_name = msg.agent if msg.agent != "default" else None
     match msg:
         case AssistantMessage(
@@ -171,7 +145,7 @@ def to_chat_message(message: MessageWithParts) -> ChatMessage[str]:
                 usage=tokens.to_run_usage(),
                 timestamp=timestamp,
                 parent_id=parent_id,
-                messages=pydantic_messages,
+                messages=_build_assistant_pydantic_messages(msg, message.parts, timestamp),
             )
         case UserMessage(model=model, id=message_id, session_id=session_id):
             return ChatMessage[str](
@@ -183,5 +157,5 @@ def to_chat_message(message: MessageWithParts) -> ChatMessage[str]:
                 model_name=model.model_id,
                 usage=RunUsage(input_tokens=0, output_tokens=0),
                 timestamp=timestamp,
-                messages=pydantic_messages,
+                messages=_build_user_pydantic_messages(message.parts, timestamp),
             )
