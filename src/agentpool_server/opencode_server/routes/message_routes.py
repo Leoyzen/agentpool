@@ -236,36 +236,33 @@ async def _process_message(  # noqa: PLR0915
         provider_id = request.model.provider_id
         model_id = request.model.model_id
 
-        # Handle synthetic "agent" provider for model_variants
-        # OpenCode TUI sends provider_id="agent" for model_variants
-        if provider_id == "agent":
-            # For model_variants, use just the model_id (variant name)
-            requested_model = model_id
-        else:
-            requested_model = f"{provider_id}:{model_id}"
+        # Strategy: First try to use model_id as a variant name
+        # OpenCode TUI sends variant names as model_id (e.g., "ack-dev", "qwen35")
+        # The provider_id is the first part of the identifier (e.g., "openai-chat")
+        requested_model = model_id  # Try variant name first
 
-        logger.info(
-            f"Model selection requested: provider={provider_id}, model_id={model_id}, resolved={requested_model}"
-        )
+        logger.info(f"Model selection requested: provider={provider_id}, model_id={model_id}")
 
         try:
             available_models = await agent.get_available_models()
             is_valid = False
 
-            if available_models:
-                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
-                if requested_model in valid_ids:
-                    is_valid = True
-                    logger.info(f"Model {requested_model} found in tokonomics models")
-
-            # Also check model_variants from manifest
-            if (
-                not is_valid
-                and state.pool
-                and requested_model in state.pool.manifest.model_variants
-            ):
+            # Check 1: Is model_id a variant name in manifest?
+            if state.pool and model_id in state.pool.manifest.model_variants:
                 is_valid = True
-                logger.info(f"Model {requested_model} found in manifest model_variants")
+                logger.info(f"Model {model_id} found as variant name in manifest")
+            # Check 2: Is it in tokonomics models?
+            elif available_models:
+                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
+                # Try both "provider:model" format and just model_id
+                full_id = f"{provider_id}:{model_id}"
+                if full_id in valid_ids:
+                    is_valid = True
+                    requested_model = full_id
+                    logger.info(f"Model {full_id} found in tokonomics models")
+                elif model_id in valid_ids:
+                    is_valid = True
+                    logger.info(f"Model {model_id} found in tokonomics models")
 
             if is_valid:
                 # Store original model to restore later
@@ -274,9 +271,7 @@ async def _process_message(  # noqa: PLR0915
                 await agent.set_model(requested_model)
                 logger.info("Switched to requested model", model=requested_model)
             else:
-                logger.warning(
-                    f"Model {requested_model} is not valid (not in tokonomics or model_variants)"
-                )
+                logger.warning(f"Model {model_id} (provider: {provider_id}) is not valid")
                 if state.pool:
                     logger.warning(
                         f"Available model_variants: {list(state.pool.manifest.model_variants.keys())}"
