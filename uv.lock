@@ -1078,7 +1078,7 @@ wheels = [
 
 [[package]]
 name = "clawd-code-sdk"
-version = "1.0.19"
+version = "1.0.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -1087,9 +1087,9 @@ dependencies = [
     { name = "mcp" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/d1/6314557a2669e37ef5cd11b9a979590013c91828f1ffff24f4b161b1f1f4/clawd_code_sdk-1.0.19.tar.gz", hash = "sha256:84da61f09418e0055710a9d7b367eb4a3c9dba746d40034a30fd08aa0661e7b4", size = 153255, upload-time = "2026-03-26T15:13:54.884Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f7/9c/2b2be6d6c56b1d583782d5ccab05f222a96c54fa8b256085651c88fc1765/clawd_code_sdk-1.0.20.tar.gz", hash = "sha256:5dcac880dc03d17d7e9c25467f86f042be7c52d7aa219b46258fb8c0e409434c", size = 153667, upload-time = "2026-03-27T10:12:49.827Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/61/90d632ef47a5c9312620cfaefae230a3aa23d39eaa77eaecdc9523383f42/clawd_code_sdk-1.0.19-py3-none-any.whl", hash = "sha256:74c33b136a6d344ed743f18f2c2b69a60e717462e06b55543e8e6cf88410142f", size = 125391, upload-time = "2026-03-26T15:13:56.727Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/8e/7b84078aecd128d7df20ab91f8ae0748e95a9e2a69ce115bb3b1c0d81790/clawd_code_sdk-1.0.20-py3-none-any.whl", hash = "sha256:2b605e07feee70a4237bf2c8156b49d66fadbbc3f35d7339a27937436249aa93", size = 125828, upload-time = "2026-03-27T10:12:51.294Z" },
 ]
 
 [[package]]
@@ -1128,16 +1128,16 @@ wheels = [
 
 [[package]]
 name = "codexed"
-version = "0.1.2"
+version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyenv" },
     { name = "pydantic" },
     { name = "schemez" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/23/ea/3070f256565663927e47aeb60fc604ae111d7cdc92185267741e44d075d4/codexed-0.1.2.tar.gz", hash = "sha256:44d708e684523a8f10f3412145440e06b7cf979fdef533bf579b975d6e00fe98", size = 53378, upload-time = "2026-03-24T11:13:45.969Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/03/e7f1bbcd32494c0ca8e8686a4db39c719f10bfd096c2131be2f200ab4bc2/codexed-0.1.3.tar.gz", hash = "sha256:d723a4307d2359c513eea0d7bfdc77e93539de2579594077489541564a7d42f2", size = 55281, upload-time = "2026-03-27T11:28:52.044Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/af/a3789bcfcc6299771b36d135d4d5db36c919cc26ce57810f04ab02af726d/codexed-0.1.2-py3-none-any.whl", hash = "sha256:fff46f869a617360bb221c4d01c43fa3208c55c6510c52a185f029929a6f7ecc", size = 63388, upload-time = "2026-03-24T11:13:47.098Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/74/3a113830780203caa986ae1249af3c25e47e21a4c02319221735eda2c803/codexed-0.1.3-py3-none-any.whl", hash = "sha256:6540ddeeee03842c4d368016e561ff0fefb59e0a0f43238ae58f7b759a5dfd3a", size = 65643, upload-time = "2026-03-27T11:28:54.499Z" },
 ]
 
 [[package]]
@@ -2111,11 +2111,11 @@ wheels = [
 
 [[package]]
 name = "griffelib"
-version = "2.0.1"
+version = "2.0.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/71/d7/2b805e89cdc609e5b304361d80586b272ef00f6287ee63de1e571b1f71ec/griffelib-2.0.1.tar.gz", hash = "sha256:59f39eabb4c777483a3823e39e8f9e03e69df271a7e49aee64e91a8cfa91bdf5", size = 166383, upload-time = "2026-03-23T21:05:25.882Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/82/74f4a3310cdabfbb10da554c3a672847f1ed33c6f61dd472681ce7f1fe67/griffelib-2.0.2.tar.gz", hash = "sha256:3cf20b3bc470e83763ffbf236e0076b1211bac1bc67de13daf494640f2de707e", size = 166461, upload-time = "2026-03-27T11:34:51.091Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/4c/cc8c68196db727cfc1432f2ad5de50aa6707e630d44b2e6361dc06d8f134/griffelib-2.0.1-py3-none-any.whl", hash = "sha256:b769eed581c0e857d362fc8fcd8e57ecd2330c124b6104ac8b4c1c86d76970aa", size = 142377, upload-time = "2026-03-23T21:04:01.116Z" },
+    { url = "https://files.pythonhosted.org/packages/11/8c/c9138d881c79aa0ea9ed83cbd58d5ca75624378b38cee225dcf5c42cc91f/griffelib-2.0.2-py3-none-any.whl", hash = "sha256:925c857658fb1ba40c0772c37acbc2ab650bd794d9c1b9726922e36ea4117ea1", size = 142357, upload-time = "2026-03-27T11:34:46.275Z" },
 ]
 
 [[package]]
