@@ -76,8 +76,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
     """List available agents from the AgentPool.
 
     Returns all agents with their configurations, suitable for the agent
-    switcher UI. Agents are marked as primary (visible in switcher) or
-    subagent (hidden, used internally).
+    switcher UI. All agents are marked as primary (visible in switcher).
     """
     pool = state.agent.agent_pool
     assert pool is not None, "AgentPool is not initialized"
@@ -86,7 +85,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
             name=name,
             description=agent.description or f"Agent: {name}",
             # model=ModelRef(model_id=agent.model_name or "unknown", provider_id=""),
-            mode="primary" if agent == state.agent else "subagent",
+            mode="primary",
             default=(name == pool.main_agent.name),  # Default agent from pool
         )
         for name, agent in pool.all_agents.items()
