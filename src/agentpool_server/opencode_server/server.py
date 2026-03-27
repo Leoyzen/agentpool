@@ -262,7 +262,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
 
     # Add CORS middleware (required for OpenCode TUI)
     app.add_middleware(
-        CORSMiddleware,  # ty: ignore[invalid-argument-type]
+        CORSMiddleware,
         allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],

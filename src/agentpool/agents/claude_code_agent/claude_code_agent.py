@@ -502,13 +502,12 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             case "plan":
                 return PermissionResultDeny(message="Plan mode active - tool execution disabled")
             case "acceptEdits":
-                actual_tool_name = _strip_mcp_prefix(tool_name)
                 # Auto-allow file editing tools
-                if actual_tool_name.lower() in ("edit", "write", "edit_file", "write_file"):
+                if display_name.lower() in ("edit", "write", "edit_file", "write_file"):
                     return PermissionResultAllow()
                 result = await input_provider.get_tool_confirmation(context=ctx)
                 return confirmation_result_to_native(result)
-            case "default" | "plan" | "delegate" | "dontAsk":
+            case "default" | "plan" | "delegate" | "dontAsk" | "auto":
                 result = await input_provider.get_tool_confirmation(context=ctx)
                 return confirmation_result_to_native(result)
             case _ as unreachable:

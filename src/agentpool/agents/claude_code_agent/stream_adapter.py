@@ -206,6 +206,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                     # Flush + tool return handled by reconstructor via
                     # ToolCcleanupallCompleteEvent observation
                     tool_use = pending_tool_calls.pop(tc_id)
+                    stripped = _strip_mcp_prefix(tool_use.name)
                     # For Bash tools: stream output + exit to virtual terminal
                     # before signaling completion. This matches the 3-step
                     # display-only terminal lifecycle.
@@ -214,7 +215,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         exit_code = 1 if user_block.is_error else 0
                         yield ToolCallProgressEvent(
                             tool_call_id=tc_id,
-                            tool_name=_strip_mcp_prefix(tool_use.name),
+                            tool_name=stripped,
                             field_meta={
                                 "terminal_output": {
                                     "terminal_id": tc_id,
@@ -224,7 +225,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         )
                         yield ToolCallProgressEvent(
                             tool_call_id=tc_id,
-                            tool_name=_strip_mcp_prefix(tool_use.name),
+                            tool_name=stripped,
                             field_meta={
                                 "terminal_exit": {
                                     "terminal_id": tc_id,
@@ -235,7 +236,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         )
 
                     return_part = ToolReturnPart(
-                        tool_name=_strip_mcp_prefix(tool_use.name),
+                        tool_name=stripped,
                         content=result_content,
                         tool_call_id=tc_id,
                     )
@@ -251,7 +252,7 @@ async def adapt_claude_stream(  # noqa: PLR0915
                         metadata = cast(dict[str, Any] | None, oc_metadata)
 
                     yield ToolCallCompleteEvent(
-                        tool_name=_strip_mcp_prefix(tool_use.name),
+                        tool_name=stripped,
                         tool_call_id=tc_id,
                         tool_input=tool_input,
                         tool_result=result_content,
@@ -348,7 +349,6 @@ async def adapt_claude_stream(  # noqa: PLR0915
         # Check for result (end of response)
         if isinstance(message, ResultMessage):
             result.result_message = message
-            break
 
     yield result
 

@@ -93,7 +93,7 @@ def vercel_command(  # noqa: PLR0915
 
     if cors:
         app.add_middleware(
-            CORSMiddleware,  # ty: ignore[invalid-argument-type]
+            CORSMiddleware,
             allow_origins=["*"],
             allow_credentials=True,
             allow_methods=["*"],
