@@ -48,10 +48,12 @@ async def convert_codex_stream(  # noqa: PLR0915
         ThreadItemMcpToolCall,
         TurnPlanUpdatedEvent,
     )
+    from pydantic_ai import PartEndEvent, TextPart, ThinkingPart
 
     from agentpool.agents.events import (
         CompactionEvent,
         PartDeltaEvent,
+        PartStartEvent,
         PlanUpdateEvent,
         TextContentItem,
         ToolCallCompleteEvent,
@@ -62,6 +64,9 @@ async def convert_codex_stream(  # noqa: PLR0915
 
     # Accumulation state for streaming tool outputs
     tool_outputs: dict[str, list[str]] = {}
+    text_started = False
+    thinking_started = False
+    part_index = 0
 
     async for event in events:
         match event:
@@ -81,12 +86,27 @@ async def convert_codex_stream(  # noqa: PLR0915
                 pass
 
             case AgentMessageDeltaEvent(data=data):
-                yield PartDeltaEvent.text(index=0, content=data.delta)
+                if not text_started:
+                    yield PartStartEvent.text(index=part_index, content="")
+                    text_started = True
+                yield PartDeltaEvent.text(index=part_index, content=data.delta)
 
             case ReasoningTextDeltaEvent(data=data):
-                yield PartDeltaEvent.thinking(index=0, content=data.delta)
+                if not thinking_started:
+                    yield PartStartEvent.thinking(index=part_index, content="")
+                    thinking_started = True
+                yield PartDeltaEvent.thinking(index=part_index, content=data.delta)
 
             case ItemStartedEvent(data=data):
+                # Close any open text/thinking part before a tool call
+                if text_started:
+                    yield PartEndEvent(index=part_index, part=TextPart(content=""))
+                    text_started = False
+                    part_index += 1
+                if thinking_started:
+                    yield PartEndEvent(index=part_index, part=ThinkingPart(content=""))
+                    thinking_started = False
+                    part_index += 1
                 if part := _thread_item_to_tool_call_part(data.item):
                     # Extract title based on tool type
                     match data.item:
@@ -160,3 +180,9 @@ async def convert_codex_stream(  # noqa: PLR0915
             # Ignore other events (token usage, turn started/completed, etc.)
             case _:
                 pass
+
+    # Emit end events for any open parts
+    if thinking_started:
+        yield PartEndEvent(index=part_index, part=ThinkingPart(content=""))
+    if text_started:
+        yield PartEndEvent(index=part_index, part=TextPart(content=""))
