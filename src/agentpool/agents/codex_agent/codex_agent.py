@@ -21,7 +21,6 @@ from pydantic_ai import RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.codex_agent.codex_converters import (
-    convert_codex_stream,
     mcp_config_to_codex,
     to_finish_reason,
     to_model_info,
@@ -30,6 +29,7 @@ from agentpool.agents.codex_agent.codex_converters import (
     turns_to_chat_messages,
     user_content_to_codex,
 )
+from agentpool.agents.codex_agent.stream_adapter import convert_codex_stream
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
