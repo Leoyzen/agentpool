@@ -7,7 +7,7 @@ Provides converters for:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentpool.agents.codex_agent.codex_converters import (
     _format_tool_result,
@@ -64,8 +64,7 @@ async def convert_codex_stream(  # noqa: PLR0915
 
     # Accumulation state for streaming tool outputs
     tool_outputs: dict[str, list[str]] = {}
-    text_started = False
-    thinking_started = False
+    active_part: Literal["text", "thinking", "tool"] | None = None
     part_index = 0
 
     async for event in events:
@@ -86,27 +85,32 @@ async def convert_codex_stream(  # noqa: PLR0915
                 pass
 
             case AgentMessageDeltaEvent(data=data):
-                if not text_started:
+                if active_part != "text":
+                    if active_part == "thinking":
+                        yield PartEndEvent(index=part_index, part=ThinkingPart(content=""))
+                        part_index += 1
                     yield PartStartEvent.text(index=part_index, content="")
-                    text_started = True
+                    active_part = "text"
                 yield PartDeltaEvent.text(index=part_index, content=data.delta)
 
             case ReasoningTextDeltaEvent(data=data):
-                if not thinking_started:
+                if active_part != "thinking":
+                    if active_part == "text":
+                        yield PartEndEvent(index=part_index, part=TextPart(content=""))
+                        part_index += 1
                     yield PartStartEvent.thinking(index=part_index, content="")
-                    thinking_started = True
+                    active_part = "thinking"
                 yield PartDeltaEvent.thinking(index=part_index, content=data.delta)
 
             case ItemStartedEvent(data=data):
                 # Close any open text/thinking part before a tool call
-                if text_started:
+                if active_part == "text":
                     yield PartEndEvent(index=part_index, part=TextPart(content=""))
-                    text_started = False
                     part_index += 1
-                if thinking_started:
+                elif active_part == "thinking":
                     yield PartEndEvent(index=part_index, part=ThinkingPart(content=""))
-                    thinking_started = False
                     part_index += 1
+                active_part = "tool"
                 if part := _thread_item_to_tool_call_part(data.item):
                     # Extract title based on tool type
                     match data.item:
@@ -181,8 +185,9 @@ async def convert_codex_stream(  # noqa: PLR0915
             case _:
                 pass
 
-    # Emit end events for any open parts
-    if thinking_started:
-        yield PartEndEvent(index=part_index, part=ThinkingPart(content=""))
-    if text_started:
-        yield PartEndEvent(index=part_index, part=TextPart(content=""))
+    # Emit end event for any open part
+    match active_part:
+        case "text":
+            yield PartEndEvent(index=part_index, part=TextPart(content=""))
+        case "thinking":
+            yield PartEndEvent(index=part_index, part=ThinkingPart(content=""))
