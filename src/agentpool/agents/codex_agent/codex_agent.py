@@ -521,17 +521,17 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             # Resolve input provider: explicit parameter overrides agent default
             effective_input_provider = input_provider or self._input_provider
             run_context = self.get_context(data=deps, input_provider=effective_input_provider)
+            raw_stream = self._client.turn_stream(
+                self._sdk_session_id,
+                input_items,
+                model=self._current_model,
+                effort=self._current_effort,
+                approval_policy=self._approval_policy,
+                sandbox_policy=self._current_sandbox,
+                output_schema=None if self._output_type in (str, None) else self._output_type,
+                personality=self._current_personality,
+            )
             async with self._tool_bridge.set_run_context(run_context, prompt=prompts):
-                raw_stream = self._client.turn_stream(
-                    self._sdk_session_id,
-                    input_items,
-                    model=self._current_model,
-                    effort=self._current_effort,
-                    approval_policy=self._approval_policy,
-                    sandbox_policy=self._current_sandbox,
-                    output_schema=None if self._output_type in (str, None) else self._output_type,
-                    personality=self._current_personality,
-                )
                 # Wrap to capture metadata (turn_id, token usage), then convert
                 async for native_event in convert_codex_stream(capture_metadata(raw_stream)):
                     reconstructor.observe(native_event)
