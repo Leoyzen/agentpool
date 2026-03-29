@@ -720,7 +720,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
-        from clawd_code_sdk import AssistantMessage, ResultSuccessMessage
+        from clawd_code_sdk import AssistantMessage, ResultSuccessMessage, UserMessage
 
         from agentpool.agents.claude_code_agent.stream_adapter import (
             StreamAdapterResult,
@@ -755,7 +755,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Capture SDK session ID from init message
             stream = client.receive_response()
             first_msg = await anext(stream)
-            assert not isinstance(first_msg, AssistantMessage), (
+            assert not isinstance(first_msg, AssistantMessage | UserMessage), (
                 f"invalid message type {type(first_msg)}"
             )
             self._sdk_session_id = first_msg.session_id
