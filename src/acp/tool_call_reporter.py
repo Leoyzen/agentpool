@@ -67,7 +67,7 @@ class ToolCallReporter:
         self.kind: ToolCallKind | None = kind
         self.status: ToolCallStatus = status
         self.locations: list[ToolCallLocation] = list(locations) if locations else []
-        self.content: list[ToolCallContent] = list(content) if content else []
+        self.content: list[ToolCallContent | str] = list(content) if content else []
         self.raw_input = raw_input
         self.raw_output = raw_output
         self._started = False
@@ -140,12 +140,12 @@ class ToolCallReporter:
         if content is not None:
             content_list: list[ToolCallContent | str] = list(content)
             if replace:
-                self.content = content_list  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
+                self.content = content_list
             else:
-                self.content.extend(content_list)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+                self.content.extend(content_list)
 
         if message is not None:
-            self.content.append(message)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+            self.content.append(message)
 
         await self._notifications.tool_call_progress(
             tool_call_id=self.tool_call_id,

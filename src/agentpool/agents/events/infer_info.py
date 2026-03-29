@@ -109,7 +109,8 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
     if tool_lower in ("bash", "execute", "run_command", "execute_command", "execute_code"):
         command = input_data.get("command") or input_data.get("code", "")
         # Escape backticks in command
-        escaped_cmd = command.replace("`", "\\`") if command else ""  # type: ignore[union-attr]
+        assert isinstance(command, str)
+        escaped_cmd = command.replace("`", "\\`") if command else ""
         title = f"`{escaped_cmd}`" if escaped_cmd else "Terminal"
         return RichToolInfo(title=title, kind="execute")
     # Search operations
@@ -119,13 +120,15 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
         title = f"Search for '{pattern}'" if pattern else "Search"
         if path:
             title += f" in {path}"
-        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
+        assert isinstance(path, str)
+        locations = [LocationContentItem(path=path)] if path else []
         return RichToolInfo(title=title, kind="search", locations=locations)
     # List directory
     if tool_lower in ("ls", "list", "list_directory"):
         path = input_data.get("path", ".")
         title = f"List {path}" if path != "." else "List current directory"
-        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
+        assert isinstance(path, str)
+        locations = [LocationContentItem(path=path)] if path else []
         return RichToolInfo(title=title, kind="search", locations=locations)
     # Web operations
     if tool_lower in ("webfetch", "web_fetch", "fetch"):
@@ -137,17 +140,20 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
     # Task/subagent operations
     if tool_lower == "task":
         description = input_data.get("description", "")
-        return RichToolInfo(title=description if description else "Task", kind="think")  # type: ignore[arg-type]
+        assert isinstance(description, str)
+        return RichToolInfo(title=description if description else "Task", kind="think")
     # Notebook operations
     if tool_lower in ("notebookread", "notebook_read"):
         path = input_data.get("notebook_path", "")
         title = f"Read Notebook {path}" if path else "Read Notebook"
-        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
+        assert isinstance(path, str)
+        locations = [LocationContentItem(path=path)] if path else []
         return RichToolInfo(title=title, kind="read", locations=locations)
     if tool_lower in ("notebookedit", "notebook_edit"):
         path = input_data.get("notebook_path", "")
         title = f"Edit Notebook {path}" if path else "Edit Notebook"
-        locations = [LocationContentItem(path=path)] if path else []  # type: ignore[arg-type]
+        assert isinstance(path, str)
+        locations = [LocationContentItem(path=path)] if path else []
         return RichToolInfo(title=title, kind="edit", locations=locations)
     # Default: use the tool name as title
     return RichToolInfo(title=actual_name, kind="other")

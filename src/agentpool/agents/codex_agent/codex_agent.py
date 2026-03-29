@@ -45,9 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
-    from codexed import (
-        CodexClient,
-    )
+    from codexed import CodexClient
     from codexed.models import (
         CodexEvent,
         McpServerConfig,
