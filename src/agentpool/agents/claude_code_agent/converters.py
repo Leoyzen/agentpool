@@ -40,6 +40,7 @@ from pydantic_ai import (
 )
 from pydantic_ai.models.anthropic import _FINISH_REASON_MAP as FINISH_REASON_MAP
 
+from agentpool.common_types import MCPServerStatus
 from agentpool.utils.diffs import compute_unified_diff
 from opencode_sdk.models.tool_metadata import (
     BashMetadata,
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
         HookInput,
         HookJSONOutput,
         McpServerConfig,
+        McpServerStatusEntry,
         PermissionResult,
         StopReason,
         StructuredPatchHunk,
@@ -94,6 +96,16 @@ def to_thinking_config(
             return ThinkingConfigEnabled(budget_tokens=tokens)
         case None:
             return None
+
+
+def to_mcp_server_status(server: McpServerStatusEntry) -> MCPServerStatus:
+    return MCPServerStatus(
+        name=server.name,
+        status=server.status,
+        server_type=server.config.type if server.config else "unknown",
+        server_name=server.server_info.name if server.server_info else None,
+        server_version=server.server_info.version if server.server_info else None,
+    )
 
 
 def to_prompt_input(content: Sequence[UserContent]) -> Iterator[UserPrompt]:

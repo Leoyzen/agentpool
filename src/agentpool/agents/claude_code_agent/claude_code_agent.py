@@ -20,6 +20,7 @@ from agentpool.agents.claude_code_agent.converters import (
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
     to_finish_reason,
+    to_mcp_server_status,
     to_prompt_input,
     to_run_usage,
     to_thinking_config,
@@ -389,15 +390,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             except Exception:  # noqa: BLE001
                 pass
             else:
-                for server in live_status.mcp_servers:
-                    result[server.name] = MCPServerStatus(
-                        name=server.name,
-                        status=server.status,
-                        server_type=server.config.type if server.config else "unknown",
-                        server_name=server.server_info.name if server.server_info else None,
-                        server_version=server.server_info.version if server.server_info else None,
-                    )
-                return result
+                return {s.name: to_mcp_server_status(s) for s in live_status.mcp_servers}
         # Fallback: report from config
         for name, config in self._mcp_servers.items():
             result[name] = MCPServerStatus(name=name, status="connected", server_type=config.type)
@@ -470,16 +463,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         input_data: ToolInput | dict[str, Any],
         context: ToolPermissionContext,
     ) -> PermissionResult:
-        """Handle tool permission requests.
-
-        Args:
-            tool_name: Name of the tool being called (e.g., "Bash", "Write")
-            input_data: Tool input arguments
-            context: Permission context with suggestions
-
-        Returns:
-            PermissionResult indicating allow or deny
-        """
+        """Handle tool permission requests."""
         from clawd_code_sdk import PermissionResultAllow, PermissionResultDeny
 
         input_dict = cast(dict[str, Any], input_data)
@@ -518,17 +502,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         input_data: AskUserQuestionInput,
         context: ToolPermissionContext,
     ) -> PermissionResult:
-        """Handle AskUserQuestion elicitation requests.
-
-        Called when Claude asks the user a clarifying question.
-
-        Args:
-            input_data: Input containing 'questions' array
-            context: Permission context with tool_use_id
-
-        Returns:
-            PermissionResult with answers or denial
-        """
+        """Handle AskUserQuestion elicitation requests."""
         from agentpool.agents.claude_code_agent.elicitation import handle_clarifying_questions
 
         ctx = self._tool_bridge._current_context
@@ -541,17 +515,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         )
 
     async def _on_elicitation(self, request: SDKControlElicitationRequest) -> ElicitResult:
-        """Handle MCP elicitation requests.
-
-        Converts from Claude SDK's ElicitationRequest to MCP's ElicitRequestParams,
-        delegates to the input provider, and converts back.
-
-        Args:
-            request: Elicitation request from an MCP server
-
-        Returns:
-            ElicitationResult with user's response
-        """
+        """Handle MCP elicitation requests."""
         from mcp.types import ElicitResult, ErrorData
 
         if self._tool_bridge._current_context is None:
