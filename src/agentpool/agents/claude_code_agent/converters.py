@@ -304,12 +304,7 @@ def _convert_read_result(result: ReadOutput) -> ReadMetadata:
 
 def _convert_bash_result(result: BashOutput, tool_input: BashInput) -> BashMetadata:
     """Convert Bash tool result to OpenCode metadata."""
-    stdout = result["stdout"]
-    stderr = result["stderr"]
-    # Combine stdout and stderr
-    output = stdout
-    if stderr:
-        output = f"{stdout}\n{stderr}" if stdout else stderr
+    output = f"{result['stdout']}\n{result['stderr']}".strip()
     # Get description from tool input (Claude Code uses "description" field)
     description = tool_input.get("description") or tool_input["command"]
     # Note: Claude Code SDK doesn't provide exit code in the success result structure,
