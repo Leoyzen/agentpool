@@ -60,11 +60,13 @@ if TYPE_CHECKING:
     from clawd_code_sdk.models import (
         HookContext,
         HookEvent,
-        HookInput,
         HookJSONOutput,
+        HookMatcher,
         McpServerConfig,
         McpServerStatusEntry,
         PermissionResult,
+        PostToolUseHookInput,
+        PreToolUseHookInput,
         StopReason,
         StructuredPatchHunk,
         SyncHookJSONOutput,
@@ -430,7 +432,7 @@ def build_sdk_hooks_from_agent_hooks(
     hooks: AgentHooks,
     agent_name: str,
     env: ExecutionEnvironment | None = None,
-) -> dict[HookEvent, list[Any]]:
+) -> dict[HookEvent, list[HookMatcher]]:
     """Convert AgentHooks to Claude SDK hooks format.
 
     Args:
@@ -443,27 +445,22 @@ def build_sdk_hooks_from_agent_hooks(
     """
     from clawd_code_sdk.models import HookMatcher
 
-    result: dict[HookEvent, list[Any]] = {}
+    result: dict[HookEvent, list[HookMatcher]] = {}
     if hooks.pre_tool_use:
 
         async def on_pre_tool_use(
-            input_data: HookInput,
+            input_data: PreToolUseHookInput,
             tool_use_id: str | None,
             context: HookContext,
         ) -> HookJSONOutput:
             """Adapter for pre_tool_use hooks."""
-            tool_name = input_data.get("tool_name", "")
-            tool_input = input_data.get("tool_input", {})
-            assert isinstance(tool_name, str)
-            assert isinstance(tool_input, dict)
             pre_result = await hooks.run_pre_tool_hooks(
                 agent_name=agent_name,
-                tool_name=tool_name,
-                tool_input=tool_input,
+                tool_name=input_data["tool_name"],
+                tool_input=input_data["tool_input"],
                 session_id=input_data.get("session_id"),
                 env=env,
             )
-
             # Convert our hook result to SDK format
             decision = pre_result.get("decision")
             if decision == "deny":
@@ -486,25 +483,21 @@ def build_sdk_hooks_from_agent_hooks(
 
             return output
 
-        result["PreToolUse"] = [HookMatcher(matcher="*", hooks=[on_pre_tool_use])]
+        result["PreToolUse"] = [HookMatcher(matcher="*", hooks=[on_pre_tool_use])]  # ty:ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     if hooks.post_tool_use:
 
         async def on_post_tool_use(
-            input_data: Any,
+            input_data: PostToolUseHookInput,
             tool_use_id: str | None,
-            context: Any,
+            context: HookContext,
         ) -> dict[str, Any]:
             """Adapter for post_tool_use hooks."""
-            tool_name = input_data.get("tool_name", "")
-            tool_input = input_data.get("tool_input", {})
-            tool_response = input_data.get("tool_response")
-
             await hooks.run_post_tool_hooks(
                 agent_name=agent_name,
-                tool_name=tool_name,
-                tool_input=tool_input,
-                tool_output=tool_response,
+                tool_name=input_data["tool_name"],
+                tool_input=input_data["tool_input"],
+                tool_output=input_data["tool_response"],
                 duration_ms=0,  # SDK doesn't provide timing
                 session_id=input_data.get("session_id"),
                 env=env,
