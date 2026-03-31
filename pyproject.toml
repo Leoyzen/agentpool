@@ -444,6 +444,29 @@ division-by-zero = "warn"
 [tool.uv]
 default-groups = ["dev", "lint", "docs"]
 constraint-dependencies = ["extism-sys<1.13.0"]
+# exclude-newer = "1 day"
+
+# [tool.uv.exclude-newer-package]  # exclude self-maintained
+# codexed = "0 days"
+# clawd-code-sdk = "0 days"
+# docler = "0 days"
+# epregistry = "0 days"
+# anyenv = "0 days"
+# exxec = "0 days"
+# mknodes = "0 days"
+# tokonomics = "0 days"
+# toprompt = "0 days"
+# yamling = "0 days"
+# sublime-search = "0 days"
+# ripgrep-rs = "0 days"
+# slashed = "0 days"
+# searchly = "0 days"
+# schemez = "0 days"
+# upathtools = "0 days"
+# promptantic = "0 days"
+# llmling-models = "0 days"
+# jinjarope = "0 days"
+# evented = "0 days"
 
 [tool.uv.build-backend]
 module-name = [
