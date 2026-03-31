@@ -31,6 +31,7 @@ from pydantic_ai import (
     ModelResponse,
     RetryPromptPart,
     SystemPromptPart,
+    TextContent,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -384,7 +385,7 @@ def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]
 
     for item in prompts:
         match item:
-            case str(text):
+            case str(text) | TextContent(content=text):
                 content_blocks.append(TextContentBlock(text=text))
 
             case BinaryImage(data=data, media_type=media_type):

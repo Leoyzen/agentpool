@@ -23,8 +23,8 @@ from agentpool.utils.inspection import execute
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from fastmcp.prompts import Prompt as FastMCPPrompt
     from fastmcp.prompts.function_prompt import FunctionPrompt
-    from fastmcp.prompts.prompt import Prompt as FastMCPPrompt
     from mcp.types import Prompt as MCPPrompt, PromptArgument
     from pydantic_ai import ModelRequestPart
     from slashed import CommandContext
@@ -186,7 +186,7 @@ class StaticPrompt(BasePrompt):
         return MCPPrompt(name=self.name, description=self.description, arguments=args)
 
     def to_fastmcp_prompt(self) -> FastMCPPrompt:
-        from fastmcp.prompts.prompt import (
+        from fastmcp.prompts import (
             Prompt as FastMCPPrompt,
             PromptArgument as FastMCPArgument,
         )

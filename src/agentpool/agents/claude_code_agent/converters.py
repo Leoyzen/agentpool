@@ -35,6 +35,7 @@ from pydantic_ai import (
     ImageUrl,
     RequestUsage,
     RunUsage,
+    TextContent,
     UploadedFile,
     VideoUrl,
 )
@@ -127,7 +128,7 @@ def to_prompt_input(content: Sequence[UserContent]) -> Iterator[UserPrompt]:
                 yield UserFilePrompt(file_id=file_id)
             case UploadedFile(file_id=file_id, provider_name=provider_name):
                 raise ValueError(f"Unsupported UploadedFile: {provider_name=} {file_id=}")
-            case str() as text:
+            case str(text) | TextContent(content=text):
                 yield UserTextPrompt(text=text)
             case BinaryContent():
                 pass  # video/audio not handled yet
@@ -512,6 +513,6 @@ def build_sdk_hooks_from_agent_hooks(
             # Post hooks are observation-only in SDK, can add context
             return {}
 
-        result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[on_post_tool_use])]  # type: ignore[list-item]  # ty:ignore[invalid-argument-type]
+        result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[on_post_tool_use])]  # ty:ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     return result

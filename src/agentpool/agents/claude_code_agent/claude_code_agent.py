@@ -386,11 +386,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         if self._client:
             try:
                 await self.ensure_initialized()
-                live_status = await self._client.get_mcp_status()
+                mcp_servers = await self._client.get_mcp_status()
             except Exception:  # noqa: BLE001
                 pass
             else:
-                return {s.name: to_mcp_server_status(s) for s in live_status.mcp_servers}
+                return {s.name: to_mcp_server_status(s) for s in mcp_servers}
         # Fallback: report from config
         for name, config in self._mcp_servers.items():
             result[name] = MCPServerStatus(name=name, status="connected", server_type=config.type)

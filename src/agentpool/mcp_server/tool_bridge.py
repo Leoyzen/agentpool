@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Sequence
 
     from fastmcp import Context, FastMCP
-    from fastmcp.tools.tool import ToolResult as FastMCPToolResult
+    from fastmcp.tools import ToolResult as FastMCPToolResult
     from pydantic_ai import UserContent
     from uvicorn import Server
 
@@ -388,7 +388,7 @@ class ToolManagerBridge:
             async def run(self, arguments: dict[str, Any]) -> FastMCPToolResult:
                 """Execute the wrapped tool with context bridging."""
                 from fastmcp.server.dependencies import get_context
-                from fastmcp.tools.tool import ToolResult as FastMCPToolResult
+                from fastmcp.tools import ToolResult as FastMCPToolResult
 
                 from agentpool.tools.base import ToolResult as AgentPoolToolResult
 

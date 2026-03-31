@@ -20,9 +20,8 @@ class PromptLayerProvider(BasePromptProvider):
     supports_versions = True
 
     def __init__(self, config: PromptLayerConfig) -> None:
-        self.client = PromptLayer(
-            api_key=config.api_key.get_secret_value() if config.api_key else None
-        )
+        key = config.api_key.get_secret_value() if config.api_key else None
+        self.client = PromptLayer(api_key=key)  # ty:ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     async def get_prompt(
         self,

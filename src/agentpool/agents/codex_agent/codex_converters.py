@@ -33,6 +33,7 @@ from pydantic_ai import (
     ModelResponse,
     RequestUsage,
     RunUsage,
+    TextContent,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -52,13 +53,13 @@ if TYPE_CHECKING:
         HttpMcpServer,
         InputModality,
         McpServerConfig,
-        MiscTurnStatusValue,
-        ModelData,
+        Model,
         StdioMcpServer,
         Thread,
         ThreadItem,
         TokenUsageBreakdown,
         Turn,
+        TurnStatus,
         UserInput,
     )
     from pydantic_ai import FinishReason
@@ -75,7 +76,7 @@ if TYPE_CHECKING:
 _MODALITY_MAP: dict[InputModality, Modality] = {"text": "text", "image": "image"}
 
 
-def to_finish_reason(status: MiscTurnStatusValue) -> FinishReason:
+def to_finish_reason(status: TurnStatus) -> FinishReason:
     """Convert Codex TurnStatusValue to pydantic-ai FinishReason."""
     match status:
         case "completed":
@@ -159,7 +160,7 @@ def mcp_config_to_codex(config: MCPServerConfig) -> tuple[str, McpServerConfig]:
             raise assert_never(unreachable)
 
 
-def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelInfo:
+def to_model_info(model_data: Model, provider: str = "openai") -> TokoModelInfo:
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     model_id = model_data.model or model_data.id
@@ -169,7 +170,7 @@ def to_model_info(model_data: ModelData, provider: str = "openai") -> TokoModelI
         provider=provider,
         description=model_data.description or None,
         id_override=model_id,
-        input_modalities={_MODALITY_MAP[m] for m in model_data.input_modalities},
+        input_modalities={_MODALITY_MAP[m] for m in model_data.input_modalities or []},
         metadata={
             k: v
             for k, v in {
@@ -201,8 +202,8 @@ def user_content_to_codex(content: Sequence[UserContent]) -> Iterator[UserInput]
 
     for item in content:
         match item:
-            case str():
-                yield UserInputText(text=item)
+            case str(text) | TextContent(content=text):
+                yield UserInputText(text=text)
             case ImageUrl(url=url):
                 yield UserInputImage(url=url)
             case BinaryContent(data=data, media_type=media_type, is_image=is_image) if is_image:

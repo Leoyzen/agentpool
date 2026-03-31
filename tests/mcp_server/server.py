@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 import anyio
 from fastmcp import Context, FastMCP
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Audio, File, Image
 from mcp.types import ModelHint, ModelPreferences, TextContent
 from pydantic import BaseModel

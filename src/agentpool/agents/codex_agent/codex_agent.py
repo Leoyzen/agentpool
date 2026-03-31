@@ -45,15 +45,15 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
-    from codexed import CodexClient
+    from codexed import CodexClient, Session
     from codexed.models import (
         CodexEvent,
         McpServerConfig,
         McpServerElicitationRequestParams,
-        MiscTurnStatusValue,
         TokenUsageBreakdown,
         ToolRequestUserInputParams,
         ToolRequestUserInputResponse,
+        TurnStatus,
     )
     from codexed.request_handlers import ApprovalParams, ApprovalResponse
     from exxec import ExecutionEnvironment
@@ -165,6 +165,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Client state
         self._client: CodexClient | None = None
         self._sdk_session_id: str | None = session_id
+        self._sessions: dict[str, Session] = {}
         self._external_mcp_servers = [
             BaseMCPServerConfig.from_string(s) if isinstance(s, str) else s
             for s in mcp_servers or []
@@ -275,6 +276,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             session = await self._client.thread_resume(self._sdk_session_id)
             thread = session.response.thread
             self._sdk_session_id = thread.id
+            self._sessions[self._sdk_session_id] = session
             self.log.info("Codex thread resumed", sdk_session_id=self._sdk_session_id, cwd=cwd)
             # Restore conversation history from resumed thread
             chat_messages = turns_to_chat_messages(thread.turns)
@@ -293,6 +295,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 personality=self._current_personality,
             )
             self._sdk_session_id = session.thread_id
+            self._sessions[self._sdk_session_id] = session
             self.log.info("Codex thread started", sdk_session_id=self._sdk_session_id, cwd=cwd)
         return self
 
@@ -454,6 +457,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 self.log.exception("Error closing Codex client")
             self._client = None
         self._sdk_session_id = None
+        self._sessions.clear()
 
     async def _stream_events(  # noqa: PLR0915
         self,
@@ -498,7 +502,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Stream turn events with bridge context set
         reconstructor = MessageReconstructor(initial_prompts=prompts, model_name=self.model_name)
         self._token_usage_data = None
-        self._turn_status: MiscTurnStatusValue | None = None
+        self._turn_status: TurnStatus | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
 
         async def capture_metadata(
@@ -507,11 +511,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             """Wrapper to capture token usage, turn_id, and turn status before event conversion."""
             async for event in raw_events:
                 match event:
-                    case TurnStartedEvent(data=data):
+                    case TurnStartedEvent(params=data):
                         self._current_turn_id = data.turn.id
-                    case TurnCompletedEvent(data=data):
+                    case TurnCompletedEvent(params=data):
                         self._turn_status = data.turn.status
-                    case ThreadTokenUsageUpdatedEvent(data=data):
+                    case ThreadTokenUsageUpdatedEvent(params=data):
                         self._token_usage_data = data.token_usage.last
                 yield event
 
@@ -519,8 +523,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             # Resolve input provider: explicit parameter overrides agent default
             effective_input_provider = input_provider or self._input_provider
             run_context = self.get_context(data=deps, input_provider=effective_input_provider)
-            raw_stream = self._client.turn_stream(
-                self._sdk_session_id,
+            session = self._sessions[self._sdk_session_id]
+            raw_stream = session.turn_stream(
                 input_items,
                 model=self._current_model,
                 effort=self._current_effort,
@@ -626,7 +630,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         """Call Codex turn_interrupt if there's an active turn."""
         if self._client and self._sdk_session_id and self._current_turn_id:
             try:
-                await self._client.turn_interrupt(self._sdk_session_id, self._current_turn_id)
+                session = self._sessions[self._sdk_session_id]
+                await session.turn_interrupt(self._current_turn_id)
                 self.log.info(
                     "Codex turn interrupted",
                     sdk_session_id=self._sdk_session_id,
@@ -786,6 +791,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Update current thread ID
         thread = session.response.thread
         self._sdk_session_id = thread.id
+        self._sessions[self._sdk_session_id] = session
         self.log.info("Thread resumed from Codex server", sdk_session_id=thread.id)
         # Convert turns to ChatMessages and populate conversation
         if thread.turns:
