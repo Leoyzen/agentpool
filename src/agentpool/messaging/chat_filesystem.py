@@ -164,7 +164,7 @@ class ChatMessageFileSystem(BaseAsyncFileFileSystem[ChatMessagePath, ChatMessage
                             ChatMessageInfo(name=file_path, type="file", size=len(content))
                         )
 
-        return entries if detail else [e["name"] for e in entries]  # type: ignore[misc]
+        return entries if detail else [e["name"] for e in entries]
 
     async def _cat_file(
         self,

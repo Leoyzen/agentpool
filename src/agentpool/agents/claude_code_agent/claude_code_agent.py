@@ -923,7 +923,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
     async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle permissions, model, thinking_level, and effort mode switching."""
-        from clawd_code_sdk.models import PermissionMode, ReasoningEffort
+        from clawd_code_sdk.models import ReasoningEffort
 
         from agentpool.agents.claude_code_agent.static_info import VALID_MODES
 
@@ -932,7 +932,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 # Map mode_id to PermissionMode
                 if mode_id not in VALID_MODES:
                     raise UnknownModeError(mode_id, list(VALID_MODES))
-                self._permission_mode = cast(PermissionMode, mode_id)
+                self._permission_mode = mode_id  # ty:ignore[invalid-assignment]
                 if self._client:  # Update SDK client if initialized
                     await self.ensure_initialized()
                     await self._client.set_permission_mode(self._permission_mode)
@@ -953,7 +953,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 # Validate thinking mode
                 if mode_id not in THINKING_MODE_TOKENS:
                     raise UnknownModeError(mode_id, list(THINKING_MODE_TOKENS.keys()))
-                self._thinking_mode = cast(ThinkingMode, mode_id)
+                self._thinking_mode = mode_id  # ty:ignore[invalid-assignment]
                 # Set thinking tokens via SDK
                 if self._client:
                     await self.ensure_initialized()

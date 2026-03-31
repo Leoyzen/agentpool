@@ -198,16 +198,16 @@ def to_session_data(thread_data: Thread, agent_name: str, cwd: str | None) -> Se
 
 def user_content_to_codex(content: Sequence[UserContent]) -> Iterator[UserInput]:
     """Convert pydantic-ai UserContent list to Codex UserInput list."""
-    from codexed.models import UserInputImage, UserInputText
+    from codexed.models import ImageUserInput, TextUserInput
 
     for item in content:
         match item:
             case str(text) | TextContent(content=text):
-                yield UserInputText(text=text)
+                yield TextUserInput(text=text)
             case ImageUrl(url=url):
-                yield UserInputImage(url=url)
+                yield ImageUserInput(url=url)
             case BinaryContent(data=data, media_type=media_type, is_image=is_image) if is_image:
-                yield UserInputImage.from_bytes(data=data, media_type=media_type)
+                yield ImageUserInput.from_bytes(data=data, media_type=media_type)
             case FileUrl() | BinaryContent() | CachePoint() | UploadedFile():
                 pass
             case _ as unreachable:
@@ -312,23 +312,23 @@ def _thread_item_to_tool_call_part(item: ThreadItem) -> ToolCallPart | BuiltinTo
 def _user_input_to_content(inp: UserInput) -> UserContent:
     """Convert Codex UserInput to pydantic-ai UserContent."""
     from codexed.models import (
-        UserInputImage,
-        UserInputLocalImage,
-        UserInputMention,
-        UserInputSkill,
-        UserInputText,
+        ImageUserInput,
+        LocalImageUserInput,
+        MentionUserInput,
+        SkillUserInput,
+        TextUserInput,
     )
 
     match inp:
-        case UserInputText():
+        case TextUserInput():
             return inp.text
-        case UserInputImage(url=url):
+        case ImageUserInput(url=url):
             return ImageUrl(url=url)
-        case UserInputLocalImage(path=path):
+        case LocalImageUserInput(path=path):
             return ImageUrl(url=f"file://{path}")
-        case UserInputSkill(name=name):
+        case SkillUserInput(name=name):
             return f"[Skill: {name}]"
-        case UserInputMention(name=name):
+        case MentionUserInput(name=name):
             return f"@{name}"
         case _ as unreachable:
             assert_never(unreachable)
