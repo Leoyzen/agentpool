@@ -686,10 +686,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         from clawd_code_sdk import AssistantMessage, ResultSuccessMessage, UserMessage
 
-        from agentpool.agents.claude_code_agent.stream_adapter import (
-            StreamAdapterResult,
-            adapt_claude_stream,
-        )
+        from agentpool.agents.claude_code_agent.stream_adapter import ClaudeCodeStreamedResponse
 
         await self.ensure_initialized()
         # Resolve input provider: explicit parameter overrides agent default
@@ -711,10 +708,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             await fork_client.connect()
             client = fork_client
 
-        adapter_result: StreamAdapterResult | None = None
         reconstructor = MessageReconstructor(initial_prompts=prompts)
+        claude_prompts = [*to_prompt_input(prompts)]
         try:
-            claude_prompts = [*to_prompt_input(prompts)]
             await client.query(*claude_prompts)
             # Capture SDK session ID from init message
             stream = client.receive_response()
@@ -726,22 +722,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Persist SDK session ID to storage for cross-referencing
             if self.storage and self.session_id:
                 await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
-
+            adapter = ClaudeCodeStreamedResponse(
+                stream=stream,
+                tool_metadata=self._tool_bridge.tool_metadata,
+                agent_name=self.name,
+                session_id=self.session_id,
+            )
             async with (
                 self._tool_bridge.set_run_context(run_context, prompt=prompts),
-                merge_queue_into_iterator(stream, self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
+                merge_queue_into_iterator(adapter, self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
             ):
-                async for event in adapt_claude_stream(
-                    merged_stream=merged_events,
-                    tool_metadata=self._tool_bridge.tool_metadata,
-                    agent_name=self.name,
-                    session_id=self.session_id,
-                ):
-                    if isinstance(event, StreamAdapterResult):
-                        adapter_result = event
-                    else:
-                        reconstructor.observe(event)
-                        yield event
+                async for event in merged_events:
+                    reconstructor.observe(event)  # ty:ignore[invalid-argument-type]
+                    yield event  # ty:ignore[invalid-yield]
 
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via CancelledError")
@@ -749,9 +742,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             if self._sdk_session_id:
                 msg_metadata["sdk_session_id"] = self._sdk_session_id
             reconstructor.flush()
-            resolved = (
-                adapter_result.resolved_model if adapter_result else None
-            ) or self.model_name
+            resolved = adapter.model_name or self.model_name
             response_msg = ChatMessage[TResult](
                 content=reconstructor.text_content,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 role="assistant",
@@ -778,13 +769,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 except Exception as e:  # noqa: BLE001
                     self.log.warning("Error disconnecting fork client", error=e)
 
-        if not adapter_result:
-            raise RuntimeError("Stream completed without producing adapter result")
-
         reconstructor.flush()
 
         # Determine final content - use structured output if available
-        result_message = adapter_result.result_message
+        result_message = adapter._result_message
         content = reconstructor.text_content
         final_content: TResult
         if (
@@ -792,8 +780,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             and isinstance(result_message, ResultSuccessMessage)
             and result_message.structured_output
         ):
-            adapter = TypeAdapter(self._output_type)
-            final_content = adapter.validate_python(result_message.structured_output)
+            _adapter = TypeAdapter(self._output_type)
+            final_content = _adapter.validate_python(result_message.structured_output)
         else:
             final_content = content  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
 
@@ -824,7 +812,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             message_id=message_id or str(uuid.uuid4()),
             session_id=self.session_id,
             parent_id=user_msg.message_id,
-            model_name=adapter_result.resolved_model or self.model_name,
+            model_name=adapter.model_name or self.model_name,
             messages=reconstructor.model_messages,
             cost_info=cost_info,
             usage=run_usage,

@@ -29,7 +29,7 @@ from agentpool.agents.codex_agent.codex_converters import (
     turns_to_chat_messages,
     user_content_to_codex,
 )
-from agentpool.agents.codex_agent.stream_adapter import convert_codex_stream
+from agentpool.agents.codex_agent.stream_adapter import CodexStreamedResponse
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
@@ -535,7 +535,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             )
             async with self._tool_bridge.set_run_context(run_context, prompt=prompts):
                 # Wrap to capture metadata (turn_id, token usage), then convert
-                async for native_event in convert_codex_stream(capture_metadata(raw_stream)):
+                adapter = CodexStreamedResponse(stream=capture_metadata(raw_stream))
+                async for native_event in adapter:
                     reconstructor.observe(native_event)
                     yield native_event
 

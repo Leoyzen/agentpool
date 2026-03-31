@@ -8,10 +8,9 @@ Provides converters for:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import field
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic.dataclasses import dataclass
 from pydantic_ai import ModelResponse, RequestUsage
 from pydantic_ai._parts_manager import ModelResponsePartsManager
 

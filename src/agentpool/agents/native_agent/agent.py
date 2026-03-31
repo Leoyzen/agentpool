@@ -698,7 +698,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         case ModelRequestNode() | CallToolsNode():
                             async with (
                                 node.stream(agent_run.ctx) as stream,
-                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # ty:ignore[invalid-argument-type]
                             ):
                                 async for event in merged:
                                     if self._cancelled:
@@ -839,7 +839,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         self._model = old_model
                     self.model_settings = old_settings
                 if output_type:
-                    self.to_structured(old_type)
+                    self.to_structured(old_type)  # pyright: ignore[reportPossiblyUnboundVariable]
 
     async def get_available_models(self) -> list[ModelInfo] | None:
         """Get available models for this agent.
