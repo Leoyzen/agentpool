@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from pydantic_ai import RequestUsage, RunUsage
     from pydantic_ai.usage import UsageBase
 
-    from agentpool.utils.streams import FileChange
+    from agentpool.utils.file_ops_tracker import FileChange
 
 FileDiffStatus = Literal["added", "deleted", "modified"]
 

@@ -23,7 +23,7 @@ import pytest
 
 from agentpool.models.manifest import AgentsManifest
 from agentpool.storage import StorageManager
-from agentpool.utils.streams import FileOpsTracker
+from agentpool.utils.file_ops_tracker import FileOpsTracker
 from agentpool.utils.time_utils import now_ms
 from agentpool.utils.todos import TodoTracker
 from agentpool_server.opencode_server.dependencies import get_state
