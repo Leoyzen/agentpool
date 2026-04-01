@@ -214,7 +214,7 @@ class RpcClient:
         if parent_session:
             payload["parentSession"] = parent_session
         resp = await self._send(payload)
-        return self._get_data(resp).get("cancelled", False)
+        return bool(self._get_data(resp).get("cancelled", False))
 
     async def get_state(self) -> RpcSessionState:
         """Get current session state."""

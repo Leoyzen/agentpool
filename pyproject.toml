@@ -480,6 +480,7 @@ module-name = [
   "agentpool_toolsets",
   "acp",
   "opencode_sdk",
+  "pi_sdk",
 ]
 wheel-exclude = [
   ".mypy_cache/**",
