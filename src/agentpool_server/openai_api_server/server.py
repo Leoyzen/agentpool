@@ -18,7 +18,8 @@ from agentpool_server.openai_api_server.responses.helpers import handle_request
 
 
 if TYPE_CHECKING:
-    from fastapi import Header, Response
+    from fastapi import Header
+    from fastapi.responses import Response, StreamingResponse
     from openai.types.responses import Response as ResponsesResponse
 
     from agentpool import AgentPool
@@ -86,7 +87,9 @@ class OpenAIAPIServer(BaseServer):
         self.app.post("/v1/chat/completions", dependencies=[dep], response_model=None)(
             self.create_chat_completion
         )
-        self.app.post("/v1/responses", dependencies=[dep])(self.create_response)
+        self.app.post("/v1/responses", dependencies=[dep], response_model=None)(
+            self.create_response
+        )
 
     @property
     def agent(self) -> BaseAgent[Any, Any]:
@@ -175,27 +178,46 @@ class OpenAIAPIServer(BaseServer):
 
             raise HTTPException(500, f"Error: {e!s}") from e
 
-    async def create_response(self, req_body: ResponseRequest) -> ResponsesResponse:
+    async def create_response(
+        self,
+        req_body: ResponseRequest,
+    ) -> ResponsesResponse | StreamingResponse:
         """Handle response creation requests."""
         from fastapi import HTTPException
+        from fastapi.responses import StreamingResponse
 
         # Validate previous_response_id if provided
-        if req_body.previous_response_id is not None:
-            if req_body.previous_response_id != self._last_response_id:
-                raise HTTPException(
-                    404,
-                    f"Response '{req_body.previous_response_id}' not found. "
-                    "Only the most recent response ID is supported for continuation.",
-                )
+        if (
+            req_body.previous_response_id is not None
+            and req_body.previous_response_id != self._last_response_id
+        ):
+            raise HTTPException(
+                404,
+                f"Response '{req_body.previous_response_id}' not found. "
+                "Only the most recent response ID is supported for continuation.",
+            )
 
         try:
+            if req_body.stream:
+                from agentpool_server.openai_api_server.responses.stream_adapter import (
+                    ResponsesStreamAdapter,
+                    stream_responses,
+                )
+
+                adapter = ResponsesStreamAdapter(req_body)
+                self._last_response_id = adapter.response_id
+                return StreamingResponse(
+                    stream_responses(self.agent, req_body, adapter),
+                    media_type="text/event-stream",
+                )
             response = await handle_request(req_body, self.agent)
             self._last_response_id = response.id
-            return response
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(500, str(e)) from e
+        else:
+            return response
 
     async def _start_async(self) -> None:
         """Start the server (blocking async - runs until stopped)."""
