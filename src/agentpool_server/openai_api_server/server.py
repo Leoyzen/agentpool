@@ -19,13 +19,11 @@ from agentpool_server.openai_api_server.responses.helpers import handle_request
 
 if TYPE_CHECKING:
     from fastapi import Header, Response
+    from openai.types.responses import Response as ResponsesResponse
 
     from agentpool import AgentPool
     from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
-    from agentpool_server.openai_api_server.responses.models import (
-        Response as ResponsesResponse,
-        ResponseRequest,
-    )
+    from agentpool_server.openai_api_server.responses.models import ResponseRequest
 logger = get_logger(__name__)
 
 

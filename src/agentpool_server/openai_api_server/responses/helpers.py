@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from agentpool_server.openai_api_server.responses.models import (
+from openai.types.responses import (
     Response,
-    ResponseMessage,
+    ResponseFunctionToolCall,
+    ResponseOutputMessage,
     ResponseOutputText,
-    ResponseToolCall,
     ResponseUsage,
 )
+from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 
 if TYPE_CHECKING:
+    from openai.types.responses import (
+        ResponseOutputItem,
+    )
+
     from agentpool.agents.base_agent import BaseAgent
     from agentpool_server.openai_api_server.responses.models import ResponseRequest
 
@@ -26,48 +32,61 @@ async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -
         case str():
             content = request.input
         case list():
-            # Get last text content from structured input
-            last = request.input[-1]["content"]
-            text_parts = [p["text"] for p in last if p["type"] == "input_text"]
-            content = "\n".join(text_parts)
+            last_msg = request.input[-1]
+            msg_content = last_msg["content"]
+            if isinstance(msg_content, str):
+                content = msg_content
+            else:
+                text_parts = [p["text"] for p in msg_content if p["type"] == "input_text"]
+                content = "\n".join(text_parts)
         case _:
             raise HTTPException(400, "Invalid input format")
 
     message = await agent.run(content)
-    text = ResponseOutputText(text=str(message.content))
+    text = ResponseOutputText(text=str(message.content), annotations=[], type="output_text")
     output_msg_id = f"msg_{uuid4().hex}"
-    output_msg = ResponseMessage(id=output_msg_id, role="assistant", content=[text])
-    output: list[ResponseMessage | ResponseToolCall] = [output_msg]
+    output_msg = ResponseOutputMessage(
+        id=output_msg_id,
+        role="assistant",
+        content=[text],
+        status="completed",
+        type="message",
+    )
 
-    calls = [
-        ResponseToolCall(type=f"{tc.tool_name}_call", id=tc.tool_call_id)
+    calls: list[ResponseFunctionToolCall] = [
+        ResponseFunctionToolCall(
+            type="function_call",
+            arguments=str(tc.args),
+            call_id=tc.tool_call_id,
+            name=tc.tool_name,
+        )
         for tc in message.get_tool_calls()
     ]
-    output = calls + output  # type: ignore[assignment, operator]
+    output: list[ResponseOutputItem] = [*calls, output_msg]
 
     usage_info: ResponseUsage | None = None
     if token_usage := message.usage:
-        # Map the keys correctly from agent's dict to ResponseUsage TypedDict
-        input_tk = token_usage.input_tokens
-        output_tk = token_usage.output_tokens
-        total_tk = token_usage.total_tokens
-
         usage_info = ResponseUsage(
-            input_tokens=input_tk,
-            input_tokens_details={},
-            output_tokens=output_tk,
-            output_tokens_details={},
-            total_tokens=total_tk,
+            input_tokens=token_usage.input_tokens,
+            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            output_tokens=token_usage.output_tokens,
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+            total_tokens=token_usage.total_tokens,
         )
 
     return Response(
+        id=f"resp_{uuid4().hex}",
+        created_at=int(datetime.now().timestamp()),
         model=request.model,
+        object="response",
         output=output,
+        parallel_tool_calls=True,
+        tool_choice="auto",
+        tools=[],
+        status="completed",
         instructions=request.instructions,
         max_output_tokens=request.max_output_tokens,
         temperature=request.temperature,
-        tools=request.tools,
-        tool_choice=request.tool_choice,
         usage=usage_info,
         metadata=request.metadata,
     )
