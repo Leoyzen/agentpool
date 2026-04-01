@@ -26,25 +26,14 @@ if TYPE_CHECKING:
 async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -> Response:
     from fastapi import HTTPException
 
-    match request.input:
-        case str():
-            content = request.input
-        case list():
-            last_msg = request.input[-1]
-            msg_content = last_msg["content"]
-            if isinstance(msg_content, str):
-                content = msg_content
-            else:
-                text_parts = [p["text"] for p in msg_content if p["type"] == "input_text"]
-                content = "\n".join(text_parts)
-        case None:
-            if request.previous_response_id is None:
-                raise HTTPException(400, "Either 'input' or 'previous_response_id' is required")
-            content = ""  # Continuation with no new input
-        case _:
-            raise HTTPException(400, "Invalid input format")
+    from agentpool_server.openai_api_server.responses.models import extract_user_content
 
-    message = await agent.run(content)
+    try:
+        content_parts = extract_user_content(request)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+    message = await agent.run(*content_parts)
     text = ResponseOutputText(text=str(message.content), annotations=[], type="output_text")
     output_msg_id = f"msg_{uuid4().hex}"
     output_msg = ResponseOutputMessage(

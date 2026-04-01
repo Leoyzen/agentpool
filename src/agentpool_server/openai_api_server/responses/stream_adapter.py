@@ -73,26 +73,15 @@ async def stream_responses(
     """Stream a responses API request through the adapter."""
     from fastapi import HTTPException
 
-    match request.input:
-        case str():
-            content = request.input
-        case list():
-            last_msg = request.input[-1]
-            msg_content = last_msg["content"]
-            if isinstance(msg_content, str):
-                content = msg_content
-            else:
-                text_parts = [p["text"] for p in msg_content if p["type"] == "input_text"]
-                content = "\n".join(text_parts)
-        case None:
-            if request.previous_response_id is None:
-                raise HTTPException(400, "Either 'input' or 'previous_response_id' is required")
-            content = ""
-        case _:
-            raise HTTPException(400, "Invalid input format")
+    from agentpool_server.openai_api_server.responses.models import extract_user_content
+
+    try:
+        content_parts = extract_user_content(request)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
     async def _event_gen() -> AsyncGenerator[Any]:
-        async for event in agent.run_stream(content):
+        async for event in agent.run_stream(*content_parts):
             yield event
 
     async for line in adapter.stream(_event_gen()):

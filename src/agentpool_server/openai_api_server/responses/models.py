@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import base64
+from typing import TYPE_CHECKING, Any, Literal
 
 from openai.types.responses import EasyInputMessageParam
 from pydantic import Field
+from pydantic_ai import BinaryContent, DocumentUrl, ImageUrl, UploadedFile
 from schemez import Schema
+
+
+if TYPE_CHECKING:
+    from openai.types.responses.response_input_content_param import ResponseInputContentParam
+    from pydantic_ai import UserContent
 
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
@@ -43,3 +50,55 @@ class ResponseRequest(Schema):
     service_tier: ServiceTier | None = None
     user: str | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
+
+
+def _convert_content_part(part: ResponseInputContentParam) -> UserContent | None:
+    """Convert a single OpenAI input content part to pydantic-ai UserContent."""
+    match part:
+        case {"type": "input_text", "text": str(text)}:
+            return text
+        case {"type": "input_image", "image_url": str(url)}:
+            return ImageUrl(url=url)
+        case {"type": "input_image" | "input_file", "file_id": str(file_id)}:
+            return UploadedFile(file_id=file_id, provider_name="openai")
+        case {"type": "input_file", "file_url": str(url)}:
+            return DocumentUrl(url=url)
+        case {"type": "input_file", "file_data": str(data_str), "filename": str(filename)}:
+            data = base64.b64decode(data_str)
+            media_type = (
+                "application/pdf" if filename.endswith(".pdf") else "application/octet-stream"
+            )
+            return BinaryContent(data=data, media_type=media_type)
+        case _:
+            return None
+
+
+def extract_user_content(request: ResponseRequest) -> list[UserContent]:
+    """Extract user content from a ResponseRequest as pydantic-ai UserContent parts.
+
+    Raises:
+        ValueError: If input format is invalid or required fields are missing.
+    """
+    match request.input:
+        case str():
+            return [request.input]
+        case list():
+            last_msg = request.input[-1]
+            msg_content = last_msg["content"]
+            if isinstance(msg_content, str):
+                return [msg_content]
+            parts: list[UserContent] = [
+                converted
+                for p in msg_content
+                if (converted := _convert_content_part(p)) is not None
+            ]
+            if not parts:
+                return [""]
+            return parts
+        case None:
+            if request.previous_response_id is None:
+                msg = "Either 'input' or 'previous_response_id' is required"
+                raise ValueError(msg)
+            return [""]
+        case _:
+            raise ValueError("Invalid input format")
