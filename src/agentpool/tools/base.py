@@ -290,7 +290,7 @@ class Tool[TOutputType = Any]:
 class FunctionTool[TOutputType = Any](Tool[TOutputType]):
     """Tool wrapping a plain callable function."""
 
-    callable: Callable[..., TOutputType | Awaitable[TOutputType]] = field(default=lambda: None)  # type: ignore[assignment]
+    callable: Callable[..., TOutputType | Awaitable[TOutputType]] = field(kw_only=True)
     """The actual tool implementation."""
 
     def get_callable(self) -> Callable[..., TOutputType | Awaitable[TOutputType]]:
