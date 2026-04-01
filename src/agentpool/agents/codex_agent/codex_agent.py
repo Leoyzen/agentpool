@@ -47,13 +47,11 @@ if TYPE_CHECKING:
 
     from codexed import CodexClient, Session
     from codexed.models import (
-        CodexEvent,
         McpServerConfig,
         McpServerElicitationRequestParams,
         TokenUsageBreakdown,
         ToolRequestUserInputParams,
         ToolRequestUserInputResponse,
-        TurnStatus,
     )
     from codexed.request_handlers import ApprovalParams, ApprovalResponse
     from exxec import ExecutionEnvironment
@@ -177,7 +175,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         self._current_effort: ReasoningEffort | None = reasoning_effort
         self._current_sandbox: SandboxMode | None = sandbox
         self._current_personality: Personality | None = personality
-        self._current_turn_id: str | None = None
+        self._adapter: CodexStreamedResponse | None = None
         # Populated by capture_metadata during streaming, read after stream completes
         self._token_usage_data: TokenUsageBreakdown | None = None
         # Pass injection_manager for mid-run injection support
@@ -475,12 +473,6 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream events from Codex turn execution."""
-        from codexed.models import (
-            ThreadTokenUsageUpdatedEvent,
-            TurnCompletedEvent,
-            TurnStartedEvent,
-        )
-
         from agentpool.agents.events import PlanUpdateEvent
         from agentpool.messaging.messages import TokenCost
 
@@ -501,45 +493,27 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
         # Stream turn events with bridge context set
         reconstructor = MessageReconstructor(initial_prompts=prompts, model_name=self.model_name)
-        self._token_usage_data = None
-        self._turn_status: TurnStatus | None = None
         # Pass output type directly - adapter handles conversion to JSON schema
-
-        async def capture_metadata(
-            raw_events: AsyncIterator[CodexEvent],
-        ) -> AsyncIterator[CodexEvent]:
-            """Wrapper to capture token usage, turn_id, and turn status before event conversion."""
-            async for event in raw_events:
-                match event:
-                    case TurnStartedEvent(params=data):
-                        self._current_turn_id = data.turn.id
-                    case TurnCompletedEvent(params=data):
-                        self._turn_status = data.turn.status
-                    case ThreadTokenUsageUpdatedEvent(params=data):
-                        self._token_usage_data = data.token_usage.last
-                yield event
-
+        # Resolve input provider: explicit parameter overrides agent default
+        effective_input_provider = input_provider or self._input_provider
+        run_context = self.get_context(data=deps, input_provider=effective_input_provider)
+        session = self._sessions[self._sdk_session_id]
+        raw_stream = session.turn_stream(
+            input_items,
+            model=self._current_model,
+            effort=self._current_effort,
+            approval_policy=self._approval_policy,
+            sandbox_policy=self._current_sandbox,
+            output_schema=None if self._output_type in (str, None) else self._output_type,
+            personality=self._current_personality,
+        )
+        self._adapter = CodexStreamedResponse(stream=raw_stream)
         try:
-            # Resolve input provider: explicit parameter overrides agent default
-            effective_input_provider = input_provider or self._input_provider
-            run_context = self.get_context(data=deps, input_provider=effective_input_provider)
-            session = self._sessions[self._sdk_session_id]
-            raw_stream = session.turn_stream(
-                input_items,
-                model=self._current_model,
-                effort=self._current_effort,
-                approval_policy=self._approval_policy,
-                sandbox_policy=self._current_sandbox,
-                output_schema=None if self._output_type in (str, None) else self._output_type,
-                personality=self._current_personality,
-            )
             async with self._tool_bridge.set_run_context(run_context, prompt=prompts):
                 # Wrap to capture metadata (turn_id, token usage), then convert
-                adapter = CodexStreamedResponse(stream=capture_metadata(raw_stream))
-                async for native_event in adapter:
+                async for native_event in self._adapter:
                     reconstructor.observe(native_event)
                     yield native_event
-
                     if isinstance(native_event, PlanUpdateEvent) and self.agent_pool:
                         self.agent_pool.todos.replace_all(native_event.entries)
 
@@ -548,7 +522,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             raise
         finally:
             # Clear turn_id when turn completes or errors
-            self._current_turn_id = None
+            self._adapter = None
 
         # Emit completion event
         reconstructor.flush()
@@ -583,7 +557,9 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             usage=run_usage,
             model_name=self.model_name,
             messages=reconstructor.model_messages,
-            finish_reason=to_finish_reason(self._turn_status) if self._turn_status else None,
+            finish_reason=to_finish_reason(s)
+            if self._adapter and (s := self._adapter._turn_status)
+            else None,
         )
 
         yield StreamCompleteEvent[OutputDataT](message=complete_msg)
@@ -629,14 +605,19 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _interrupt(self) -> None:
         """Call Codex turn_interrupt if there's an active turn."""
-        if self._client and self._sdk_session_id and self._current_turn_id:
+        if (
+            self._client
+            and self._sdk_session_id
+            and self._adapter
+            and self._adapter._current_turn_id
+        ):
             try:
                 session = self._sessions[self._sdk_session_id]
-                await session.turn_interrupt(self._current_turn_id)
+                await session.turn_interrupt(self._adapter._current_turn_id)
                 self.log.info(
                     "Codex turn interrupted",
                     sdk_session_id=self._sdk_session_id,
-                    turn_id=self._current_turn_id,
+                    turn_id=self._adapter._current_turn_id,
                 )
             except Exception:
                 self.log.exception("Failed to interrupt Codex turn")

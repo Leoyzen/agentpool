@@ -10,6 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from codexed.models import (
+    ThreadTokenUsageUpdatedEvent,
+    TurnCompletedEvent,
+    TurnStartedEvent,
+)
 from pydantic_ai import PartEndEvent, TextPart, ThinkingPart
 
 from agentpool.agents.codex_agent.codex_converters import (
@@ -35,7 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from datetime import datetime
 
-    from codexed.models import CodexEvent
+    from codexed.models import CodexEvent, TokenUsageBreakdown, TurnStatus
 
     from agentpool.agents.events import RichAgentStreamEvent
 
@@ -48,6 +53,9 @@ class CodexStreamedResponse(StreamedResponse):
     _provider_timestamp: datetime | None = None
     _timestamp: datetime = field(default_factory=get_now)
     _model_name: str | None = None
+    _token_usage_data: TokenUsageBreakdown | None = None
+    _turn_status: TurnStatus | None = None
+    _current_turn_id: str | None = None
 
     async def _get_event_iterator(self) -> AsyncIterator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915
         from codexed.models import (
@@ -72,6 +80,12 @@ class CodexStreamedResponse(StreamedResponse):
 
         async for event in self.stream:
             match event:
+                case TurnStartedEvent(params=data):
+                    self._current_turn_id = data.turn.id
+                case TurnCompletedEvent(params=data):
+                    self._turn_status = data.turn.status
+                case ThreadTokenUsageUpdatedEvent(params=data):
+                    self._token_usage_data = data.token_usage.last
                 # === Stateful: Accumulate command execution output ===
                 case ItemCommandExecutionOutputDeltaNotification(params=data):
                     item_id = data.item_id
