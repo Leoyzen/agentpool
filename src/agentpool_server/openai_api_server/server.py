@@ -108,7 +108,13 @@ class OpenAIAPIServer(BaseServer):
         """List available agents as models."""
         models = []
         for name, agent in self.pool.all_agents.items():
-            info = OpenAIModelInfo(id=name, created=0, description=agent.description)
+            info = OpenAIModelInfo(
+                id=name,
+                created=0,
+                description=agent.description,
+                object="model",
+                owned_by="agentpool",
+            )
             models.append(info)
         return {"object": "list", "data": models}
 

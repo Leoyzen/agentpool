@@ -4,19 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from openai.types import Model
 from openai.types.chat import ChatCompletionMessageToolCall
 from openai.types.chat.chat_completion_message_function_tool_call import Function
 from pydantic import Field
 from schemez import Schema
 
 
-class OpenAIModelInfo(Schema):
-    """OpenAI model info format."""
+class OpenAIModelInfo(Model):
+    """Exended OpenAI model info format."""
 
-    id: str
-    object: str = "model"
-    owned_by: str = "agentpool"
-    created: int
     description: str | None = None
     permissions: list[str] = Field(default_factory=list)
 
