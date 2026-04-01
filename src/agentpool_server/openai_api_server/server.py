@@ -5,17 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Any
 
 import anyenv
+from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from openai.types.chat.chat_completion import Choice
+from openai.types.completion_usage import CompletionUsage
 
 from agentpool.log import get_logger
 from agentpool_server import BaseServer
 from agentpool_server.openai_api_server.completions.helpers import stream_response
-from agentpool_server.openai_api_server.completions.models import (
-    ChatCompletionMessage,
-    ChatCompletionResponse,
-    Choice,
-    CompletionUsage,
-    OpenAIModelInfo,
-)
+from agentpool_server.openai_api_server.completions.models import OpenAIModelInfo
 from agentpool_server.openai_api_server.responses.helpers import handle_request
 
 
@@ -142,7 +139,7 @@ class OpenAIAPIServer(BaseServer):
                     completion_tokens=response.usage.output_tokens,
                     total_tokens=response.usage.total_tokens,
                 )
-            completion_response = ChatCompletionResponse(
+            completion_response = ChatCompletion(
                 id=response.message_id,
                 object="chat.completion",
                 created=int(response.timestamp.timestamp()),

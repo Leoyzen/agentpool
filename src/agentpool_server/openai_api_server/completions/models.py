@@ -4,33 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from openai.types.chat import (
-    ChatCompletion as ChatCompletionResponse,
-    ChatCompletionChunk,
-    ChatCompletionMessage,
-    ChatCompletionMessageToolCall as ToolCall,
-)
-from openai.types.chat.chat_completion import Choice
-from openai.types.chat.chat_completion_message_function_tool_call import (
-    Function as FunctionCall,
-)
-from openai.types.completion_usage import CompletionUsage
+from openai.types.chat import ChatCompletionMessageToolCall
+from openai.types.chat.chat_completion_message_function_tool_call import Function
 from pydantic import Field
 from schemez import Schema
-
-
-__all__ = [
-    "ChatCompletionChunk",
-    "ChatCompletionMessage",
-    "ChatCompletionRequest",
-    "ChatCompletionResponse",
-    "Choice",
-    "CompletionUsage",
-    "FunctionCall",
-    "OpenAIMessage",
-    "OpenAIModelInfo",
-    "ToolCall",
-]
 
 
 class OpenAIModelInfo(Schema):
@@ -53,8 +30,8 @@ class OpenAIMessage(Schema):
     role: Literal["system", "user", "assistant", "tool", "function"]
     content: str | None = None
     name: str | None = None
-    function_call: FunctionCall | None = None
-    tool_calls: list[ToolCall] | None = None
+    function_call: Function | None = None
+    tool_calls: list[ChatCompletionMessageToolCall] | None = None
 
 
 class ChatCompletionRequest(Schema):
