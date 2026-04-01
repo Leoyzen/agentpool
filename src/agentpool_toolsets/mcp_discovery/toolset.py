@@ -279,17 +279,17 @@ class MCPDiscoveryToolset(ResourceProvider):
             # Format results, filtering by allowed/blocked
             lines = [f"Found MCP servers matching '{query}':\n"]
             count = 0
-            for i in range(len(results)):
-                name = results["name"][i].as_py()
+            for row in results.to_pylist():
+                name = row["name"]
 
                 # Filter by allowed/blocked
                 if not self._is_server_allowed(name):
                     continue
 
-                desc = results["description"][i].as_py()
-                version = results["version"][i].as_py()
-                has_remote = results["has_remote"][i].as_py()
-                remote_types = results["remote_types"][i].as_py()
+                desc = row["description"]
+                version = row["version"]
+                has_remote = row["has_remote"]
+                remote_types = row["remote_types"]
 
                 lines.append(f"**{name}** (v{version})")
                 lines.append(f"  {desc}")
