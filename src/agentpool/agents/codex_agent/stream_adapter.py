@@ -50,7 +50,6 @@ class CodexStreamedResponse(StreamedResponse):
     """Streamed codex response."""
 
     stream: AsyncIterator[CodexEvent]
-    _provider_timestamp: datetime | None = None
     _timestamp: datetime = field(default_factory=get_now)
     _model_name: str | None = None
     _token_usage_data: TokenUsageBreakdown | None = None

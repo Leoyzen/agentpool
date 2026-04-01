@@ -498,16 +498,14 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                         self.log.info("Stream cancelled by user")
                         break
                     if isinstance(event, ToolCallCompleteEvent):
-                        enriched_event = event
-                        if not enriched_event.agent_name:
-                            enriched_event = replace(enriched_event, agent_name=self.name)
+                        if not event.agent_name:
+                            event = replace(event, agent_name=self.name)  # noqa: PLW2901
                         if (
-                            enriched_event.metadata is None
-                            and enriched_event.tool_call_id in self._tool_bridge.tool_metadata
+                            event.metadata is None
+                            and event.tool_call_id in self._tool_bridge.tool_metadata
                         ):
-                            meta = self._tool_bridge.tool_metadata[enriched_event.tool_call_id]
-                            enriched_event = replace(enriched_event, metadata=meta)
-                        event = enriched_event  # noqa: PLW2901
+                            meta = self._tool_bridge.tool_metadata[event.tool_call_id]
+                            event = replace(event, metadata=meta)  # noqa: PLW2901
                     reconstructor.observe(event)  # ty: ignore[invalid-argument-type]
                     yield event  # ty:ignore[invalid-yield]
         except asyncio.CancelledError:

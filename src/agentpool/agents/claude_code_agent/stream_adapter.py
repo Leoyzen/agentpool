@@ -111,7 +111,6 @@ class ClaudeCodeStreamedResponse(StreamedResponse):
     tool_metadata: dict[str, dict[str, Any]]
     agent_name: str
     session_id: str
-    _provider_timestamp: datetime | None = None
     _timestamp: datetime = field(default_factory=get_now)
     _model_name: str | None = None
     _result_message: ResultMessage | None = None
