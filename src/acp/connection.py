@@ -170,9 +170,12 @@ class Connection:
         except asyncio.CancelledError:
             return
         except anyio.ClosedResourceError:
-            return
+            pass
         except anyio.EndOfStream:
-            return
+            pass
+        # EOF / closed: reject in-flight requests so callers get an error
+        # instead of hanging forever (e.g. subprocess crash during initialize).
+        self._state.reject_all_outgoing(ConnectionError("Connection closed: remote end sent EOF"))
 
     async def _process_message(self, message: dict[str, Any]) -> None:
         method = message.get("method")
