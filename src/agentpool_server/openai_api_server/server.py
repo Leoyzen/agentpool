@@ -41,7 +41,6 @@ class OpenAIAPIServer(BaseServer):
         host: str = "0.0.0.0",
         port: int = 8000,
         cors: bool = True,
-        docs: bool = True,
         api_key: str | None = None,
         raise_exceptions: bool = False,
     ) -> None:
@@ -53,7 +52,6 @@ class OpenAIAPIServer(BaseServer):
             host: Host to bind server to
             port: Port to bind server to
             cors: Whether to enable CORS middleware
-            docs: Whether to enable API documentation endpoints
             api_key: Optional API key for authentication
             raise_exceptions: Whether to raise exceptions during server start
         """
@@ -77,10 +75,6 @@ class OpenAIAPIServer(BaseServer):
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
-
-        if not docs:
-            self.app.docs_url = None
-            self.app.redoc_url = None
 
         # Add routes with authentication dependency
         dep = Depends(self.verify_api_key)

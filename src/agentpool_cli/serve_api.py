@@ -27,7 +27,6 @@ def api_command(
     show_messages: Annotated[
         bool, t.Option("--show-messages", help="Show message activity")
     ] = False,
-    docs: Annotated[bool, t.Option(help="Enable API documentation")] = True,
 ) -> None:
     """Run agents as a completions API server.
 
@@ -56,7 +55,7 @@ def api_command(
         for agent in pool.all_agents.values():
             agent.message_sent.connect(on_message)
 
-    server = OpenAIAPIServer(pool, cors=cors, docs=docs)
+    server = OpenAIAPIServer(pool, cors=cors)
 
     # Get log level from the global context
     log_level = ctx.obj.get("log_level", "info") if ctx.obj else "info"
