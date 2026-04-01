@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 
 import anyenv
+from openai.pagination import SyncPage
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 from openai.types.completion_usage import CompletionUsage
@@ -104,19 +105,19 @@ class OpenAIAPIServer(BaseServer):
         if self.api_key and authorization != f"Bearer {self.api_key}":
             raise HTTPException(401, "Invalid API key")
 
-    async def list_models(self) -> dict[str, Any]:
+    async def list_models(self) -> SyncPage[OpenAIModelInfo]:
         """List available agents as models."""
-        models = []
-        for name, agent in self.pool.all_agents.items():
-            info = OpenAIModelInfo(
+        models = [
+            OpenAIModelInfo(
                 id=name,
                 created=0,
                 description=agent.description,
                 object="model",
                 owned_by="agentpool",
             )
-            models.append(info)
-        return {"object": "list", "data": models}
+            for name, agent in self.pool.all_agents.items()
+        ]
+        return SyncPage[OpenAIModelInfo](data=models, object="list")
 
     async def create_chat_completion(self, request: ChatCompletionRequest) -> Response:
         """Handle chat completion requests."""
