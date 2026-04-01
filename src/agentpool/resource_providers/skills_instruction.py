@@ -105,6 +105,10 @@ class SkillsInstructionProvider(ResourceProvider):
 
         for name, skill in skill_items:
             try:
+                # Skip skills that disable model invocation
+                if getattr(skill, "disable_model_invocation", False):
+                    continue
+
                 if mode == "metadata":
                     content = self._format_skill_metadata(name, skill)
                 elif mode == "full":
@@ -129,7 +133,32 @@ class SkillsInstructionProvider(ResourceProvider):
     def _format_skill_metadata(self, name: str, skill: Any) -> str:
         """Format skill metadata in XML."""
         desc = escape(str(skill.description)) if hasattr(skill, "description") else ""
-        return f'  <skill id="{escape(name)}" name="{escape(name)}" description="{desc}" />'
+
+        # Build optional metadata attributes
+        attrs: list[str] = []
+        if getattr(skill, "user_invocable", True) is False:
+            attrs.append('user-invocable="false"')
+        if context := getattr(skill, "context", None):
+            attrs.append(f'context="{escape(context)}"')
+        if agent := getattr(skill, "agent", None):
+            attrs.append(f'agent="{escape(agent)}"')
+
+        attr_str = " " + " ".join(attrs) if attrs else ""
+
+        # Build inner content
+        lines: list[str] = [
+            f"<skill{attr_str}>",
+            f"<id>{escape(name)}</id>",
+            f"<name>{escape(name)}</name>",
+            f"<description>{desc}</description>",
+        ]
+
+        # Add argument hint if present
+        if arg_hint := getattr(skill, "argument_hint", None):
+            lines.append(f"<argument-hint>{escape(arg_hint)}</argument-hint>")
+
+        lines.append("</skill>")
+        return "\n".join(lines)
 
     def _format_skill_full(self, name: str, skill: Any, instructions: str) -> str:
         """Format full skill content in XML."""

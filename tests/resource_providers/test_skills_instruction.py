@@ -62,7 +62,11 @@ async def test_skills_instruction_metadata(mock_registry, mock_ctx):
     )
     result = await provider._generate_skills_instruction(mock_ctx)
     assert "<available-skills>" in result
-    assert '<skill id="skill1" name="skill1" description="description1" />' in result
+    assert "<skill>" in result
+    assert "<id>skill1</id>" in result
+    assert "<name>skill1</name>" in result
+    assert "<description>description1</description>" in result
+    assert "</skill>" in result
     assert "<instructions>" not in result
     assert "</available-skills>" in result
 
@@ -79,8 +83,8 @@ async def test_skills_instruction_full(mock_registry, mock_ctx):
 
     result = await provider._generate_skills_instruction(mock_ctx)
     assert "<available-skills>" in result
-    assert '<skill id="skill1" name="skill1" description="description1">' in result
-    assert "<instructions>" in result
+    assert '<skill_content id="skill1" name="skill1">' in result
+    assert "<skill-instruction>" in result
     assert "instructions1" in result
     assert "Base directory for this skill: /tmp/skill1/" in result
 
@@ -94,8 +98,8 @@ async def test_skills_instruction_max_skills(mock_registry, mock_ctx):
     )
     result = await provider._generate_skills_instruction(mock_ctx)
 
-    assert '<skill id="skill1"' in result
-    assert '<skill id="skill2"' not in result
+    assert "<id>skill1</id>" in result
+    assert "<id>skill2</id>" not in result
 
 
 @pytest.mark.asyncio
@@ -123,7 +127,7 @@ async def test_skills_instruction_override_from_context(mock_registry, mock_ctx)
 
     result = await provider._generate_skills_instruction(mock_ctx)
 
-    assert "<instructions>" in result
+    assert "<skill-instruction>" in result
     assert "instructions1" in result
 
 

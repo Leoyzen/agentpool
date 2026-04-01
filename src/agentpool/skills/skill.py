@@ -36,6 +36,21 @@ class Skill(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
     instructions: str | None = Field(default=None, exclude=True)
 
+    # Model invocation control
+    disable_model_invocation: bool = Field(default=False, alias="disable-model-invocation")
+
+    # User invocation control
+    user_invocable: bool = Field(default=True, alias="user-invocable")
+
+    # Context preservation setting (e.g., "fork", "continue")
+    context: str | None = None
+
+    # Agent type compatibility (e.g., "general-purpose", "coding")
+    agent: str | None = None
+
+    # Argument hint for slash command completion
+    argument_hint: str | None = Field(default=None, alias="argument-hint")
+
     @field_validator("name")
     @classmethod
     def _validate_name(cls, v: str) -> str:
@@ -161,9 +176,29 @@ def to_prompt(skills: list[Skill]) -> str:
 
     lines = ["<available_skills>"]
     for skill in skills:
-        lines.append("<skill>")
+        # Skip skills that disable model invocation
+        if skill.disable_model_invocation:
+            continue
+
+        # Build optional metadata attributes
+        attrs: list[str] = []
+        if not skill.user_invocable:
+            attrs.append('user-invocable="false"')
+        if skill.context:
+            attrs.append(f'context="{html.escape(skill.context)}"')
+        if skill.agent:
+            attrs.append(f'agent="{html.escape(skill.agent)}"')
+
+        attr_str = " " + " ".join(attrs) if attrs else ""
+
+        lines.append(f"<skill{attr_str}>")
         lines.append(f"<name>{html.escape(skill.name)}</name>")
         lines.append(f"<description>{html.escape(skill.description)}</description>")
+
+        # Add argument hint if present
+        if skill.argument_hint:
+            lines.append(f"<argument-hint>{html.escape(skill.argument_hint)}</argument-hint>")
+
         skill_md = find_skill_md(skill.skill_path)
         if skill_md is not None:
             lines.append(f"<location>{skill_md}</location>")
