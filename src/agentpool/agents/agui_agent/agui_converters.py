@@ -300,12 +300,11 @@ def to_agui_input_content(parts: Sequence[UserContent]) -> list[InputContent]:
                 encoded = base64.b64encode(data).decode()
                 mime = media_type or "application/octet-stream"
                 source = InputContentDataSource(value=encoded, mime_type=mime)
-                # Pick modality from mime type for binary data
-                if mime.startswith("image/"):
+                if part.is_image:
                     result.append(ImageInputContent(source=source))
-                elif mime.startswith("audio/"):
+                elif part.is_audio:
                     result.append(AudioInputContent(source=source))
-                elif mime.startswith("video/"):
+                elif part.is_video:
                     result.append(VideoInputContent(source=source))
                 else:
                     result.append(DocumentInputContent(source=source))
