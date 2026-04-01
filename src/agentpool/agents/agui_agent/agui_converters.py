@@ -308,7 +308,7 @@ def to_agui_input_content(parts: Sequence[UserContent]) -> list[InputContent]:
                     result.append(AudioInputContent(source=data_source))
                 elif part.is_video:
                     result.append(VideoInputContent(source=data_source))
-                else:
+                else:  # aguis BinaryContent is deprecated
                     result.append(DocumentInputContent(source=data_source))
             case UploadedFile() | CachePoint():
                 pass
@@ -403,8 +403,10 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> Iterator[Message
                                     args_str = args
                                 case dict():
                                     args_str = anyenv.dump_json(args)
-                                case _:
-                                    args_str = str(args)
+                                case None:
+                                    args_str = ""
+                                case _ as unreachable:
+                                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
                             call = FunctionCall(name=tool_name, arguments=args_str)
                             tc = ToolCall(id=tc_id, type="function", function=call)
                             tool_calls.append(tc)
