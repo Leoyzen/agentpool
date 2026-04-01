@@ -334,6 +334,18 @@ def _user_input_to_content(inp: UserInput) -> UserContent:
             assert_never(unreachable)
 
 
+def get_tool_parts(
+    tool_name: str,
+    args: dict[str, Any],
+    tc_id: str,
+    output: str,
+) -> tuple[BuiltinToolCallPart, BuiltinToolReturnPart]:
+
+    bash_call = BuiltinToolCallPart(tool_name=tool_name, args=args, tool_call_id=tc_id)
+    bash_ret = BuiltinToolReturnPart(tool_name=tool_name, content=output, tool_call_id=tc_id)
+    return (bash_call, bash_ret)
+
+
 def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]:  # noqa: PLR0915
     """Convert one Turn to ChatMessages (user and optionally assistant).
 
@@ -382,11 +394,8 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 display = f"[Executed: {cmd}]" + (f"\n{output[:200]}" if output else "")
                 assistant_display_parts.append(display)
                 cmd_args = {"command": cmd, "cwd": cwd}
-                bash_call = BuiltinToolCallPart(tool_name="bash", args=cmd_args, tool_call_id=tc_id)
-                bash_ret = BuiltinToolReturnPart(
-                    tool_name="bash", content=output, tool_call_id=tc_id
-                )
-                assistant_responses.append(ModelResponse(parts=[bash_call, bash_ret]))
+                parts = get_tool_parts(tool_name="bash", args=cmd_args, tc_id=tc_id, output=output)
+                assistant_responses.append(ModelResponse(parts=parts))
 
             case ThreadItemFileChange(changes=changes, id=tc_id):
                 paths = [c.path for c in changes]
@@ -397,43 +406,39 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                 assistant_display_parts.append(display)
                 diffs = [c.diff for c in changes if c.diff]
                 text = "\n".join(diffs) or "OK"
-                args = {"files": paths}
-                edit_call = ToolCallPart(tool_name="edit", args=args, tool_call_id=tc_id)
-                edit_ret = BuiltinToolReturnPart(tool_name="edit", content=text, tool_call_id=tc_id)
-                assistant_responses.append(ModelResponse(parts=[edit_call, edit_ret]))
+                args: dict[str, Any] = {"files": paths}
+                parts = get_tool_parts(tool_name="edit", args=args, tc_id=tc_id, output=text)
+                assistant_responses.append(ModelResponse(parts=parts))
 
-            case ThreadItemMcpToolCall(result=mcp_result, arguments=args, id=tc_id, tool=tool):
+            case ThreadItemMcpToolCall(result=mcp_result, arguments=mcp_args, id=tc_id, tool=tool):
                 result_text = ""
                 if mcp_result and mcp_result.content:
                     texts = [str(b.model_dump().get("text", "")) for b in mcp_result.content]
                     result_text = " ".join(texts)
                 assistant_display_parts.append(f"[Tool: {tool}] {result_text[:100]}")
-                mcp_args = args if isinstance(args, dict) else {}
-                mcp_call = BuiltinToolCallPart(tool_name=tool, args=mcp_args, tool_call_id=tc_id)
-                mcp_ret = BuiltinToolReturnPart(
-                    tool_name=tool, content=result_text, tool_call_id=tc_id
-                )
-                assistant_responses.append(ModelResponse(parts=[mcp_call, mcp_ret]))
+                args = mcp_args or {}
+                parts = get_tool_parts(tool_name=tool, args=args, tc_id=tc_id, output=result_text)
+                assistant_responses.append(ModelResponse(parts=parts))
 
             case ThreadItemWebSearch(query=query, id=tc_id):
                 assistant_display_parts.append(f"[Web Search: {query}]")
-                search_call = BuiltinToolCallPart(
-                    tool_name="web_search", args={"query": query}, tool_call_id=tc_id
+                parts = get_tool_parts(
+                    tool_name="web_search",
+                    args={"query": query},
+                    tc_id=tc_id,
+                    output="Search completed",
                 )
-                search_ret = BuiltinToolReturnPart(
-                    tool_name="web_search", content="Search completed", tool_call_id=tc_id
-                )
-                assistant_responses.append(ModelResponse(parts=[search_call, search_ret]))
+                assistant_responses.append(ModelResponse(parts=parts))
 
             case ThreadItemImageView(path=path, id=tc_id):
                 assistant_display_parts.append(f"[Viewed Image: {path}]")
-                view_call = BuiltinToolCallPart(
-                    tool_name="view_image", args={"path": path}, tool_call_id=tc_id
+                parts = get_tool_parts(
+                    tool_name="view_image",
+                    args={"path": path},
+                    tc_id=tc_id,
+                    output="Image viewed",
                 )
-                view_ret = BuiltinToolReturnPart(
-                    tool_name="view_image", content="Image viewed", tool_call_id=tc_id
-                )
-                assistant_responses.append(ModelResponse(parts=[view_call, view_ret]))
+                assistant_responses.append(ModelResponse(parts=parts))
 
             case ThreadItemEnteredReviewMode(review=review):
                 assistant_display_parts.append(f"[Entered Review Mode: {review}]")
@@ -464,13 +469,13 @@ def _turn_to_chat_messages(turn: Turn) -> list[ChatMessage[list[UserContent]]]: 
                     collab_args["receiver_thread_ids"] = receiver_thread_ids
                 if prompt:
                     collab_args["prompt"] = prompt
-                collab_call = BuiltinToolCallPart(
-                    tool_name="collab_agent", args=collab_args, tool_call_id=tc_id
+                parts = get_tool_parts(
+                    tool_name="collab_agent",
+                    args=collab_args,
+                    tc_id=tc_id,
+                    output=f"Status: {status}",
                 )
-                collab_ret = BuiltinToolReturnPart(
-                    tool_name="collab_agent", content=f"Status: {status}", tool_call_id=tc_id
-                )
-                assistant_responses.append(ModelResponse(parts=[collab_call, collab_ret]))
+                assistant_responses.append(ModelResponse(parts=parts))
             case ThreadItemPlan() | ThreadItemDynamicToolCall() | ThreadItemContextCompaction():
                 pass
             case _ as unreachable:

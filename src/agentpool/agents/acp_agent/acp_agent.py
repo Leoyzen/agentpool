@@ -43,10 +43,7 @@ from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
 from agentpool.agents.acp_agent.session_state import ACPSessionState
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.events import (
-    RunStartedEvent,
-    StreamCompleteEvent,
-)
+from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
