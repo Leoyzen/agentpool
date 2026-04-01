@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, assert_never
 
 from openai.types.responses import EasyInputMessageParam
 from pydantic import Field
@@ -57,8 +57,10 @@ def _convert_content_part(part: ResponseInputContentParam) -> UserContent | None
     match part:
         case {"type": "input_text", "text": str(text)}:
             return text
-        case {"type": "input_image", "image_url": str(url)}:
-            return ImageUrl(url=url)
+        case {"type": "input_image", "image_url": str(url), **rest}:
+            detail = rest.get("detail")
+            metadata = {"detail": detail} if detail else None
+            return ImageUrl(url=url, vendor_metadata=metadata)
         case {"type": "input_image" | "input_file", "file_id": str(file_id)}:
             return UploadedFile(file_id=file_id, provider_name="openai")
         case {"type": "input_file", "file_url": str(url)}:
@@ -87,11 +89,7 @@ def extract_user_content(request: ResponseRequest) -> list[UserContent]:
             msg_content = last_msg["content"]
             if isinstance(msg_content, str):
                 return [msg_content]
-            parts: list[UserContent] = [
-                converted
-                for p in msg_content
-                if (converted := _convert_content_part(p)) is not None
-            ]
+            parts = [converted for p in msg_content if (converted := _convert_content_part(p))]
             if not parts:
                 return [""]
             return parts
@@ -100,5 +98,5 @@ def extract_user_content(request: ResponseRequest) -> list[UserContent]:
                 msg = "Either 'input' or 'previous_response_id' is required"
                 raise ValueError(msg)
             return [""]
-        case _:
-            raise ValueError("Invalid input format")
+        case _ as unreachable:
+            assert_never(unreachable)
