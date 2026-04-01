@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import replace
 from datetime import datetime
 import os
 from pathlib import Path
@@ -47,7 +46,6 @@ from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
-    ToolCallCompleteEvent,
 )
 from agentpool.agents.events.reconstructor import MessageReconstructor
 from agentpool.agents.exceptions import (
@@ -417,7 +415,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.exception("Error terminating ACP process")
             self._process = None
 
-    async def _stream_events(  # noqa: PLR0915
+    async def _stream_events(
         self,
         prompts: list[UserContent],
         *,
@@ -469,43 +467,26 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         prompt_task = asyncio.create_task(self._api.prompt(session_id, final_blocks))
         self._prompt_task = prompt_task
 
-        async def poll_acp_events() -> AsyncIterator[RichAgentStreamEvent[str]]:
-            """Poll raw updates from ACP state, convert to events, until prompt completes."""
-            from agentpool.agents.acp_agent.acp_converters import acp_to_native_event
+        from agentpool.agents.acp_agent.stream_adapter import AcpAgentStreamedResponse
 
-            assert self._state
-            while not prompt_task.done():
-                if self._client_handler:
-                    try:
-                        await self._client_handler._update_event.wait_with_timeout(0.05)
-                        self._client_handler._update_event.clear()
-                    except TimeoutError:
-                        pass
-                while (update := self._state.pop_update()) is not None:
-                    if native_event := acp_to_native_event(update):
-                        yield native_event
-            while (update := self._state.pop_update()) is not None:
-                if native_event := acp_to_native_event(update):
-                    yield native_event
+        assert self._client_handler
+        streamed_response = AcpAgentStreamedResponse(
+            state=self._state,
+            update_event=self._client_handler._update_event,
+            prompt_task=prompt_task,
+            agent_name=self.name,
+            tool_metadata=self._tool_bridge.tool_metadata,
+        )
 
         try:
             async with (
                 self._tool_bridge.set_run_context(run_context, prompt=prompts),
-                merge_queue_into_iterator(poll_acp_events(), self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
+                merge_queue_into_iterator(streamed_response, self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
             ):
                 async for event in merged_events:
                     if self._cancelled:
                         self.log.info("Stream cancelled by user")
                         break
-                    if isinstance(event, ToolCallCompleteEvent):
-                        if not event.agent_name:
-                            event = replace(event, agent_name=self.name)  # noqa: PLW2901
-                        if (
-                            event.metadata is None
-                            and event.tool_call_id in self._tool_bridge.tool_metadata
-                        ):
-                            meta = self._tool_bridge.tool_metadata[event.tool_call_id]
-                            event = replace(event, metadata=meta)  # noqa: PLW2901
                     reconstructor.observe(event)  # ty: ignore[invalid-argument-type]
                     yield event  # ty:ignore[invalid-yield]
         except asyncio.CancelledError:
