@@ -31,9 +31,12 @@ async def load_skill(ctx: AgentContext, skill_name: str) -> str:
         return "No agent pool available - skills require pool context"
 
     skills = ctx.pool.skills.list_skills()
-    if not skills:
+    # Filter out skills that disable model invocation (for model visibility)
+    visible_skills = [s for s in skills if not getattr(s, "disable_model_invocation", False)]
+
+    if not visible_skills:
         return "No skills available."
-    if skill := next((s for s in skills if s.name == skill_name), None):
+    if skill := next((s for s in visible_skills if s.name == skill_name), None):
         try:
             instructions = ctx.pool.skills.get_skill_instructions(skill_name)
         except Exception as e:  # noqa: BLE001
@@ -53,7 +56,7 @@ async def load_skill(ctx: AgentContext, skill_name: str) -> str:
         parts.append(instructions)
         parts.append(f"Skill directory: {skill.skill_path}")
         return "\n\n".join(parts)
-    available = ", ".join(s.name for s in skills)
+    available = ", ".join(s.name for s in visible_skills)
     return f"Skill {skill_name!r} not found. Available skills: {available}"
 
 
@@ -65,9 +68,12 @@ async def list_skills(ctx: AgentContext) -> str:
     """
     if ctx.pool is None:
         return "No agent pool available - skills require pool context"
-    if skills := ctx.pool.skills.list_skills():
+    skills = ctx.pool.skills.list_skills()
+    # Filter out skills that disable model invocation (for model visibility)
+    visible_skills = [s for s in skills if not getattr(s, "disable_model_invocation", False)]
+    if visible_skills:
         lines = ["Available skills:", ""]
-        lines.extend(f"- **{skill.name}**: {skill.description}" for skill in skills)
+        lines.extend(f"- **{skill.name}**: {skill.description}" for skill in visible_skills)
         return "\n".join(lines)
     return "No skills available"
 
