@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import anyenv
 from pydantic_ai import (
+    CachePoint,
     ModelRequest,
     ModelResponse,
     SystemPromptPart,
@@ -22,6 +23,7 @@ from pydantic_ai import (
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
+    UploadedFile,
     UserPromptPart,
 )
 from pydantic_ai.messages import (
@@ -299,15 +301,19 @@ def to_agui_input_content(parts: Sequence[UserContent]) -> list[InputContent]:
             case BinaryContent(data=data, media_type=media_type):
                 encoded = base64.b64encode(data).decode()
                 mime = media_type or "application/octet-stream"
-                source = InputContentDataSource(value=encoded, mime_type=mime)
+                data_source = InputContentDataSource(value=encoded, mime_type=mime)
                 if part.is_image:
-                    result.append(ImageInputContent(source=source))
+                    result.append(ImageInputContent(source=data_source))
                 elif part.is_audio:
-                    result.append(AudioInputContent(source=source))
+                    result.append(AudioInputContent(source=data_source))
                 elif part.is_video:
-                    result.append(VideoInputContent(source=source))
+                    result.append(VideoInputContent(source=data_source))
                 else:
-                    result.append(DocumentInputContent(source=source))
+                    result.append(DocumentInputContent(source=data_source))
+            case UploadedFile() | CachePoint():
+                pass
+            case _ as unreachable:
+                assert_never(unreachable)
     return result
 
 
