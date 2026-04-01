@@ -139,7 +139,6 @@ class ToolCall(PiBaseModel):
     id: str
     name: str
     arguments: dict[str, Any]
-    thought_signature: str | None = None
 
 
 # =============================================================================
@@ -616,20 +615,18 @@ class ContextUsage(PiBaseModel):
 class RpcSessionState(PiBaseModel):
     """RPC session state."""
 
-    model: str | None = None
-    provider: str | None = None
+    model: Model | None = None
     thinking_level: ThinkingLevel
     is_streaming: bool
-    messages: list[AgentMessage]
-    system_prompt: str
+    is_compacting: bool
+    steering_mode: SteeringMode
+    follow_up_mode: SteeringMode
     session_file: str | None = None
     session_id: str
     session_name: str | None = None
-    steering_mode: SteeringMode
-    follow_up_mode: SteeringMode
-    auto_compaction: bool
-    auto_retry: bool
-    context_usage: ContextUsage | None = None
+    auto_compaction_enabled: bool
+    message_count: int
+    pending_message_count: int
 
 
 # =============================================================================
@@ -645,6 +642,20 @@ class TokenStats(PiBaseModel):
     cache_read: int
     cache_write: int
     total: int
+
+
+SourceScope = Literal["user", "project", "temporary"]
+SourceOrigin = Literal["package", "top-level"]
+
+
+class SourceInfo(PiBaseModel):
+    """Source info for extension/resource origin."""
+
+    path: str
+    source: str
+    scope: SourceScope
+    origin: SourceOrigin
+    base_dir: str | None = None
 
 
 class SessionStats(PiBaseModel):
@@ -671,7 +682,7 @@ class BashResult(PiBaseModel):
     """Bash command result."""
 
     output: str
-    exit_code: int
+    exit_code: int | None = None
     cancelled: bool = False
     truncated: bool = False
     full_output_path: str | None = None
@@ -696,13 +707,8 @@ class CompactionResult(PiBaseModel):
 # =============================================================================
 
 
-class ModelInfo(PiBaseModel):
-    """Model info."""
-
-    provider: str
-    id: str
-    context_window: int
-    reasoning: bool
+# ModelInfo is just Model — get_available_models returns full Model objects
+ModelInfo = Model
 
 
 # =============================================================================
@@ -714,9 +720,9 @@ class RpcSlashCommand(PiBaseModel):
     """RPC slash command."""
 
     name: str
-    description: str
-    source: str
-    """One of "extension", "prompt", "skill", "builtin"."""
+    description: str | None = None
+    source: Literal["extension", "prompt", "skill"]
+    source_info: SourceInfo
 
 
 # =============================================================================
@@ -731,6 +737,7 @@ class RpcPromptCommand(PiBaseModel):
     id: str
     message: str
     images: list[ImageContent] | None = None
+    streaming_behavior: Literal["steer", "followUp"] | None = None
 
 
 class RpcSteerCommand(PiBaseModel):
@@ -1009,17 +1016,14 @@ class NewSessionData(PiBaseModel):
     cancelled: bool
 
 
-class SetModelData(PiBaseModel):
-    """Set model response data."""
-
-    provider: str
-    id: str
+# set_model returns a full Model object
+SetModelData = Model
 
 
 class CycleModelData(PiBaseModel):
     """Cycle model response data."""
 
-    model: SetModelData
+    model: Model
     thinking_level: ThinkingLevel
     is_scoped: bool
 
@@ -1090,3 +1094,73 @@ class SessionStatsData(PiBaseModel):
     """Wraps SessionStats in the RPC response."""
 
     stats: SessionStats
+
+
+# =============================================================================
+# Extension UI Events (agent -> client via stdout)
+# =============================================================================
+
+ExtensionUIMethod = Literal[
+    "select",
+    "confirm",
+    "input",
+    "editor",
+    "notify",
+    "setStatus",
+    "setWidget",
+    "setTitle",
+    "set_editor_text",
+]
+
+
+class ExtensionUIRequest(PiBaseModel):
+    """Extension UI request event emitted when an extension needs user input.
+
+    Fields vary by method. All methods include type, id, and method.
+    """
+
+    type: Literal["extension_ui_request"] = "extension_ui_request"
+    id: str
+    method: ExtensionUIMethod
+    title: str | None = None
+    message: str | None = None
+    options: list[str] | None = None
+    placeholder: str | None = None
+    prefill: str | None = None
+    timeout: int | None = None
+    notify_type: Literal["info", "warning", "error"] | None = None
+    status_key: str | None = None
+    status_text: str | None = None
+    widget_key: str | None = None
+    widget_lines: list[str] | None = None
+    widget_placement: Literal["aboveEditor", "belowEditor"] | None = None
+    text: str | None = None
+
+
+class ExtensionUIResponseValue(PiBaseModel):
+    """Extension UI response with a string value (select/input/editor)."""
+
+    type: Literal["extension_ui_response"] = "extension_ui_response"
+    id: str
+    value: str
+
+
+class ExtensionUIResponseConfirm(PiBaseModel):
+    """Extension UI response for confirm dialogs."""
+
+    type: Literal["extension_ui_response"] = "extension_ui_response"
+    id: str
+    confirmed: bool
+
+
+class ExtensionUIResponseCancel(PiBaseModel):
+    """Extension UI response for cancelled requests."""
+
+    type: Literal["extension_ui_response"] = "extension_ui_response"
+    id: str
+    cancelled: Literal[True] = True
+
+
+ExtensionUIResponse = (
+    ExtensionUIResponseValue | ExtensionUIResponseConfirm | ExtensionUIResponseCancel
+)

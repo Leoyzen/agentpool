@@ -26,11 +26,10 @@ from pi_sdk.models import (
     ForkData,
     ForkMessageEntry,
     LastAssistantTextData,
-    ModelInfo,
+    Model,
     RpcSessionState,
     RpcSlashCommand,
     SessionStats,
-    SetModelData,
     SwitchSessionData,
 )
 
@@ -50,7 +49,7 @@ class RpcError(Exception):
 class RpcClientOptions:
     """Configuration for the RPC client."""
 
-    cli_path: str = "dist/cli.js"
+    cli_path: str = "pi"
     cwd: str | None = None
     env: dict[str, str] | None = None
     provider: str | None = None
@@ -94,7 +93,7 @@ class RpcClient:
             msg = "Client already started"
             raise RuntimeError(msg)
 
-        cmd_args = ["node", self._options.cli_path, "--mode", "rpc"]
+        cmd_args = [self._options.cli_path, "--mode", "rpc"]
         if self._options.provider:
             cmd_args.extend(["--provider", self._options.provider])
         if self._options.model:
@@ -221,10 +220,10 @@ class RpcClient:
         resp = await self._send({"type": "get_state"})
         return RpcSessionState.model_validate(self._get_data(resp))
 
-    async def set_model(self, provider: str, model_id: str) -> SetModelData:
+    async def set_model(self, provider: str, model_id: str) -> Model:
         """Set model by provider and ID."""
         resp = await self._send({"type": "set_model", "provider": provider, "modelId": model_id})
-        return SetModelData.model_validate(self._get_data(resp))
+        return Model.model_validate(self._get_data(resp))
 
     async def cycle_model(self) -> CycleModelData | None:
         """Cycle to next model. Returns None if only one model available."""
@@ -232,11 +231,11 @@ class RpcClient:
         data = self._get_data(resp)
         return CycleModelData.model_validate(data) if data else None
 
-    async def get_available_models(self) -> list[ModelInfo]:
+    async def get_available_models(self) -> list[Model]:
         """Get list of available models."""
         resp = await self._send({"type": "get_available_models"})
         data = self._get_data(resp)
-        return [ModelInfo.model_validate(m) for m in data.get("models", [])]
+        return [Model.model_validate(m) for m in data.get("models", [])]
 
     async def set_thinking_level(self, level: ThinkingLevel) -> None:
         """Set thinking level."""
@@ -474,3 +473,27 @@ class RpcClient:
         if not response.get("success"):
             raise RpcError(response.get("error", "Unknown RPC error"))
         return response.get("data") or {}
+
+
+if __name__ == "__main__":
+
+    async def main() -> None:
+        opts = RpcClientOptions(cwd="/tmp")
+        async with RpcClient(opts) as client:
+            print("Client started successfully")
+
+            # Get session state
+            state = await client.get_state()
+            print(f"Session state: {state}")
+
+            # Send a simple prompt and collect events
+            print("Sending prompt...")
+            events = await client.prompt_and_wait("Say hello in one sentence.", timeout=30.0)
+            for ev in events:
+                print(f"  Event: {ev.type}")
+
+            # Get last assistant text
+            text = await client.get_last_assistant_text()
+            print(f"Assistant said: {text}")
+
+    asyncio.run(main())
