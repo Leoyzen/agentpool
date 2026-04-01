@@ -1,24 +1,36 @@
-"""OpenAI-compatible API server for AgentPool."""
+"""OpenAI-compatible API models for AgentPool chat completions."""
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
+from openai.types.chat import (
+    ChatCompletion as ChatCompletionResponse,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    ChatCompletionMessageToolCall as ToolCall,
+)
+from openai.types.chat.chat_completion import Choice
+from openai.types.chat.chat_completion_message_function_tool_call import (
+    Function as FunctionCall,
+)
+from openai.types.completion_usage import CompletionUsage
 from pydantic import Field
 from schemez import Schema
 
-from agentpool.log import get_logger
 
-
-logger = get_logger(__name__)
-
-
-class CompletionUsage(TypedDict):
-    """Token usage information."""
-
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
+__all__ = [
+    "ChatCompletionChunk",
+    "ChatCompletionMessage",
+    "ChatCompletionRequest",
+    "ChatCompletionResponse",
+    "Choice",
+    "CompletionUsage",
+    "FunctionCall",
+    "OpenAIMessage",
+    "OpenAIModelInfo",
+    "ToolCall",
+]
 
 
 class OpenAIModelInfo(Schema):
@@ -32,26 +44,14 @@ class OpenAIModelInfo(Schema):
     permissions: list[str] = Field(default_factory=list)
 
 
-class FunctionCall(Schema):
-    """Function call information."""
-
-    name: str
-    arguments: str
-
-
-class ToolCall(Schema):
-    """Tool call information."""
-
-    id: str
-    type: str = "function"
-    function: FunctionCall
-
-
 class OpenAIMessage(Schema):
-    """OpenAI chat message format."""
+    """OpenAI chat message format (for request input).
+
+    Covers all roles in a single model for easy request parsing.
+    """
 
     role: Literal["system", "user", "assistant", "tool", "function"]
-    content: str | None  # Content can be null in function calls
+    content: str | None = None
     name: str | None = None
     function_call: FunctionCall | None = None
     tool_calls: list[ToolCall] | None = None
@@ -67,32 +67,3 @@ class ChatCompletionRequest(Schema):
     max_tokens: int | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: str | None = Field(default="auto")
-
-
-class Choice(Schema):
-    """Choice in a completion response."""
-
-    index: int = 0
-    message: OpenAIMessage
-    finish_reason: str = "stop"
-
-
-class ChatCompletionResponse(Schema):
-    """OpenAI chat completion response."""
-
-    id: str
-    object: str = "chat.completion"
-    created: int
-    model: str
-    choices: list[Choice]
-    usage: CompletionUsage | None = None
-
-
-class ChatCompletionChunk(Schema):
-    """Chunk of a streaming chat completion."""
-
-    id: str
-    object: str = "chat.completion.chunk"
-    created: int
-    model: str
-    choices: list[dict[str, Any]]

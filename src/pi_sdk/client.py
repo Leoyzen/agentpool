@@ -30,6 +30,7 @@ from pi_sdk.models import (
     RpcSessionState,
     RpcSlashCommand,
     SessionStats,
+    SetModelData,
     SwitchSessionData,
 )
 
@@ -220,10 +221,10 @@ class RpcClient:
         resp = await self._send({"type": "get_state"})
         return RpcSessionState.model_validate(self._get_data(resp))
 
-    async def set_model(self, provider: str, model_id: str) -> dict[str, str]:
-        """Set model by provider and ID. Returns {provider, id}."""
+    async def set_model(self, provider: str, model_id: str) -> SetModelData:
+        """Set model by provider and ID."""
         resp = await self._send({"type": "set_model", "provider": provider, "modelId": model_id})
-        return self._get_data(resp)
+        return SetModelData.model_validate(self._get_data(resp))
 
     async def cycle_model(self) -> CycleModelData | None:
         """Cycle to next model. Returns None if only one model available."""

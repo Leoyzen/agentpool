@@ -10,10 +10,10 @@ from agentpool.log import get_logger
 from agentpool_server import BaseServer
 from agentpool_server.openai_api_server.completions.helpers import stream_response
 from agentpool_server.openai_api_server.completions.models import (
+    ChatCompletionMessage,
     ChatCompletionResponse,
     Choice,
     CompletionUsage,
-    OpenAIMessage,
     OpenAIModelInfo,
 )
 from agentpool_server.openai_api_server.responses.helpers import handle_request
@@ -134,19 +134,20 @@ class OpenAIAPIServer(BaseServer):
             )
         try:
             response = await agent.run(content)
-            message = OpenAIMessage(role="assistant", content=str(response.content))
+            message = ChatCompletionMessage(role="assistant", content=str(response.content))
             usage = None
             if response.cost_info:
                 usage = CompletionUsage(
-                    input_tokens=response.usage.input_tokens,
-                    output_tokens=response.usage.output_tokens,
+                    prompt_tokens=response.usage.input_tokens,
+                    completion_tokens=response.usage.output_tokens,
                     total_tokens=response.usage.total_tokens,
                 )
             completion_response = ChatCompletionResponse(
                 id=response.message_id,
+                object="chat.completion",
                 created=int(response.timestamp.timestamp()),
                 model=request.model,
-                choices=[Choice(message=message)],
+                choices=[Choice(index=0, message=message, finish_reason="stop")],
                 usage=usage,
             )
             json = completion_response.model_dump_json()
