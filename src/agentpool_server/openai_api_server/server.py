@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import anyenv
 from openai.pagination import SyncPage
@@ -22,15 +22,18 @@ if TYPE_CHECKING:
     from openai.types.responses import Response as ResponsesResponse
 
     from agentpool import AgentPool
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
     from agentpool_server.openai_api_server.responses.models import ResponseRequest
 logger = get_logger(__name__)
 
 
 class OpenAIAPIServer(BaseServer):
-    """OpenAI-compatible API server backed by AgentPool.
+    """OpenAI-compatible API server backed by a single agent.
 
-    Provides both chat completions and responses endpoints.
+    Uses one main agent from the pool and exposes its available models
+    through the standard OpenAI models endpoint. Provides both chat
+    completions and responses endpoints.
     """
 
     def __init__(
@@ -47,7 +50,7 @@ class OpenAIAPIServer(BaseServer):
         """Initialize OpenAI-compatible server.
 
         Args:
-            pool: AgentPool containing available agents
+            pool: AgentPool with a main agent to serve
             name: Optional Server name (auto-generated if None)
             host: Host to bind server to
             port: Port to bind server to
@@ -63,6 +66,7 @@ class OpenAIAPIServer(BaseServer):
         self.port = port
         self.api_key = api_key
         self.app = FastAPI()
+        self._last_response_id: str | None = None
         logfire.instrument_fastapi(self.app)
 
         if cors:
@@ -84,6 +88,11 @@ class OpenAIAPIServer(BaseServer):
         )
         self.app.post("/v1/responses", dependencies=[dep])(self.create_response)
 
+    @property
+    def agent(self) -> BaseAgent[Any, Any]:
+        """The main agent serving requests."""
+        return self.pool.main_agent
+
     def verify_api_key(
         self, authorization: Annotated[str | None, Header(alias="Authorization")] = None
     ) -> None:
@@ -98,30 +107,42 @@ class OpenAIAPIServer(BaseServer):
             raise HTTPException(401, "Invalid API key")
 
     async def list_models(self) -> SyncPage[OpenAIModelInfo]:
-        """List available agents as models."""
-        models = [
-            OpenAIModelInfo(
-                id=name,
-                created=0,
-                description=agent.description,
-                object="model",
-                owned_by="agentpool",
-            )
-            for name, agent in self.pool.all_agents.items()
-        ]
+        """List available models from the agent's model discovery."""
+        models: list[OpenAIModelInfo] = []
+        try:
+            available = await self.agent.get_available_models()
+            if available:
+                models = [
+                    OpenAIModelInfo(
+                        id=m.id_override or m.id,
+                        created=0,
+                        description=m.description or m.id,
+                        object="model",
+                        owned_by=m.owned_by or m.provider,
+                    )
+                    for m in available
+                ]
+        except Exception:
+            logger.exception("Failed to get available models")
+        # Always include the agent's current model as fallback
+        if not models:
+            models = [
+                OpenAIModelInfo(
+                    id=self.agent.name,
+                    created=0,
+                    description=self.agent.description,
+                    object="model",
+                    owned_by="agentpool",
+                )
+            ]
         return SyncPage[OpenAIModelInfo](data=models, object="list")
 
     async def create_chat_completion(self, request: ChatCompletionRequest) -> Response:
         """Handle chat completion requests."""
-        from fastapi import HTTPException, Response
+        from fastapi import Response
         from fastapi.responses import StreamingResponse
 
-        try:
-            agent = self.pool.all_agents[request.model]
-        except KeyError:
-            raise HTTPException(404, f"Model {request.model} not found") from None
-
-        # Just take the last message content - let agent handle history
+        agent = self.agent
         content = request.messages[-1].content or ""
         if request.stream:
             return StreamingResponse(
@@ -150,17 +171,29 @@ class OpenAIAPIServer(BaseServer):
             return Response(content=json, media_type="application/json")
         except Exception as e:
             self.log.exception("Error processing chat completion")
+            from fastapi import HTTPException
+
             raise HTTPException(500, f"Error: {e!s}") from e
 
     async def create_response(self, req_body: ResponseRequest) -> ResponsesResponse:
         """Handle response creation requests."""
         from fastapi import HTTPException
 
+        # Validate previous_response_id if provided
+        if req_body.previous_response_id is not None:
+            if req_body.previous_response_id != self._last_response_id:
+                raise HTTPException(
+                    404,
+                    f"Response '{req_body.previous_response_id}' not found. "
+                    "Only the most recent response ID is supported for continuation.",
+                )
+
         try:
-            agent = self.pool.all_agents[req_body.model]
-            return await handle_request(req_body, agent)
-        except KeyError:
-            raise HTTPException(404, f"Model {req_body.model} not found") from None
+            response = await handle_request(req_body, self.agent)
+            self._last_response_id = response.id
+            return response
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(500, str(e)) from e
 

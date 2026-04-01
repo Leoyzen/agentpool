@@ -24,14 +24,18 @@ def api_command(
     host: Annotated[str, t.Option(help="Host to bind server to")] = "localhost",
     port: Annotated[int, t.Option(help="Port to listen on")] = 8000,
     cors: Annotated[bool, t.Option(help="Enable CORS")] = True,
+    agent: Annotated[
+        str | None,
+        t.Option("--agent", help="Name of specific agent to use (defaults to pool's default)"),
+    ] = None,
     show_messages: Annotated[
         bool, t.Option("--show-messages", help="Show message activity")
     ] = False,
 ) -> None:
-    """Run agents as a completions API server.
+    """Run an agent as an OpenAI-compatible completions API server.
 
-    This creates an OpenAI-compatible API server that makes your agents available
-    through a standard completions API interface.
+    This creates an OpenAI-compatible API server backed by a single agent.
+    Model listing uses the agent's model discovery.
     """
     import uvicorn
 
@@ -49,11 +53,10 @@ def api_command(
         msg = str(e)
         raise t.BadParameter(msg) from e
     manifest = AgentsManifest.from_file(config_path)
-    pool = AgentPool(manifest)
+    pool = AgentPool(manifest, main_agent_name=agent)
 
     if show_messages:
-        for agent in pool.all_agents.values():
-            agent.message_sent.connect(on_message)
+        pool.main_agent.message_sent.connect(on_message)
 
     server = OpenAIAPIServer(pool, cors=cors)
 

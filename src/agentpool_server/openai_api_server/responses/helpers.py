@@ -37,6 +37,10 @@ async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -
             else:
                 text_parts = [p["text"] for p in msg_content if p["type"] == "input_text"]
                 content = "\n".join(text_parts)
+        case None:
+            if request.previous_response_id is None:
+                raise HTTPException(400, "Either 'input' or 'previous_response_id' is required")
+            content = ""  # Continuation with no new input
         case _:
             raise HTTPException(400, "Invalid input format")
 
