@@ -15,8 +15,6 @@ from uuid import uuid4
 
 import anyenv
 from pydantic_ai import (
-    BinaryContent,
-    FileUrl,
     ModelRequest,
     ModelResponse,
     SystemPromptPart,
@@ -25,6 +23,14 @@ from pydantic_ai import (
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
+)
+from pydantic_ai.messages import (
+    AudioUrl,
+    BinaryContent,
+    DocumentUrl,
+    ImageUrl,
+    TextContent,
+    VideoUrl,
 )
 
 from agentpool.agents.events import (
@@ -42,7 +48,12 @@ from agentpool.utils.todos import PlanEntry
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from ag_ui.core import Event, InputContent, Message, Tool as AGUITool
+    from ag_ui.core import (
+        Event,
+        InputContent,
+        Message,
+        Tool as AGUITool,
+    )
     from pydantic_ai import ModelMessage, UserContent
 
     from agentpool.agents.events import RichAgentStreamEvent
@@ -246,7 +257,15 @@ def _content_to_plan_entries(content: list[Any]) -> list[PlanEntry]:
 
 def to_agui_input_content(parts: Sequence[UserContent]) -> list[InputContent]:
     """Convert pydantic-ai UserContent parts to AG-UI InputContent format."""
-    from ag_ui.core import BinaryInputContent, TextInputContent
+    from ag_ui.core import (
+        AudioInputContent,
+        DocumentInputContent,
+        ImageInputContent,
+        InputContentDataSource,
+        InputContentUrlSource,
+        TextInputContent,
+        VideoInputContent,
+    )
 
     result: list[InputContent] = []
     for part in parts:
@@ -254,12 +273,42 @@ def to_agui_input_content(parts: Sequence[UserContent]) -> list[InputContent]:
             case str() as text:
                 result.append(TextInputContent(text=text))
 
-            case FileUrl(url=url, media_type=media_type):
-                result.append(BinaryInputContent(url=str(url), mime_type=media_type))
+            case TextContent(content=text):
+                result.append(TextInputContent(text=text))
+
+            case ImageUrl(url=url):
+                mime = part.media_type or "image/png"
+                source = InputContentUrlSource(value=str(url), mime_type=mime)
+                result.append(ImageInputContent(source=source))
+
+            case AudioUrl(url=url):
+                mime = part.media_type or "audio/mpeg"
+                source = InputContentUrlSource(value=str(url), mime_type=mime)
+                result.append(AudioInputContent(source=source))
+
+            case VideoUrl(url=url):
+                mime = part.media_type or "video/mp4"
+                source = InputContentUrlSource(value=str(url), mime_type=mime)
+                result.append(VideoInputContent(source=source))
+
+            case DocumentUrl(url=url):
+                mime = part.media_type or "application/pdf"
+                source = InputContentUrlSource(value=str(url), mime_type=mime)
+                result.append(DocumentInputContent(source=source))
 
             case BinaryContent(data=data, media_type=media_type):
                 encoded = base64.b64encode(data).decode()
-                result.append(BinaryInputContent(data=encoded, mime_type=media_type))
+                mime = media_type or "application/octet-stream"
+                source = InputContentDataSource(value=encoded, mime_type=mime)
+                # Pick modality from mime type for binary data
+                if mime.startswith("image/"):
+                    result.append(ImageInputContent(source=source))
+                elif mime.startswith("audio/"):
+                    result.append(AudioInputContent(source=source))
+                elif mime.startswith("video/"):
+                    result.append(VideoInputContent(source=source))
+                else:
+                    result.append(DocumentInputContent(source=source))
     return result
 
 
@@ -306,9 +355,8 @@ def model_messages_to_agui(messages: Sequence[ModelMessage]) -> Iterator[Message
                             yield UserMessage(id=str(uuid4()), content=content)
 
                         case UserPromptPart(content=list() as content):
-                            # Join text parts
-                            text = " ".join(p if isinstance(p, str) else str(p) for p in content)
-                            yield UserMessage(id=str(uuid4()), content=text)
+                            agui_parts = to_agui_input_content(content)
+                            yield UserMessage(id=str(uuid4()), content=agui_parts)
 
                         case UserPromptPart(content=content):
                             yield UserMessage(id=str(uuid4()), content=str(content))
