@@ -17,9 +17,7 @@ from openai.types.responses.response_usage import InputTokensDetails, OutputToke
 
 
 if TYPE_CHECKING:
-    from openai.types.responses import (
-        ResponseOutputItem,
-    )
+    from openai.types.responses import ResponseOutputItem
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool_server.openai_api_server.responses.models import ResponseRequest
@@ -53,7 +51,7 @@ async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -
         type="message",
     )
 
-    calls: list[ResponseFunctionToolCall] = [
+    calls = [
         ResponseFunctionToolCall(
             type="function_call",
             arguments=str(tc.args),
@@ -64,15 +62,13 @@ async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -
     ]
     output: list[ResponseOutputItem] = [*calls, output_msg]
 
-    usage_info: ResponseUsage | None = None
-    if token_usage := message.usage:
-        usage_info = ResponseUsage(
-            input_tokens=token_usage.input_tokens,
-            input_tokens_details=InputTokensDetails(cached_tokens=0),
-            output_tokens=token_usage.output_tokens,
-            output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
-            total_tokens=token_usage.total_tokens,
-        )
+    usage_info = ResponseUsage(
+        input_tokens=message.usage.input_tokens,
+        input_tokens_details=InputTokensDetails(cached_tokens=0),
+        output_tokens=message.usage.output_tokens,
+        output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+        total_tokens=message.usage.total_tokens,
+    )
 
     return Response(
         id=f"resp_{uuid4().hex}",
