@@ -742,7 +742,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             if self._sdk_session_id:
                 msg_metadata["sdk_session_id"] = self._sdk_session_id
             reconstructor.flush()
-            resolved = adapter.model_name or self.model_name
+            resolved = adapter.model_name or self.model_name  # pyright: ignore[reportPossiblyUnboundVariable]
             response_msg = ChatMessage[TResult](
                 content=reconstructor.text_content,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
                 role="assistant",
