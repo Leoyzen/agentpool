@@ -532,6 +532,8 @@ def opencode_to_session_data(
     """Convert OpenCode Session to SessionData for persistence."""
     # Store revert/share in metadata
     metadata: dict[str, Any] = {}
+    if session.title:
+        metadata["title"] = session.title
     if session.revert:
         metadata["revert"] = session.revert.model_dump()
     if session.share:

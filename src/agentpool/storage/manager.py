@@ -276,8 +276,13 @@ class StorageManager:
         # Skip during tests to avoid external API calls
         if not initial_prompt or os.environ.get("PYTEST_CURRENT_TEST"):
             return
-        if not initial_prompt or os.environ.get("PYTEST_CURRENT_TEST"):
-            return
+
+        # Generate title from initial prompt
+        await self._generate_title_from_prompt(
+            session_id=session_id,
+            prompt=initial_prompt,
+            on_title_generated=on_title_generated,
+        )
 
     @method_spawner
     async def save_session(self, data: SessionData) -> None:
@@ -736,6 +741,8 @@ class StorageManager:
         # Generate using core logic
         if metadata := await self._generate_title_core(session_id, f"user: {prompt[:500]}"):
             title = metadata.title
+            # Store the generated title
+            await self.update_session_title(session_id, title)
             if on_title_generated:
                 on_title_generated(title)
             return title

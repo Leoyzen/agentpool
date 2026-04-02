@@ -84,6 +84,7 @@ class SQLSessionStore:
             pool_id=data.pool_id,
             project_id=data.project_id,
             parent_id=data.parent_id,
+            title=data.title,  # Save title from metadata
             version=data.version,
             cwd=data.cwd,
             created_at=data.created_at,  # Maps to start_time in DB
@@ -93,6 +94,10 @@ class SQLSessionStore:
 
     def _from_db_model(self, row: Session) -> SessionData:
         """Convert database model to SessionData."""
+        # Merge title into metadata for SessionData compatibility
+        metadata = row.metadata_json or {}
+        if row.title and "title" not in metadata:
+            metadata = {**metadata, "title": row.title}
         return SessionData(
             session_id=row.id,  # id is the primary key
             agent_name=row.agent_name,
@@ -103,7 +108,7 @@ class SQLSessionStore:
             cwd=row.cwd,
             created_at=row.start_time,  # start_time in DB is created_at in SessionData
             last_active=row.last_active,
-            metadata=row.metadata_json or {},
+            metadata=metadata,
         )
 
     async def save(self, data: SessionData) -> None:
