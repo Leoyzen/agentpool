@@ -7,61 +7,18 @@ input_json_delta or OpenAI's function call streaming).
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from dataclasses import dataclass
+from typing import Any
 
-import anyenv
-
-
-def repair_partial_json(buffer: str) -> str:
-    """Attempt to repair truncated JSON for preview purposes.
-
-    Handles common truncation cases:
-    - Unclosed strings
-    - Missing closing braces/brackets
-    - Trailing commas
-
-    Args:
-        buffer: Potentially incomplete JSON string
-
-    Returns:
-        Repaired JSON string (may still be invalid in edge cases)
-    """
-    if not buffer:
-        return "{}"
-    result = buffer.rstrip()
-    # Check if we're in the middle of a string by counting unescaped quotes
-    in_string = False
-    i = 0
-    while i < len(result):
-        char = result[i]
-        if char == "\\" and i + 1 < len(result):
-            i += 2  # Skip escaped character
-            continue
-        if char == '"':
-            in_string = not in_string
-        i += 1
-
-    # Close unclosed string
-    if in_string:
-        result += '"'
-
-    # Remove trailing comma (invalid JSON)
-    result = result.rstrip()
-    if result.endswith(","):
-        result = result[:-1]
-    # Balance braces and brackets
-    open_braces = result.count("{") - result.count("}")
-    open_brackets = result.count("[") - result.count("]")
-    result += "]" * max(0, open_brackets)
-    result += "}" * max(0, open_braces)
-    return result
+from pydantic_core import from_json
 
 
-class ToolCall(TypedDict):
+@dataclass(slots=True)
+class ToolCall:
     """Tool call in construction."""
 
     name: str
-    args_buffer: str
+    args_buffer: str = ""
 
 
 class ToolCallAccumulator:
@@ -101,7 +58,7 @@ class ToolCallAccumulator:
             tool_call_id: Unique identifier for the tool call
             tool_name: Name of the tool being called
         """
-        self._calls[tool_call_id] = ToolCall(name=tool_name, args_buffer="")
+        self._calls[tool_call_id] = ToolCall(name=tool_name)
 
     def add_args(self, tool_call_id: str, delta: str) -> None:
         """Add argument delta to a tool call.
@@ -111,7 +68,7 @@ class ToolCallAccumulator:
             delta: JSON string fragment to append
         """
         if tool_call_id in self._calls:
-            self._calls[tool_call_id]["args_buffer"] += delta
+            self._calls[tool_call_id].args_buffer += delta
 
     def complete(self, tool_call_id: str) -> tuple[str, dict[str, Any]] | None:
         """Complete a tool call and return (tool_name, parsed_args).
@@ -128,12 +85,11 @@ class ToolCallAccumulator:
             return None
 
         call_data = self._calls.pop(tool_call_id)
-        args_str = call_data["args_buffer"]
         try:
-            args = anyenv.load_json(args_str) if args_str else {}
-        except anyenv.JsonLoadError:
-            args = {"_raw": args_str}
-        return call_data["name"], args
+            args = from_json(call_data.args_buffer) if call_data.args_buffer else {}
+        except ValueError:
+            args = {"_raw": call_data.args_buffer}
+        return call_data.name, args
 
     def get_pending(self, tool_call_id: str) -> tuple[str, str] | None:
         """Get pending call data (tool_name, args_buffer) without completing.
@@ -147,7 +103,7 @@ class ToolCallAccumulator:
         if tool_call_id not in self._calls:
             return None
         data = self._calls[tool_call_id]
-        return data["name"], data["args_buffer"]
+        return data.name, data.args_buffer
 
     def get_partial_args(self, tool_call_id: str) -> dict[str, Any]:
         """Get best-effort parsed args from incomplete JSON stream.
@@ -163,27 +119,10 @@ class ToolCallAccumulator:
         """
         if tool_call_id not in self._calls:
             return {}
-
-        buffer = self._calls[tool_call_id]["args_buffer"]
+        buffer = self._calls[tool_call_id].args_buffer
         if not buffer:
             return {}
-
-        # Try direct parse first
-        try:
-            result = anyenv.load_json(buffer, return_type=dict)
-        except anyenv.JsonLoadError:
-            pass
-        else:
-            return result
-
-        # Try to repair truncated JSON
-        try:
-            repaired = repair_partial_json(buffer)
-            result = anyenv.load_json(repaired, return_type=dict)
-        except anyenv.JsonLoadError:
-            return {}
-        else:
-            return result
+        return json_from_string(buffer)
 
     def is_pending(self, tool_call_id: str) -> bool:
         """Check if a tool call is being tracked."""
@@ -193,8 +132,16 @@ class ToolCallAccumulator:
         """Get the tool name for a pending call."""
         if tool_call_id not in self._calls:
             return None
-        return self._calls[tool_call_id]["name"]
+        return self._calls[tool_call_id].name
 
     def clear(self) -> None:
         """Clear all pending tool calls."""
         self._calls.clear()
+
+
+def json_from_string(buffer: str) -> dict[str, Any]:
+    try:
+        result = from_json(buffer, allow_partial="trailing-strings")
+    except ValueError:
+        return {}
+    return result if isinstance(result, dict) else {}
