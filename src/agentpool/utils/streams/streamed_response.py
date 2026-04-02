@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import ModelResponse, RequestUsage
-from pydantic_ai._parts_manager import ModelResponsePartsManager
+
+from agentpool.utils.streams.parts_manager import PartsManager
 
 
 if TYPE_CHECKING:
@@ -28,13 +29,14 @@ if TYPE_CHECKING:
 class StreamedResponse(ABC):
     """Streamed response from an LLM when calling a tool."""
 
+    provider_name: str
     provider_response_id: str | None = field(default=None, init=False)
     provider_details: dict[str, Any] | None = field(default=None, init=False)
     finish_reason: FinishReason | None = field(default=None, init=False)
-    _parts_manager: ModelResponsePartsManager = field(
-        default_factory=ModelResponsePartsManager, init=False
-    )
     _usage: RequestUsage = field(default_factory=RequestUsage, init=False)
+
+    def __post_init__(self) -> None:
+        self._parts_manager = PartsManager(self.provider_name)
 
     def __aiter__(self) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         """Stream the response as an async iterable of [`RichAgentStreamEvent`]."""

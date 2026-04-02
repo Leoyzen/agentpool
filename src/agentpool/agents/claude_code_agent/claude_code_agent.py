@@ -723,6 +723,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             if self.storage and self.session_id:
                 await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
             adapter = ClaudeCodeStreamedResponse(
+                provider_name="claude_code",
                 stream=stream,
                 tool_metadata=self._tool_bridge.tool_metadata,
                 agent_name=self.name,

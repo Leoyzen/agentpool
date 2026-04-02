@@ -507,7 +507,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             output_schema=None if self._output_type in (str, None) else self._output_type,
             personality=self._current_personality,
         )
-        self._adapter = CodexStreamedResponse(stream=raw_stream)
+        self._adapter = CodexStreamedResponse(provider_name="codex", stream=raw_stream)
         try:
             async with self._tool_bridge.set_run_context(run_context, prompt=prompts):
                 # Wrap to capture metadata (turn_id, token usage), then convert

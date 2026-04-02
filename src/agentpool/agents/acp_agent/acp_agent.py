@@ -468,6 +468,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         assert self._client_handler
         streamed_response = AcpAgentStreamedResponse(
+            provider_name="acp",
             state=self._state,
             update_event=self._client_handler._update_event,
             prompt_task=prompt_task,
