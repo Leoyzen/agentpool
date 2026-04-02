@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
 import anyenv
 from pydantic_ai import (
@@ -232,7 +232,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
             message_id=message_id,
             session_id=session_id,
             time=TimeCreated(created=created_ms),
-            agent_name=agent_name,
+            agent_name=msg.name or agent_name,
         )
         if msg.content and isinstance(msg.content, str):
             ts_opt = TimeStartEndOptional(start=created_ms)
@@ -265,8 +265,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
             parent_id="",  # Would need to track parent user message
             model_id=msg.model_name or model_id,
             provider_id=msg.provider_name or provider_id,
-            mode="default",
-            agent_name=agent_name,
+            agent_name=msg.name or agent_name,
             path=MessagePath(cwd=working_dir, root=working_dir),
             time=MessageTime(created=created_ms, completed=completed_ms),
             tokens=tokens,
@@ -280,7 +279,16 @@ def chat_message_to_opencode(  # noqa: PLR0915
         for model_msg in msg.messages:
             # Handle case where message might be a dict (loaded from storage)
             if isinstance(model_msg, dict):
-                continue  # Skip dict messages that can't be processed
+                # Try to extract text content from dict representation
+                model_dict = cast(dict[str, Any], model_msg)
+                parts = model_dict.get("parts") or []
+                for part_dict in parts:
+                    if isinstance(part_dict, dict) and part_dict.get("part_kind") == "text":
+                        content = part_dict.get("content") or ""
+                        if content:
+                            ts_opt = TimeStartEndOptional(start=created_ms, end=completed_ms)
+                            result.add_text_part(content, time=ts_opt)
+                continue
             for p in model_msg.parts:
                 match p:
                     case PydanticTextPart(content=content):
