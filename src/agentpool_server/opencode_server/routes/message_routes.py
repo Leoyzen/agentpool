@@ -149,23 +149,15 @@ async def _process_message(  # noqa: PLR0915
 
     Per-session locking ensures messages to the same session are processed
     sequentially, preventing race conditions and event interleaving.
+
+    User message is created BEFORE acquiring the lock so that the UI can
+    immediately show the message with "QUEUED" status while waiting.
     """
-    # Acquire per-session lock to ensure sequential processing
-    lock = state.get_session_lock(session_id)
-    async with lock:
-        return await _process_message_locked(session_id, request, state)
-
-
-async def _process_message_locked(  # noqa: PLR0915
-    session_id: str,
-    request: MessageRequest,
-    state: StateDep,
-) -> MessageWithParts:
-    """Actual message processing logic (called within lock)."""
+    # --- Create user message BEFORE lock (so UI shows queued status) ---
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    # --- Create user message ---
+
     user_msg_id = identifier.ascending("message", request.message_id)
     user_message = UserMessage(
         id=user_msg_id,
@@ -205,6 +197,28 @@ async def _process_message_locked(  # noqa: PLR0915
     state.messages[session_id].append(user_msg_with_parts)
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
+
+    # Acquire per-session lock to ensure sequential processing
+    lock = state.get_session_lock(session_id)
+    async with lock:
+        return await _process_message_locked(
+            session_id, request, state, user_msg_id, user_msg_with_parts
+        )
+
+
+async def _process_message_locked(  # noqa: PLR0915
+    session_id: str,
+    request: MessageRequest,
+    state: StateDep,
+    user_msg_id: str,
+    user_msg_with_parts: MessageWithParts,
+) -> MessageWithParts:
+    """Actual agent processing logic (called within lock).
+
+    Args:
+        user_msg_id: ID of already-created user message
+        user_msg_with_parts: The user message with parts (already broadcast)
+    """
     # --- Mark session busy ---
     busy = SessionStatus(type="busy")
     state.session_status[session_id] = busy
