@@ -801,8 +801,8 @@ class OpenCodeStorageProvider(StorageProvider):
     async def save_session(self, data: SessionData) -> None:
         """Save or update session data.
 
-        For OpenCode storage, sessions are created implicitly when messages
-        are logged. This method updates session metadata if the session exists.
+        Creates a new session file if it doesn't exist, or updates the existing
+        session metadata (title, etc.) if it does.
 
         Args:
             data: Session data to save
@@ -812,27 +812,51 @@ class OpenCodeStorageProvider(StorageProvider):
             (p for sid, p in self._list_sessions() if sid == data.session_id),
             None,
         )
-        if not session_path:
-            # Session doesn't exist yet - it will be created when first message is logged
-            logger.debug(
-                "Session not found for save_session, will be created on first message",
-                session_id=data.session_id,
+
+        if session_path:
+            # Update existing session
+            oc_session = helpers.read_session(session_path)
+            if not oc_session:
+                return
+
+            # Update metadata
+            if data.metadata.get("title"):
+                oc_session.title = data.metadata["title"]
+            oc_session.time.updated = datetime_to_ms(get_now())
+
+            # Write back
+            dct = oc_session.model_dump(by_alias=True)
+            session_path.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
+        else:
+            # Create new session file
+            now = datetime_to_ms(get_now())
+            project_id = data.project_id or "default"
+
+            # Ensure project directory exists
+            project_dir = self.sessions_path / project_id
+            project_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create new session
+            new_session = Session(
+                id=data.session_id,
+                project_id=project_id,
+                directory=data.cwd or str(self.base_path),
+                title=data.metadata.get("title") or data.title or "New Session",
+                version=OPENCODE_VERSION,
+                time=TimeCreatedUpdated(created=now, updated=now),
+                parent_id=data.parent_id,
             )
-            return
 
-        # Read existing session
-        oc_session = helpers.read_session(session_path)
-        if not oc_session:
-            return
+            # Write session file
+            session_path = project_dir / f"{data.session_id}.json"
+            dct = new_session.model_dump(by_alias=True)
+            session_path.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
 
-        # Update metadata
-        if data.metadata.get("title"):
-            oc_session.title = data.metadata["title"]
-        oc_session.time.updated = datetime_to_ms(get_now())
-
-        # Write back
-        dct = oc_session.model_dump(by_alias=True)
-        session_path.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
+            logger.debug(
+                "Created new session file",
+                session_id=data.session_id,
+                path=str(session_path),
+            )
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a session and all its messages.

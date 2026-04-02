@@ -356,6 +356,103 @@ class TestMemoryProviderTitleOperations:
         assert await provider.get_session_title(session_id) == "Memory Title"
 
 
+class TestOpenCodeProviderTitleFix:
+    """Tests for OpenCodeStorageProvider title persistence fix."""
+
+    async def test_save_session_creates_new_session_file(self, tmp_path: Path) -> None:
+        """Verify save_session creates new session file when it doesn't exist."""
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
+        from agentpool_config.storage import OpenCodeStorageConfig
+
+        config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
+        provider = OpenCodeStorageProvider(config)
+
+        # Create SessionData with title
+        session_data = SessionData(
+            session_id="new_session_001",
+            agent_name="test_agent",
+            project_id="test_project",
+            cwd="/tmp/test",
+            metadata={"title": "New Session Title"},
+        )
+
+        # Save session (should create new file)
+        await provider.save_session(session_data)
+
+        # Verify session file was created
+        session_file = provider.sessions_path / "test_project" / "new_session_001.json"
+        assert session_file.exists(), f"Session file should be created at {session_file}"
+
+        # Verify title was saved
+        from agentpool_storage.opencode_provider import helpers
+
+        oc_session = helpers.read_session(session_file)
+        assert oc_session is not None
+        title = oc_session.title
+        assert title == "New Session Title"
+        assert oc_session.id == "new_session_001"
+        assert oc_session.project_id == "test_project"
+
+    async def test_save_session_updates_existing_session(self, tmp_path: Path) -> None:
+        """Verify save_session updates existing session file."""
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
+        from agentpool_config.storage import OpenCodeStorageConfig
+
+        config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
+        provider = OpenCodeStorageProvider(config)
+
+        # Create initial session
+        session_data = SessionData(
+            session_id="update_session_001",
+            agent_name="test_agent",
+            project_id="test_project",
+            metadata={"title": "Initial Title"},
+        )
+        await provider.save_session(session_data)
+
+        # Update title
+        updated_data = SessionData(
+            session_id="update_session_001",
+            agent_name="test_agent",
+            project_id="test_project",
+            metadata={"title": "Updated Title"},
+        )
+        await provider.save_session(updated_data)
+
+        # Verify title was updated
+        session_file = provider.sessions_path / "test_project" / "update_session_001.json"
+        from agentpool_storage.opencode_provider import helpers
+
+        oc_session = helpers.read_session(session_file)
+        assert oc_session is not None
+        title = oc_session.title
+        assert title == "Updated Title"
+
+    async def test_load_session_reads_title(self, tmp_path: Path) -> None:
+        """Verify load_session reads title from session file."""
+        from agentpool_storage.opencode_provider.provider import OpenCodeStorageProvider
+        from agentpool_config.storage import OpenCodeStorageConfig
+
+        config = OpenCodeStorageConfig(path=str(tmp_path / "opencode_storage"))
+        provider = OpenCodeStorageProvider(config)
+
+        # Create session with title
+        session_data = SessionData(
+            session_id="load_session_001",
+            agent_name="test_agent",
+            project_id="test_project",
+            metadata={"title": "Loadable Title"},
+        )
+        await provider.save_session(session_data)
+
+        # Load session
+        loaded = await provider.load_session("load_session_001")
+
+        assert loaded is not None
+        assert loaded.title == "Loadable Title"
+        assert loaded.metadata.get("title") == "Loadable Title"
+
+
 class TestSQLProviderTitleOperations:
     """Tests for SQLModelProvider title operations."""
 
