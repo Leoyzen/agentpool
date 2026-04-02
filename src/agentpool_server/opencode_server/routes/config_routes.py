@@ -120,8 +120,6 @@ async def _get_configured_variants(
         for name, config in manifest.model_variants.items():
             variants[name] = {
                 "provider": _extract_provider(config),
-                # Note: variant-specific settings (temp, thinking) are not exposed to clients;
-                # they are applied internally by the agent
             }
 
     return variants
@@ -153,6 +151,7 @@ def _build_providers_from_configured(
         providers_by_name[provider_name].models[variant_name] = Model(
             id=variant_name,
             name=variant_name,
+            attachment=True,  # Enable multimodal support for manually configured models
             cost=ModelCost(
                 input=DEFAULT_MODEL_INPUT_COST,
                 output=DEFAULT_MODEL_OUTPUT_COST,
@@ -189,6 +188,7 @@ def _build_providers_from_variants(
                 name: Model(
                     id=name,
                     name=name,
+                    attachment=True,  # Enable multimodal support for agent modes
                     cost=ModelCost(
                         input=DEFAULT_MODEL_INPUT_COST,
                         output=DEFAULT_MODEL_OUTPUT_COST,
@@ -225,7 +225,7 @@ async def _build_providers_with_fallback(
     # Primary: Configured variants
     configured = await _get_configured_variants(manifest)
     if configured:
-        logger.debug(f"Using {len(configured)} configured variants from manifest")
+        logger.info(f"Using {len(configured)} configured variants from manifest")
         return _build_providers_from_configured(configured)
 
     # Secondary: Tokonomics discovery
