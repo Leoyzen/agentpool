@@ -151,7 +151,13 @@ def _apply_configured_variants(
         This function modifies the providers list in place. New providers
         are created if a configured variant references a non-existent provider.
     """
-    from agentpool_server.opencode_server.models import Model, ModelCost, ModelLimit, Provider
+    from agentpool_server.opencode_server.models import (
+        Model,
+        ModelCost,
+        ModelLimit,
+        ModelModalities,
+        Provider,
+    )
 
     # Build lookup for provider name -> Provider object
     provider_lookup: dict[str, Provider] = {}
@@ -177,14 +183,16 @@ def _apply_configured_variants(
             # Override existing (configured takes precedence)
             existing = provider.models[variant_name]
             existing.name = variant_name
-            existing.attachment = True  # Enable multimodal support
+            existing.attachment = False  # Disable attachment upload, use image paste instead
+            existing.modalities = ModelModalities(input=["text", "image"], output=["text"])
             # Note: variant-specific settings (temp, thinking) not exposed to client
         else:
             # Add new model - use a minimal Model creation
             provider.models[variant_name] = Model(
                 id=variant_name,
                 name=variant_name,
-                attachment=True,  # Enable multimodal support for manually configured models
+                attachment=False,  # Disable attachment upload, use image paste instead
+                modalities=ModelModalities(input=["text", "image"], output=["text"]),
                 cost=ModelCost(
                     input=DEFAULT_MODEL_INPUT_COST,
                     output=DEFAULT_MODEL_OUTPUT_COST,

@@ -415,7 +415,7 @@ async def _process_message_locked(  # noqa: PLR0915
 
     async def run_with_model():
         try:
-            iterator = agent.run_stream(user_prompt, session_id=session_id)
+            iterator = agent.run_stream(*user_prompt, session_id=session_id)
             async for oc_event in adapter.process_stream(iterator):
                 await state.broadcast_event(oc_event)
         finally:

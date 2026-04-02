@@ -24,6 +24,7 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_conte
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
+    FilePart,
     FilePartInput,
     MCPStatus,
     MessagePath,
@@ -429,10 +430,32 @@ def opencode_to_chat_message(
     # Build model messages from parts
     model_messages: list[ModelRequest | ModelResponse] = []
     if role == "user":
-        # Collect text parts into a user prompt
-        text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]
-        content = "\n".join(text_content) if text_content else ""
-        model_messages.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+        # Collect all parts (text and files/images) into multimodal content list
+        from pydantic_ai import BinaryContent, ImageUrl
+
+        content_items: list[str | BinaryContent | ImageUrl] = []
+        for part in msg.parts:
+            if isinstance(part, TextPart):
+                content_items.append(part.text)
+            elif isinstance(part, FilePart):
+                # Convert file part to appropriate content type
+                if part.mime.startswith("image/") and part.url.startswith("data:"):
+                    # Data URI image - extract base64 and create BinaryContent
+                    # This is the most compatible format for multimodal models
+                    content_items.append(BinaryContent.from_data_uri(part.url))
+                elif part.mime.startswith("image/"):
+                    # Regular image URL (http/https)
+                    content_items.append(ImageUrl(url=part.url, media_type=part.mime))
+                else:
+                    # Other file types - treat as text reference for now
+                    content_items.append(f"[File: {part.filename or 'attachment'}]")
+
+        # Create single user prompt with all content items as a list
+        # This is the correct format for multimodal prompts in pydantic-ai
+        if content_items:
+            model_messages.append(ModelRequest(parts=[UserPromptPart(content=content_items)]))
+        else:
+            model_messages.append(ModelRequest(parts=[UserPromptPart(content="")]))
     else:
         # Assistant message - collect response parts and tool interactions
         response_parts: list[Any] = []

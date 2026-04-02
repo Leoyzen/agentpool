@@ -121,7 +121,8 @@ def to_user_content_or_path_ref(
     """
     from urllib.parse import unquote, urlparse
 
-    # Handle data: URIs - convert to BinaryContent
+    # Handle data: URIs - always use BinaryContent for data URIs
+    # This ensures the model receives the actual binary data rather than a URL reference
     if url.startswith("data:"):
         return BinaryContent.from_data_uri(url)
 

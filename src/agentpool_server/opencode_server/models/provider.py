@@ -30,6 +30,13 @@ class ModelLimit(OpenCodeBaseModel):
     output: float
 
 
+class ModelModalities(OpenCodeBaseModel):
+    """Modalities supported by a model."""
+
+    input: list[str] = Field(default_factory=lambda: ["text"])
+    output: list[str] = Field(default_factory=lambda: ["text"])
+
+
 class Model(OpenCodeBaseModel):
     """Model information."""
 
@@ -38,6 +45,7 @@ class Model(OpenCodeBaseModel):
     attachment: bool = False
     cost: ModelCost
     limit: ModelLimit
+    modalities: ModelModalities = Field(default_factory=ModelModalities)
     options: dict[str, Any] = Field(default_factory=dict)
     reasoning: bool = False
     release_date: str = ""
@@ -69,13 +77,27 @@ class Model(OpenCodeBaseModel):
         # Convert limits
         context = float(model.context_window) if model.context_window else 128000.0
         output = float(model.max_output_tokens) if model.max_output_tokens else 4096.0
+        # Build modalities from tokonomics data (convert to strings)
+        input_modalities = (
+            [str(m) for m in model.input_modalities] if model.input_modalities else ["text"]
+        )
+        output_modalities = (
+            [str(m) for m in model.output_modalities] if model.output_modalities else ["text"]
+        )
+        # Ensure text is always included
+        if "text" not in input_modalities:
+            input_modalities.insert(0, "text")
+        if "text" not in output_modalities:
+            output_modalities.insert(0, "text")
+        modalities = ModelModalities(input=input_modalities, output=output_modalities)
         # Use id_override if available (e.g., "opus" for Claude Code SDK)
         return cls(
             id=model.id_override or model.id,
             name=model.name,
-            attachment="image" in model.input_modalities,
+            attachment=False,  # Disable attachment upload, use image paste instead
             cost=cost,
             limit=ModelLimit(context=context, output=output),
+            modalities=modalities,
             reasoning="reasoning" in model.output_modalities or "thinking" in model.name.lower(),
             release_date=model.created_at.strftime("%Y-%m-%d") if model.created_at else "",
             temperature=True,
