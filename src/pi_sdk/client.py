@@ -14,6 +14,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Self
 
+import anyenv
+
 from pi_sdk.models import (
     AgentMessageAdapter,
     AgentSessionEvent,
@@ -90,8 +92,7 @@ class RpcClient:
     async def start(self) -> None:
         """Start the RPC agent process."""
         if self._process is not None:
-            msg = "Client already started"
-            raise RuntimeError(msg)
+            raise RuntimeError("Client already started")
 
         cmd_args = [self._options.cli_path, "--mode", "rpc"]
         if self._options.provider:
@@ -112,11 +113,9 @@ class RpcClient:
             cwd=self._options.cwd,
             env=env,
         )
-
         # Start background tasks for reading stdout and stderr
         self._reader_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
-
         # Brief wait to detect immediate exit
         await asyncio.sleep(0.1)
         if self._process.returncode is not None:
@@ -399,7 +398,7 @@ class RpcClient:
             line = await reader.readline()
             if not line:
                 break
-            self._handle_line(line.decode("utf-8", errors="replace").strip())
+            self._handle_line(line.decode(errors="replace").strip())
 
     async def _read_stderr(self) -> None:
         """Background task: accumulate stderr for debugging."""
@@ -410,14 +409,14 @@ class RpcClient:
             chunk = await reader.read(4096)
             if not chunk:
                 break
-            self._stderr += chunk.decode("utf-8", errors="replace")
+            self._stderr += chunk.decode(errors="replace")
 
     def _handle_line(self, line: str) -> None:
         if not line:
             return
         try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
+            data = anyenv.load_json(line, return_type=dict)
+        except anyenv.JsonLoadError:
             logger.debug("Ignoring non-JSON line: %s", line[:200])
             return
 
