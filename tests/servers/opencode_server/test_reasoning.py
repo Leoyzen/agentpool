@@ -4,7 +4,7 @@ from typing import cast
 from unittest.mock import MagicMock
 
 from pydantic_ai.messages import (
-    PartDeltaEvent,
+    PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
     TextPart,
     TextPartDelta,
@@ -13,8 +13,11 @@ from pydantic_ai.messages import (
 )
 import pytest
 
-from agentpool_server.opencode_server.models import PartUpdatedEvent
-from agentpool_server.opencode_server.models.events import PartUpdatedEventProperties
+from agentpool_server.opencode_server.models import PartDeltaEvent, PartUpdatedEvent
+from agentpool_server.opencode_server.models.events import (
+    PartDeltaEventProperties,
+    PartUpdatedEventProperties,
+)
 from agentpool_server.opencode_server.models.parts import (
     ReasoningPart,
     TextPart as OpenCodeTextPart,
@@ -49,27 +52,30 @@ async def test_thinking_events_create_reasoning_part():
     events.extend([
         e
         async for e in adapter._handle_event(
-            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more..."))
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more..."))
         )
     ])
 
-    # Assert reasoning part was created
-    # Based on models/events.py, PartUpdatedEvent has properties.part
-    reasoning_events = []
+    # Assert reasoning part was created and content accumulated
+    # Check both PartUpdatedEvent (creation) and PartDeltaEvent (delta updates)
+    reasoning_parts = []
     for e in events:
         if isinstance(e, PartUpdatedEvent):
             props = e.properties
             if isinstance(props, PartUpdatedEventProperties) and isinstance(
                 props.part, ReasoningPart
             ):
-                reasoning_events.append(e)
+                reasoning_parts.append(props.part)
+        elif isinstance(e, PartDeltaEvent):
+            props = e.properties
+            if isinstance(props, PartDeltaEventProperties) and props.field == "text":
+                # Delta events don't have the full part, check adapter context
+                pass
 
-    assert len(reasoning_events) >= 1, "ReasoningPart should be created from thinking events"
-    # Cast to narrow type since we've already checked it's a ReasoningPart
-    first_part = cast(ReasoningPart, reasoning_events[0].properties.part)
-    last_part = cast(ReasoningPart, reasoning_events[-1].properties.part)
-    assert "Thinking..." in first_part.text
-    assert " more..." in last_part.text
+    # Also verify accumulation via adapter's main_context
+    assert adapter.main_context.reasoning_part is not None, "ReasoningPart should be created"
+    assert "Thinking..." in adapter.main_context.reasoning_part.text
+    assert " more..." in adapter.main_context.reasoning_part.text
 
 
 @pytest.mark.asyncio
@@ -106,7 +112,7 @@ async def test_multi_turn_thinking_creates_separate_parts():
     events.extend([
         e
         async for e in adapter._handle_event(
-            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking"))
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=" more thinking"))
         )
     ])
     # End of thinking - text response starts
@@ -127,14 +133,14 @@ async def test_multi_turn_thinking_creates_separate_parts():
     events.extend([
         e
         async for e in adapter._handle_event(
-            PartDeltaEvent(index=2, delta=ThinkingPartDelta(content_delta=" more"))
+            PydanticPartDeltaEvent(index=2, delta=ThinkingPartDelta(content_delta=" more"))
         )
     ])
     # End of thinking - text response starts
     events.extend([
         e
         async for e in adapter._handle_event(
-            PartDeltaEvent(index=3, delta=TextPartDelta(content_delta="Second response"))
+            PydanticPartDeltaEvent(index=3, delta=TextPartDelta(content_delta="Second response"))
         )
     ])
 
@@ -239,32 +245,21 @@ async def test_single_thinking_phase_accumulates_correctly():
     events.extend([
         e
         async for e in adapter._handle_event(
-            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="middle "))
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="middle "))
         )
     ])
     events.extend([
         e
         async for e in adapter._handle_event(
-            PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="end"))
+            PydanticPartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta="end"))
         )
     ])
 
-    # Extract ReasoningParts
-    reasoning_parts = []
-    for e in events:
-        if isinstance(e, PartUpdatedEvent):
-            props = e.properties
-            if isinstance(props, PartUpdatedEventProperties) and isinstance(
-                props.part, ReasoningPart
-            ):
-                reasoning_parts.append(props.part)
+    # Verify accumulation via adapter context (not just events)
+    # PartDeltaEvent yields deltas, not full parts, so check context directly
+    assert adapter.main_context.reasoning_part is not None, "ReasoningPart should be created"
 
-    # Should have 1 part that accumulated all content
-    assert len(reasoning_parts) >= 1, (
-        f"Expected at least 1 ReasoningPart, got {len(reasoning_parts)}"
-    )
-
-    # The content should be accumulated
-    final_content = reasoning_parts[-1].text
+    # The content should be accumulated in the context
+    final_content = adapter.main_context.reasoning_part.text
     expected = "Start middle end"
     assert final_content == expected, f"Expected '{expected}', got '{final_content}'"

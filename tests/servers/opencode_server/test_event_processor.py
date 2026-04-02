@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from pydantic_ai.messages import (
-    PartDeltaEvent,
+    PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
     TextPart as PydanticTextPart,
     TextPartDelta,
@@ -25,6 +25,7 @@ from agentpool_server.opencode_server.models import (
     MessagePath,
     MessageTime,
     MessageWithParts,
+    PartDeltaEvent,
     PartUpdatedEvent,
     TextPart,
 )
@@ -126,14 +127,14 @@ async def test_process_text_delta_accumulates_text(server_state: ServerState) ->
         pass
 
     # WHEN: PartDeltaEvent with TextPartDelta received
-    delta_event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="world!"))
+    delta_event = PydanticPartDeltaEvent(index=0, delta=TextPartDelta(content_delta="world!"))
     events = []
     async for e in processor.process(delta_event, ctx):
         events.append(e)
 
-    # THEN: PartUpdatedEvent is yielded
+    # THEN: PartDeltaEvent is yielded (not PartUpdatedEvent for deltas)
     assert len(events) == 1
-    assert isinstance(events[0], PartUpdatedEvent)
+    assert isinstance(events[0], PartDeltaEvent)
 
     # AND: context.response_text accumulated the delta
     assert ctx.response_text == "Hello, world!"
@@ -176,7 +177,7 @@ async def test_process_text_delta_without_start(server_state: ServerState) -> No
     )
 
     # WHEN: PartDeltaEvent without prior PartStartEvent
-    delta_event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="Some text"))
+    delta_event = PydanticPartDeltaEvent(index=0, delta=TextPartDelta(content_delta="Some text"))
     events = []
     async for e in processor.process(delta_event, ctx):
         events.append(e)
