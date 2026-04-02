@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 
-from codexed import ApprovalPolicy, Personality, ReasoningEffort, SandboxMode  # noqa: TC002
+from codexed import Personality, ReasoningEffort, SandboxMode  # noqa: TC002
 from pydantic import ConfigDict, Field
 
 from agentpool.models.agents import AnyToolConfig  # noqa: TC001
@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.resource_providers import ResourceProvider
     from agentpool.ui.base import InputProvider
+
+
+ApprovalPolicy = Literal["untrusted", "on-failure", "on-request", "never"]
 
 
 class CodexAgentConfig(BaseAgentConfig):

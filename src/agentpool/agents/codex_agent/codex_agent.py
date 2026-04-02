@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import anyenv
 from codexed.models import (
-    ApprovalPolicy,
     CommandExecutionRequestApprovalResponse,
     McpServerElicitationResponse,
     Personality,
@@ -39,6 +38,7 @@ from agentpool.agents.exceptions import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
+from agentpool.models.codex_agents import ApprovalPolicy
 
 
 if TYPE_CHECKING:
