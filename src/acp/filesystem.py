@@ -525,7 +525,7 @@ class ACPFileSystem(BaseAsyncFileSystem[ACPPath, AcpInfo]):
             logger.warning("CLI find error, falling back to walk: %s", e)
             return await super()._find(path, maxdepth=maxdepth, withdirs=withdirs, **kwargs)  # type: ignore[no-any-return]
 
-    find = sync_wrapper(_find)
+    find = sync_wrapper(_find)  # pyright: ignore[reportAssignmentType]
 
     def open(
         self,

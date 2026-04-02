@@ -276,14 +276,14 @@ class _WebSocketReadStream(ByteReceiveStream):
 
         # Read from WebSocket
         try:
-            message = await self._websocket.recv()
+            message: str | bytes = await self._websocket.recv()
             if isinstance(message, str):
                 message = message.encode()
             # Add newline for JSON-RPC line protocol
             if not message.endswith(b"\n"):
                 message += b"\n"
             self._buffer = message[max_bytes:]
-            return message[:max_bytes]  # type: ignore[no-any-return]
+            return message[:max_bytes]
         except Exception as e:
             raise anyio.EndOfStream from e
 

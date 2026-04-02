@@ -100,7 +100,7 @@ async def test_agent_piping_iter(caplog):
     assert len(items) == 2
     assert isinstance(items[0], AgentResponse)
     assert isinstance(items[1], Talk)
-    assert items[0].message.content == "model: test"  # type: ignore
+    assert items[0].message.content == "model: test"
 
 
 async def test_agent_piping_background_error(caplog):

@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Tag, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Discriminator, TypeAdapter
 from pydantic.alias_generators import to_camel
 
 
@@ -209,9 +209,7 @@ class ToolResultMessage(PiBaseModel):
 
 
 Message = Annotated[
-    Annotated[UserMessage, Tag("user")]
-    | Annotated[AssistantMessage, Tag("assistant")]
-    | Annotated[ToolResultMessage, Tag("toolResult")],
+    UserMessage | AssistantMessage | ToolResultMessage,
     Discriminator("role"),
 ]
 
@@ -247,11 +245,7 @@ class CustomMessage(PiBaseModel):
 
 
 AgentMessage = Annotated[
-    Annotated[UserMessage, Tag("user")]
-    | Annotated[AssistantMessage, Tag("assistant")]
-    | Annotated[ToolResultMessage, Tag("toolResult")]
-    | Annotated[BashExecutionMessage, Tag("bashExecution")]
-    | Annotated[CustomMessage, Tag("custom")],
+    UserMessage | AssistantMessage | ToolResultMessage | BashExecutionMessage | CustomMessage,
     Discriminator("role"),
 ]
 
@@ -411,18 +405,18 @@ class EventError(PiBaseModel):
 
 
 AssistantMessageEvent = Annotated[
-    Annotated[EventStart, Tag("start")]
-    | Annotated[EventTextStart, Tag("text_start")]
-    | Annotated[EventTextDelta, Tag("text_delta")]
-    | Annotated[EventTextEnd, Tag("text_end")]
-    | Annotated[EventThinkingStart, Tag("thinking_start")]
-    | Annotated[EventThinkingDelta, Tag("thinking_delta")]
-    | Annotated[EventThinkingEnd, Tag("thinking_end")]
-    | Annotated[EventToolcallStart, Tag("toolcall_start")]
-    | Annotated[EventToolcallDelta, Tag("toolcall_delta")]
-    | Annotated[EventToolcallEnd, Tag("toolcall_end")]
-    | Annotated[EventDone, Tag("done")]
-    | Annotated[EventError, Tag("error")],
+    EventStart
+    | EventTextStart
+    | EventTextDelta
+    | EventTextEnd
+    | EventThinkingStart
+    | EventThinkingDelta
+    | EventThinkingEnd
+    | EventToolcallStart
+    | EventToolcallDelta
+    | EventToolcallEnd
+    | EventDone
+    | EventError,
     Discriminator("type"),
 ]
 
@@ -511,16 +505,16 @@ class ToolExecutionEndEvent(PiBaseModel):
 
 
 AgentEvent = Annotated[
-    Annotated[AgentStartEvent, Tag("agent_start")]
-    | Annotated[AgentEndEvent, Tag("agent_end")]
-    | Annotated[TurnStartEvent, Tag("turn_start")]
-    | Annotated[TurnEndEvent, Tag("turn_end")]
-    | Annotated[MessageStartEvent, Tag("message_start")]
-    | Annotated[MessageUpdateEvent, Tag("message_update")]
-    | Annotated[MessageEndEvent, Tag("message_end")]
-    | Annotated[ToolExecutionStartEvent, Tag("tool_execution_start")]
-    | Annotated[ToolExecutionUpdateEvent, Tag("tool_execution_update")]
-    | Annotated[ToolExecutionEndEvent, Tag("tool_execution_end")],
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | MessageStartEvent
+    | MessageUpdateEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent,
     Discriminator("type"),
 ]
 
@@ -578,21 +572,21 @@ class AutoRetryEndEvent(PiBaseModel):
 
 
 AgentSessionEvent = Annotated[
-    Annotated[AgentStartEvent, Tag("agent_start_s")]
-    | Annotated[AgentEndEvent, Tag("agent_end_s")]
-    | Annotated[TurnStartEvent, Tag("turn_start_s")]
-    | Annotated[TurnEndEvent, Tag("turn_end_s")]
-    | Annotated[MessageStartEvent, Tag("message_start_s")]
-    | Annotated[MessageUpdateEvent, Tag("message_update_s")]
-    | Annotated[MessageEndEvent, Tag("message_end_s")]
-    | Annotated[ToolExecutionStartEvent, Tag("tool_execution_start_s")]
-    | Annotated[ToolExecutionUpdateEvent, Tag("tool_execution_update_s")]
-    | Annotated[ToolExecutionEndEvent, Tag("tool_execution_end_s")]
-    | Annotated[QueueUpdateEvent, Tag("queue_update")]
-    | Annotated[CompactionStartEvent, Tag("compaction_start")]
-    | Annotated[CompactionEndEvent, Tag("compaction_end")]
-    | Annotated[AutoRetryStartEvent, Tag("auto_retry_start")]
-    | Annotated[AutoRetryEndEvent, Tag("auto_retry_end")],
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | MessageStartEvent
+    | MessageUpdateEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent
+    | QueueUpdateEvent
+    | CompactionStartEvent
+    | CompactionEndEvent
+    | AutoRetryStartEvent
+    | AutoRetryEndEvent,
     Discriminator("type"),
 ]
 

@@ -129,14 +129,16 @@ class Connection:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    async def send_request(self, method: str, params: JsonValue | None = None) -> Any:
+    async def send_request(self, method: str, params: JsonValue | None = None) -> dict[str, Any]:
         request_id = self._next_request_id
         self._next_request_id += 1
         future = self._state.register_outgoing(request_id, method)
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
         await self._sender.send(payload)
         self._notify_observers("outgoing", payload)
-        return await future
+        data = await future
+        assert isinstance(data, dict)
+        return data
 
     async def send_notification(self, method: str, params: JsonValue | None = None) -> None:
         payload = {"jsonrpc": "2.0", "method": method, "params": params}

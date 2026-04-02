@@ -16,7 +16,6 @@ from agentpool_config.session import SessionQuery
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Coroutine, Sequence
-    from types import TracebackType
 
     from pydantic_ai import UserContent
     from toprompt import AnyPromptType
@@ -59,8 +58,7 @@ class MessageHistory:
         self._storage = storage or StorageManager(config=storage_cfg)
         self._converter = converter or ConversionManager([])
         self.chat_messages = ChatMessageList()
-        if messages:
-            self.chat_messages.extend(messages)
+        self.chat_messages.extend(messages or [])
         self._last_messages: list[ChatMessage[Any]] = []
         self._pending_parts: deque[UserContent] = deque()
         self._config = session_config
@@ -84,12 +82,7 @@ class MessageHistory:
             await asyncio.gather(*tasks)
         return self
 
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
+    async def __aexit__(self, *args: object) -> None:
         """Clean up any pending parts."""
         self._pending_parts.clear()
 
