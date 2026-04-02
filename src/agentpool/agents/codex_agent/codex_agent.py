@@ -38,7 +38,6 @@ from agentpool.agents.exceptions import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
-from agentpool.models.codex_agents import ApprovalPolicy
 
 
 if TYPE_CHECKING:
@@ -65,7 +64,7 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageHistory
-    from agentpool.models.codex_agents import CodexAgentConfig
+    from agentpool.models.codex_agents import ApprovalPolicy, CodexAgentConfig
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions.models import SessionData
     from agentpool.ui.base import InputProvider
@@ -227,7 +226,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             input_provider=input_provider,
             agent_pool=agent_pool,
             output_type=resolved_output_type,  # type: ignore[arg-type]
-            hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            hooks=config.hooks.get_agent_hooks(),
         )
 
     async def _setup_toolsets(self) -> None:
@@ -703,6 +702,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _set_mode(self, mode_id: str | bool, category_id: str) -> None:
         """Handle approval_policy, reasoning_effort, and model mode switching."""
+        from agentpool.models.codex_agents import ApprovalPolicy
+
         match category_id:
             case "mode" if mode_id in VALID_POLICIES:
                 self._approval_policy = cast(ApprovalPolicy, mode_id)

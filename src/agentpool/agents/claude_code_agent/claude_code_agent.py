@@ -339,7 +339,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             input_provider=input_provider,
             agent_pool=agent_pool,
             output_type=resolved_output_type,  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
-            hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            hooks=config.hooks.get_agent_hooks(),
         )
 
     async def _setup_toolsets(self) -> None:

@@ -207,7 +207,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             mcp_servers=config.mcp_servers,
             agent_pool=agent_pool,
             tool_confirmation_mode=config.requires_tool_confirmation,
-            hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            hooks=config.hooks.get_agent_hooks(),
         )
 
     async def __aenter__(self) -> Self:

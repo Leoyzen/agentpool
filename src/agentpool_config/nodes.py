@@ -194,10 +194,7 @@ class BaseAgentConfig(NodeConfig):
     - "per_tool": Use individual tool settings
     """
 
-    hooks: HooksConfig | None = Field(
-        default=None,
-        title="Lifecycle hooks",
-    )
+    hooks: HooksConfig = Field(default_factory=HooksConfig, title="Lifecycle hooks")
     """Hooks for intercepting and customizing agent behavior at key lifecycle points.
 
     Allows adding context, blocking operations, modifying inputs, or triggering

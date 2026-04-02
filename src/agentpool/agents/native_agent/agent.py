@@ -400,7 +400,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             tool_mode=config.tool_mode,
             knowledge=config.knowledge,
             toolsets=toolsets_list,
-            hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            hooks=config.hooks.get_agent_hooks(),
             tool_confirmation_mode=config.requires_tool_confirmation,
             builtin_tools=config.get_builtin_tools() or None,
             usage_limits=config.usage_limits,

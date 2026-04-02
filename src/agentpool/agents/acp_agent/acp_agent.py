@@ -242,7 +242,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             agent_pool=agent_pool,
             deps_type=deps_type,
             auto_approve=config.auto_approve,
-            hooks=config.hooks.get_agent_hooks() if config.hooks else None,
+            hooks=config.hooks.get_agent_hooks(),
         )
 
     @property
