@@ -72,7 +72,37 @@ class TestSQLProviderLogSession:
         assert session_id_2 in sessions
 
 
-class TestOpenCodeStorageProviderLoadSession:
+class TestOpenCodeStorageProviderPathHandling:
+    """Tests for OpenCodeStorageProvider path handling."""
+
+    async def test_db_path_converted_to_storage_dir(self) -> None:
+        """Test that .db file path is converted to storage directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Configure with .db file path (legacy config style)
+            db_path = Path(tmpdir) / "opencode.db"
+            config = OpenCodeStorageConfig(path=str(db_path))
+            provider = OpenCodeStorageProvider(config)
+
+            # Provider should use storage directory, not the .db file path
+            expected_base = Path(tmpdir) / "storage"
+            assert provider.base_path == expected_base
+            assert provider.sessions_path == expected_base / "session"
+            assert provider.messages_path == expected_base / "message"
+            assert provider.parts_path == expected_base / "part"
+
+    async def test_directory_path_used_directly(self) -> None:
+        """Test that directory path is used as-is."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage_path = Path(tmpdir) / "storage"
+            config = OpenCodeStorageConfig(path=str(storage_path))
+            provider = OpenCodeStorageProvider(config)
+
+            # Provider should use the directory path directly
+            assert provider.base_path == storage_path
+            assert provider.sessions_path == storage_path / "session"
+            assert provider.messages_path == storage_path / "message"
+            assert provider.parts_path == storage_path / "part"
+
     """Tests for OpenCodeStorageProvider.load_session() implementation."""
 
     @pytest.fixture

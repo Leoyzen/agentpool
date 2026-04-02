@@ -57,7 +57,8 @@ async def test_ensure_session_creates_new_session(mock_state: ServerState) -> No
 
     assert result.id == session_id
     assert result.parent_id == parent_id
-    assert result.project_id == "default"
+    # project_id is computed from working_dir (returns "global" for non-git dirs)
+    assert result.project_id == "global"
     assert result.directory == mock_state.working_dir
     assert result.title == "New Session"
     assert result.version == "1"

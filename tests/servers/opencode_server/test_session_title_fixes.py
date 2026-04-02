@@ -40,7 +40,7 @@ class TestConvertersTitleFix:
         """Verify opencode_to_session_data saves title to metadata."""
         session = Session(
             id="test_session_001",
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="My Test Title",
             version="1",
@@ -59,7 +59,7 @@ class TestConvertersTitleFix:
         """Verify opencode_to_session_data handles empty title correctly."""
         session = Session(
             id="test_session_002",
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="",  # Empty title
             version="1",
@@ -99,7 +99,7 @@ class TestConvertersTitleFix:
         """Verify round-trip conversion preserves title."""
         original = Session(
             id="test_roundtrip",
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="Round Trip Title",
             version="1",

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 from decimal import Decimal
 from pathlib import Path
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
@@ -55,6 +56,49 @@ logger = get_logger(__name__)
 
 _message_info_adapter: TypeAdapter[MessageInfo] = TypeAdapter(MessageInfo)
 _part_adapter: TypeAdapter[Part] = TypeAdapter(Part)
+
+
+def compute_project_id(directory: str) -> str:
+    """Compute OpenCode project ID from directory.
+
+    OpenCode uses the root commit SHA1 of the git repository as the project ID.
+    If not in a git repository, returns 'global'.
+
+    Args:
+        directory: Project directory path
+
+    Returns:
+        Project ID (root commit SHA1 or 'global')
+    """
+    try:
+        # Get the git root directory
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        git_root = result.stdout.strip()
+
+        # Get the root commit(s)
+        result = subprocess.run(
+            ["git", "rev-list", "--max-parents=0", "--all"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        root_commits = [c.strip() for c in result.stdout.strip().split("\n") if c.strip()]
+
+        if root_commits:
+            # Sort and return the first root commit
+            return sorted(root_commits)[0]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Not in a git repo or no root commits found
+    return "global"
 
 
 def parse_message_info(data: dict[str, Any], *, message_id: str, session_id: str) -> MessageInfo:

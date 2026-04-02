@@ -138,7 +138,7 @@ class TestSessionTitleConverters:
         """opencode_to_session_data should include title in metadata."""
         session = Session(
             id="test_session_123",
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="Test Session Title",
             version="1",
@@ -157,7 +157,7 @@ class TestSessionTitleConverters:
         """opencode_to_session_data should handle empty title."""
         session = Session(
             id="test_session_456",
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="",  # Empty title
             version="1",
@@ -197,7 +197,7 @@ class TestSessionTitleConverters:
         """Round-trip conversion should preserve title."""
         original_session = Session(
             id="test_session_round",
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="Round Trip Title",
             version="1",
@@ -230,7 +230,7 @@ class TestSessionTitleGeneration:
         # Create session first
         session = Session(
             id=session_id,
-            project_id="default",
+            project_id="global",
             directory="/tmp",
             title="New Session",
             version="1",

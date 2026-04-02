@@ -132,7 +132,13 @@ class OpenCodeStorageProvider(StorageProvider):
         """Initialize OpenCode storage provider."""
         config = config or OpenCodeStorageConfig()
         super().__init__(config)
-        self.base_path = Path(config.path).expanduser()
+        path = Path(config.path).expanduser()
+        # If path points to a .db file (legacy config), use the storage directory
+        # instead which is where OpenCode actually stores message data
+        if path.suffix == ".db":
+            self.base_path = path.parent / "storage"
+        else:
+            self.base_path = path
         self.sessions_path = self.base_path / "session"
         self.messages_path = self.base_path / "message"
         self.parts_path = self.base_path / "part"
@@ -470,8 +476,49 @@ class OpenCodeStorageProvider(StorageProvider):
         model: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
-        """Log a conversation start."""
-        # No-op for read-only provider
+        """Log a conversation start.
+
+        Creates a new session file in OpenCode format.
+        """
+        # Check if session already exists
+        existing_path = next(
+            (p for sid, p in self._list_sessions() if sid == session_id),
+            None,
+        )
+        if existing_path:
+            return  # Session already exists
+
+        # Create new session file
+        now = datetime_to_ms(start_time or get_now())
+
+        # Compute project_id from working directory
+        project_id = helpers.compute_project_id(str(self.base_path))
+
+        # Ensure project directory exists
+        project_dir = self.sessions_path / project_id
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create new session
+        new_session = Session(
+            id=session_id,
+            project_id=project_id,
+            directory=str(self.base_path),
+            title="New Session",  # Will be updated when title is generated
+            version=OPENCODE_VERSION,
+            time=TimeCreatedUpdated(created=now, updated=now),
+            parent_id=parent_session_id,
+        )
+
+        # Write session file
+        session_path = project_dir / f"{session_id}.json"
+        dct = new_session.model_dump(by_alias=True)
+        session_path.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
+
+        logger.debug(
+            "Created new session file",
+            session_id=session_id,
+            path=str(session_path),
+        )
 
     async def get_sessions(self, filters: QueryFilters) -> list[ConvData]:
         """Get filtered conversations with their messages."""
@@ -830,7 +877,14 @@ class OpenCodeStorageProvider(StorageProvider):
         else:
             # Create new session file
             now = datetime_to_ms(get_now())
-            project_id = data.project_id or "default"
+
+            # Compute project_id from cwd if not provided or is "default"
+            if data.project_id and data.project_id != "default":
+                project_id = data.project_id
+            elif data.cwd:
+                project_id = helpers.compute_project_id(data.cwd)
+            else:
+                project_id = "global"
 
             # Ensure project directory exists
             project_dir = self.sessions_path / project_id
@@ -914,9 +968,12 @@ class OpenCodeStorageProvider(StorageProvider):
             # so we need to check the first message's agent
             if agent_name:
                 messages = await self.get_session_messages(session_id)
-                first_agent = messages[0].name if messages else None
-                if first_agent != agent_name:
-                    continue
+                if messages:
+                    # Session has messages - check agent name
+                    first_agent = messages[0].name
+                    if first_agent != agent_name:
+                        continue
+                # If no messages, include the session anyway (don't filter out new sessions)
             session_ids.append(session_id)
         return session_ids
 

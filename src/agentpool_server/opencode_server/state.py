@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.provider_auth import create_default_auth_service
+from agentpool_storage.opencode_provider import helpers
 
 
 if TYPE_CHECKING:
@@ -194,7 +195,7 @@ class ServerState:
 
     async def broadcast_event(self, event: Event) -> None:
         """Broadcast an event to all SSE subscribers."""
-        print(f"Broadcasting event: {event.type} to {len(self.event_subscribers)} subscribers")
+        # print(f"Broadcasting event: {event.type} to {len(self.event_subscribers)} subscribers")
         for queue in self.event_subscribers:
             await queue.put(event)
 
@@ -231,9 +232,10 @@ class ServerState:
         )
 
         now = now_ms()
+        project_id = helpers.compute_project_id(self.working_dir)
         session = Session(
             id=session_id,
-            project_id="default",  # TODO: Get from config
+            project_id=project_id,
             directory=self.working_dir,
             title="New Session",
             version="1",

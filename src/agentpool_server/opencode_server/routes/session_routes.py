@@ -16,6 +16,7 @@ from agentpool.repomap import RepoMap, find_src_files
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.command_validation import validate_command
+from agentpool_storage.opencode_provider import helpers
 from agentpool_server.opencode_server.converters import (
     chat_message_to_opencode,
     opencode_to_session_data,
@@ -560,9 +561,10 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     """Create a new session and persist to storage."""
     now = now_ms()
     session_id = identifier.ascending("session")
+    project_id = helpers.compute_project_id(state.working_dir)
     session = Session(
         id=session_id,
-        project_id="default",  # TODO: Get from config/request
+        project_id=project_id,
         directory=state.working_dir,
         title=request.title if request and request.title else "New Session",
         version="1",
@@ -613,6 +615,35 @@ async def get_session(session_id: str, state: StateDep) -> Session:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@router.get("/{session_id}/message")
+async def get_session_messages(
+    session_id: str,
+    state: StateDep,
+    limit: int | None = None,
+) -> list[MessageWithParts]:
+    """Get all messages for a session.
+
+    Retrieves all messages in a session, including user prompts and AI responses.
+    Loads from storage if session not in memory cache.
+
+    Args:
+        session_id: Unique identifier for the session
+        limit: Optional maximum number of messages to return
+
+    Returns:
+        List of messages with their parts
+    """
+    # Ensure session is loaded
+    session = await get_or_load_session(state, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = state.messages.get(session_id, [])
+    if limit is not None and limit > 0:
+        messages = messages[-limit:]
+    return messages
 
 
 @router.get("/{session_id}/children")

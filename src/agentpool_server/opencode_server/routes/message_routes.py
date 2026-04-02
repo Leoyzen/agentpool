@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
@@ -332,33 +333,48 @@ async def _process_message_locked(  # noqa: PLR0915
                     await agent.set_model(original_model)
                     logger.info("Restored original model", model=original_model)
 
-    await run_with_model()
+    response_time: int | None = None
+    cancelled = False
+    try:
+        await run_with_model()
 
-    for oc_event in adapter.finalize():
-        await state.broadcast_event(oc_event)
+        for oc_event in adapter.finalize():
+            await state.broadcast_event(oc_event)
 
-    # --- Finalize assistant message ---
-    response_time = now_ms()
-    preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
-    logger.info("Response text", text_preview=preview)
-    tokens = Tokens.from_pydantic_ai(adapter.usage)
-    cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
-    msg_time = MessageTime(created=now, completed=response_time)
-    update = {"time": msg_time, "tokens": tokens, "cost": cost}
-    updated_assistant = assistant_msg.model_copy(update=update)
-    assistant_msg_with_parts.info = updated_assistant
-    await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
-    await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-    # --- Mark session idle ---
-    status = SessionStatus(type="idle")
-    state.session_status[session_id] = status
-    await state.broadcast_event(SessionStatusEvent.create(session_id, status))
-    await state.broadcast_event(SessionIdleEvent.create(session_id))
-    # --- Update session timestamp ---
-    session = state.sessions[session_id]
-    state.sessions[session_id] = session.model_copy(
-        update={"time": TimeCreatedUpdated(created=session.time.created, updated=response_time)}
-    )
+        # --- Finalize assistant message ---
+        response_time = now_ms()
+        preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
+        logger.info("Response text", text_preview=preview)
+        tokens = Tokens.from_pydantic_ai(adapter.usage)
+        cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
+        msg_time = MessageTime(created=now, completed=response_time)
+        update = {"time": msg_time, "tokens": tokens, "cost": cost}
+        updated_assistant = assistant_msg.model_copy(update=update)
+        assistant_msg_with_parts.info = updated_assistant
+        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+    except asyncio.CancelledError:
+        # User cancelled the request (e.g., pressed ESC)
+        logger.info("Request cancelled by user", session_id=session_id)
+        cancelled = True
+        # Persist partial message if there's any content
+        if adapter.response_text:
+            await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+    finally:
+        # --- Mark session idle ---
+        # Always set session to idle, even if processing failed or was cancelled
+        status = SessionStatus(type="idle")
+        state.session_status[session_id] = status
+        await state.broadcast_event(SessionStatusEvent.create(session_id, status))
+        await state.broadcast_event(SessionIdleEvent.create(session_id))
+        # --- Update session timestamp ---
+        if response_time is not None:
+            session = state.sessions[session_id]
+            state.sessions[session_id] = session.model_copy(
+                update={
+                    "time": TimeCreatedUpdated(created=session.time.created, updated=response_time)
+                }
+            )
     return assistant_msg_with_parts
 
 

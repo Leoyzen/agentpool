@@ -7,6 +7,7 @@ and persistence are handled by the caller.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -151,11 +152,15 @@ class OpenCodeStreamAdapter:
     @property
     def cost_info(self) -> Any:
         """Return cost information for the current response."""
+
         # Use main_context's cost tracking
         class SimpleCostInfo:
             def __init__(self, total):
                 self.total_cost = total
-        return SimpleCostInfo(self.main_context.total_cost) if self.main_context.total_cost else None
+
+        return (
+            SimpleCostInfo(self.main_context.total_cost) if self.main_context.total_cost else None
+        )
 
     @property
     def text_part(self) -> TextPart | None:
@@ -176,6 +181,11 @@ class OpenCodeStreamAdapter:
             async for event in stream:
                 async for oc_event in self.processor.process(event, self.main_context):
                     yield oc_event
+        except asyncio.CancelledError:
+            # Stream was cancelled by user - this is expected behavior
+            # Don't propagate the error, just log it
+            logger.debug("Stream cancelled by user", session_id=self.session_id)
+            raise  # Re-raise so caller can handle cleanup
         except Exception as e:  # noqa: BLE001
             self.main_context.response_text = f"Error calling agent: {e}"
             yield SessionErrorEvent.from_exception(session_id=self.session_id, exception=e)
