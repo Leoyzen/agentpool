@@ -146,7 +146,8 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
     Supports stdio servers (command + args) or HTTP/SSE servers (url).
     """
     # Build the config based on request
-    # Note: client_id is auto-generated from command/url, custom names not supported
+    # Note: client_id is auto-generated for internal identification;
+    # display_name uses configured name if available
     config: SSEMCPServerConfig | StdioMCPServerConfig | StreamableHTTPMCPServerConfig
     if request.url:
         # HTTP-based server
@@ -175,7 +176,9 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
 
     try:
         await manager.setup_server(config, add_to_config=True)
-        return MCPStatus(name=config.client_id, status="connected")
+        return MCPStatus(
+            name=config.client_id, display_name=config.display_name, status="connected"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add MCP server: {e}") from e
 

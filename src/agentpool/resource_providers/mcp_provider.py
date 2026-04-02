@@ -285,18 +285,25 @@ class MCPResourceProvider(ResourceProvider):
         try:
             if self.client.connected:
                 return MCPServerStatus(
-                    name=self.name, status="connected", server_type=self.transport_type
+                    name=self.name,
+                    status="connected",
+                    display_name=self.server.display_name,
+                    server_type=self.transport_type,
                 )
         except Exception as e:  # noqa: BLE001
             return MCPServerStatus(
                 name=self.name,
                 status="failed",
+                display_name=self.server.display_name,
                 error=str(e),
                 server_type=self.transport_type,
             )
         else:
             return MCPServerStatus(
-                name=self.name, status="disabled", server_type=self.transport_type
+                name=self.name,
+                status="disabled",
+                display_name=self.server.display_name,
+                server_type=self.transport_type,
             )
 
 

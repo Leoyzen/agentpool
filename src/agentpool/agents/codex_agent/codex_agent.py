@@ -373,12 +373,13 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                     result[server.name] = MCPServerStatus(
                         name=server.name,
                         status="connected" if server.tools else "disconnected",
+                        display_name=server.name,
                         server_name=server.name,
                     )
                 return result
         # Fallback: report from config
         for name, _cfg in self._extra_mcp_servers:
-            result[name] = MCPServerStatus(name=name, status="connected")
+            result[name] = MCPServerStatus(name=name, display_name=name, status="connected")
         return result
 
     async def _cleanup(self) -> None:

@@ -134,7 +134,7 @@ class MCPManager:
 
         provider = MCPResourceProvider(
             server=config,
-            name=f"{self.name}_{config.client_id}",
+            name=f"{self.name}_{config.display_name}",
             owner=self.owner,
             source="pool" if self.owner == "pool" else "node",
             sampling_callback=self._sampling_callback,

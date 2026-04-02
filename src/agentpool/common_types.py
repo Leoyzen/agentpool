@@ -60,15 +60,23 @@ class MCPServerStatus:
     """Status information for an MCP server."""
 
     name: str
-    """Server name/identifier."""
+    """Server name/identifier (client_id)."""
+
     status: MCPConnectionStatus
     """Connection status."""
+
+    display_name: str | None = None
+    """Human-readable display name for the server."""
+
     server_type: str = "unknown"
     """Transport type (stdio, sse, http)."""
+
     error: str | None = None
-    """Error message if status is "error"."""
+    """Error message if status is 'error'."""
+
     server_name: str | None = None
     """Self-reported server name."""
+
     server_version: str | None = None
     """Self-reported server version."""
 

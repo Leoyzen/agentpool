@@ -24,6 +24,11 @@ class MCPStatus(OpenCodeBaseModel):
     """MCP server status."""
 
     name: str
+    """Server identifier (client_id) for backward compatibility."""
+
+    display_name: str
+    """Human-readable display name for the server."""
+
     status: MCPConnectionStatus
     tools: list[str] = Field(default_factory=list)
     error: str | None = None

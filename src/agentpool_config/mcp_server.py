@@ -145,6 +145,18 @@ class BaseMCPServerConfig(Schema):
         """Generate a unique client ID for this server configuration."""
         raise NotImplementedError
 
+    @property
+    def display_name(self) -> str:
+        """Return a display name for this server configuration.
+
+        Returns the configured name (stripped of whitespace) if available,
+        otherwise falls back to the generated client_id.
+
+        Returns:
+            The display name to use for this server.
+        """
+        return self.name.strip() if self.name and self.name.strip() else self.client_id
+
     @classmethod
     def from_string(cls, text: str) -> MCPServerConfig:
         """Create a MCPServerConfig from a string."""
