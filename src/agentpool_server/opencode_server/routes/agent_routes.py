@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, TypeAdapter
 from schemez.functionschema import ToolParameters
 
 from agentpool.log import get_logger
@@ -489,7 +489,10 @@ async def get_provider_auth(state: StateDep) -> dict[str, list[ProviderAuthMetho
 
     Returns available OAuth providers with their auth methods.
     """
-    return state.auth_service.methods()
+    return {
+        k: [ProviderAuthMethod(type=m.type, label=m.label) for m in ms]
+        for k, ms in state.auth_service.methods().items()
+    }
 
 
 @router.post("/provider/{provider_id}/oauth/authorize")
@@ -504,7 +507,12 @@ async def oauth_authorize(
     """
     method = body.method if body else 0
     try:
-        return await state.auth_service.authorize(provider_id, method)
+        auth = await state.auth_service.authorize(provider_id, method)
+        return ProviderAuthAuthorization(
+            url=auth.url,
+            method=auth.method,
+            instructions=auth.instructions,
+        )
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -528,8 +536,12 @@ async def oauth_callback(
 @router.put("/auth/{provider_id}")
 async def set_auth(provider_id: str, info: AuthInfo, state: StateDep) -> bool:
     """Set authentication credentials for a provider."""
+    from llmling_models.auth import AuthInfo as NativeAuthInfo
+
+    native_info = TypeAdapter[NativeAuthInfo](NativeAuthInfo).validate_python(info.model_dump())
+
     try:
-        return await state.auth_service.set_credentials(provider_id, info)
+        return await state.auth_service.set_credentials(provider_id, native_info)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 

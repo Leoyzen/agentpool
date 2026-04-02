@@ -10,6 +10,8 @@ from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any
 
+from llmling_models.auth import ProviderAuthService
+
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool.log import get_logger
 from agentpool_server.opencode_server.converters import (
@@ -17,12 +19,7 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
     session_data_to_opencode,
 )
-from agentpool_server.opencode_server.provider_auth import create_default_auth_service
-from opencode_sdk.models import (
-    Config,
-    LspUpdatedEvent,
-    SessionStatus,
-)
+from opencode_sdk.models import Config, LspUpdatedEvent, SessionStatus
 
 
 if TYPE_CHECKING:
@@ -32,7 +29,6 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-    from agentpool_server.opencode_server.provider_auth import ProviderAuthService
     from opencode_sdk.models import (
         AnyMessageWithParts,
         Event,
@@ -117,7 +113,7 @@ class ServerState:
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     """Background tasks tracked for cleanup on shutdown."""
 
-    auth_service: ProviderAuthService = field(default_factory=create_default_auth_service)
+    auth_service: ProviderAuthService = field(default_factory=ProviderAuthService.create_default)
     """Provider authentication service."""
 
     workspaces: dict[str, WorkspaceInfo] = field(default_factory=dict)
