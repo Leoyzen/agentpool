@@ -146,7 +146,22 @@ async def _process_message(  # noqa: PLR0915
 
     This does the actual work of creating messages, running the agent,
     and broadcasting events. Used by both sync and async endpoints.
+
+    Per-session locking ensures messages to the same session are processed
+    sequentially, preventing race conditions and event interleaving.
     """
+    # Acquire per-session lock to ensure sequential processing
+    lock = state.get_session_lock(session_id)
+    async with lock:
+        return await _process_message_locked(session_id, request, state)
+
+
+async def _process_message_locked(  # noqa: PLR0915
+    session_id: str,
+    request: MessageRequest,
+    state: StateDep,
+) -> MessageWithParts:
+    """Actual message processing logic (called within lock)."""
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -342,6 +357,9 @@ async def send_message(
     """Send a message and wait for the agent's response.
 
     This is the synchronous version - waits for completion before returning.
+    Messages to the same session are processed sequentially using per-session locks
+    to prevent race conditions and event interleaving.
+
     For async processing, use POST /session/{id}/prompt_async instead.
     """
     return await _process_message(session_id, request, state)
@@ -352,11 +370,15 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     """Send a message asynchronously without waiting for response.
 
     Starts the agent processing in the background and returns immediately.
+    Messages to the same session are queued and processed sequentially using
+    per-session locks to prevent race conditions and event interleaving.
+
     Client should listen to SSE events to get updates.
 
     Returns 204 No Content immediately.
     """
     # Create background task to process the message
+    # Lock is acquired inside _process_message
     state.create_background_task(
         _process_message(session_id, request, state),
         name=f"process_message_{session_id}",

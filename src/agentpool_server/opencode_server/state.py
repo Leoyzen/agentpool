@@ -71,6 +71,9 @@ class ServerState:
     # This is a cache of sessions loaded from pool.sessions
     sessions: dict[str, Session] = field(default_factory=dict)
     session_status: dict[str, SessionStatus] = field(default_factory=dict)
+    # Per-session locks for concurrent message handling
+    # Ensures messages to the same session are processed sequentially
+    session_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     # Message storage (session_id -> messages)
     # Runtime cache - messages are also persisted via pool.storage
     messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
@@ -143,6 +146,23 @@ class ServerState:
             msg = "Agent has no agent_pool set"
             raise RuntimeError(msg)
         return self.agent.agent_pool
+
+    def get_session_lock(self, session_id: str) -> asyncio.Lock:
+        """Get or create a lock for the given session.
+
+        Per-session locks ensure that messages to the same session
+        are processed sequentially, preventing race conditions and
+        event interleaving.
+
+        Args:
+            session_id: The session ID to get the lock for.
+
+        Returns:
+            asyncio.Lock: The lock for the session.
+        """
+        if session_id not in self.session_locks:
+            self.session_locks[session_id] = asyncio.Lock()
+        return self.session_locks[session_id]
 
     @property
     def storage(self) -> StorageManager:
