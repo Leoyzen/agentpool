@@ -6,7 +6,7 @@ import pytest
 from agentpool import Agent
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.resource_providers.codemode import RemoteCodeModeResourceProvider
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 
 
 def add_numbers(x: int, y: int) -> int:
@@ -32,8 +32,8 @@ async def fetch_data(name: str, count: int = 1) -> dict[str, object]:
 async def test_secure_codemode_provider_creation():
     """Test that RemoteCodeModeResourceProvider can be created without sig errors."""
     tools = [
-        Tool.from_callable(add_numbers),
-        Tool.from_callable(fetch_data),
+        FunctionTool.from_callable(add_numbers),
+        FunctionTool.from_callable(fetch_data),
     ]
 
     config = LocalExecutionEnvironmentConfig()
@@ -52,8 +52,8 @@ async def test_secure_codemode_provider_creation():
 async def test_secure_codemode_provider_with_agent():
     """Test that RemoteCodeModeResourceProvider works with Agent without errors."""
     tools = [
-        Tool.from_callable(add_numbers),
-        Tool.from_callable(fetch_data),
+        FunctionTool.from_callable(add_numbers),
+        FunctionTool.from_callable(fetch_data),
     ]
 
     config = LocalExecutionEnvironmentConfig()
@@ -72,7 +72,7 @@ async def test_secure_codemode_provider_with_agent():
 
 async def test_codemode_tool_schema_generation():
     """Test that tool schema generation works properly for codemode providers."""
-    tools = [Tool.from_callable(add_numbers)]
+    tools = [FunctionTool.from_callable(add_numbers)]
 
     config = LocalExecutionEnvironmentConfig()
     provider = RemoteCodeModeResourceProvider(
@@ -100,8 +100,8 @@ async def test_codemode_tool_schema_generation():
 
 async def test_multiple_providers():
     """Test RemoteCodeModeResourceProvider with multiple underlying providers."""
-    tools1 = [Tool.from_callable(add_numbers)]
-    tools2 = [Tool.from_callable(fetch_data)]
+    tools1 = [FunctionTool.from_callable(add_numbers)]
+    tools2 = [FunctionTool.from_callable(fetch_data)]
 
     provider1 = StaticResourceProvider(tools=tools1)
     provider2 = StaticResourceProvider(tools=tools2)

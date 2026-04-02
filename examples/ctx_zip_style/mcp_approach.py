@@ -9,7 +9,7 @@ import anyio
 from exxec_config import LocalExecutionEnvironmentConfig
 
 from agentpool.resource_providers.codemode.remote_mcp_execution import RemoteMCPExecutor
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 
 
 def add_numbers(x: int, y: int) -> int:
@@ -55,9 +55,9 @@ async def demo_code_generation_approach():
     """Demo new code generation approach (ctx-zip style, works with cloud sandboxes)."""
     print("\n=== Code Generation Approach (ctx-zip style) ===")
     tools = [
-        Tool.from_callable(add_numbers),
-        Tool.from_callable(multiply_numbers),
-        Tool.from_callable(fetch_weather),
+        FunctionTool.from_callable(add_numbers),
+        FunctionTool.from_callable(multiply_numbers),
+        FunctionTool.from_callable(fetch_weather),
     ]
     config = LocalExecutionEnvironmentConfig()  # Could be E2B, Modal, etc.
 
@@ -95,7 +95,7 @@ print(f"Weather: {result3}")
 async def demo_inspect_generated_files():
     """Show what files are generated in the sandbox."""
     print("\n=== Inspecting Generated Files ===")
-    tools = [Tool.from_callable(add_numbers), Tool.from_callable(multiply_numbers)]
+    tools = [FunctionTool.from_callable(add_numbers), FunctionTool.from_callable(multiply_numbers)]
     config = LocalExecutionEnvironmentConfig()
 
     provider = RemoteMCPExecutor.from_tools(tools, config)

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 from agentpool.utils.diffs import compute_unified_diff, count_changed_lines
 
 
@@ -99,4 +99,4 @@ async def edit_file_tool(
 
 
 # Create the tool instance
-edit_tool = Tool.from_callable(edit_file_tool, name_override="edit_file")
+edit_tool = FunctionTool.from_callable(edit_file_tool, name_override="edit_file")

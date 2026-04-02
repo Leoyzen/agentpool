@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import ToolDefinition
 
 from agentpool.agents.native_agent.agent import Agent
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ async def test_schema_override_propagation():
         },
     }
 
-    tool = Tool.from_callable(my_tool, schema_override=override)
+    tool = FunctionTool.from_callable(my_tool, schema_override=override)
 
     agent = Agent(name="test-agent", model="openai:gpt-4o", tools=[tool])
 

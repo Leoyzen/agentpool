@@ -104,9 +104,9 @@ class ImportToolConfig(BaseToolConfig):
 
     def get_tool(self) -> Tool:
         """Import and create tool from configuration."""
-        from agentpool.tools.base import Tool
+        from agentpool.tools.base import FunctionTool
 
-        return Tool.from_callable(
+        return FunctionTool.from_callable(
             self.import_path,
             name_override=self.name,
             description_override=self.description,

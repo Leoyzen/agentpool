@@ -18,7 +18,7 @@ from agentpool.resource_providers.codemode.helpers import validate_code
 from agentpool.resource_providers.codemode.provider import (
     CodeModeResourceProvider,
 )
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 
 
 logger = get_logger(__name__)
@@ -148,7 +148,7 @@ if __name__ == "__main__":
         return webbrowser.open(url)
 
     async def main() -> None:
-        tools = [Tool.from_callable(open_browser)]
+        tools = [FunctionTool.from_callable(open_browser)]
         static_provider = StaticResourceProvider(tools=tools)
         config = LocalExecutionEnvironmentConfig(default_command_timeout=30.0)
         provider = RemoteCodeModeResourceProvider(

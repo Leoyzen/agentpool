@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, overload
 
 from agentpool.resource_providers import ResourceProvider
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool, Tool
 
 
 if TYPE_CHECKING:
@@ -67,7 +67,7 @@ class StaticResourceProvider(ResourceProvider):
             case Tool():
                 instance = tool
             case Callable() | str():  # ty: ignore[invalid-match-pattern]
-                instance = Tool.from_callable(tool)
+                instance = FunctionTool.from_callable(tool)
         self._tools.append(instance)
 
     def remove_tool(self, name: str) -> bool:
@@ -134,10 +134,8 @@ class StaticResourceProvider(ResourceProvider):
         Returns:
             Created Tool instance
         """
-        from agentpool.tools.base import Tool as ToolClass
-
         match tool:
-            case ToolClass():
+            case Tool():
                 tool.description = description_override or tool.description
                 tool.name = name_override or tool.name
                 tool.source = source
@@ -145,7 +143,7 @@ class StaticResourceProvider(ResourceProvider):
                 tool.enabled = enabled
 
             case _:
-                tool = ToolClass.from_callable(
+                tool = FunctionTool.from_callable(
                     tool,
                     enabled=enabled,
                     source=source,
@@ -246,10 +244,10 @@ class StaticResourceProvider(ResourceProvider):
             metadata: Additional tool metadata
             **kwargs: Additional arguments passed to Tool.from_callable
         """
-        from agentpool.tools.base import Tool
+        from agentpool.tools.base import FunctionTool
 
         def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
-            tool = Tool.from_callable(
+            tool = FunctionTool.from_callable(
                 f,
                 name_override=name,
                 description_override=description,

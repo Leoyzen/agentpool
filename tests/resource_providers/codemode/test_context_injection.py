@@ -10,7 +10,7 @@ import pytest
 from agentpool import AgentContext  # noqa: TC001
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.resource_providers.codemode.provider import CodeModeResourceProvider
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 
 
 async def tool_with_run_context(ctx: RunContext[None], message: str) -> str:
@@ -36,7 +36,7 @@ async def dual_context_tool(run_ctx: RunContext[None], agent_ctx: AgentContext, 
 async def test_direct_context_call_fails():
     """Test that calling context-dependent tools directly fails."""
     # Create tool that needs RunContext
-    tool = Tool.from_callable(tool_with_run_context)
+    tool = FunctionTool.from_callable(tool_with_run_context)
     # Create provider with the context-dependent tool
     static_provider = StaticResourceProvider(tools=[tool])
     code_provider = CodeModeResourceProvider([static_provider])
@@ -54,7 +54,7 @@ async def test_direct_context_call_fails():
 async def test_simple_tool_works():
     """Test that simple tools without context work fine."""
     # Create tool without context requirements
-    tool = Tool.from_callable(simple_tool)
+    tool = FunctionTool.from_callable(simple_tool)
     # Create provider
     static_provider = StaticResourceProvider(tools=[tool])
     code_provider = CodeModeResourceProvider([static_provider])
@@ -71,7 +71,7 @@ async def test_simple_tool_works():
 async def test_context_signature_hiding():
     """Test that context parameters are hidden from user-visible signatures."""
     # Create tool with context
-    tool = Tool.from_callable(tool_with_run_context)
+    tool = FunctionTool.from_callable(tool_with_run_context)
     static_provider = StaticResourceProvider(tools=[tool])
     code_provider = CodeModeResourceProvider([static_provider])
     # Get tool description (what user sees)
@@ -98,7 +98,7 @@ async def test_context_signature_hiding():
 async def test_agent_context_signature_hiding():
     """Test that AgentContext parameters are hidden from user-visible signatures."""
     # Create tool with AgentContext
-    tool = Tool.from_callable(tool_with_agent_context)
+    tool = FunctionTool.from_callable(tool_with_agent_context)
     static_provider = StaticResourceProvider(tools=[tool])
     code_provider = CodeModeResourceProvider([static_provider])
     # Get tool description (what user sees)
@@ -124,7 +124,7 @@ async def test_agent_context_signature_hiding():
 async def test_dual_context_signature_hiding():
     """Test that both RunContext and AgentContext parameters are hidden from tools."""
     # Create tool with both contexts
-    tool = Tool.from_callable(dual_context_tool)
+    tool = FunctionTool.from_callable(dual_context_tool)
     static_provider = StaticResourceProvider(tools=[tool])
     code_provider = CodeModeResourceProvider([static_provider])
     # Get tool description (what user sees)

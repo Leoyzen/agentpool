@@ -253,14 +253,14 @@ class ToolServerLifecycleHandler:
 if __name__ == "__main__":
     from exxec_config import LocalExecutionEnvironmentConfig
 
-    from agentpool.tools.base import Tool
+    from agentpool.tools.base import FunctionTool
 
     def add_numbers(x: int, y: int) -> int:
         """Add two numbers."""
         return x + y
 
     async def main() -> None:
-        tools = [Tool.from_callable(add_numbers)]
+        tools = [FunctionTool.from_callable(add_numbers)]
         config = LocalExecutionEnvironmentConfig()
         provider = RemoteCodeExecutor.from_tools(tools, config, server_port=9876)
         async with provider:

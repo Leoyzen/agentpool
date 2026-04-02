@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent, Tool
+from agentpool import Agent, FunctionTool
 from agentpool.ui.mock_provider import MockInputProvider
 
 
@@ -17,11 +17,11 @@ async def test_tool_confirmation():
         """Tool not requiring confirmation."""
         return f"Regular tool got: {text}"
 
-    tool_info_with = Tool.from_callable(
+    tool_info_with = FunctionTool.from_callable(
         tool_with_confirm,
         requires_confirmation=True,
     )
-    tool_info_without = Tool.from_callable(
+    tool_info_without = FunctionTool.from_callable(
         tool_without_confirm,
         requires_confirmation=False,
     )

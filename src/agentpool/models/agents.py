@@ -307,7 +307,7 @@ class NativeAgentConfig(BaseAgentConfig):
         Returns:
             List of ResourceProvider instances
         """
-        from agentpool.tools.base import Tool
+        from agentpool.tools.base import FunctionTool
 
         providers: list[ResourceProvider] = []
         static_tools: list[Tool] = []
@@ -320,7 +320,7 @@ class NativeAgentConfig(BaseAgentConfig):
                 case BaseToolsetConfig():
                     providers.append(tool_config.get_provider())
                 case str():
-                    static_tools.append(Tool.from_callable(tool_config))
+                    static_tools.append(FunctionTool.from_callable(tool_config))
                 case BaseToolConfig():
                     static_tools.append(tool_config.get_tool())
 

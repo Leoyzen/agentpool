@@ -10,7 +10,7 @@ from pydantic import ConfigDict, Field, ImportString
 from schemez import Schema
 
 from agentpool.prompts.prompts import BasePrompt
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool, Tool
 from agentpool_config.knowledge import Knowledge
 from agentpool_config.tools import ImportToolConfig
 
@@ -140,7 +140,7 @@ class Job[TDeps, TResult = str](Schema):
         for tool in self.tools:
             match tool:
                 case str():
-                    tools.append(Tool.from_callable(tool))
+                    tools.append(FunctionTool.from_callable(tool))
                 case ImportToolConfig() as config:
                     tools.append(config.get_tool())
                 case Tool():

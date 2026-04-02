@@ -12,7 +12,7 @@ from acp import EnvVariable, StdioMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.log import get_logger
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 from agentpool_server.acp_server.converters import convert_acp_mcp_server_to_config
 from agentpool_server.acp_server.session import ACPSession
 from agentpool_server.acp_server.session_manager import ACPSessionManager
@@ -153,7 +153,7 @@ async def test_tool_integration():
             return f"MCP result for: {query}"
 
         meta = {"mcp_tool": "dummy_search"}
-        tool = Tool.from_callable(dummy_mcp_tool, source="mcp", metadata=meta)
+        tool = FunctionTool.from_callable(dummy_mcp_tool, source="mcp", metadata=meta)
 
         agent.tools.register_tool(tool)
 

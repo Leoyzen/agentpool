@@ -10,7 +10,7 @@ from exxec_config import LocalExecutionEnvironmentConfig
 from agentpool import Agent
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.resource_providers.codemode import RemoteCodeModeResourceProvider
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 
 
 def add_numbers(x: int, y: int) -> int:
@@ -47,9 +47,9 @@ async def demo_http_server_approach():
     """Demo original HTTP server approach (works with local/docker)."""
     print("=== HTTP Server Approach ===")
     tools = [
-        Tool.from_callable(add_numbers),
-        Tool.from_callable(multiply_numbers),
-        Tool.from_callable(fetch_weather),
+        FunctionTool.from_callable(add_numbers),
+        FunctionTool.from_callable(multiply_numbers),
+        FunctionTool.from_callable(fetch_weather),
     ]
 
     config = LocalExecutionEnvironmentConfig()

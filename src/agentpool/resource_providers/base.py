@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 from anyenv.signals import Signal
 
 from agentpool.log import get_logger
-from agentpool.tools.base import Tool
+from agentpool.tools.base import FunctionTool
 from agentpool_config.tools import ToolHints
 
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo
     from agentpool.skills.skill import Skill
-    from agentpool.tools.base import ToolKind
+    from agentpool.tools.base import Tool, ToolKind
 
 
 logger = get_logger(__name__)
@@ -188,7 +188,7 @@ class ResourceProvider:
         name_override: str | None = None,
         description_override: str | None = None,
         schema_override: OpenAIFunctionDefinition | None = None,
-    ) -> Tool:
+    ) -> FunctionTool:
         """Create a tool from a function.
 
         Args:
@@ -207,7 +207,7 @@ class ResourceProvider:
         Returns:
             Tool created from the function
         """
-        return Tool.from_callable(
+        return FunctionTool.from_callable(
             fn=fn,
             category=category,
             source=self.name,

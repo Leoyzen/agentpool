@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from agentpool.tools import Tool, ToolError, ToolManager
+from agentpool.tools import FunctionTool, ToolError, ToolManager
+
+
+if TYPE_CHECKING:
+    from agentpool.tools.base import Tool
 
 
 async def test_basic_tool_management():
     """Test basic tool enabling/disabling."""
-    tool1 = Tool.from_callable(lambda x: x, name_override="tool1")
-    tool2 = Tool.from_callable(lambda x: x, name_override="tool2")
+    tool1 = FunctionTool.from_callable(lambda x: x, name_override="tool1")
+    tool2 = FunctionTool.from_callable(lambda x: x, name_override="tool2")
 
     manager = ToolManager([tool1, tool2])
 
@@ -25,8 +31,8 @@ async def test_basic_tool_management():
 
 async def test_state_filtering():
     """Test filtering tools by state."""
-    tool1 = Tool.from_callable(lambda x: x, name_override="tool1")
-    tool2 = Tool.from_callable(lambda x: x, name_override="tool2")
+    tool1 = FunctionTool.from_callable(lambda x: x, name_override="tool1")
+    tool2 = FunctionTool.from_callable(lambda x: x, name_override="tool2")
 
     manager = ToolManager([tool1, tool2])
     await manager.disable_tool("tool1")
@@ -55,7 +61,7 @@ async def test_providers_property():
     """Test that providers property returns all providers."""
     from agentpool.resource_providers import StaticResourceProvider
 
-    tool1 = Tool.from_callable(lambda x: x, name_override="tool1")
+    tool1 = FunctionTool.from_callable(lambda x: x, name_override="tool1")
     manager = ToolManager([tool1])
 
     # Add an external provider
@@ -79,15 +85,14 @@ async def test_providers_property():
 
 async def test_enabled_state_preservation():
     """Test that enabled states are preserved when tools change."""
-    from agentpool.tools.base import Tool
 
     # Create a mock MCP provider with some tools
     class MockMCPProvider:
         def __init__(self):
             self.name = "mock_mcp"
             self._tools_cache: list[Tool] | None = [
-                Tool.from_callable(lambda x: x, name_override="tool1"),
-                Tool.from_callable(lambda x: x, name_override="tool2"),
+                FunctionTool.from_callable(lambda x: x, name_override="tool1"),
+                FunctionTool.from_callable(lambda x: x, name_override="tool2"),
             ]
             self._saved_enabled_states: dict[str, bool] = {}
 

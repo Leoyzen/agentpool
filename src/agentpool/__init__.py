@@ -18,7 +18,7 @@ from agentpool.agents import Agent, AgentContext, ClaudeCodeAgent, ACPAgent, AGU
 from agentpool.delegation import AgentPool, Team, TeamRun, BaseTeam
 from dotenv import load_dotenv
 from agentpool.messaging.messages import ChatMessage
-from agentpool.tools import Tool, ToolCallInfo
+from agentpool.tools import Tool, ToolCallInfo, FunctionTool
 from agentpool.messaging.messagenode import MessageNode
 from agentpool.testing import acp_test_session
 from pydantic_ai import (
@@ -55,6 +55,7 @@ __all__ = [
     "ChatMessage",
     "ClaudeCodeAgent",
     "DocumentUrl",
+    "FunctionTool",
     "ImageUrl",
     "MessageNode",
     "NativeAgentConfig",

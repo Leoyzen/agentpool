@@ -234,33 +234,6 @@ class Tool[TOutputType = Any]:
             func, name_override=name, description_override=description
         )
 
-    @classmethod
-    def from_callable(
-        cls,
-        fn: Callable[..., TOutputType | Awaitable[TOutputType]] | str,
-        *,
-        name_override: str | None = None,
-        description_override: str | None = None,
-        schema_override: schemez.OpenAIFunctionDefinition | None = None,
-        hints: ToolHints | None = None,
-        category: ToolKind | None = None,
-        enabled: bool = True,
-        source: ToolSource | str | None = None,
-        **kwargs: Any,
-    ) -> FunctionTool[TOutputType]:
-        """Create a FunctionTool from a callable or import path."""
-        return FunctionTool.from_callable(
-            fn,
-            name_override=name_override,
-            description_override=description_override,
-            schema_override=schema_override,
-            hints=hints,
-            category=category,
-            enabled=enabled,
-            source=source,
-            **kwargs,
-        )
-
     def get_mcp_tool_annotations(self) -> ToolAnnotations:
         """Convert internal Tool to MCP Tool."""
         from mcp.types import ToolAnnotations
@@ -360,4 +333,4 @@ class ToolParameter:
 if __name__ == "__main__":
     import webbrowser
 
-    t = Tool.from_callable(webbrowser.open)
+    t = FunctionTool.from_callable(webbrowser.open)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import sys
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,13 +11,18 @@ from ag_ui.core import TextMessageContentEvent, ToolCallStartEvent
 import anyio
 import httpx
 from pydantic_ai import PartDeltaEvent
+from pydantic_ai.models.test import TestModel
 import pytest
 
+from agentpool import Agent, AgentPool
 from agentpool.agents.agui_agent import AGUIAgent
-from agentpool.agents.agui_agent.agui_converters import agui_to_native_event
+from agentpool.agents.agui_agent.agui_converters import agui_to_native_event, to_agui_tool
 from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent as NativeToolCallStart
+from agentpool.agents.tool_call_accumulator import ToolCallAccumulator
 from agentpool.messaging import ChatMessage
 from agentpool.talk.stats import MessageStats
+from agentpool.tools import FunctionTool
+from agentpool_server.agui_server import AGUIServer
 
 
 if TYPE_CHECKING:
@@ -343,12 +349,9 @@ async def test_agui_tool_execution_error(mock_sse_response):
 
 def test_tool_call_accumulator():
     """Test ToolCallAccumulator for streaming tool arguments."""
-    from agentpool.agents.tool_call_accumulator import ToolCallAccumulator
-
     accumulator = ToolCallAccumulator()
     # Start a tool call
     accumulator.start("call1", "my_tool")
-
     # Add argument deltas
     accumulator.add_args("call1", '{"arg1":')
     accumulator.add_args("call1", ' "value1"')
@@ -365,8 +368,6 @@ def test_tool_call_accumulator():
 
 def test_tool_call_accumulator_invalid_json():
     """Test ToolCallAccumulator with invalid JSON."""
-    from agentpool.agents.tool_call_accumulator import ToolCallAccumulator
-
     accumulator = ToolCallAccumulator()
     accumulator.start("call1", "test_tool")
     accumulator.add_args("call1", "invalid json {")
@@ -380,8 +381,6 @@ def test_tool_call_accumulator_invalid_json():
 
 def test_tool_call_accumulator_multiple_calls():
     """Test ToolCallAccumulator with multiple concurrent tool calls."""
-    from agentpool.agents.tool_call_accumulator import ToolCallAccumulator
-
     accumulator = ToolCallAccumulator()
     # Start multiple tool calls
     accumulator.start("call1", "tool1")
@@ -413,14 +412,12 @@ def test_tool_call_accumulator_multiple_calls():
 
 def test_to_agui_tool():
     """Test converting native Tool to AG-UI Tool format."""
-    from agentpool.agents.agui_agent.agui_converters import to_agui_tool
-    from agentpool.tools import Tool
 
     def example_tool(name: str, count: int = 1) -> str:
         """Process a name with count."""
         return name * count
 
-    tool = Tool.from_callable(example_tool)
+    tool = FunctionTool.from_callable(example_tool)
     agui_tool = to_agui_tool(tool)
 
     assert agui_tool.name == "example_tool"
@@ -440,14 +437,6 @@ async def test_agui_server_and_client_e2e():
     This tests both our AG-UI server implementation and client together,
     verifying the full round-trip works.
     """
-    import socket
-
-    from pydantic_ai.models.test import TestModel
-
-    from agentpool import Agent, AgentPool
-    from agentpool.agents.agui_agent import AGUIAgent
-    from agentpool_server.agui_server import AGUIServer
-
     # Find an available port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
@@ -489,14 +478,6 @@ async def test_agui_server_and_client_with_tools():
     Tests that server-side tool execution works correctly - the server
     executes its tools and the client receives the result.
     """
-    import socket
-
-    from pydantic_ai.models.test import TestModel
-
-    from agentpool import Agent, AgentPool
-    from agentpool.agents.agui_agent import AGUIAgent
-    from agentpool_server.agui_server import AGUIServer
-
     # Find an available port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))

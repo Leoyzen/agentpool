@@ -105,7 +105,7 @@ if __name__ == "__main__":
     import anyio
     from exxec_config import LocalExecutionEnvironmentConfig
 
-    from agentpool.tools.base import Tool
+    from agentpool.tools.base import FunctionTool
 
     def add_numbers(x: int, y: int) -> int:
         """Add two numbers."""
@@ -117,7 +117,10 @@ if __name__ == "__main__":
 
     async def main() -> None:
         print("\n=== Code Generation Approach (ctx-zip style) ===")
-        tools = [Tool.from_callable(add_numbers), Tool.from_callable(multiply_numbers)]
+        tools = [
+            FunctionTool.from_callable(add_numbers),
+            FunctionTool.from_callable(multiply_numbers),
+        ]
         config = LocalExecutionEnvironmentConfig()  # Could be E2B, etc.
         provider = RemoteMCPExecutor.from_tools(tools, config)
         async with provider:

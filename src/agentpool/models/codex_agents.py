@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
     from agentpool.resource_providers import ResourceProvider
+    from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
 
 
@@ -148,7 +149,7 @@ class CodexAgentConfig(BaseAgentConfig):
         """
         from agentpool import log
         from agentpool.resource_providers import StaticResourceProvider
-        from agentpool.tools.base import Tool
+        from agentpool.tools.base import FunctionTool
         from agentpool_config import BaseToolConfig
         from agentpool_config.toolsets import BaseToolsetConfig
 
@@ -162,7 +163,7 @@ class CodexAgentConfig(BaseAgentConfig):
                     case BaseToolsetConfig():
                         providers.append(tool_config.get_provider())
                     case str():
-                        static_tools.append(Tool.from_callable(tool_config))
+                        static_tools.append(FunctionTool.from_callable(tool_config))
                     case BaseToolConfig():
                         static_tools.append(tool_config.get_tool())
                     case _ as unreachable:
