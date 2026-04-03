@@ -822,11 +822,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         async def agent_iteration_task() -> None:
             """Background task that runs agentlet.iter() and feeds events to queue."""
             nonlocal iteration_error, response_msg
+            history = [m for run in history_list for m in run.to_pydantic_ai()]
             try:
                 async with agentlet.iter(
                     prompts,
                     deps=agent_deps,
-                    message_history=[m for run in history_list for m in run.to_pydantic_ai()],
+                    message_history=history,
                     usage_limits=self._default_usage_limits,
                 ) as agent_run:
                     pending_tcs: dict[str, BaseToolCallPart] = {}

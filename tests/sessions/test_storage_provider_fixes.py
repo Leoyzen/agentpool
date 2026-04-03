@@ -3,6 +3,7 @@
 Covers:
 - SQLProvider.log_session() duplicate session handling
 - OpenCodeStorageProvider.load_session() implementation
+- Serialization/deserialization of ModelMessage objects
 """
 
 from __future__ import annotations
@@ -254,3 +255,64 @@ class TestOpenCodeStorageProviderPathHandling:
         # Verify all sessions are listed
         for session_id in session_ids:
             assert session_id in result
+
+
+class TestSerialization:
+    """Tests for ModelMessage serialization/deserialization."""
+
+    def test_deserialize_messages_returns_model_message_objects(self) -> None:
+        """Test that deserialize_messages returns ModelMessage objects, not dicts.
+
+        This is a regression test for a bug where TypeAdapter(list) was used
+        instead of TypeAdapter(list[ModelMessage]), causing deserialization
+        to return dicts instead of ModelMessage objects. This caused pydantic-ai
+        to ignore the message history when loading sessions.
+        """
+        from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.storage.serialization import (
+            deserialize_messages,
+            serialize_messages,
+        )
+
+        # Create sample messages
+        request = ModelRequest(
+            parts=[UserPromptPart(content="Hello")],
+            instructions=None,
+        )
+        response = ModelResponse(
+            parts=[TextPart(content="Hi there")],
+            model_name="gpt-4",
+        )
+        original_messages = [request, response]
+
+        # Serialize
+        serialized = serialize_messages(original_messages)
+        assert serialized is not None
+
+        # Deserialize
+        deserialized = deserialize_messages(serialized)
+
+        # Verify we got ModelMessage objects, not dicts
+        assert len(deserialized) == 2
+        assert isinstance(deserialized[0], ModelRequest)
+        assert isinstance(deserialized[1], ModelResponse)
+
+        # Verify content is preserved
+        assert isinstance(deserialized[0].parts[0], UserPromptPart)
+        assert deserialized[0].parts[0].content == "Hello"
+        assert isinstance(deserialized[1].parts[0], TextPart)
+        assert deserialized[1].parts[0].content == "Hi there"
+
+    def test_deserialize_messages_empty_json(self) -> None:
+        """Test that deserialize_messages handles empty/None input."""
+        from agentpool.storage.serialization import deserialize_messages
+
+        assert deserialize_messages(None) == []
+        assert deserialize_messages("") == []
+
+    def test_serialize_messages_empty_list(self) -> None:
+        """Test that serialize_messages returns None for empty list."""
+        from agentpool.storage.serialization import serialize_messages
+
+        assert serialize_messages([]) is None
