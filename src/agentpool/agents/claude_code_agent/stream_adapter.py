@@ -47,7 +47,6 @@ from clawd_code_sdk.models import (
     HookProgressSystemMessage,
     HookResponseSystemMessage,
     HookStartedSystemMessage,
-    ImageBlock,
     InitSystemMessage,
     LocalCommandOutputMessage,
     PromptSuggestionMessage,
@@ -87,9 +86,7 @@ if TYPE_CHECKING:
     from clawd_code_sdk import Message, ResultMessage, ToolUseBlock
     from clawd_code_sdk.models import StopReason
 
-    from agentpool.agents.events import (
-        RichAgentStreamEvent,
-    )
+    from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.events.events import ToolCallContentItem
 
 _MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
@@ -129,6 +126,7 @@ class ClaudeCodeStreamedResponse(StreamedResponse):
             APIRetrySystemMessage,
             AssistantMessage,
             CompactBoundarySystemMessage,
+            ImageBlock,
             MessageUnion,
             ResultMessage,
             StreamEvent,
@@ -167,74 +165,80 @@ class ClaudeCodeStreamedResponse(StreamedResponse):
                                     title=rich_info.title,
                                     tool_input=cast(dict[str, Any], input_data),
                                 )
-                            case ToolResultBlock() | ThinkingBlock() | TextBlock() | ImageBlock():
-                                pass  # ToolResult Blocks only appear in UserMessages
+                            case ThinkingBlock() | TextBlock():
+                                pass  # Already handled via streaming deltas
                             case _ as unknown_block:
                                 assert_never(unknown_block)  # ty:ignore[type-assertion-failure]
 
                 case UserMessage(content=list() as user_blocks):
                     for user_block in user_blocks:
-                        if not isinstance(user_block, ToolResultBlock):
-                            continue
-                        tc_id = user_block.tool_use_id
-                        result_content = user_block.get_parsed_content()
-                        # Flush + tool return handled by reconstructor via
-                        # ToolCcleanupallCompleteEvent observation
-                        tool_use = pending_tool_calls.pop(tc_id)
-                        stripped = _strip_mcp_prefix(tool_use.name)
-                        # For Bash tools: stream output + exit to virtual terminal
-                        # before signaling completion. This matches the 3-step
-                        # display-only terminal lifecycle.
-                        if tool_use.name == "Bash":
-                            output_str = str(result_content) if result_content else ""
-                            exit_code = 1 if user_block.is_error else 0
-                            yield ToolCallProgressEvent(
-                                tool_call_id=tc_id,
-                                tool_name=stripped,
-                                field_meta={
-                                    "terminal_output": {
-                                        "terminal_id": tc_id,
-                                        "data": output_str,
-                                    },
-                                },
-                            )
-                            yield ToolCallProgressEvent(
-                                tool_call_id=tc_id,
-                                tool_name=stripped,
-                                field_meta={
-                                    "terminal_exit": {
-                                        "terminal_id": tc_id,
-                                        "exit_code": exit_code,
-                                        "signal": None,
-                                    },
-                                },
-                            )
+                        match user_block:
+                            case ToolResultBlock(tool_use_id=tc_id, is_error=is_error):
+                                result_content = user_block.get_parsed_content()
+                                # Flush + tool return handled by reconstructor via
+                                # ToolCcleanupallCompleteEvent observation
+                                tool_use = pending_tool_calls.pop(tc_id)
+                                stripped = _strip_mcp_prefix(tool_use.name)
+                                # For Bash tools: stream output + exit to virtual terminal
+                                # before signaling completion. This matches the 3-step
+                                # display-only terminal lifecycle.
+                                if tool_use.name == "Bash":
+                                    output_str = str(result_content) if result_content else ""
+                                    yield ToolCallProgressEvent(
+                                        tool_call_id=tc_id,
+                                        tool_name=stripped,
+                                        field_meta={
+                                            "terminal_output": {
+                                                "terminal_id": tc_id,
+                                                "data": output_str,
+                                            },
+                                        },
+                                    )
+                                    yield ToolCallProgressEvent(
+                                        tool_call_id=tc_id,
+                                        tool_name=stripped,
+                                        field_meta={
+                                            "terminal_exit": {
+                                                "terminal_id": tc_id,
+                                                "exit_code": 1 if is_error else 0,
+                                                "signal": None,
+                                            },
+                                        },
+                                    )
 
-                        return_part = ToolReturnPart(
-                            tool_name=stripped,
-                            content=result_content,
-                            tool_call_id=tc_id,
-                        )
-                        yield FunctionToolResultEvent(result=return_part)
-                        tool_input = cast(dict[str, Any], tool_use.input) if tool_use else {}
-                        metadata: dict[str, Any] | None = self.tool_metadata.get(tc_id)
-                        if not metadata and isinstance(message.tool_use_result, list):
-                            oc_metadata = convert_to_opencode_metadata(
-                                tool_name=tool_use.name,
-                                tool_use_result=i[0] if (i := message.tool_use_result) else {},
-                                tool_input=tool_input,
-                            )
-                            metadata = cast(dict[str, Any] | None, oc_metadata)
+                                return_part = ToolReturnPart(
+                                    tool_name=stripped,
+                                    content=result_content,
+                                    tool_call_id=tc_id,
+                                )
+                                yield FunctionToolResultEvent(result=return_part)
+                                tool_input = (
+                                    cast(dict[str, Any], tool_use.input) if tool_use else {}
+                                )
+                                metadata: dict[str, Any] | None = self.tool_metadata.get(tc_id)
+                                if not metadata and isinstance(message.tool_use_result, list):
+                                    oc_metadata = convert_to_opencode_metadata(
+                                        tool_name=tool_use.name,
+                                        tool_use_result=i[0]
+                                        if (i := message.tool_use_result)
+                                        else {},
+                                        tool_input=tool_input,
+                                    )
+                                    metadata = cast(dict[str, Any] | None, oc_metadata)
 
-                        yield ToolCallCompleteEvent(
-                            tool_name=stripped,
-                            tool_call_id=tc_id,
-                            tool_input=tool_input,
-                            tool_result=result_content,
-                            agent_name=self.agent_name,
-                            message_id="",
-                            metadata=metadata,
-                        )
+                                yield ToolCallCompleteEvent(
+                                    tool_name=stripped,
+                                    tool_call_id=tc_id,
+                                    tool_input=tool_input,
+                                    tool_result=result_content,
+                                    agent_name=self.agent_name,
+                                    message_id="",
+                                    metadata=metadata,
+                                )
+                            case ImageBlock() | TextBlock():
+                                pass
+                            case _ as unknown_user_block:
+                                assert_never(unknown_user_block)  # ty:ignore[type-assertion-failure]
 
                 # Real-time streaming: content_block_start
                 case StreamEvent(
