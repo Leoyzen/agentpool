@@ -121,7 +121,7 @@ class AgentWorker[WorkerOutputT, AgentDepsT](Worker[list[ModelMessage]]):  # typ
         message_history = await self.storage.load_context(task["context_id"]) or []
         message_history.extend(self.build_message_history(task.get("history", [])))
         try:
-            result = await self.agent.run(message_history=message_history)  # type: ignore
+            result = await self.agent.run(message_history=message_history)  # type: ignore[arg-type]
             chat_msgs = self.agent.conversation.chat_messages
             messages = [msg for chat_msg in chat_msgs for msg in chat_msg.messages]
             await self.storage.update_context(task["context_id"], messages)

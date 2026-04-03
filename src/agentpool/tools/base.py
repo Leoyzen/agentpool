@@ -8,7 +8,7 @@ import inspect
 from typing import TYPE_CHECKING, Any, Literal, cast, get_type_hints
 
 import logfire
-from pydantic_ai import RunContext, Tool as PydanticAiTool
+from pydantic_ai import RunContext, Tool as PydanticAiTool, ToolReturn
 import schemez
 
 from agentpool.log import get_logger
@@ -67,6 +67,11 @@ class ToolResult:
 
     metadata: dict[str, Any] | None = None
     """Metadata for UI/app use - NOT sent to LLM (diffs, diagnostics, etc.)."""
+
+    def to_pydantic_ai(self) -> ToolReturn:
+        """Convert this ToolResult to a pydantic-ai ToolReturn."""
+        val = self.structured_content or self.content
+        return ToolReturn(return_value=val, content=self.content, metadata=self.metadata)
 
 
 @dataclass

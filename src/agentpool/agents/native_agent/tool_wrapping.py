@@ -25,10 +25,7 @@ if TYPE_CHECKING:
     from agentpool.tools.base import Tool
 
 
-def _inject_additional_context(
-    result: Any,
-    additional: str,
-) -> ToolReturn:
+def _inject_additional_context(result: Any, additional: str) -> ToolReturn:
     """Inject additional context into a tool result.
 
     Wraps or modifies the result to include additional context that will
@@ -116,9 +113,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
         duration_ms = (time.perf_counter() - start_time) * 1000
         # Convert AgentPool ToolResult to pydantic-ai ToolReturn
         if isinstance(result, ToolResult):
-            val = result.structured_content or result.content
-            result = ToolReturn(return_value=val, content=result.content, metadata=result.metadata)
-
+            result = result.to_pydantic_ai()
         # Post-tool hooks
         if hooks:
             post_result = await hooks.run_post_tool_hooks(
@@ -171,14 +166,14 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                 if run_ctx_key:
                     # Pass RunContext to original function
                     return await _execute_with_hooks(
-                        lambda *a, **kw: execute(fn, ctx, *a, **kw),
+                        lambda *a, **kw: execute(fn, ctx, *a, **kw),  # ty:ignore[invalid-argument-type]
                         tool_input,
                         *args,
                         **kwargs,
                     )
                 # Don't pass RunContext to original function since it didn't expect it
                 return await _execute_with_hooks(
-                    lambda *a, **kw: execute(fn, *a, **kw),
+                    lambda *a, **kw: execute(fn, *a, **kw),  # ty:ignore[invalid-argument-type]
                     tool_input,
                     *args,
                     **kwargs,
@@ -198,7 +193,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
             if result == "allow":
                 tool_input = kwargs.copy()
                 return await _execute_with_hooks(
-                    lambda *a, **kw: execute(fn, *a, **kw),
+                    lambda *a, **kw: execute(fn, *a, **kw),  # ty:ignore[invalid-argument-type]
                     tool_input,
                     *args,
                     **kwargs,

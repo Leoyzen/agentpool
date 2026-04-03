@@ -34,23 +34,15 @@ async def test_schema_override_propagation():
     }
 
     tool = FunctionTool.from_callable(my_tool, schema_override=override)
-
-    agent = Agent(name="test-agent", model="openai:gpt-4o", tools=[tool])
-
+    agent = Agent(name="test-agent", model="test", tools=[tool])
     pydantic_agent: PydanticAgent[Any, Any] = await agent.get_agentlet(None, None)
-
     found_tool_def = None
-
     # Inspect _function_toolset or _user_toolsets to find the tool
     # Note: This relies on pydantic-ai internals, which might change.
     # But it's the only way to inspect without running the agent against an LLM.
-
     toolsets: list[Any] = []
-    if hasattr(pydantic_agent, "_function_toolset"):
-        toolsets.append(pydantic_agent._function_toolset)
-    if hasattr(pydantic_agent, "_user_toolsets"):
-        toolsets.extend(pydantic_agent._user_toolsets)  # type: ignore
-
+    toolsets.append(pydantic_agent._function_toolset)
+    toolsets.extend(pydantic_agent._user_toolsets)
     for ts in toolsets:
         tools = getattr(ts, "tools", {})
         if isinstance(tools, dict):
