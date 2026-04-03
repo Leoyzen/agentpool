@@ -53,13 +53,8 @@ from agentpool.agents.events.events import PartDeltaEvent, PartStartEvent
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from pydantic_ai import (
-        BaseToolCallPart,
-        FinishReason,
-        ModelMessage,
-        ModelResponsePart,
-        UserContent,
-    )
+    from pydantic_ai import FinishReason, ModelMessage, ModelResponsePart, UserContent
+
 
 type _ActiveKind = Literal["text", "thinking", "tool"]
 
@@ -137,10 +132,14 @@ class TurnManager:
         """
         yield from self._close_active()
         tc_id = tool_call_id or _generate_tool_call_id()
-        part_cls: type[BaseToolCallPart] = (
-            BuiltinToolCallPart if kind == "builtin" else ToolCallPart
-        )
-        part = part_cls(tool_name=name, args=args, tool_call_id=tc_id)
+        if kind == "builtin":
+            part: BuiltinToolCallPart | ToolCallPart = BuiltinToolCallPart(
+                tool_name=name,
+                args=args,
+                tool_call_id=tc_id,
+            )
+        else:
+            part = ToolCallPart(tool_name=name, args=args, tool_call_id=tc_id)
         self._current_parts.append(part)
         self._active_kind = "tool"
         yield PartStartEvent(index=self._part_index, part=part)
@@ -260,13 +259,13 @@ class TurnManager:
         yield from self._close_active()
         self._active_kind = kind
         if kind == "text":
-            part = TextPart(content="")
-            self._current_parts.append(part)
-            yield PartStartEvent(index=self._part_index, part=part)
+            text_part = TextPart(content="")
+            self._current_parts.append(text_part)
+            yield PartStartEvent(index=self._part_index, part=text_part)
         elif kind == "thinking":
-            part = ThinkingPart(content="")
-            self._current_parts.append(part)
-            yield PartStartEvent(index=self._part_index, part=part)
+            thinking_part = ThinkingPart(content="")
+            self._current_parts.append(thinking_part)
+            yield PartStartEvent(index=self._part_index, part=thinking_part)
 
     def _close_active(self) -> Iterator[TurnEvent]:
         """Close the currently active part, if any."""

@@ -57,7 +57,7 @@ class StreamedResponse(ABC):
         # noinspection PyUnreachableCode
         yield
 
-    def get(self) -> ChatMessage:
+    def get(self) -> ChatMessage[Any]:
         """Build a ChatMessage from the data received from the stream so far."""
         return ChatMessage(
             messages=[ModelResponse(parts=self._turn_manager.current_response_parts)],
