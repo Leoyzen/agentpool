@@ -6,6 +6,7 @@ from typing import Any, Literal, Self
 
 from pydantic import Field
 
+from agentpool.utils.time_utils import now_ms
 from opencode_sdk.models.app import Project  # noqa: TC001
 from opencode_sdk.models.base import OpenCodeBaseModel
 from opencode_sdk.models.common import FileDiff  # noqa: TC001
@@ -53,6 +54,7 @@ class ServerConnectedEvent(OpenCodeBaseModel):
 class SessionInfoProperties(OpenCodeBaseModel):
     """Session info wrapper for events."""
 
+    session_id: str
     info: Session
 
 
@@ -64,7 +66,7 @@ class SessionCreatedEvent(OpenCodeBaseModel):
 
     @classmethod
     def create(cls, session: Session) -> Self:
-        return cls(properties=SessionInfoProperties(info=session))
+        return cls(properties=SessionInfoProperties(session_id=session.id, info=session))
 
 
 class SessionUpdatedEvent(OpenCodeBaseModel):
@@ -75,13 +77,14 @@ class SessionUpdatedEvent(OpenCodeBaseModel):
 
     @classmethod
     def create(cls, session: Session) -> Self:
-        return cls(properties=SessionInfoProperties(info=session))
+        return cls(properties=SessionInfoProperties(session_id=session.id, info=session))
 
 
 class SessionDeletedProperties(OpenCodeBaseModel):
     """Properties for session deleted event."""
 
     session_id: str
+    info: Session
 
 
 class SessionDeletedEvent(OpenCodeBaseModel):
@@ -91,8 +94,8 @@ class SessionDeletedEvent(OpenCodeBaseModel):
     properties: SessionDeletedProperties
 
     @classmethod
-    def create(cls, session_id: str) -> Self:
-        return cls(properties=SessionDeletedProperties(session_id=session_id))
+    def create(cls, session_id: str, info: Session) -> Self:
+        return cls(properties=SessionDeletedProperties(session_id=session_id, info=info))
 
 
 class SessionStatusProperties(OpenCodeBaseModel):
@@ -196,6 +199,7 @@ class SessionErrorEvent(OpenCodeBaseModel):
 class MessageUpdatedEventProperties(OpenCodeBaseModel):
     """Properties for message updated event."""
 
+    session_id: str
     info: MessageInfo
 
 
@@ -207,13 +211,17 @@ class MessageUpdatedEvent(OpenCodeBaseModel):
 
     @classmethod
     def create(cls, message: MessageInfo) -> Self:
-        return cls(properties=MessageUpdatedEventProperties(info=message))
+        return cls(
+            properties=MessageUpdatedEventProperties(session_id=message.session_id, info=message)
+        )
 
 
 class PartUpdatedEventProperties(OpenCodeBaseModel):
     """Properties for part updated event."""
 
+    session_id: str
     part: Part
+    time: int
     delta: str | None = None
 
 
@@ -224,8 +232,15 @@ class PartUpdatedEvent(OpenCodeBaseModel):
     properties: PartUpdatedEventProperties
 
     @classmethod
-    def create(cls, part: Part, delta: str | None = None) -> Self:
-        return cls(properties=PartUpdatedEventProperties(part=part, delta=delta))
+    def create(cls, part: Part, delta: str | None = None, *, time: int | None = None) -> Self:
+        return cls(
+            properties=PartUpdatedEventProperties(
+                session_id=part.session_id,
+                part=part,
+                time=time or now_ms(),
+                delta=delta,
+            )
+        )
 
 
 class PartDeltaEventProperties(OpenCodeBaseModel):

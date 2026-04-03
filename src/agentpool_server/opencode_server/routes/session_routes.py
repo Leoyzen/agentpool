@@ -227,7 +227,7 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     state.todos.pop(session_id, None)
     # Delete from storage
     await state.storage.delete_session(session_id)
-    await state.broadcast_event(SessionDeletedEvent.create(session_id))
+    await state.broadcast_event(SessionDeletedEvent.create(session_id, info=session))
     return True
 
 
