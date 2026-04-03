@@ -476,12 +476,27 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     Returns None if session not found.
     Uses agent.load_session() which handles loading from the appropriate
     storage (pool storage, Claude storage, ACP server, Codex, etc.).
+
+    Important: This function ensures the agent's conversation history is always
+    synchronized with the requested session. Even if the session is cached,
+    if the agent currently has a different session loaded, the history will be
+    reloaded to prevent cross-session contamination.
     """
-    # Check if session AND messages are already loaded
-    if session_id in state.sessions and session_id in state.messages:
+    # Check if session is cached AND agent has the correct session loaded
+    agent_has_correct_session = (
+        state.agent.session_id == session_id
+        and session_id in state.sessions
+        and session_id in state.messages
+    )
+
+    if agent_has_correct_session:
+        # Session cached and agent has correct history - safe to return
         return state.sessions[session_id]
 
-    # Load via agent - this populates agent.conversation.chat_messages
+    # Need to load/reload session history into agent
+    # This happens when:
+    # 1. Session not in cache (new session)
+    # 2. Agent has different session loaded (session switch)
     data = await state.agent.load_session(session_id)
     if data is None:
         return None
@@ -511,6 +526,8 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         state.input_providers[session_id] = input_provider
     # Set input provider on agent to ensure correct session routing
     state.agent._input_provider = state.input_providers[session_id]
+    # Update agent's session_id to track which session is loaded
+    state.agent.session_id = session_id
     return session
 
 
