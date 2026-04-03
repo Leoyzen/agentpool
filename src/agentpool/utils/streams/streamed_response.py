@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import ModelResponse, RequestUsage
 
-from agentpool.utils.streams.parts_manager import PartsManager
+from agentpool.messaging.messages import ChatMessage
+from agentpool.utils.streams.turn_manager import TurnManager
 
 
 if TYPE_CHECKING:
@@ -36,7 +37,7 @@ class StreamedResponse(ABC):
     _usage: RequestUsage = field(default_factory=RequestUsage, init=False)
 
     def __post_init__(self) -> None:
-        self._parts_manager = PartsManager(self.provider_name)
+        self._turn_manager = TurnManager(provider_name=self.provider_name)
 
     def __aiter__(self) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         """Stream the response as an async iterable of [`RichAgentStreamEvent`]."""
@@ -49,23 +50,19 @@ class StreamedResponse(ABC):
         This method should be implemented by subclasses to translate the vendor-specific stream
         of events into agentpool-format events.
 
-        It should use the `_parts_manager` to handle deltas, and should update the
+        It should use the `_turn_manager` to handle deltas, and should update the
         `_usage` attributes as it goes.
         """
         raise NotImplementedError
         # noinspection PyUnreachableCode
         yield
 
-    def get(self) -> ModelResponse:
-        """Build a ModelResponse from the data received from the stream so far."""
-        return ModelResponse(
-            parts=self._parts_manager.get_parts(),
-            model_name=self.model_name,
-            timestamp=self.timestamp,
-            usage=self.usage(),
-            provider_response_id=self.provider_response_id,
-            provider_details=self.provider_details,
-            finish_reason=self.finish_reason,
+    def get(self) -> ChatMessage:
+        """Build a ChatMessage from the data received from the stream so far."""
+        return ChatMessage(
+            messages=[ModelResponse(parts=self._turn_manager.current_response_parts)],
+            content="",
+            role="assistant",
         )
 
     # TODO (v2): Make this a property
