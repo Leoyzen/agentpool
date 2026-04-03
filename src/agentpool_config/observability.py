@@ -34,6 +34,18 @@ class BaseObservabilityConfig(Schema):
     )
 
 
+class OtelDesktopViewerConfig(BaseObservabilityConfig):
+    """Configuration for OTEL desktop viewer endpoint."""
+
+    model_config = ConfigDict(json_schema_extra={"x-doc-title": "OTEL Desktop Viewer"})
+
+    type: Literal["otel-desktop-viewer"] = "otel-desktop-viewer"
+    """OTEL desktop viewer endpoint type."""
+
+    _endpoint: str = PrivateAttr(default="http://localhost:4318")
+    _headers: dict[str, str] = PrivateAttr(default_factory=dict)
+
+
 class LogfireObservabilityConfig(BaseObservabilityConfig):
     """Configuration for Logfire endpoint."""
 
@@ -213,6 +225,7 @@ class CustomObservabilityConfig(BaseObservabilityConfig):
 # Union of all provider configs
 ObservabilityProviderConfig = Annotated[
     LogfireObservabilityConfig
+    | OtelDesktopViewerConfig
     | LangsmithObservabilityConfig
     | AgentOpsObservabilityConfig
     | ArizePhoenixObservabilityConfig
