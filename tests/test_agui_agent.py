@@ -176,7 +176,7 @@ async def test_agui_agent_to_tool():
             assert tool.name == "ask_test-agent"
             assert "Test tool description" in tool.description
 
-            result = await tool.execute(prompt="Test question")
+            result = await tool.run(prompt="Test question")
             assert result == "Answer"
 
 

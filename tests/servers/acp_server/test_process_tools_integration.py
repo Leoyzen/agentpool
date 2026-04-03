@@ -98,7 +98,7 @@ async def test_start_process(
     tools = await execution_tools.get_tools()
     start_tool = next(tool for tool in tools if tool.name == "start_process")
 
-    result = await start_tool.execute(
+    result = await start_tool.run(
         agent_ctx=agent_ctx,
         command="echo",
         args=["hello", "world"],
@@ -131,7 +131,7 @@ async def test_get_process_output(
     tools = await execution_tools.get_tools()
     output_tool = next(tool for tool in tools if tool.name == "get_process_output")
 
-    result = await output_tool.execute(
+    result = await output_tool.run(
         agent_ctx=agent_ctx,
         process_id=process_id,
     )
@@ -160,7 +160,7 @@ async def test_kill_process(
     tools = await execution_tools.get_tools()
     kill_tool = next(tool for tool in tools if tool.name == "kill_process")
 
-    result = await kill_tool.execute(
+    result = await kill_tool.run(
         agent_ctx=agent_ctx,
         process_id=process_id,
     )
@@ -191,7 +191,7 @@ async def test_wait_for_process(
     tools = await execution_tools.get_tools()
     wait_tool = next(tool for tool in tools if tool.name == "wait_for_process")
 
-    result = await wait_tool.execute(
+    result = await wait_tool.run(
         agent_ctx=agent_ctx,
         process_id=process_id,
     )
@@ -221,7 +221,7 @@ async def test_release_process(
     tools = await execution_tools.get_tools()
     release_tool = next(tool for tool in tools if tool.name == "release_process")
 
-    result = await release_tool.execute(
+    result = await release_tool.run(
         agent_ctx=agent_ctx,
         process_id=process_id,
     )
@@ -256,7 +256,7 @@ async def test_list_processes(
     tools = await execution_tools.get_tools()
     list_tool = next(tool for tool in tools if tool.name == "list_processes")
 
-    result = await list_tool.execute(agent_ctx=agent_ctx)
+    result = await list_tool.run(agent_ctx=agent_ctx)
 
     # Tools now return formatted strings
     assert isinstance(result, str)
@@ -297,7 +297,7 @@ async def test_process_not_found(
     tools = await execution_tools.get_tools()
     output_tool = next(tool for tool in tools if tool.name == "get_process_output")
 
-    result = await output_tool.execute(
+    result = await output_tool.run(
         agent_ctx=agent_ctx,
         process_id="nonexistent_process",
     )

@@ -211,13 +211,13 @@ class Tool[TOutputType = Any]:
         return "\n".join(lines)
 
     @logfire.instrument("Executing tool {self.name} with args={args}, kwargs={kwargs}")
-    async def execute(self, *args: Any, **kwargs: Any) -> Any:
+    async def run(self, *args: Any, **kwargs: Any) -> Any:
         """Execute tool, handling both sync and async cases."""
         return await execute(self.get_callable(), *args, **kwargs, use_thread=True)
 
     async def execute_and_unwrap(self, *args: Any, **kwargs: Any) -> Any:
         """Execute tool and unwrap ToolResult if present."""
-        result = await self.execute(*args, **kwargs)
+        result = await self.run(*args, **kwargs)
         if isinstance(result, ToolResult):
             return result.content
         return result

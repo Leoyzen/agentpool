@@ -88,7 +88,7 @@ async def test_write_text_file_success(
     """Test successful file writing."""
     tools = await fs_tools.get_tools()
     write_tool = next(tool for tool in tools if tool.name == "write")
-    result = await write_tool.execute(
+    result = await write_tool.run(
         agent_ctx=agent_ctx,
         path="/home/user/output.txt",
         content="Hello, World!\nThis is written content.\n",
@@ -112,7 +112,7 @@ async def test_write_text_file_json(
 
     tools = await fs_tools.get_tools()
     write_tool = next(tool for tool in tools if tool.name == "write")
-    result = await write_tool.execute(
+    result = await write_tool.run(
         agent_ctx=agent_ctx, path="/home/user/config.json", content=json_str
     )
 
@@ -147,7 +147,7 @@ async def test_write_empty_file(
     """Test writing empty content to a file."""
     tools = await fs_tools.get_tools()
     write_tool = next(tool for tool in tools if tool.name == "write")
-    result = await write_tool.execute(
+    result = await write_tool.run(
         agent_ctx=agent_ctx, path="/home/user/empty_output.txt", content=""
     )
 
@@ -188,7 +188,7 @@ async def test_write_file_with_unicode(
 
     tools = await fs_tools.get_tools()
     write_tool = next(tool for tool in tools if tool.name == "write")
-    result = await write_tool.execute(agent_ctx=agent_ctx, path="/home/output.txt", content=content)
+    result = await write_tool.run(agent_ctx=agent_ctx, path="/home/output.txt", content=content)
 
     assert isinstance(result, ToolResult)
     assert "/home/output.txt" in result.content
@@ -214,7 +214,7 @@ async def test_read_then_write(
     assert result == "original content"
 
     # Write new content
-    await write_tool.execute(
+    await write_tool.run(
         agent_ctx=agent_ctx, path="/home/user/test.txt", content="modified content", overwrite=True
     )
 

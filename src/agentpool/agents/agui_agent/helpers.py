@@ -94,7 +94,7 @@ async def execute_tool_call(
     # Execute the tool
     logger.info("Executing tool", tool=tool.name, args=args)
     try:
-        result = await tool.execute(**args)
+        result = await tool.run(**args)
         result_str = str(result) if not isinstance(result, str) else result
         logger.debug("Tool executed", tool=tool.name, result=result_str[:100])
         return AGUIToolMessage(id=str(uuid4()), tool_call_id=tool_call_id, content=result_str)
