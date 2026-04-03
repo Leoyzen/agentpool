@@ -231,9 +231,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
             # Process through chain
             for connection in connections:
                 target = connection.targets[0]
-                target_name = target.name
                 yield connection
-
                 # Let errors propagate - they break the chain
                 start = perf_counter()
                 messages = await connection.trigger()
@@ -245,9 +243,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                     self._team_talk.append(last_talk)
 
                 timing = perf_counter() - start
-                msg = messages[0]
-                response = AgentResponse[Any](target_name, message=msg, timing=timing)
-                yield response
+                yield AgentResponse[Any](target.name, message=messages[0], timing=timing)
 
         finally:  # Always clean up connections
             for connection in connections:
