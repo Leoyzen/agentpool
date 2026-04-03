@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING
 import logfire
 
 from agentpool.log import get_logger
+from agentpool_config.observability import CustomObservabilityConfig
 
 
 if TYPE_CHECKING:
-    from agentpool_config.observability import BaseObservabilityConfig, ObservabilityConfig
+    from agentpool_config.observability import ObservabilityConfig, ObservabilityProviderConfig
 
 logger = get_logger(__name__)
 
@@ -56,11 +57,14 @@ class ObservabilityRegistry:
         logger.info("Configured observability", provider=config.type)
 
 
-def _setup_otel_environment(config: BaseObservabilityConfig) -> None:
+def _setup_otel_environment(config: ObservabilityProviderConfig) -> None:
     """Set up OTEL environment variables for the configured backend."""
-    # Get endpoint and headers from config
-    endpoint = getattr(config, "_endpoint", getattr(config, "endpoint", None))
-    headers = getattr(config, "_headers", getattr(config, "headers", {}))
+    if isinstance(config, CustomObservabilityConfig):
+        endpoint = config.endpoint
+        headers = config.headers
+    else:
+        endpoint = config._endpoint
+        headers = config._headers
 
     if not endpoint:
         logger.warning("No endpoint found", provider=config.type)
