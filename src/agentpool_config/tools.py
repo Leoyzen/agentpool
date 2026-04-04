@@ -41,6 +41,17 @@ class ToolHints(Schema):
             open_world=annotations.openWorldHint,
         )
 
+    def to_mcp(self) -> ToolAnnotations:
+        """Convert to MCP tool annotations."""
+        from mcp.types import ToolAnnotations
+
+        return ToolAnnotations(
+            readOnlyHint=self.read_only,
+            destructiveHint=self.destructive,
+            idempotentHint=self.idempotent,
+            openWorldHint=self.open_world,
+        )
+
 
 class BaseToolConfig(Schema):
     """Base configuration for agent tools."""

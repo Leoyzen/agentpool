@@ -32,18 +32,10 @@ def filter_servers_by_capabilities(
     """
     from acp.schema.mcp import HttpMcpServer, SseMcpServer
 
+    mcp_caps = i.mcp_capabilities if (i := agent_capabilities) else None
     # Check what transports are supported
-    supports_http = (
-        agent_capabilities
-        and agent_capabilities.mcp_capabilities
-        and agent_capabilities.mcp_capabilities.http
-    )
-    supports_sse = (
-        agent_capabilities
-        and agent_capabilities.mcp_capabilities
-        and agent_capabilities.mcp_capabilities.sse
-    )
-
+    supports_http = mcp_caps and mcp_caps.http
+    supports_sse = mcp_caps and mcp_caps.sse
     supported_servers: list[McpServer] = []
     unsupported_servers: list[tuple[McpServer, str]] = []
 

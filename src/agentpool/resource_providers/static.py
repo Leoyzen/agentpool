@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, assert_never, overload
 
 from agentpool.resource_providers import ResourceProvider
 from agentpool.tools.base import FunctionTool, Tool
@@ -68,6 +68,8 @@ class StaticResourceProvider(ResourceProvider):
                 instance = tool
             case Callable() | str():  # ty: ignore[invalid-match-pattern]
                 instance = FunctionTool.from_callable(tool)
+            case _ as unreachable:
+                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
         self._tools.append(instance)
 
     def remove_tool(self, name: str) -> bool:
@@ -135,14 +137,14 @@ class StaticResourceProvider(ResourceProvider):
             Created Tool instance
         """
         match tool:
-            case Tool():
-                tool.description = description_override or tool.description
-                tool.name = name_override or tool.name
+            case Tool(description=description, meta=meta, name=name):
+                tool.description = description_override or description
+                tool.name = name_override or name
                 tool.source = source
-                tool.metadata = tool.metadata | (metadata or {})
+                tool.meta = meta | (metadata or {})
                 tool.enabled = enabled
 
-            case _:
+            case str() | Callable():  # ty:ignore[invalid-match-pattern]
                 tool = FunctionTool.from_callable(
                     tool,
                     enabled=enabled,
@@ -152,6 +154,8 @@ class StaticResourceProvider(ResourceProvider):
                     requires_confirmation=requires_confirmation,
                     metadata=metadata or {},
                 )
+            case _ as unreachable:
+                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
         self.add_tool(tool)
         return tool

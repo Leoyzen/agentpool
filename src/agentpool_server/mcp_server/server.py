@@ -105,13 +105,7 @@ class MCPServer(BaseServer):
         for tool in tools:
             # TODO: previously there was code to filter private attributes using a wrapper.
             # comment said it was to remove _meta params, but not sure if it was required at all.
-            tool_annotations = types.ToolAnnotations(
-                title=tool.name,
-                readOnlyHint=tool.hints.read_only,
-                destructiveHint=tool.hints.destructive,
-                idempotentHint=tool.hints.idempotent,
-                openWorldHint=tool.hints.open_world,
-            )
+            tool_annotations = tool.hints.to_mcp()
             # TODO: set task=True?
             self.fastmcp.tool(annotations=tool_annotations)(tool.fn)
 

@@ -106,9 +106,9 @@ class ShowToolCommand(NodeCommand):
                 extra_info.append("Requires Confirmation: Yes")
             if tool_info.source != "dynamic":  # Only show if not default
                 extra_info.append(f"Source: {tool_info.source}")
-            if tool_info.metadata:
+            if tool_info.meta:
                 extra_info.append("\nMetadata:")
-                extra_info.extend(f"- {k}: {v}" for k, v in tool_info.metadata.items())
+                extra_info.extend(f"- {k}: {v}" for k, v in tool_info.meta.items())
 
             if extra_info:
                 sections.extend(extra_info)

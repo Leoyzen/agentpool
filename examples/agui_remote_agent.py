@@ -45,7 +45,7 @@ async def tool_conversion():
     print("=== Tool Conversion ===\n")
     async with AGUIAgent(endpoint=endpoint, name="calculator-agent") as agent:
         calculator_tool = agent.to_tool()
-        result = await calculator_tool.run("What is 157 * 89?")
+        result = await calculator_tool.run(prompt="What is 157 * 89?")
         print(f"Calculator result: {result}\n")
 
 

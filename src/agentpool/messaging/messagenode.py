@@ -209,11 +209,8 @@ class MessageNode[TDeps, TResult](ABC):
             docstring = f"{docstring}\n\n{self.description}"
         wrapped.__doc__ = docstring
         wrapped.__name__ = tool_name
-        if isinstance(self, BaseAgent):  # override TResult with concrete type
-            wrapped.__annotations__ = {"prompt": str, "return": self._output_type or Any}
-        else:
-            wrapped.__annotations__ = {"prompt": str, "return": Any}
-
+        return_val = out if isinstance(self, BaseAgent) and (out := self._output_type) else Any
+        wrapped.__annotations__ = {"prompt": str, "return": return_val}
         return FunctionTool.from_callable(wrapped)
 
     @overload
@@ -383,11 +380,7 @@ class MessageNode[TDeps, TResult](ABC):
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
         """Execute node with prompts. Implementation-specific run logic."""
 
-    async def run_message(
-        self,
-        message: ChatMessage[Any],
-        **kwargs: Any,
-    ) -> ChatMessage[TResult]:
+    async def run_message(self, message: ChatMessage[Any], **kwargs: Any) -> ChatMessage[TResult]:
         """Run with an incoming ChatMessage (e.g., from Talk routing).
 
         Extracts content from the message, preserves session_id,

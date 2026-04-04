@@ -348,6 +348,17 @@ class AgentPoolACPAgent(ACPAgent):
                         model_messages.extend(chat_msg.messages)
                 for update in model_messages_to_session_updates(model_messages):
                     await session.notifications.send_update(update)
+                # await session.notifications.send_update(
+                #     UsageUpdate(used=chat_msg.usage.total_tokens)
+                # )
+                # await session.notifications.send_update(
+                #     SessionInfoUpdate(
+                #         session_id=params.session_id,
+                #         title="",
+                #         updated_at=model_messages[-1].timestamp,
+                #     )
+                # )
+
                 logger.info(
                     "Conversation replayed",
                     session_id=params.session_id,

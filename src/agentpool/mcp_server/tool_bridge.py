@@ -378,7 +378,7 @@ class ToolManagerBridge:
                     name=tool.name,
                     description=tool.description or "No description",
                     parameters=cast(dict[str, Any], filtered_schema),
-                    annotations=tool.get_mcp_tool_annotations(),
+                    annotations=tool.hints.to_mcp(),
                     # output_schema=tool.output_schema,
                 )
                 # Set these AFTER super().__init__() to avoid being overwritten

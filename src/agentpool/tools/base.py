@@ -24,7 +24,7 @@ from agentpool_config.tools import ToolHints
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from mcp.types import Tool as MCPTool, ToolAnnotations
+    from mcp.types import Tool as MCPTool
     from pydantic_ai import UserContent
     from schemez import FunctionSchema, Property
 
@@ -105,7 +105,7 @@ class Tool[TOutputType = Any]:
     agent_name: str | None = None
     """The agent name as an identifier for agent-as-a-tool."""
 
-    metadata: dict[str, str] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
     """Additional tool metadata"""
 
     category: ToolKind | None = None
@@ -120,7 +120,7 @@ class Tool[TOutputType = Any]:
 
     def to_pydantic_ai(self) -> PydanticAiTool:
         """Convert tool to Pydantic AI tool."""
-        metadata = {**self.metadata, "agent_name": self.agent_name, "category": self.category}
+        metadata = {**self.meta, "agent_name": self.agent_name, "category": self.category}
         return PydanticAiTool(
             function=self.get_callable(),
             name=self.name,
@@ -205,15 +205,15 @@ class Tool[TOutputType = Any]:
         if self.parameters:
             lines.append(f"{indent}  Parameters:")
             lines.extend(f"{indent}    {param}" for param in self.parameters)
-        if self.metadata:
+        if self.meta:
             lines.append(f"{indent}  Metadata:")
-            lines.extend(f"{indent}    {k}: {v}" for k, v in self.metadata.items())
+            lines.extend(f"{indent}    {k}: {v}" for k, v in self.meta.items())
         return "\n".join(lines)
 
     @logfire.instrument("Executing tool {self.name} with args={args}, kwargs={kwargs}")
-    async def run(self, *args: Any, **kwargs: Any) -> Any:
+    async def run(self, **kwargs: Any) -> Any:
         """Execute tool, handling both sync and async cases."""
-        return await execute(self.get_callable(), *args, **kwargs, use_thread=True)
+        return await execute(self.get_callable(), **kwargs, use_thread=True)
 
     async def execute_and_unwrap(self, *args: Any, **kwargs: Any) -> Any:
         """Execute tool and unwrap ToolResult if present."""
@@ -239,28 +239,15 @@ class Tool[TOutputType = Any]:
             func, name_override=name, description_override=description
         )
 
-    def get_mcp_tool_annotations(self) -> ToolAnnotations:
-        """Convert internal Tool to MCP Tool."""
-        from mcp.types import ToolAnnotations
-
-        return ToolAnnotations(
-            title=self.name,
-            readOnlyHint=self.hints.read_only if self.hints else None,
-            destructiveHint=self.hints.destructive if self.hints else None,
-            idempotentHint=self.hints.idempotent if self.hints else None,
-            openWorldHint=self.hints.open_world if self.hints else None,
-        )
-
     def to_mcp_tool(self) -> MCPTool:
         """Convert internal Tool to MCP Tool."""
         from mcp.types import Tool as MCPTool
 
-        schema = self.schema
         return MCPTool(
-            name=schema["function"]["name"],
-            description=schema["function"]["description"],
-            inputSchema=cast(dict[str, Any], schema["function"]["parameters"]),
-            annotations=self.get_mcp_tool_annotations(),
+            name=self.schema["function"]["name"],
+            description=self.schema["function"]["description"],
+            inputSchema=cast(dict[str, Any], self.schema["function"]["parameters"]),
+            annotations=self.hints.to_mcp(),
         )
 
 
