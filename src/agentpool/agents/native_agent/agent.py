@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import BaseToolCallPart, ModelSettings, UsageLimits, UserContent
+    from pydantic_ai import BaseToolCallPart, EndStrategy, ModelSettings, UsageLimits, UserContent
     from pydantic_ai.builtin_tools import AbstractBuiltinTool
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import (
         AnyEventHandlerType,
-        EndStrategy,
         ModelType,
         ProcessorCallback,
         SessionIdType,

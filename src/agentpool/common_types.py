@@ -78,9 +78,7 @@ TeamName = str
 AgentName = str
 StrPath = str | os.PathLike[str]
 MessageRole = Literal["user", "assistant"]
-PartType = Literal["text", "image", "audio", "video"]
 ModelType = Model | ModelId | str
-EnvironmentType = Literal["file", "inline"]
 ToolSource = Literal["agent", "builtin", "dynamic", "task", "mcp", "toolset"]
 AnyCallable = Callable[..., Any]
 AsyncFilterFn = Callable[..., Awaitable[bool]]
@@ -115,7 +113,6 @@ class PathReference:
 PromptCompatible = AnyPromptType | JoinablePathLike | PathReference
 # P = ParamSpec("P")
 # SyncAsync = Callable[P, OptionalAwaitable[T]]
-EndStrategy = Literal["early", "exhaustive"]
 QueueStrategy = Literal["concat", "latest", "buffer"]
 """The strategy for handling multiple tool calls when a final result is found.
 
@@ -126,12 +123,7 @@ QueueStrategy = Literal["concat", "latest", "buffer"]
 
 @runtime_checkable
 class SupportsRunStream[TResult](Protocol):
-    """Protocol for nodes that support streaming via run_stream().
-
-    Used by Team and TeamRun to check if a node can be streamed.
-    All streaming nodes return RichAgentStreamEvent, with subagent/team
-    activity wrapped in SubAgentEvent.
-    """
+    """Protocol for nodes that support streaming via run_stream()."""
 
     def run_stream(
         self, *prompts: Any, **kwargs: Any
@@ -140,33 +132,14 @@ class SupportsRunStream[TResult](Protocol):
 
 @runtime_checkable
 class SupportsStructuredOutput(Protocol):
-    """Protocol for agents that support structured output via to_structured().
-
-    Used by Interactions class for pick/extract operations that require
-    structured output from agents.
-    """
+    """Protocol for agents that support structured output via to_structured()."""
 
     @property
     def _output_type(self) -> type[Any]: ...
 
-    def to_structured[T](self, output_type: type[T]) -> SupportsStructuredOutput:
-        """Create a copy of this agent configured for structured output.
+    def to_structured[T](self, output_type: type[T]) -> SupportsStructuredOutput: ...
 
-        Args:
-            output_type: The type to structure output as
-
-        Returns:
-            New agent instance configured for structured output
-        """
-        ...
-
-    async def run(self, *prompts: Any, **kwargs: Any) -> Any:
-        """Run the agent with the given prompts.
-
-        Returns:
-            ChatMessage with content typed according to output_type from to_structured
-        """
-        ...
+    async def run(self, *prompts: Any, **kwargs: Any) -> Any: ...
 
 
 class BaseCode(BaseModel):

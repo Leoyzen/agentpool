@@ -10,14 +10,13 @@ from uuid import UUID
 
 from llmling_models_config import AnyModelConfig  # noqa: TC002
 from pydantic import ConfigDict, Field, model_validator
-from pydantic_ai import UsageLimits  # noqa: TC002
+from pydantic_ai import EndStrategy, UsageLimits  # noqa: TC002
 from schemez import InlineSchemaDef
 from tokonomics.model_discovery import ProviderType  # noqa: TC002
 from tokonomics.model_names import ModelId  # noqa: TC002
 from toprompt import render_prompt
 
 from agentpool import log
-from agentpool.common_types import EndStrategy  # noqa: TC001
 from agentpool.models.fields import OutputTypeField, SystemPromptField  # noqa: TC001
 from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool.resource_providers import StaticResourceProvider
