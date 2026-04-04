@@ -7,6 +7,7 @@ state, enabling stateless recursive processing.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
@@ -37,7 +38,10 @@ from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.converters import _convert_params_for_ui
+from agentpool_server.opencode_server.converters import (
+    _convert_params_for_ui,
+    opencode_to_chat_message,
+)
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
@@ -749,6 +753,11 @@ class EventProcessor:
             ctx.state.messages[child_session_id].append(user_msg)
             yield MessageUpdatedEvent.create(user_msg.info)
 
+            # Persist user message to storage
+            with contextlib.suppress(Exception):
+                chat_msg = opencode_to_chat_message(user_msg, session_id=child_session_id)
+                await ctx.state.storage.log_message(chat_msg)
+
             # Now create assistant message with user_msg as parent
             child_assistant_msg_id = identifiers.ascending("message")
             child_assistant_msg = MessageWithParts.assistant(
@@ -774,6 +783,13 @@ class EventProcessor:
             # Create child session assistant message
             ctx.state.messages[child_session_id].append(child_assistant_msg)
             yield MessageUpdatedEvent.create(child_assistant_msg.info)
+
+            # Persist assistant message to storage
+            with contextlib.suppress(Exception):
+                chat_msg = opencode_to_chat_message(
+                    child_assistant_msg, session_id=child_session_id
+                )
+                await ctx.state.storage.log_message(chat_msg)
 
             # Create ToolPart in parent session representing the subagent
             subagent_key = f"{depth}:{source_name}"
@@ -826,6 +842,14 @@ class EventProcessor:
                 )
                 child_ctx.assistant_msg.parts.append(text_part)
                 yield PartUpdatedEvent.create(text_part)
+
+            # Persist final child assistant message to storage
+            # This ensures all parts (text, tool calls, etc.) are saved
+            with contextlib.suppress(Exception):
+                chat_msg = opencode_to_chat_message(
+                    child_ctx.assistant_msg, session_id=child_ctx.session_id
+                )
+                await ctx.state.storage.log_message(chat_msg)
 
             # Update the ToolPart in parent to completed state
             subagent_key = f"{depth}:{source_name}"
@@ -900,6 +924,11 @@ class EventProcessor:
         ctx.state.messages[event.child_session_id].append(user_msg)
         yield MessageUpdatedEvent.create(user_msg.info)
 
+        # Persist user message to storage
+        with contextlib.suppress(Exception):
+            chat_msg = opencode_to_chat_message(user_msg, session_id=event.child_session_id)
+            await ctx.state.storage.log_message(chat_msg)
+
         # Create assistant message
         child_assistant_msg_id = identifiers.ascending("message")
         child_assistant_msg = MessageWithParts.assistant(
@@ -923,6 +952,13 @@ class EventProcessor:
         self._child_contexts[event.child_session_id] = child_ctx
         ctx.state.messages[event.child_session_id].append(child_assistant_msg)
         yield MessageUpdatedEvent.create(child_assistant_msg.info)
+
+        # Persist assistant message to storage
+        with contextlib.suppress(Exception):
+            chat_msg = opencode_to_chat_message(
+                child_assistant_msg, session_id=event.child_session_id
+            )
+            await ctx.state.storage.log_message(chat_msg)
 
         # Create ToolPart in parent session
         subagent_key = f"{event.depth}:{event.source_name}"

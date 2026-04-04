@@ -481,6 +481,11 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     synchronized with the requested session. Even if the session is cached,
     if the agent currently has a different session loaded, the history will be
     reloaded to prevent cross-session contamination.
+
+    For subagent sessions (child sessions), we prioritize the in-memory version
+    because parts are streamed in real-time and may not be immediately persisted
+    to storage. This ensures users see the latest message state when viewing
+    subagent sessions.
     """
     # Check if session is cached AND agent has the correct session loaded
     agent_has_correct_session = (
@@ -493,10 +498,27 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         # Session cached and agent has correct history - safe to return
         return state.sessions[session_id]
 
+    # For subagent/child sessions: prioritize in-memory messages if available
+    # This is critical because subagent parts are streamed in real-time to memory
+    # but are only persisted at completion, not after each part update
+    # A session is considered a subagent session if it has a parent_id
+    cached_session = state.sessions.get(session_id)
+    is_subagent_session = cached_session is not None and cached_session.parent_id is not None
+
+    if is_subagent_session and session_id in state.messages:
+        # Subagent session exists in memory with messages - return it directly
+        # This avoids overwriting real-time streamed parts with stale storage data
+        return cached_session
+
     # Need to load/reload session history into agent
     # This happens when:
     # 1. Session not in cache (new session)
     # 2. Agent has different session loaded (session switch)
+    # 3. Session in cache but no messages (e.g., subagent session not yet populated)
+
+    # Check if we have in-memory messages before reloading (for subagent sessions)
+    existing_messages = state.messages.get(session_id) if is_subagent_session else None
+
     data = await state.agent.load_session(session_id)
     if data is None:
         return None
@@ -508,18 +530,27 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     # Initialize runtime state
     if session_id not in state.session_status:
         state.session_status[session_id] = SessionStatus(type="idle")
-    # Convert agent's conversation history to OpenCode format
-    state.messages[session_id] = [
-        chat_message_to_opencode(
-            chat_msg,
-            session_id=session_id,
-            working_dir=state.working_dir,
-            agent_name=state.agent.name,
-            model_id=chat_msg.model_name or "sonnet",  # Normalized name from Claude storage
-            provider_id=chat_msg.provider_name or "claude-code",
-        )
-        for chat_msg in state.agent.conversation.chat_messages
-    ]
+
+    # For subagent sessions with existing in-memory messages, preserve them
+    # Subagent messages are streamed in real-time and may not be persisted yet
+    if is_subagent_session and existing_messages:
+        # Keep existing in-memory messages (they're more recent than storage)
+        # Only update if memory is empty
+        pass  # existing_messages already in state.messages[session_id]
+    else:
+        # Convert agent's conversation history to OpenCode format
+        # This is for regular sessions or sessions not yet in memory
+        state.messages[session_id] = [
+            chat_message_to_opencode(
+                chat_msg,
+                session_id=session_id,
+                working_dir=state.working_dir,
+                agent_name=state.agent.name,
+                model_id=chat_msg.model_name or "sonnet",  # Normalized name from Claude storage
+                provider_id=chat_msg.provider_name or "claude-code",
+            )
+            for chat_msg in state.agent.conversation.chat_messages
+        ]
     # Create input provider for this session if not exists
     if session_id not in state.input_providers:
         input_provider = OpenCodeInputProvider(state, session_id)

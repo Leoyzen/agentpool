@@ -44,6 +44,7 @@ class SlowAgentMock:
         self.tools = []
         self._input_provider = None
         self.model_name = "test-model"
+        self.session_id: str | None = None
 
     async def set_model(self, model: str) -> None:
         """Mock set_model method."""
@@ -56,6 +57,11 @@ class SlowAgentMock:
     async def get_available_models(self):
         """Mock get_available_models method."""
         return []
+
+    async def load_session(self, session_id: str) -> Any:
+        """Mock load_session method."""
+        self.session_id = session_id
+        return None
 
     def run_stream(
         self,
