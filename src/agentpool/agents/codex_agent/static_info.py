@@ -50,12 +50,12 @@ SANDBOX_MODES = [
         description="Full filesystem access (dangerous)",
         category_id="sandbox",
     ),
-    ModeInfo(
-        value="externalSandbox",
-        name="External Sandbox",
-        description="Use external sandbox environment",
-        category_id="sandbox",
-    ),
+    # ModeInfo(
+    #     value="externalSandbox",
+    #     name="External Sandbox",
+    #     description="Use external sandbox environment",
+    #     category_id="sandbox",
+    # ),
 ]
 
 
