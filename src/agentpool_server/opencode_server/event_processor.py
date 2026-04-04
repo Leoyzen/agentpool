@@ -792,7 +792,7 @@ class EventProcessor:
                 await ctx.state.storage.log_message(chat_msg)
 
             # Create ToolPart in parent session representing the subagent
-            subagent_key = f"{depth}:{source_name}"
+            subagent_key = f"{depth}:{source_name}:{child_session_id}"
             if not ctx.has_subagent_tool_part(subagent_key):
                 ts = TimeStart(start=now_ms())
                 running_state = ToolStateRunning(
@@ -852,7 +852,7 @@ class EventProcessor:
                 await ctx.state.storage.log_message(chat_msg)
 
             # Update the ToolPart in parent to completed state
-            subagent_key = f"{depth}:{source_name}"
+            subagent_key = f"{depth}:{source_name}:{child_session_id}"
             if ctx.has_subagent_tool_part(subagent_key):
                 existing = ctx.get_subagent_tool_part(subagent_key)
                 if existing is not None:
@@ -961,7 +961,7 @@ class EventProcessor:
             await ctx.state.storage.log_message(chat_msg)
 
         # Create ToolPart in parent session
-        subagent_key = f"{event.depth}:{event.source_name}"
+        subagent_key = f"{event.depth}:{event.source_name}:{event.child_session_id}"
         if not ctx.has_subagent_tool_part(subagent_key):
             ts = TimeStart(start=now_ms())
             running_state = ToolStateRunning(
