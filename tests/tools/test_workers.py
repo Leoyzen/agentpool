@@ -210,7 +210,7 @@ async def test_structured_worker_output(default_model: str):
     # Convert structured agent to tool and register with main agent
     tool = structured.to_tool()
     # Verify that return type annotation is set correctly
-    assert tool.callable.__annotations__.get("return") == StructuredResponse
+    assert tool.fn.__annotations__.get("return") == StructuredResponse
     main_agent.tools.register_tool(tool, enabled=True)
     # Test that both agents work together
     async with structured, main_agent:

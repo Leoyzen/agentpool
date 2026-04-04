@@ -113,7 +113,7 @@ class MCPServer(BaseServer):
                 openWorldHint=tool.hints.open_world,
             )
             # TODO: set task=True?
-            self.fastmcp.tool(annotations=tool_annotations)(tool.callable)
+            self.fastmcp.tool(annotations=tool_annotations)(tool.fn)
 
         self._tools_registered = True
         logger.info("Registered MCP tools", count=len(tools))

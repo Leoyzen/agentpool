@@ -159,7 +159,7 @@ async def test_converted_tool_has_both_contexts():
         tool = client.convert_tool(test_tool)
 
         # Check signature includes both contexts
-        sig = inspect.signature(tool.callable)
+        sig = inspect.signature(tool.fn)
         params = list(sig.parameters.keys())
         assert "ctx" in params  # RunContext
         assert "agent_ctx" in params  # AgentContext

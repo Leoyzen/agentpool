@@ -94,7 +94,7 @@ def node_function(
                 raise ValueError(f"Invalid depends_on: {depends_on}")
         # TODO: we still need to inject the deps in execution part.
         metadata = NodeFunction(func=func, depends_on=depends_on_ or [], deps=deps)
-        func._node_function = metadata  # type: ignore
+        func._node_function = metadata  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
         return func
 
     return decorator(func) if func is not None else decorator

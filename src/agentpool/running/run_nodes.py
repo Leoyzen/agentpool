@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from agentpool.running.executor import discover_functions, execute_functions
@@ -50,9 +51,6 @@ async def run_nodes_async(
     if module:
         discovered = discover_functions(module)
     else:
-        # Use calling module
-        import inspect
-
         frame = inspect.currentframe()
         while frame:
             if frame.f_globals.get("__name__") != __name__:

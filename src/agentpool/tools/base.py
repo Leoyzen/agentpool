@@ -268,12 +268,12 @@ class Tool[TOutputType = Any]:
 class FunctionTool[TOutputType = Any](Tool[TOutputType]):
     """Tool wrapping a plain callable function."""
 
-    callable: Callable[..., TOutputType | Awaitable[TOutputType]] = field(kw_only=True)
+    fn: Callable[..., TOutputType | Awaitable[TOutputType]] = field(kw_only=True)
     """The actual tool implementation."""
 
     def get_callable(self) -> Callable[..., TOutputType | Awaitable[TOutputType]]:
         """Return the wrapped callable."""
-        return self.callable
+        return self.fn
 
     @classmethod
     def from_callable(
@@ -307,7 +307,7 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
         return cls(
             name=name_override or name,
             description=description_override or inspect.getdoc(callable_obj) or "",
-            callable=callable_obj,
+            fn=callable_obj,
             import_path=import_path,
             schema_override=schema_override,
             category=category,

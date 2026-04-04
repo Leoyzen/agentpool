@@ -172,7 +172,7 @@ async def test_agui_agent_to_tool():
 
         async with AGUIAgent(endpoint="http://localhost:8000/run", name="test-agent") as agent:
             tool = agent.to_tool(description="Test tool description")
-            assert callable(tool.callable)
+            assert callable(tool.fn)
             assert tool.name == "ask_test-agent"
             assert "Test tool description" in tool.description
 

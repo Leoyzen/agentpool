@@ -88,9 +88,9 @@ class CodeModeResourceProvider(AggregatingResourceProvider):
         for value in namespace.values():
             if callable(value) and hasattr(value, "callable"):
                 # It's a NamespaceCallable - wrap its underlying callable with ctx
-                original_callable = value.callable
+                original_callable = value.fn
                 if "agent_ctx" in inspect.signature(original_callable).parameters:
-                    value.callable = partial(original_callable, agent_ctx=ctx)
+                    value.fn = partial(original_callable, agent_ctx=ctx)
 
         # async def report_progress(current: int, total: int, message: str = ""):
         #     """Report progress during code execution."""
