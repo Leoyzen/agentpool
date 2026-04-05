@@ -468,7 +468,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             assert run_ctx is not None
             while (max_count is None or count < max_count) and not run_ctx.cancelled:
                 try:
-                    agent_ctx = self.get_context()
+                    agent_ctx = self.get_context(run_ctx=run_ctx)
                     current_prompts = [
                         call_with_context(p, agent_ctx, **kwargs) if callable(p) else p
                         for p in prompt

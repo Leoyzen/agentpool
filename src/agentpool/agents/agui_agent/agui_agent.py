@@ -390,6 +390,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                         tool_call_id=tc_id,
                         tool_name=tool_name,
                         tool_input=args,
+                        run_ctx=run_ctx,
                     )
                     result = await execute_tool_call(
                         tool,
