@@ -807,7 +807,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
         # Track tool call starts to combine with results later
         # Create AgentContext with user deps stored in .data
-        agent_deps = self.get_context(input_provider=input_provider)
+        agent_deps = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
         if deps is not None:
             agent_deps.data = deps
 
