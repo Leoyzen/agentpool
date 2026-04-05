@@ -18,7 +18,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.tools import ToolDefinition
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentContext
+from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
@@ -746,6 +746,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     async def _process_node_stream(
         self,
+        run_ctx: AgentRunContext,
         node_stream: AsyncIterator[Any],
         *,
         pending_tcs: dict[str, BaseToolCallPart],
@@ -754,8 +755,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         """Process events from a node stream (ModelRequest or CallTools).
 
         Args:
+            run_ctx: Per-run context for state isolation
             node_stream: Stream of events from the node
-
             pending_tcs: Dictionary of pending tool calls
             message_id: Current message ID
 
@@ -764,7 +765,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         """
         async with merge_queue_into_iterator(node_stream, self._event_queue) as merged:
             async for event in merged:
-                if self._cancelled:
+                if run_ctx.cancelled:
                     break
                 yield event
                 if combined := process_tool_event(self.name, event, pending_tcs, message_id):
@@ -772,6 +773,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -832,7 +834,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 ) as agent_run:
                     pending_tcs: dict[str, BaseToolCallPart] = {}
                     async for node in agent_run:
-                        if self._cancelled or iteration_done.is_set():
+                        if run_ctx.cancelled or iteration_done.is_set():
                             self.log.info("Stream cancelled by user")
                             break
                         if isinstance(node, End):
@@ -845,7 +847,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                     stream, self._event_queue
                                 ) as merged:  # type: ignore[arg-type]
                                     async for event in merged:
-                                        if self._cancelled or iteration_done.is_set():
+                                        if run_ctx.cancelled or iteration_done.is_set():
                                             break
                                         await event_queue.put(event)
                                         if combined := process_tool_event(
@@ -855,7 +857,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
                     # Build response message
                     response_time = time.perf_counter() - start_time
-                    if self._cancelled:
+                    if run_ctx.cancelled:
                         partial_content = extract_text_from_messages(
                             agent_run.all_messages(), include_interruption_note=True
                         )
@@ -903,7 +905,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     yield event
                 except TimeoutError:
                     # Check if we should exit
-                    if self._cancelled:
+                    if run_ctx.cancelled:
                         break
                     continue
 
@@ -916,7 +918,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             iteration_done.set()
             # Only set cancelled if the iteration task was actually cancelled
             if iteration_task.cancelled():
-                self._cancelled = True
+                run_ctx.cancelled = True
             # Cancel task if still running
             if not iteration_task.done():
                 iteration_task.cancel()
@@ -956,8 +958,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             # Direct Model instance assignment (no signal emission)
             self._model = model
 
-    async def _interrupt(self) -> None:
-        """Cancel the current stream task."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Cancel the current stream task.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if (task := self._current_stream_task) and not task.done():
             task.cancel()
 

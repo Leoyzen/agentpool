@@ -83,6 +83,7 @@ from pydantic_ai import (
 from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.claude_code_agent.converters import (
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
@@ -828,6 +829,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -1245,15 +1247,19 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,
-            finish_reason="stop" if self._cancelled else None,
+            finish_reason="stop" if run_ctx.cancelled else None,
             metadata=metadata,
         )
 
         # Emit stream complete - post-processing handled by base class
         yield StreamCompleteEvent[TResult](message=chat_message)
 
-    async def _interrupt(self) -> None:
-        """Call Claude SDK's native interrupt() to stop the query."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Call Claude SDK's native interrupt() to stop the query.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if self._client:
             try:
                 await self._client.interrupt()

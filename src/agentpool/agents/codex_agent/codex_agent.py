@@ -13,6 +13,7 @@ from pydantic_ai import TextPartDelta
 from pydantic_ai.usage import RequestUsage, RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.codex_agent.codex_converters import (
     convert_codex_stream,
     mcp_config_to_codex,
@@ -338,6 +339,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -524,8 +526,12 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         self._approval_policy = policy
         self.log.info("Approval policy updated", policy=policy)
 
-    async def _interrupt(self) -> None:
-        """Call Codex turn_interrupt if there's an active turn."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Call Codex turn_interrupt if there's an active turn.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if self._client and self._sdk_session_id and self._current_turn_id:
             try:
                 await self._client.turn_interrupt(self._sdk_session_id, self._current_turn_id)

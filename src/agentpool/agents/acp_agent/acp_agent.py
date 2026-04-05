@@ -46,6 +46,7 @@ from acp.agent import ACPAgentAPI
 from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.acp_agent.session_state import ACPSessionState
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
@@ -400,6 +401,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -481,7 +483,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     if isinstance(event, ToolResultMetadataEvent):
                         tool_metadata[event.tool_call_id] = event.metadata
                         continue
-                    if self._cancelled:
+                    if run_ctx.cancelled:
                         self.log.info("Stream cancelled by user")
                         break
                     if isinstance(event, ToolCallCompleteEvent):
@@ -504,9 +506,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     yield event
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
-            self._cancelled = True
+            run_ctx.cancelled = True
 
-        if self._cancelled:
+        if run_ctx.cancelled:
             message = ChatMessage[str](
                 content="".join(text_chunks),
                 role="assistant",
@@ -579,8 +581,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self.auto_approve = auto_approve
         self.log.info("Auto-approve mode changed", auto_approve=auto_approve)
 
-    async def _interrupt(self) -> None:
-        """Send CancelNotification to remote ACP server and cancel local tasks."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Send CancelNotification to remote ACP server and cancel local tasks.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if self._api and self._sdk_session_id:
             try:
                 await self._api.cancel(self._sdk_session_id)

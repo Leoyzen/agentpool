@@ -7,8 +7,8 @@ state, enabling stateless recursive processing.
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import AsyncIterator
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent
@@ -964,15 +964,19 @@ class EventProcessor:
         subagent_key = f"{event.depth}:{event.source_name}:{event.child_session_id}"
         if not ctx.has_subagent_tool_part(subagent_key):
             ts = TimeStart(start=now_ms())
+            # Extract prompt from metadata, fallback to empty string
+            subagent_prompt = event.metadata.get("prompt") or ""
+            # Tool title uses event.description for display
+            tool_title = event.description or event.source_name
             running_state = ToolStateRunning(
                 time=ts,
                 input={
-                    "description": description,
+                    "description": tool_title,
                     "subagent_type": event.source_type,
-                    "prompt": "",
+                    "prompt": subagent_prompt,
                 },
-                metadata={"sessionId": event.child_session_id, "title": event.source_name},
-                title=event.source_name,
+                metadata={"sessionId": event.child_session_id},
+                title=tool_title,
             )
             tool_part = ToolPart(
                 id=identifiers.ascending("part"),
