@@ -5,11 +5,11 @@
 ---
 rfc_id: RFC-0021
 title: Agent Concurrent Execution Safety
-status: DRAFT
+status: ACCEPTED
 author: yuchen.liu
 reviewers: []
 created: 2025-04-05
-last_updated: 2025-04-05
+last_updated: 2026-04-05
 decision_date:
 related_documents:
   - RFC-0021-PRE-FLIGHT-ANALYSIS.md (State inventory and audit)
@@ -755,3 +755,67 @@ Key files referenced in this RFC:
 ---
 
 **End of RFC-0021**
+
+## Appendix B: Implementation Summary
+
+### Status: COMPLETED ✅
+
+All phases of RFC-0021 have been successfully implemented:
+
+- **Phase 0**: Finally block bug fixed in NativeAgent
+- **Wave 1**: AgentRunContext created, _cancelled and _current_stream_task migrated
+- **Wave 2**: _event_queue and _injection_manager migrated, cleanup verified
+- **Wave 3**: All tests passing (9/9 concurrent safety tests)
+
+### Test Results
+
+```
+tests/agents/test_concurrent_safety.py::test_serial_execution_baseline PASSED
+tests/agents/test_concurrent_safety.py::test_single_call_completion PASSED
+tests/agents/test_concurrent_safety.py::test_concurrent_calls_complete PASSED
+tests/agents/test_concurrent_safety.py::test_concurrent_event_isolation PASSED
+tests/agents/test_concurrent_safety.py::test_concurrent_cancellation_isolation PASSED
+tests/agents/test_concurrent_safety.py::test_concurrent_event_queue_isolation PASSED
+tests/agents/test_concurrent_safety.py::test_serial_performance_baseline PASSED
+tests/agents/test_concurrent_safety.py::test_concurrent_performance PASSED
+tests/agents/test_concurrent_safety.py::test_native_agent_concurrent PASSED
+```
+
+### Files Modified
+
+- `src/agentpool/agents/context.py` - AgentRunContext dataclass
+- `src/agentpool/agents/base_agent.py` - State migration to context
+- `src/agentpool/agents/native_agent/agent.py` - Bug fixes and context usage
+- `src/agentpool/agents/events/event_emitter.py` - Context-based event queue
+- All agent subclasses updated for context compatibility
+
+### Migration Guide for Custom Subclasses
+
+If you have custom agent subclasses that access mutable state:
+
+1. **Update method signatures** to accept `run_ctx: AgentRunContext`:
+   ```python
+   async def _stream_events(self, run_ctx: AgentRunContext, ...)
+   async def _interrupt(self, run_ctx: AgentRunContext | None = None)
+   ```
+
+2. **Access state via context** instead of instance:
+   ```python
+   # Before
+   if self._cancelled:
+       
+   # After
+   if run_ctx.cancelled:
+   ```
+
+3. **Use context for event queue**:
+   ```python
+   # Before
+   await self._event_queue.put(event)
+   
+   # After
+   await run_ctx.event_queue.put(event)
+   ```
+
+4. **Pass context through call chain** when calling parent methods.
+
