@@ -244,14 +244,6 @@ class ToolManagerBridge:
     _actual_port: int | None = field(default=None, init=False, repr=False)
     """Actual port the server is bound to."""
 
-    injection_manager: PromptInjectionManager | None = field(default=None, repr=False)
-    """Optional injection manager for mid-run prompt injection.
-
-    When set, the bridge will consume pending injections after each tool call
-    and append them to the tool result. This enables prompt injection for
-    ACP agents (ACPAgent, ClaudeCodeAgent, CodexAgent) that use the bridge.
-    """
-
     tool_metadata: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
     """Metadata from tool results, keyed by tool_call_id.
 
@@ -459,10 +451,13 @@ class ToolManagerBridge:
                     logger.info("Storing tool result metadata", tool_call_id=tc_id)
                     self._bridge.tool_metadata[tc_id] = result.metadata
 
-                # Consume pending injection and append to result
-                if self._bridge.injection_manager and (
-                    injection := await self._bridge.injection_manager.consume()
-                ):
+                # Consume pending injection from node's run context (isolated per-call)
+                injection_manager = (
+                    self._bridge.node._current_run_ctx.injection_manager
+                    if self._bridge.node._current_run_ctx
+                    else None
+                )
+                if injection_manager and (injection := await injection_manager.consume()):
                     result = _append_injection_to_result(result, injection)
 
                 return _convert_to_tool_result(result)

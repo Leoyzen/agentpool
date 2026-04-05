@@ -230,7 +230,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
         self._background_run_ctx: AgentRunContext | None = None
-        self._injection_manager = PromptInjectionManager()
+        self._current_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
         self._connect_pending: bool = False
@@ -362,6 +362,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         tool_call_id: str | None = None,
         tool_input: dict[str, Any] | None = None,
         tool_name: str | None = None,
+        run_ctx: AgentRunContext | None = None,
     ) -> AgentContext[Any]:
         """Create a new context for this agent.
 
@@ -371,6 +372,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id: Optional tool call ID
             tool_input: Optional tool input
             tool_name: Optional tool name
+            run_ctx: Optional per-run context for accessing run-isolated state
 
         Returns:
             A new AgentContext instance
@@ -386,6 +388,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id=tool_call_id,
             tool_input=tool_input or {},
             tool_name=tool_name,
+            run_ctx=run_ctx,
         )
 
     @property
@@ -540,7 +543,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.queue_prompt("Now analyze the results")
                 return "Initial work done"
         """
-        self._injection_manager.queue(*prompts)
+        # Use current run context if available, otherwise background context
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            run_ctx.injection_manager.queue(*prompts)
 
     def inject_prompt(self, message: str) -> None:
         """Inject a message into the conversation mid-run.
@@ -559,19 +565,30 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.inject_prompt("Also check the test coverage")
                 return "Changes made"
         """
-        self._injection_manager.inject(message)
+        # Use current run context if available, otherwise background context
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            run_ctx.injection_manager.inject(message)
 
     def has_queued_prompts(self) -> bool:
         """Check if there are queued prompts waiting to be processed."""
-        return self._injection_manager.has_queued()
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            return run_ctx.injection_manager.has_queued()
+        return False
 
     def has_pending_injections(self) -> bool:
         """Check if there are pending injections."""
-        return self._injection_manager.has_pending()
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            return run_ctx.injection_manager.has_pending()
+        return False
 
     def clear_queued_prompts(self) -> None:
         """Clear all queued prompts and pending injections."""
-        self._injection_manager.clear()
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            run_ctx.injection_manager.clear()
 
     @method_spawner
     async def run_stream(
@@ -631,12 +648,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()
         # Queue the initial prompts
-        self._injection_manager.insert_queued(prompts)
+        run_ctx.injection_manager.insert_queued(prompts)
 
         try:
+            # Set current run context for external access (e.g., tools calling queue_prompt)
+            self._current_run_ctx = run_ctx
             # Process queued prompts until queue is empty
-            while self._injection_manager.has_queued() and not run_ctx.cancelled:
-                current_prompts = self._injection_manager.pop_queued()
+            while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
+                current_prompts = run_ctx.injection_manager.pop_queued()
                 if current_prompts is None:
                     break
                 async for event in self._run_stream_once(
@@ -656,9 +675,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     yield event
 
                 # After each iteration, flush unconsumed injections to queue
-                self._injection_manager.flush_pending_to_queue()
+                run_ctx.injection_manager.flush_pending_to_queue()
         finally:
-            self._injection_manager.clear()  # Clean slate for next run
+            # Clean up per-call injection manager (isolated from other concurrent calls)
+            # Only clear _current_run_ctx if it still points to this run (prevents
+            # affecting other concurrent calls that may have started after this one)
+            if self._current_run_ctx is run_ctx:
+                self._current_run_ctx = None
+            run_ctx.injection_manager.clear()
 
     async def _run_stream_once(
         self,
@@ -744,7 +768,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     reason = pre_run_result.get("reason", "Blocked by pre-run hook")
                     raise RuntimeError(f"Run blocked: {reason}")  # noqa: TRY301
 
-            context = self.get_context(input_provider=input_provider)
+            context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
             async for event in self._stream_events(
                 run_ctx,
                 [*pending_parts, *converted_prompts],

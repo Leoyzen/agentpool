@@ -195,8 +195,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._state: ACPSessionState | None = None
         self._extra_mcp_servers: list[McpServer] = []
         self._sessions_cache: list[SessionData] | None = None
-        # Create bridge (not started yet) - pass injection_manager for mid-run injection support
-        self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
+        # ToolManagerBridge gets injection_manager from node's run context
+        self._tool_bridge = ToolManagerBridge(node=self)
         # Track the prompt task for cancellation
         self._prompt_task: asyncio.Task[Any] | None = None
 
@@ -477,7 +477,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         try:
             async with (
                 self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
-                merge_queue_into_iterator(poll_acp_events(), self._event_queue) as merged_events,
+                merge_queue_into_iterator(poll_acp_events(), run_ctx.event_queue) as merged_events,
             ):
                 async for event in merged_events:
                     if isinstance(event, ToolResultMetadataEvent):

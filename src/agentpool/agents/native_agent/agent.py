@@ -277,9 +277,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self.sys_prompts = SystemPrompts(all_prompts, prompt_manager=prompt_manager)
         self._formatted_system_prompt: str | None = None  # Set in __aenter__
         self._hook_manager = NativeAgentHookManager(
-            agent_name=self.name,
+            agent=self,
             agent_hooks=hooks,
-            injection_manager=self._injection_manager,
         )
         self._default_usage_limits = usage_limits
         self._providers = list(providers) if providers else None  # model discovery
@@ -763,7 +762,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Yields:
             Processed stream events
         """
-        async with merge_queue_into_iterator(node_stream, self._event_queue) as merged:
+        async with merge_queue_into_iterator(node_stream, run_ctx.event_queue) as merged:
             async for event in merged:
                 if run_ctx.cancelled:
                     break
@@ -844,7 +843,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         if isinstance(node, ModelRequestNode | CallToolsNode):
                             async with node.stream(agent_run.ctx) as stream:
                                 async with merge_queue_into_iterator(
-                                    stream, self._event_queue
+                                    stream, run_ctx.event_queue
                                 ) as merged:  # type: ignore[arg-type]
                                     async for event in merged:
                                         if run_ctx.cancelled or iteration_done.is_set():
@@ -964,7 +963,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
         """
-        if (task := self._current_stream_task) and not task.done():
+        task = run_ctx.current_task if run_ctx else None
+        if task and not task.done():
             task.cancel()
 
     @asynccontextmanager

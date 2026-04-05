@@ -86,6 +86,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     model_name: str | None = None
     """Model name in provider:model format (e.g., 'anthropic:claude-haiku-4-5')."""
 
+    run_ctx: AgentRunContext | None = None
+    """Reference to the per-run context for accessing run-isolated state like event_queue."""
+
     @property
     def native_agent(self) -> Agent[TDeps, Any]:
         """Current agent, type-narrowed to native pydantic-ai Agent."""
@@ -112,7 +115,11 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             tool_call_id=self.tool_call_id or "",
             tool_input=self.tool_input,
         )
-        await self.agent._event_queue.put(progress_event)
+        # Use run_ctx.event_queue for per-run isolation, fallback to agent queue
+        if self.run_ctx is not None:
+            await self.run_ctx.event_queue.put(progress_event)
+        else:
+            await self.agent._event_queue.put(progress_event)
 
     @property
     def events(self) -> StreamEventEmitter:

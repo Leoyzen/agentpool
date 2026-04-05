@@ -169,8 +169,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         self._current_turn_id: str | None = None
         # Populated by capture_metadata during streaming, read after stream completes
         self._token_usage_data: dict[str, int] | None = None
-        # Pass injection_manager for mid-run injection support
-        self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
+        # ToolManagerBridge gets injection_manager from node's run context
+        self._tool_bridge = ToolManagerBridge(node=self)
 
     @classmethod
     def from_config(

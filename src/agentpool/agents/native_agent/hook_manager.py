@@ -17,7 +17,7 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
 
-    from agentpool.agents.prompt_injection import PromptInjectionManager
+    from agentpool.agents.base_agent import BaseAgent
     from agentpool.hooks import AgentHooks
 
 logger = get_logger(__name__)
@@ -28,14 +28,13 @@ class NativeAgentHookManager:
 
     Responsibilities:
     - Wraps AgentHooks and delegates to it
-    - Consumes injections from PromptInjectionManager
+    - Consumes injections from PromptInjectionManager (via agent's run context)
     - Combines injection with post-tool hook results
 
     Example:
         hook_manager = NativeAgentHookManager(
-            agent_name="my-agent",
+            agent=agent,
             agent_hooks=hooks,
-            injection_manager=agent._injection_manager,
         )
 
         # Injections are queued via agent.inject_prompt()
@@ -47,20 +46,18 @@ class NativeAgentHookManager:
     def __init__(
         self,
         *,
-        agent_name: str,
+        agent: BaseAgent[Any, Any],
         agent_hooks: AgentHooks | None = None,
-        injection_manager: PromptInjectionManager | None = None,
     ) -> None:
         """Initialize hook manager.
 
         Args:
-            agent_name: Name of the agent (for logging)
+            agent: The agent instance (for accessing per-run injection manager)
             agent_hooks: Optional AgentHooks for pre/post hooks
-            injection_manager: Shared injection manager from BaseAgent
         """
-        self.agent_name = agent_name
+        self.agent_name = agent.name
         self.agent_hooks = agent_hooks
-        self._injection_manager = injection_manager
+        self._agent = agent
 
     def has_hooks(self) -> bool:
         """Check if any hooks are configured."""
@@ -203,9 +200,12 @@ class NativeAgentHookManager:
         else:
             result = HookResult(decision="allow")
 
-        # Consume pending injection from shared manager
-        if self._injection_manager:
-            injection = await self._injection_manager.consume()
+        # Consume pending injection from run context (isolated per-call)
+        injection_manager = (
+            self._agent._current_run_ctx.injection_manager if self._agent._current_run_ctx else None
+        )
+        if injection_manager:
+            injection = await injection_manager.consume()
             if injection:
                 logger.debug(
                     "Consuming injection after tool use",

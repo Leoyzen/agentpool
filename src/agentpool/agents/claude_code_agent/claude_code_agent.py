@@ -341,19 +341,16 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._client: ClaudeSDKClient | None = None
         self._connection_task: asyncio.Task[None] | None = None
         self._sdk_session_id: str | None = session_id
-        # ToolBridge state for exposing toolsets via MCP
-        self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
+        # ToolBridge gets injection_manager from node's run context
+        self._tool_bridge = ToolManagerBridge(node=self)
         self._mcp_servers: dict[str, McpServerConfig] = {}  # Claude SDK MCP server configs
         # Track pending tool call for permission matching
         self._pending_tool_call_ids: dict[str, str] = {}
         # Create Claude storage provider for session management
         self._claude_storage = ClaudeStorageProvider()
         self._hook_manager = ClaudeCodeHookManager(
-            agent_name=self.name,
+            agent=self,
             agent_hooks=hooks,
-            event_queue=self._event_queue,
-            get_session_id=lambda: self.session_id,
-            injection_manager=self._injection_manager,
             set_mode=self._set_mode,
         )
 
@@ -921,7 +918,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Merge SDK messages with event queue for real-time tool event streaming
             async with (
                 self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
-                merge_queue_into_iterator(stream, self._event_queue) as events,
+                merge_queue_into_iterator(stream, run_ctx.event_queue) as events,
             ):
                 async for event_or_message in events:
                     # Check if it's a queued event (from tools via EventEmitter)
