@@ -378,7 +378,9 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     break
                 # Execute pending tool calls locally and collect results
                 tools_by_name = {t.name: t for t in tools}
-                base_ctx = self.get_context(data=deps, input_provider=effective_input_provider)
+                base_ctx = self.get_context(
+                    data=deps, input_provider=effective_input_provider, run_ctx=run_ctx
+                )
                 pending_tool_results = []
                 for tc_id, (tool_name, args) in tool_calls_pending.items():
                     tool = tools_by_name.get(tool_name)

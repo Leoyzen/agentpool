@@ -858,7 +858,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Temporarily set event handler on command store
         old_handler = self._command_store.event_handler
         self._command_store.event_handler = event_queue.put
-        cmd_ctx = self._command_store.create_context(data=self.get_context())
+        # Use current run_ctx if available (for event queue isolation)
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        cmd_ctx = self._command_store.create_context(data=self.get_context(run_ctx=run_ctx))
         command_str = f"{cmd_name} {args}".strip()
         try:
             execute_task = asyncio.create_task(

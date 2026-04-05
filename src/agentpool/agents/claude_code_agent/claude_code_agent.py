@@ -591,7 +591,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # Handle AskUserQuestion specially - this is Claude asking for clarification
         if tool_name == "AskUserQuestion":
-            agent_ctx = self.get_context()
+            agent_ctx = self.get_context(run_ctx=self._current_run_ctx)
             return await handle_clarifying_questions(agent_ctx, input_data, context)
         # Auto-grant if bypassPermissions mode is active
         if self._permission_mode == "bypassPermissions":
@@ -627,7 +627,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             display_name = _strip_mcp_prefix(tool_name)
             self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
             ctx = self.get_context(
-                tool_call_id=tool_call_id, tool_input=input_data, tool_name=tool_name
+                tool_call_id=tool_call_id,
+                tool_input=input_data,
+                tool_name=tool_name,
+                run_ctx=self._current_run_ctx,
             )
             result = await self._input_provider.get_tool_confirmation(
                 context=ctx,
