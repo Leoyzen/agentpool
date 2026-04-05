@@ -210,14 +210,14 @@ class Tool[TOutputType = Any]:
             lines.extend(f"{indent}    {k}: {v}" for k, v in self.meta.items())
         return "\n".join(lines)
 
-    @logfire.instrument("Executing tool {self.name} with args={args}, kwargs={kwargs}")
+    @logfire.instrument("Executing tool {self.name} kwargs={kwargs}")
     async def run(self, **kwargs: Any) -> Any:
         """Execute tool, handling both sync and async cases."""
         return await execute(self.get_callable(), **kwargs, use_thread=True)
 
-    async def execute_and_unwrap(self, *args: Any, **kwargs: Any) -> Any:
+    async def execute_and_unwrap(self, **kwargs: Any) -> Any:
         """Execute tool and unwrap ToolResult if present."""
-        result = await self.run(*args, **kwargs)
+        result = await self.run(**kwargs)
         if isinstance(result, ToolResult):
             return result.content
         return result
