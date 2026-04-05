@@ -19,6 +19,9 @@ from acp.schema import (
     ListSessionsResponse,
     LogoutResponse,
     ResumeSessionResponse,
+    SetSessionConfigOptionResponse,
+    SetSessionModelResponse,
+    SetSessionModeResponse,
 )
 
 
@@ -76,15 +79,17 @@ class TestAgent(Agent):
     async def cancel(self, params: CancelNotification) -> None:
         self.cancellations.append(params.session_id)
 
-    async def set_session_mode(self, params: SetSessionModeRequest) -> None:
-        return None
+    async def set_session_mode(self, params: SetSessionModeRequest) -> SetSessionModeResponse:
+        return SetSessionModeResponse()
 
-    async def set_session_model(self, params: SetSessionModelRequest) -> None:
-        return None
+    async def set_session_model(self, params: SetSessionModelRequest) -> SetSessionModelResponse:
+        return SetSessionModelResponse()
 
-    async def set_session_config_option(self, params: SetSessionConfigOptionRequest) -> None:
+    async def set_session_config_option(
+        self, params: SetSessionConfigOptionRequest
+    ) -> SetSessionConfigOptionResponse:
         """Mock session config option change."""
-        return
+        return SetSessionConfigOptionResponse()
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self.ext_calls.append((method, params))

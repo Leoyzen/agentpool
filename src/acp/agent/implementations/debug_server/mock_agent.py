@@ -25,6 +25,8 @@ from acp.schema import (
     ReadTextFileResponse,
     ResumeSessionResponse,
     SessionInfo,
+    SetSessionModelResponse,
+    SetSessionModeResponse,
     WriteTextFileResponse,
 )
 
@@ -128,13 +130,15 @@ class MockAgent(Agent):
         terminal_id = str(uuid.uuid4())
         return CreateTerminalResponse(terminal_id=terminal_id)
 
-    async def set_session_mode(self, params: SetSessionModeRequest) -> None:
+    async def set_session_mode(self, params: SetSessionModeRequest) -> SetSessionModeResponse:
         """Mock session mode change."""
         logger.info("Mock session mode change")
+        return SetSessionModeResponse()
 
-    async def set_session_model(self, params: SetSessionModelRequest) -> None:
+    async def set_session_model(self, params: SetSessionModelRequest) -> SetSessionModelResponse:
         """Mock session model change."""
         logger.info("Mock session model change")
+        return SetSessionModelResponse()
 
     async def set_session_config_option(self, params: SetSessionConfigOptionRequest) -> None:
         """Mock session config option change."""
