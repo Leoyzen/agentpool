@@ -185,7 +185,7 @@ def _create_forked_history(agent: BaseAgent) -> MessageHistory:
         # Get pydantic-ai messages and inject cache point
         all_messages: list[ModelRequest | ModelResponse] = []
         for msg in current_history:
-            all_messages.extend(msg.to_pydantic_ai())
+            all_messages.extend(msg.messages)
         # Wrap in a single ChatMessage for the forked history
         msg = ChatMessage(messages=all_messages, role="user", content="")
         return MessageHistory(messages=[msg])

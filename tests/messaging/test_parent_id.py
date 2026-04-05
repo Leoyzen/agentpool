@@ -211,30 +211,6 @@ class TestChatMessageParentId:
         msg = ChatMessage.user_prompt("Hello")
         assert msg.parent_id is None
 
-    def test_from_pydantic_ai_accepts_parent_id(self):
-        """ChatMessage.from_pydantic_ai should accept parent_id parameter."""
-        from pydantic_ai import ModelRequest
-
-        request = ModelRequest(parts=[])
-        msg = ChatMessage.from_pydantic_ai(
-            content="Hello",
-            message=request,
-            parent_id="parent-456",
-        )
-        assert msg.parent_id == "parent-456"
-
-    def test_from_pydantic_ai_response_accepts_parent_id(self):
-        """ChatMessage.from_pydantic_ai should accept parent_id for responses."""
-        from pydantic_ai import ModelResponse, TextPart
-
-        response = ModelResponse(parts=[TextPart(content="Hi")])
-        msg = ChatMessage.from_pydantic_ai(
-            content="Hi",
-            message=response,
-            parent_id="parent-789",
-        )
-        assert msg.parent_id == "parent-789"
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -99,10 +99,7 @@ class TaskManager:
                     # Remove and execute
                     heapq.heappop(self._task_queue)
                     # Create new task from stored coroutine
-                    new_task = asyncio.create_task(
-                        next_task.coroutine,
-                        name=next_task.name,
-                    )
+                    new_task = asyncio.create_task(next_task.coroutine, name=next_task.name)
                     self._pending_tasks.add(new_task)
                     new_task.add_done_callback(self._pending_tasks.discard)
                 else:

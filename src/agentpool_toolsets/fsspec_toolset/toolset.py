@@ -1218,7 +1218,7 @@ class FSSpecTools(ResourceProvider):
         # Build complete message list. Add stored history from previous runs
         all_messages: list[ModelRequest | ModelResponse] = []
         for chat_msg in stored_history:
-            all_messages.extend(chat_msg.to_pydantic_ai())
+            all_messages.extend(chat_msg.messages)
 
         # Add current run's messages (not yet in stored history)
         # But exclude the last message if it contains the current agentic_edit tool call
