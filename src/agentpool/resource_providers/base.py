@@ -212,7 +212,7 @@ class ResourceProvider:
             category=category,
             source=self.name,
             requires_confirmation=requires_confirmation,
-            metadata=metadata,
+            meta=metadata,
             name_override=name_override,
             description_override=description_override,
             schema_override=schema_override,

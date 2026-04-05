@@ -153,7 +153,7 @@ async def test_tool_integration():
             return f"MCP result for: {query}"
 
         meta = {"mcp_tool": "dummy_search"}
-        tool = FunctionTool.from_callable(dummy_mcp_tool, source="mcp", metadata=meta)
+        tool = FunctionTool.from_callable(dummy_mcp_tool, source="mcp", meta=meta)
 
         agent.tools.register_tool(tool)
 

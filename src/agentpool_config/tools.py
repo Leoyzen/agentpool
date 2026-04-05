@@ -82,9 +82,6 @@ class BaseToolConfig(Schema):
     metadata: dict[str, str] = Field(default_factory=dict, title="Tool metadata")
     """Additional tool metadata."""
 
-    instructions: str | None = Field(default=None, title="Tool instructions")
-    """Instructions for how to use this tool effectively."""
-
     model_config = ConfigDict(frozen=True)
 
     def get_tool(self) -> Tool:
@@ -123,6 +120,5 @@ class ImportToolConfig(BaseToolConfig):
             description_override=self.description,
             enabled=self.enabled,
             requires_confirmation=self.requires_confirmation,
-            metadata=self.metadata,
-            instructions=self.instructions,
+            meta=self.metadata,
         )

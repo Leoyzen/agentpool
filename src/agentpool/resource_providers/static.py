@@ -152,7 +152,7 @@ class StaticResourceProvider(ResourceProvider):
                     name_override=name_override,
                     description_override=description_override,
                     requires_confirmation=requires_confirmation,
-                    metadata=metadata or {},
+                    meta=metadata or {},
                 )
             case _ as unreachable:
                 assert_never(unreachable)  # ty:ignore[type-assertion-failure]
@@ -209,7 +209,6 @@ class StaticResourceProvider(ResourceProvider):
         enabled: bool = True,
         requires_confirmation: bool = False,
         metadata: dict[str, str] | None = None,
-        **kwargs: Any,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
 
     def tool(
@@ -221,7 +220,6 @@ class StaticResourceProvider(ResourceProvider):
         enabled: bool = True,
         requires_confirmation: bool = False,
         metadata: dict[str, str] | None = None,
-        **kwargs: Any,
     ) -> Callable[..., Any] | Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Decorator to register a function as a tool.
 
@@ -246,7 +244,6 @@ class StaticResourceProvider(ResourceProvider):
             enabled: Whether tool is initially enabled
             requires_confirmation: Whether execution needs confirmation
             metadata: Additional tool metadata
-            **kwargs: Additional arguments passed to Tool.from_callable
         """
         from agentpool.tools.base import FunctionTool
 
@@ -257,8 +254,7 @@ class StaticResourceProvider(ResourceProvider):
                 description_override=description,
                 enabled=enabled,
                 requires_confirmation=requires_confirmation,
-                metadata=metadata or {},
-                **kwargs,
+                meta=metadata or {},
             )
             self.add_tool(tool)
             return f

@@ -274,7 +274,8 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
         category: ToolKind | None = None,
         enabled: bool = True,
         source: ToolSource | str | None = None,
-        **kwargs: Any,
+        requires_confirmation: bool = False,
+        meta: dict[str, Any] | None = None,
     ) -> FunctionTool[TOutputType]:
         """Create a FunctionTool from a callable or import path string."""
         from agentpool.utils import importing
@@ -301,7 +302,8 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
             hints=hints or ToolHints(),
             enabled=enabled,
             source=source or "dynamic",
-            **kwargs,
+            requires_confirmation=requires_confirmation,
+            meta=meta or {},
         )
 
 
