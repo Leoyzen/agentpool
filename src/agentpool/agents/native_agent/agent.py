@@ -667,6 +667,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         model: ModelType | None,
         output_type: type[AgentOutputType] | None,
         input_provider: InputProvider | None = None,
+        run_ctx: AgentRunContext | None = None,
     ) -> PydanticAgent[AgentContext[TDeps], AgentOutputType]:
         """Create pydantic-ai agent from current state."""
         from agentpool.agents.native_agent.tool_wrapping import wrap_tool
@@ -683,7 +684,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Resolve history processors with caching
         history_processors = self._resolve_history_processors()
 
-        context_for_tools = self.get_context(input_provider=input_provider)
+        # CRITICAL: Pass run_ctx for event queue isolation (RFC-0021)
+        context_for_tools = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
 
         # Collect pydantic_ai.tools.Tool instances using Tool.to_pydantic_ai()
         pydantic_ai_tools = []
@@ -802,7 +804,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             agent_name=self.name,
             parent_session_id=parent_session_id,
         )
-        agentlet = await self.get_agentlet(None, self._output_type, input_provider)
+        agentlet = await self.get_agentlet(None, self._output_type, input_provider, run_ctx)
         response_msg: ChatMessage[Any] | None = None
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
         # Track tool call starts to combine with results later
