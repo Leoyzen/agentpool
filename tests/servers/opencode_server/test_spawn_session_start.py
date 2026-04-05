@@ -401,7 +401,8 @@ async def test_complete_lifecycle_ordering(server_state: ServerState) -> None:
     )
 
     # Verify ToolPart in parent session was updated (completed state after StreamComplete)
-    subagent_key = "1:lifecycle_test_agent"
+    # Note: subagent_key format is "{depth}:{source_name}:{child_session_id}"
+    subagent_key = f"1:lifecycle_test_agent:{child_session_id}"
     assert parent_ctx.has_subagent_tool_part(subagent_key), "Parent should have subagent ToolPart"
 
     tool_part = parent_ctx.get_subagent_tool_part(subagent_key)
@@ -492,7 +493,8 @@ async def test_backward_compatibility_fallback(server_state: ServerState) -> Non
     assert "Fallback content" in combined_text, f"Content should be routed. Got: {combined_text!r}"
 
     # Verify ToolPart was created in parent
-    subagent_key = "1:fallback_agent"
+    # Note: subagent_key format is "{depth}:{source_name}:{child_session_id}"
+    subagent_key = f"1:fallback_agent:{child_session_id}"
     assert parent_ctx.has_subagent_tool_part(subagent_key), (
         "Parent should have subagent ToolPart (created reactively)"
     )
