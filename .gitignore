@@ -20,8 +20,8 @@ junit.xml
 # pyenv
 .python-version
 # dotenv
-.env
-# virtualenv
+.env# virtualenv
+.envrc
 .venv
 # mkdocs documentation
 /site
