@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
 
@@ -21,6 +25,50 @@ if TYPE_CHECKING:
 ConfirmationResult = Literal["allow", "skip", "abort_run", "abort_chain"]
 
 logger = get_logger(__name__)
+
+
+@dataclass(kw_only=True)
+class AgentRunContext:
+    """Per-execution isolated state container for agent runs.
+
+    This dataclass holds all state that is specific to a single run execution,
+    ensuring isolation between concurrent runs. It is separate from AgentContext
+    which is the PydanticAI context passed to tools.
+
+    Attributes:
+        cancelled: Whether the run has been cancelled.
+        current_task: The asyncio.Task for the current run, if any.
+        event_queue: Queue for streaming events from this run.
+        injection_manager: Manages prompt injection and queuing for this run.
+        session_id: Unique identifier for this run session.
+        deps: Optional dependencies passed to the run.
+        start_time: Timestamp when the run started (for metrics).
+    """
+
+    cancelled: bool = False
+    """Whether the run has been cancelled."""
+
+    current_task: asyncio.Task | None = None
+    """The asyncio.Task for the current run, if any."""
+
+    event_queue: asyncio.Queue | None = None
+    """Queue for streaming events from this run."""
+
+    injection_manager: PromptInjectionManager = field(default_factory=PromptInjectionManager)
+    """Manages prompt injection and queuing for this run."""
+
+    session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    """Unique identifier for this run session."""
+
+    deps: Any = None
+    """Optional dependencies passed to the run."""
+
+    start_time: float = field(default_factory=time.time)
+    """Timestamp when the run started (for metrics)."""
+
+    def cancel(self) -> None:
+        """Cancel this run."""
+        self.cancelled = True
 
 
 @dataclass(kw_only=True)
@@ -41,6 +89,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
 
     model_name: str | None = None
     """Model name in provider:model format (e.g., 'anthropic:claude-haiku-4-5')."""
+
+    run_ctx: AgentRunContext | None = None
+    """Per-run context for accessing run-isolated state."""
 
     @property
     def native_agent(self) -> Agent[TDeps, Any]:

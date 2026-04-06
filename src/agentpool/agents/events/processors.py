@@ -27,10 +27,15 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic_ai import (
     PartDeltaEvent,
+    TextPart,
     TextPartDelta,
+    ThinkingPart,
     ThinkingPartDelta,
+    ToolCallPart,
     ToolCallPartDelta,
 )
+
+from agentpool.agents.events.events import ToolCallStartEvent
 
 
 if TYPE_CHECKING:
@@ -240,3 +245,17 @@ async def batch_stream_deltas(  # noqa: PLR0915
     # Flush any remaining batch at end of stream
     if pending_type is not None and pending_content:
         yield _make_batched_event()
+
+
+def event_to_part(
+    event: RichAgentStreamEvent[Any],
+) -> TextPart | ThinkingPart | ToolCallPart | None:
+    match event:
+        case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+            return TextPart(content=delta)
+        case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)) if delta:
+            return ThinkingPart(content=delta)
+        case ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc_name, raw_input=tc_input):
+            return ToolCallPart(tool_name=tc_name, args=tc_input, tool_call_id=tc_id)
+        case _:
+            return None

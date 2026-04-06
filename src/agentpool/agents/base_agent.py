@@ -362,6 +362,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         tool_call_id: str | None = None,
         tool_input: dict[str, Any] | None = None,
         tool_name: str | None = None,
+        run_ctx: AgentRunContext | None = None,
     ) -> AgentContext[Any]:
         """Create a new context for this agent.
 
@@ -371,6 +372,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id: Optional tool call ID
             tool_input: Optional tool input
             tool_name: Optional tool name
+            run_ctx: Optional per-run context for accessing run-isolated state
 
         Returns:
             A new AgentContext instance
@@ -386,6 +388,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id=tool_call_id,
             tool_input=tool_input or {},
             tool_name=tool_name,
+            run_ctx=run_ctx,
         )
 
     @property

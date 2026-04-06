@@ -254,6 +254,13 @@ class AgentCapabilities(AnnotatedObject):
     session_capabilities: SessionCapabilities | None = Field(default_factory=SessionCapabilities)
     """Session capabilities supported by the agent."""
 
+    slash_commands: list[AvailableCommand] = Field(default_factory=list)
+    """Available slash commands that can be invoked by the client.
+
+    These commands are exposed by the agent for direct invocation
+    via slash command interfaces. Empty list means no commands available.
+    """
+
     @classmethod
     def create(
         cls,
@@ -266,6 +273,7 @@ class AgentCapabilities(AnnotatedObject):
         list_sessions: bool = False,
         resume_session: bool = False,
         close_session: bool = False,
+        slash_commands: list[AvailableCommand] | None = None,
     ) -> Self:
         """Create an instance of AgentCapabilities.
 
@@ -279,6 +287,7 @@ class AgentCapabilities(AnnotatedObject):
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
             close_session: Whether the agent supports `session/close` (unstable).
+            slash_commands: Available slash commands exposed by the agent.
         """
         session_caps = SessionCapabilities(
             list=SessionListCapabilities() if list_sessions else None,
@@ -294,4 +303,5 @@ class AgentCapabilities(AnnotatedObject):
                 image=image_prompts,
             ),
             session_capabilities=session_caps,
+            slash_commands=slash_commands or [],
         )
