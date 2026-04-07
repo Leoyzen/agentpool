@@ -160,11 +160,6 @@ class SQLModelProvider(StorageProvider):
         Uses upsert semantics to handle duplicate session IDs gracefully.
         If the session already exists, it will be silently ignored.
         """
-        from sqlalchemy import select
-
-        Uses upsert semantics to handle duplicate session IDs gracefully.
-        If the session already exists, it will be silently ignored.
-        """
         from agentpool_storage.sql_provider.models import Conversation
 
         async with AsyncSession(self.engine) as session:
