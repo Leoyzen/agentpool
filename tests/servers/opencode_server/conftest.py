@@ -95,8 +95,10 @@ def storage_manager() -> StorageManager:
     Uses MemoryStorageProvider so session CRUD, message storage, etc.
     all work without any external dependencies or I/O.
     """
-    provider = MemoryStorageProvider()
-    return StorageManager(providers=[provider])
+    from agentpool_config.storage import MemoryStorageConfig, StorageConfig
+
+    config = StorageConfig(providers=[MemoryStorageConfig()])
+    return StorageManager(config=config)
 
 
 @pytest.fixture

@@ -282,6 +282,16 @@ class StorageManager:
                 name=f"title_gen_{session_id[:8]}",
             )
 
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data in the primary provider.
+
+        Args:
+            data: Session data to persist
+        """
+        provider = self.get_project_provider()
+        await provider.save_session(data)
+        self._session_logged.add(data.session_id)
+
     @method_spawner
     async def log_command(
         self,

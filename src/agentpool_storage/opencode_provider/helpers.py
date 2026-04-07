@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 from decimal import Decimal
+from pathlib import Path
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
@@ -41,6 +43,7 @@ from agentpool_server.opencode_server.models.parts import (
     ToolPart,
     ToolStateCompleted,
 )
+from agentpool_server.opencode_server.models.session import Session
 
 
 if TYPE_CHECKING:
@@ -300,3 +303,71 @@ def to_chat_message(
         messages=pydantic_messages,
         provider_details=provider_details,
     )
+
+
+def compute_project_id(directory: str) -> str:
+    """Compute OpenCode project ID from directory.
+
+    OpenCode uses the root commit SHA1 of the git repository as the project ID.
+    If not in a git repository, returns 'global'.
+
+    Args:
+        directory: Project directory path
+
+    Returns:
+        Project ID (root commit SHA1 or 'global')
+    """
+    try:
+        # Get the git root directory
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        git_root = result.stdout.strip()
+
+        # Get the root commit(s)
+        result = subprocess.run(
+            ["git", "rev-list", "--max-parents=0", "--all"],
+            cwd=git_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        root_commits = [c.strip() for c in result.stdout.strip().split("\n") if c.strip()]
+
+        if root_commits:
+            # Sort and return the first root commit
+            return sorted(root_commits)[0]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Not in a git repo or no root commits found
+    return "global"
+
+
+def read_session(session_path: Path) -> Session | None:
+    """Read a session from a JSON file.
+
+    Args:
+        session_path: Path to the session JSON file
+
+    Returns:
+        Session model if successful, None if file is invalid or missing
+    """
+    import anyenv
+
+    if not isinstance(session_path, Path):
+        session_path = Path(session_path)
+
+    if not session_path.exists():
+        return None
+
+    try:
+        content = session_path.read_text(encoding="utf-8")
+        data = anyenv.load_json(content)
+        return Session.model_validate(data)
+    except (anyenv.JsonLoadError, Exception) as e:
+        logger.warning("Failed to parse session file", path=str(session_path), error=str(e))
