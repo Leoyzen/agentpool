@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
 import anyenv
 from pydantic_ai import (
@@ -24,6 +24,7 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_conte
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
+    FilePart,
     FilePartInput,
     MCPStatus,
     MessagePath,
@@ -82,6 +83,7 @@ _PARAM_NAME_MAP: dict[str, str] = {
 def to_mcp_status(status: MCPServerStatus) -> MCPStatus:
     return MCPStatus(
         name=status.name,
+        display_name=status.display_name or status.name,
         status=to_opencode_mcp_status(status.status),
         error=status.error,
     )
@@ -231,7 +233,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
             message_id=message_id,
             session_id=session_id,
             time=TimeCreated(created=created_ms),
-            agent_name=agent_name,
+            agent_name=msg.name or agent_name,
         )
         if msg.content and isinstance(msg.content, str):
             ts_opt = TimeStartEndOptional(start=created_ms)
@@ -264,8 +266,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
             parent_id="",  # Would need to track parent user message
             model_id=msg.model_name or model_id,
             provider_id=msg.provider_name or provider_id,
-            mode="default",
-            agent_name=agent_name,
+            agent_name=msg.name or agent_name,
             path=MessagePath(cwd=working_dir, root=working_dir),
             time=MessageTime(created=created_ms, completed=completed_ms),
             tokens=tokens,
@@ -277,6 +278,18 @@ def chat_message_to_opencode(  # noqa: PLR0915
         # Process all model messages to extract parts
         tool_calls: dict[str, ToolPart] = {}
         for model_msg in msg.messages:
+            # Handle case where message might be a dict (loaded from storage)
+            if isinstance(model_msg, dict):
+                # Try to extract text content from dict representation
+                model_dict = cast(dict[str, Any], model_msg)
+                parts = model_dict.get("parts") or []
+                for part_dict in parts:
+                    if isinstance(part_dict, dict) and part_dict.get("part_kind") == "text":
+                        content = part_dict.get("content") or ""
+                        if content:
+                            ts_opt = TimeStartEndOptional(start=created_ms, end=completed_ms)
+                            result.add_text_part(content, time=ts_opt)
+                continue
             for p in model_msg.parts:
                 match p:
                     case PydanticTextPart(content=content):
@@ -337,8 +350,18 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             else:
                                 title = f"Completed {tool_name}"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
+                                # Extract metadata from tool result if present (e.g., subagent sessionId)
+                                metadata = (
+                                    tool_content.get("metadata", {})
+                                    if isinstance(tool_content, dict)
+                                    else {}
+                                )
                                 existing.state = ToolStateCompleted(
-                                    title=title, input=existing_input, output=output, time=tsc
+                                    title=title,
+                                    input=existing_input,
+                                    output=output,
+                                    time=tsc,
+                                    metadata=metadata,
                                 )
                         else:
                             # Orphan return - create completed tool part
@@ -350,7 +373,15 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             else:
                                 title = f"Completed {tool_name}"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
-                                state = ToolStateCompleted(title=title, output=output, time=tsc)
+                                # Extract metadata for orphan returns too
+                                metadata = (
+                                    tool_content.get("metadata", {})
+                                    if isinstance(tool_content, dict)
+                                    else {}
+                                )
+                                state = ToolStateCompleted(
+                                    title=title, output=output, time=tsc, metadata=metadata
+                                )
                             result.add_tool_part(tool_name, call_id, state=state)
         cost = float(msg.cost_info.total_cost) if msg.cost_info else 0.0
         result.add_step_finish_part(reason=msg.finish_reason or "stop", cost=cost, tokens=tokens)
@@ -399,10 +430,32 @@ def opencode_to_chat_message(
     # Build model messages from parts
     model_messages: list[ModelRequest | ModelResponse] = []
     if role == "user":
-        # Collect text parts into a user prompt
-        text_content = [part.text for part in msg.parts if isinstance(part, TextPart)]
-        content = "\n".join(text_content) if text_content else ""
-        model_messages.append(ModelRequest(parts=[UserPromptPart(content=content)]))
+        # Collect all parts (text and files/images) into multimodal content list
+        from pydantic_ai import BinaryContent, ImageUrl
+
+        content_items: list[str | BinaryContent | ImageUrl] = []
+        for part in msg.parts:
+            if isinstance(part, TextPart):
+                content_items.append(part.text)
+            elif isinstance(part, FilePart):
+                # Convert file part to appropriate content type
+                if part.mime.startswith("image/") and part.url.startswith("data:"):
+                    # Data URI image - extract base64 and create BinaryContent
+                    # This is the most compatible format for multimodal models
+                    content_items.append(BinaryContent.from_data_uri(part.url))
+                elif part.mime.startswith("image/"):
+                    # Regular image URL (http/https)
+                    content_items.append(ImageUrl(url=part.url, media_type=part.mime))
+                else:
+                    # Other file types - treat as text reference for now
+                    content_items.append(f"[File: {part.filename or 'attachment'}]")
+
+        # Create single user prompt with all content items as a list
+        # This is the correct format for multimodal prompts in pydantic-ai
+        if content_items:
+            model_messages.append(ModelRequest(parts=[UserPromptPart(content=content_items)]))
+        else:
+            model_messages.append(ModelRequest(parts=[UserPromptPart(content="")]))
     else:
         # Assistant message - collect response parts and tool interactions
         response_parts: list[Any] = []
@@ -510,6 +563,8 @@ def opencode_to_session_data(
     """Convert OpenCode Session to SessionData for persistence."""
     # Store revert/share in metadata
     metadata: dict[str, Any] = {}
+    if session.title:
+        metadata["title"] = session.title
     if session.revert:
         metadata["revert"] = session.revert.model_dump()
     if session.share:

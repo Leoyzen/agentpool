@@ -9,11 +9,14 @@ from typing import TYPE_CHECKING, Any
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
 from fastapi import APIRouter, HTTPException
 from pydantic_ai import FileUrl
+from slashed import CommandContext
 
+from agentpool.log import get_logger
 from agentpool.repomap import RepoMap, find_src_files
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.command_validation import validate_command
+from agentpool_storage.opencode_provider import helpers
 from agentpool_server.opencode_server.converters import (
     chat_message_to_opencode,
     opencode_to_session_data,
@@ -31,6 +34,7 @@ from agentpool_server.opencode_server.models import (
     MessageUpdatedEvent,
     MessageWithParts,
     OpenCodeBaseModel,
+    PartDeltaEvent,
     PartUpdatedEvent,
     PermissionAskedProperties,
     PermissionReplyRequest,
@@ -38,6 +42,7 @@ from agentpool_server.opencode_server.models import (
     Session,
     SessionCreatedEvent,
     SessionCreateRequest,
+    SessionUpdatedEvent,
     SessionDeletedEvent,
     SessionDiffEvent,
     SessionForkRequest,
@@ -46,21 +51,423 @@ from agentpool_server.opencode_server.models import (
     SessionShare,
     SessionStatus,
     SessionStatusEvent,
-    SessionUpdatedEvent,
     SessionUpdateRequest,
     ShellRequest,
     StepFinishPart,
     StepStartPart,
     SummarizeRequest,
     TextPart,
+    TimeCreated,
     TimeCreatedUpdated,
     Todo,
     Tokens,
+    UserMessage,
 )
+from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
+
+logger = get_logger(__name__)
+
+
+class _CommandOutputCapture:
+    """Output writer that captures command output to a string buffer."""
+
+    def __init__(self) -> None:
+        self._buffer: list[str] = []
+
+    async def print(self, message: str) -> None:
+        """Write a message to the buffer."""
+        self._buffer.append(message)
+
+    def __str__(self) -> str:
+        """Get the captured output as a single string."""
+        return "\n".join(self._buffer)
+
+
+def _process_skill_template(template: str, arguments: str | None) -> str:
+    """Process skill template with placeholder substitution like opencode.
+
+    Args:
+        template: The skill instruction template.
+        arguments: The command arguments string.
+
+    Returns:
+        The processed template with placeholders replaced.
+
+    Supported placeholders:
+        - $1, $2, etc.: Positional arguments
+        - $ARGUMENTS: All arguments as a single string
+    """
+    args = arguments.split() if arguments else []
+
+    # Find numbered placeholders $1, $2, etc.
+    import re
+
+    placeholder_regex = r"\$(\d+|ARGUMENTS)"
+    placeholders = re.findall(placeholder_regex, template)
+
+    # Find the highest numbered placeholder
+    last_pos = 0
+    for p in placeholders:
+        if p.isdigit():
+            last_pos = max(last_pos, int(p))
+
+    # Replace placeholders
+    def replace_placeholder(match: re.Match[str]) -> str:
+        placeholder = match.group(1)
+        if placeholder == "ARGUMENTS":
+            return arguments or ""
+        pos = int(placeholder)
+        idx = pos - 1
+        if idx >= len(args):
+            return ""
+        if pos == last_pos and idx < len(args):
+            # Last placeholder swallows remaining args
+            return " ".join(args[idx:])
+        return args[idx] if idx < len(args) else ""
+
+    result = re.sub(placeholder_regex, replace_placeholder, template)
+
+    # If no placeholders and arguments exist, wrap in user_request tag
+    if not placeholders and arguments and arguments.strip():
+        result = result + "\n\n<user_request>\n\n" + arguments + "\n\n</user_request>"
+
+    return result
+
+
+def _create_command_context(state: ServerState) -> CommandContext[Any]:
+    """Create a CommandContext for executing slash commands.
+
+    Args:
+        state: The current server state with agent and working directory info.
+
+    Returns:
+        A CommandContext configured with the agent context, output capture, and command store.
+    """
+    from agentpool.agents.context import AgentContext
+
+    assert state.command_store is not None, "Command store must be initialized"
+
+    agent_ctx = AgentContext(node=state.agent, data=None)
+    return CommandContext(
+        output=_CommandOutputCapture(),
+        data=agent_ctx,
+        command_store=state.command_store,
+    )
+
+
+async def _execute_slashed_command(
+    state: ServerState,
+    session_id: str,
+    request: CommandRequest,
+) -> MessageWithParts:
+    """Execute a slashed command from the CommandStore.
+
+    Args:
+        state: The server state containing the command store and agent.
+        session_id: The session ID for this command execution.
+        request: The command request with command name and arguments.
+
+    Returns:
+        MessageWithParts containing the command output.
+
+    Raises:
+        HTTPException: 404 if command store not initialized or command not found.
+        HTTPException: 500 if command execution fails.
+    """
+    # Validate command store is available
+    if state.command_store is None:
+        raise HTTPException(status_code=404, detail="Command store not initialized")
+
+    # Retrieve command from store
+    command = state.command_store.get_command(request.command)
+    if command is None:
+        raise HTTPException(status_code=404, detail=f"Command not found: {request.command}")
+
+    # Check if this is a skill command
+    is_skill_cmd = request.command.startswith("skill:")
+
+    if is_skill_cmd:
+        return await _execute_skill_command(state, session_id, request)
+
+    # Create assistant message (before execution)
+    now = now_ms()
+    assistant_msg_id = identifier.ascending("message")
+    assistant_message = AssistantMessage(
+        id=assistant_msg_id,
+        session_id=session_id,
+        parent_id="",
+        model_id=request.model or "default",
+        provider_id="opencode",
+        mode="command",
+        agent=request.agent or "default",
+        path=MessagePath(cwd=state.working_dir, root=state.working_dir),
+        time=MessageTime(created=now),
+    )
+
+    # Initialize message with parts
+    message_with_parts = MessageWithParts(info=assistant_message, parts=[])
+
+    # Store message in state and broadcast
+    state.messages[session_id].append(message_with_parts)
+    await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
+
+    # Mark session as busy
+    state.session_status[session_id] = SessionStatus(type="busy")
+    await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
+
+    # Add step-start part to indicate command is running
+    part_id = identifier.ascending("part")
+    step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
+    message_with_parts.parts.append(step_start)
+    await state.broadcast_event(PartUpdatedEvent.create(step_start))
+
+    # Parse arguments
+    args = request.arguments.split() if request.arguments else []
+
+    # Create command context with output capture
+    output_capture = _CommandOutputCapture()
+    cmd_ctx = CommandContext(
+        output=output_capture,
+        data=state.agent.get_context(),
+        command_store=state.command_store,
+    )
+
+    # Execute command
+    try:
+        await command.execute(cmd_ctx, args, {})
+    except Exception as e:
+        # Mark session as idle before raising
+        state.session_status[session_id] = SessionStatus(type="idle")
+        await state.broadcast_event(
+            SessionStatusEvent.create(session_id, SessionStatus(type="idle"))
+        )
+        raise HTTPException(status_code=500, detail=f"Command execution failed: {e}") from e
+
+    # Get command output
+    output_text = str(output_capture) if output_capture else "Command executed"
+
+    # Create text part with output
+    text_part = TextPart(
+        id=identifier.ascending("part"),
+        message_id=assistant_msg_id,
+        session_id=session_id,
+        text=output_text,
+    )
+    message_with_parts.parts.append(text_part)
+    await state.broadcast_event(PartUpdatedEvent.create(text_part))
+
+    # Run agent to process the loaded skill context
+    try:
+        # Create adapter to stream agent events through existing text_part
+        adapter = OpenCodeStreamAdapter(
+            state=state,
+            session_id=session_id,
+            assistant_msg_id=assistant_msg_id,
+            assistant_msg=message_with_parts,
+            working_dir=state.working_dir,
+        )
+        # Build prompt including user arguments
+        user_request = request.arguments if request.arguments else "请使用已加载的 skill context"
+        agent_prompt = f"用户执行了命令 '{request.command}' 并说: {user_request}\n\n请使用已加载的 skill context 来回答用户的请求。"
+
+        # Run agent with prompt to use the skill context
+        iterator = state.agent.run_stream(
+            agent_prompt,
+            session_id=session_id,
+        )
+        async for oc_event in adapter.process_stream(iterator):
+            await state.broadcast_event(oc_event)
+        # Append adapter's response to text_part
+        if adapter.response_text:
+            text_part.text = f"{output_text}\n\n{adapter.response_text}"
+            await state.broadcast_event(PartUpdatedEvent.create(text_part))
+    except Exception:  # noqa: BLE001
+        # Command already executed, ignore agent errors
+        pass
+
+    # Add step-finish part to indicate command completed
+    step_finish = StepFinishPart(
+        id=identifier.ascending("part"),
+        message_id=assistant_msg_id,
+        session_id=session_id,
+    )
+    message_with_parts.parts.append(step_finish)
+    await state.broadcast_event(PartUpdatedEvent.create(step_finish))
+
+    # Mark session as idle
+    state.session_status[session_id] = SessionStatus(type="idle")
+    await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
+
+    # Broadcast command.executed event
+    await state.broadcast_event(
+        CommandExecutedEvent.create(
+            name=request.command,
+            session_id=session_id,
+            arguments=request.arguments or "",
+            message_id=assistant_msg_id,
+        )
+    )
+
+    return message_with_parts
+
+
+async def _execute_skill_command(
+    state: ServerState,
+    session_id: str,
+    request: CommandRequest,
+) -> MessageWithParts:
+    """Execute a skill command from the SkillCommandRegistry.
+
+    This implements opencode-compatible skill handling:
+    1. Load skill instructions
+    2. Process template with arguments ($1, $2, $ARGUMENTS)
+    3. Create USER message with processed content
+    4. Run agent with this user message
+
+    Args:
+        state: The server state containing the skill commands.
+        session_id: The session ID for this command execution.
+        request: The command request with command name and arguments.
+
+    Returns:
+        MessageWithParts containing the assistant's response.
+
+    Raises:
+        HTTPException: 404 if skill command not found.
+    """
+    skill_name = request.command.removeprefix("skill:")
+
+    # Get skill command from pool
+    skill_cmd = None
+    if state.pool.skill_commands:
+        skill_cmd = state.pool.skill_commands.get(skill_name)
+
+    if not skill_cmd:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+
+    # Load skill instructions
+    instructions = skill_cmd.skill.load_instructions()
+
+    # Build RFC-0008 compatible XML format prompt
+    args = request.arguments or ""
+    user_prompt = f"""<skill-instruction>
+{instructions}
+</skill-instruction>
+
+<user-request>
+{args}
+</user-request>"""
+
+    # Mark session as busy
+    state.session_status[session_id] = SessionStatus(type="busy")
+    await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="busy")))
+
+    # Load session into agent to ensure conversation history is restored
+    # This ensures agent sees all previous messages during this run
+    await state.agent.load_session(session_id)
+
+    # Create USER message (not assistant!)
+    user_msg_id = identifier.ascending("message")
+    user_message = UserMessage(
+        id=user_msg_id,
+        session_id=session_id,
+        role="user",
+        time=TimeCreated.now(),
+        agent=request.agent or "default",
+    )
+    user_part_id = identifier.ascending("part")
+    user_msg_with_parts = MessageWithParts(
+        info=user_message,
+        parts=[
+            TextPart(id=user_part_id, messageID=user_msg_id, sessionID=session_id, text=user_prompt)
+        ],
+    )
+
+    # Store and broadcast user message
+    state.messages[session_id].append(user_msg_with_parts)
+    await state.broadcast_event(PartUpdatedEvent.create(user_msg_with_parts.parts[0]))
+    await state.broadcast_event(MessageUpdatedEvent.create(user_message))
+
+    # Create assistant message (for response)
+    assistant_msg_id = identifier.ascending("message")
+    assistant_message = AssistantMessage(
+        id=assistant_msg_id,
+        session_id=session_id,
+        parent_id=user_msg_id,
+        model_id=request.model or "default",
+        provider_id="opencode",
+        mode="command",
+        agent=request.agent or "default",
+        path=MessagePath(cwd=state.working_dir, root=state.working_dir),
+        time=MessageTime(created=now_ms()),
+    )
+    message_with_parts = MessageWithParts(info=assistant_message, parts=[])
+    state.messages[session_id].append(message_with_parts)
+    await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
+
+    # Add step-start part
+    step_start = StepStartPart(
+        id=identifier.ascending("part"),
+        message_id=assistant_msg_id,
+        session_id=session_id,
+    )
+    message_with_parts.parts.append(step_start)
+    await state.broadcast_event(PartUpdatedEvent.create(step_start))
+
+    # Run agent with the user message context
+    try:
+        adapter = OpenCodeStreamAdapter(
+            state=state,
+            session_id=session_id,
+            assistant_msg_id=assistant_msg_id,
+            assistant_msg=message_with_parts,
+            working_dir=state.working_dir,
+        )
+
+        # Run agent with the user prompt
+        iterator = state.agent.run_stream(user_prompt, session_id=session_id)
+        async for oc_event in adapter.process_stream(iterator):
+            await state.broadcast_event(oc_event)
+
+    except Exception as e:
+        error_text = f"Error: {e}"
+        text_part = TextPart(
+            id=identifier.ascending("part"),
+            message_id=assistant_msg_id,
+            session_id=session_id,
+            text=error_text,
+        )
+        message_with_parts.parts.append(text_part)
+        await state.broadcast_event(PartUpdatedEvent.create(text_part))
+
+    # Add step-finish part
+    step_finish = StepFinishPart(
+        id=identifier.ascending("part"),
+        message_id=assistant_msg_id,
+        session_id=session_id,
+    )
+    message_with_parts.parts.append(step_finish)
+    await state.broadcast_event(PartUpdatedEvent.create(step_finish))
+
+    # Mark session as idle
+    state.session_status[session_id] = SessionStatus(type="idle")
+    await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
+
+    # Broadcast command.executed event
+    await state.broadcast_event(
+        CommandExecutedEvent.create(
+            name=request.command,
+            session_id=session_id,
+            arguments=request.arguments or "",
+            message_id=assistant_msg_id,
+        )
+    )
+
+    return message_with_parts
 
 
 async def get_or_load_session(state: ServerState, session_id: str) -> Session | None:
@@ -69,12 +476,49 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     Returns None if session not found.
     Uses agent.load_session() which handles loading from the appropriate
     storage (pool storage, Claude storage, ACP server, Codex, etc.).
+
+    Important: This function ensures the agent's conversation history is always
+    synchronized with the requested session. Even if the session is cached,
+    if the agent currently has a different session loaded, the history will be
+    reloaded to prevent cross-session contamination.
+
+    For subagent sessions (child sessions), we prioritize the in-memory version
+    because parts are streamed in real-time and may not be immediately persisted
+    to storage. This ensures users see the latest message state when viewing
+    subagent sessions.
     """
-    # Check if session AND messages are already loaded
-    if session_id in state.sessions and session_id in state.messages:
+    # Check if session is cached AND agent has the correct session loaded
+    agent_has_correct_session = (
+        state.agent.session_id == session_id
+        and session_id in state.sessions
+        and session_id in state.messages
+    )
+
+    if agent_has_correct_session:
+        # Session cached and agent has correct history - safe to return
         return state.sessions[session_id]
 
-    # Load via agent - this populates agent.conversation.chat_messages
+    # For subagent/child sessions: prioritize in-memory messages if available
+    # This is critical because subagent parts are streamed in real-time to memory
+    # but are only persisted at completion, not after each part update
+    # A session is considered a subagent session if it has a parent_id
+    cached_session = state.sessions.get(session_id)
+    is_subagent_session = cached_session is not None and cached_session.parent_id is not None
+
+    if is_subagent_session and session_id in state.messages:
+        # Subagent session exists in memory with messages - return it directly
+        # This avoids overwriting real-time streamed parts with stale storage data
+        return cached_session
+
+    # Need to load/reload session history into agent
+    # This happens when:
+    # 1. Session not in cache (new session)
+    # 2. Agent has different session loaded (session switch)
+    # 3. Session in cache but no messages (e.g., subagent session not yet populated)
+
+    # Check if we have in-memory messages before reloading (for subagent sessions)
+    existing_messages = state.messages.get(session_id) if is_subagent_session else None
+
     data = await state.agent.load_session(session_id)
     if data is None:
         return None
@@ -86,18 +530,35 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     # Initialize runtime state
     if session_id not in state.session_status:
         state.session_status[session_id] = SessionStatus(type="idle")
-    # Convert agent's conversation history to OpenCode format
-    state.messages[session_id] = [
-        chat_message_to_opencode(
-            chat_msg,
-            session_id=session_id,
-            working_dir=state.working_dir,
-            agent_name=state.agent.name,
-            model_id=chat_msg.model_name or "sonnet",  # Normalized name from Claude storage
-            provider_id=chat_msg.provider_name or "claude-code",
-        )
-        for chat_msg in state.agent.conversation.chat_messages
-    ]
+
+    # For subagent sessions with existing in-memory messages, preserve them
+    # Subagent messages are streamed in real-time and may not be persisted yet
+    if is_subagent_session and existing_messages:
+        # Keep existing in-memory messages (they're more recent than storage)
+        # Only update if memory is empty
+        pass  # existing_messages already in state.messages[session_id]
+    else:
+        # Convert agent's conversation history to OpenCode format
+        # This is for regular sessions or sessions not yet in memory
+        state.messages[session_id] = [
+            chat_message_to_opencode(
+                chat_msg,
+                session_id=session_id,
+                working_dir=state.working_dir,
+                agent_name=state.agent.name,
+                model_id=chat_msg.model_name or "sonnet",  # Normalized name from Claude storage
+                provider_id=chat_msg.provider_name or "claude-code",
+            )
+            for chat_msg in state.agent.conversation.chat_messages
+        ]
+    # Create input provider for this session if not exists
+    if session_id not in state.input_providers:
+        input_provider = OpenCodeInputProvider(state, session_id)
+        state.input_providers[session_id] = input_provider
+    # Set input provider on agent to ensure correct session routing
+    state.agent._input_provider = state.input_providers[session_id]
+    # Update agent's session_id to track which session is loaded
+    state.agent.session_id = session_id
     return session
 
 
@@ -148,9 +609,10 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     """Create a new session and persist to storage."""
     now = now_ms()
     session_id = identifier.ascending("session")
+    project_id = helpers.compute_project_id(state.working_dir)
     session = Session(
         id=session_id,
-        project_id="default",  # TODO: Get from config/request
+        project_id=project_id,
         directory=state.working_dir,
         title=request.title if request and request.title else "New Session",
         version="1",
@@ -172,6 +634,12 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     state.input_providers[session_id] = input_provider
     # Set input provider on agent
     state.agent._input_provider = input_provider
+    # Clear agent's conversation for the new session
+    # Agent is shared across sessions, so we need to clear its conversation state
+    if hasattr(state.agent, "conversation") and state.agent.conversation:
+        state.agent.conversation.chat_messages.clear()
+    # Update agent's session_id to the new session
+    state.agent.session_id = session_id
     await state.broadcast_event(SessionCreatedEvent.create(session))
     return session
 
@@ -195,6 +663,72 @@ async def get_session(session_id: str, state: StateDep) -> Session:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@router.get("/{session_id}/message")
+async def get_session_messages(
+    session_id: str,
+    state: StateDep,
+    limit: int | None = None,
+) -> list[MessageWithParts]:
+    """Get all messages for a session.
+
+    Retrieves all messages in a session, including user prompts and AI responses.
+    Loads from storage if session not in memory cache.
+
+    Args:
+        session_id: Unique identifier for the session
+        limit: Optional maximum number of messages to return
+
+    Returns:
+        List of messages with their parts
+    """
+    # Ensure session is loaded
+    session = await get_or_load_session(state, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = state.messages.get(session_id, [])
+    if limit is not None and limit > 0:
+        messages = messages[-limit:]
+    return messages
+
+
+@router.get("/{session_id}/children")
+async def get_session_children(
+    session_id: str,
+    state: StateDep,
+) -> list[Session]:
+    """Get all child sessions for a given session.
+
+    Returns a list of sessions where parent_id matches the provided session_id.
+    Queries both memory cache and database for complete results.
+    """
+    children: list[Session] = []
+    seen_ids: set[str] = set()
+
+    # Check all cached sessions first
+    for session in state.sessions.values():
+        if session.parent_id == session_id:
+            children.append(session)
+            seen_ids.add(session.id)
+
+    # Query database for child sessions not in memory
+    try:
+        store = state.pool.sessions.store
+        if hasattr(store, "list_sessions"):
+            child_ids = await store.list_sessions(parent_id=session_id)
+            for child_id in child_ids:
+                if child_id not in seen_ids:
+                    child_session = await get_or_load_session(state, child_id)
+                    if child_session:
+                        children.append(child_session)
+                        seen_ids.add(child_id)
+    except Exception:  # noqa: BLE001
+        # Graceful fallback if store doesn't support list_sessions or query fails
+        pass
+
+    return children
 
 
 @router.patch("/{session_id}")
@@ -481,7 +1015,10 @@ async def get_session_todos(session_id: str, state: StateDep) -> list[Todo]:
 
     # Get todos from pool's TodoTracker
     tracker = state.pool.todos
-    return [Todo(id=e.id, content=e.content, status=e.status) for e in tracker.entries]
+    return [
+        Todo(id=e.id, content=e.content, status=e.status, priority=e.priority)
+        for e in tracker.entries
+    ]
 
 
 @router.get("/{session_id}/diff")
@@ -659,7 +1196,7 @@ async def summarize_session(  # noqa: PLR0915
     The summary message is marked with summary=true for UI display.
     """
     from pydantic_ai.messages import (
-        PartDeltaEvent,
+        PartDeltaEvent as PydanticPartDeltaEvent,
         PartStartEvent,
         TextPart as PydanticTextPart,
         TextPartDelta,
@@ -727,10 +1264,10 @@ async def summarize_session(  # noqa: PLR0915
                         text=delta,
                     )
                     assistant_msg_with_parts.parts.append(text_part)
-                    await state.broadcast_event(PartUpdatedEvent.create(text_part, delta=delta))
+                    await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
                 # Text streaming delta
-                case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
+                case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
                     response_text += delta
                     if text_part is not None:
                         text_part = TextPart(
@@ -744,7 +1281,14 @@ async def summarize_session(  # noqa: PLR0915
                             if isinstance(p, TextPart) and p.id == text_part.id:
                                 assistant_msg_with_parts.parts[i] = text_part
                                 break
-                        await state.broadcast_event(PartUpdatedEvent.create(text_part, delta=delta))
+                        await state.broadcast_event(
+                            PartDeltaEvent.create(
+                                session_id=session_id,
+                                message_id=assistant_msg_id,
+                                part_id=text_part.id,
+                                delta=delta,
+                            )
+                        )
 
                 # Stream complete - extract token usage
                 case StreamCompleteEvent(message=msg) if msg and msg.usage:
@@ -1044,14 +1588,28 @@ async def execute_command(  # noqa: PLR0915
     request: CommandRequest,
     state: StateDep,
 ) -> MessageWithParts:
-    """Execute a slash command (MCP prompt).
+    """Execute a slash command (CommandStore or MCP prompt).
 
-    Commands are mapped to MCP prompts. The command name is used to find
-    the matching prompt, and arguments are parsed and passed to it.
+    Commands are resolved in order: first checked against CommandStore (for
+    slashed/skill commands), then against MCP prompts. This provides unified
+    command execution across both systems.
     """
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Check CommandStore first (slashed commands take priority)
+    if state.command_store and state.command_store.get_command(request.command) is not None:
+        # Check for collision with MCP prompts
+        prompts = await state.agent.tools.list_prompts()
+        if any(p.name == request.command for p in prompts):
+            logger.warning(
+                "Both slashed command and prompt exist for '%s'. Using slashed command.",
+                request.command,
+            )
+        return await _execute_slashed_command(state, session_id, request)
+
+    # Fall back to MCP prompts (existing code remains unchanged)
     prompts = await state.agent.tools.list_prompts()
     # Find matching prompt by name
     prompt = next((p for p in prompts if p.name == request.command), None)

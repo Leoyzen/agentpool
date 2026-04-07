@@ -378,3 +378,14 @@ class StorageConfig(Schema):
         if self.providers is None:
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
+
+    def get_session_store(self) -> Any | None:
+        """Get the session store from the first SQL provider.
+
+        Returns:
+            Session store if available, None otherwise
+        """
+        for provider in self.effective_providers:
+            if hasattr(provider, "get_session_store"):
+                return provider.get_session_store()
+        return None

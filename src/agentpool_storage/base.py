@@ -97,6 +97,7 @@ class StorageProvider:
         start_time: datetime | None = None,
         model: str | None = None,
         agent_type: str | None = None,
+        parent_session_id: str | None = None,
     ) -> None:
         """Log a conversation (if supported)."""
 

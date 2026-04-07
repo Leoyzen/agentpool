@@ -6,26 +6,27 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
+import inspect
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
 from uuid import uuid4
 
 import logfire
 from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode, RunContext
+from pydantic_ai.models import Model
 from pydantic_ai.tools import ToolDefinition
 
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.storage import StorageManager
-from agentpool.tools import ToolManager
-from agentpool.tools.base import FunctionTool
+from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
-from agentpool.utils.inspection import get_argument_key
 from agentpool.utils.result_utils import to_type
 from agentpool.utils.streams import merge_queue_into_iterator
 
@@ -46,7 +47,6 @@ if TYPE_CHECKING:
     from toprompt import AnyPromptType
     from upathtools import JoinablePathLike
 
-    from agentpool.agents.context import AgentContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import (
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from agentpool.prompts.prompts import PromptType
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
-    from agentpool.tools import Tool
+    from agentpool.tools.base import FunctionTool
     from agentpool.ui.base import InputProvider
     from agentpool_config.knowledge import Knowledge
     from agentpool_config.mcp_server import MCPServerConfig
@@ -104,7 +104,6 @@ class AgentKwargs(TypedDict, total=False):
     model_settings: ModelSettings | None
     usage_limits: UsageLimits | None
     providers: Sequence[ProviderType] | None
-    storage: StorageManager | None
 
 
 class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
@@ -152,7 +151,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         history_processors: Sequence[Callable[..., Any]] | None = None,
-        storage: StorageManager | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -200,8 +198,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers: Model providers for model discovery (e.g., ["openai", "anthropic"]).
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
-            history_processors: Pre-resolved history processor callables
-            storage: Optional per-agent StorageManager. Falls back to pool.storage if not provided.
+            history_processors: History processors (deprecated - use session=MemoryConfig(history_processors=[...]))
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -212,9 +209,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from agentpool_config.session import MemoryConfig
 
         self.model_settings = model_settings
-        memory_cfg = (
-            session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
-        )
+        # Handle deprecated history_processors parameter
+        if history_processors is not None:
+            # Convert to session configuration
+            if session is None:
+                memory_cfg = MemoryConfig(history_processors=[])
+                # Store processors for manual resolution
+                self._direct_history_processors = list(history_processors)
+            elif isinstance(session, MemoryConfig):
+                memory_cfg = session
+                # Merge processors
+                if memory_cfg.history_processors is None:
+                    memory_cfg.history_processors = []
+                # Store processors for manual resolution
+                self._direct_history_processors = list(history_processors)
+            else:
+                raise ValueError(
+                    "Cannot use history_processors parameter with non-MemoryConfig session"
+                )
+        else:
+            memory_cfg = (
+                session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
+            )
+            self._direct_history_processors = None
         # Collect MCP servers from config
         all_mcp_servers = list(mcp_servers) if mcp_servers else []
         if agent_config and agent_config.mcp_servers:
@@ -239,7 +256,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             event_handlers=event_handlers,
             commands=all_commands,
             hooks=hooks,
-            storage=storage,
         )
         self.tool_confirmation_mode: ToolConfirmationMode = tool_confirmation_mode
         # Store builtin tools for pydantic-ai
@@ -255,9 +271,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if knowledge:
             resources.extend(knowledge.get_resources())
         manifest = agent_pool.manifest if agent_pool else AgentsManifest()
-        effective_storage = self.storage or StorageManager()
+        storage = agent_pool.storage if agent_pool else StorageManager()
         self.conversation = MessageHistory(
-            storage=effective_storage,
+            storage=storage,
             converter=ConversionManager(config=manifest.conversion),
             session_config=memory_cfg,
             resources=resources,
@@ -285,11 +301,90 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._hook_manager = NativeAgentHookManager(
             agent_name=self.name,
             agent_hooks=hooks,
-            injection_manager=self._injection_manager,
         )
         self._default_usage_limits = usage_limits
         self._providers = list(providers) if providers else None  # model discovery
-        self._history_processors = list(history_processors) if history_processors else []
+        self._resolved_history_processors: list[Callable[..., Any]] | None = None
+
+    def _validate_processor_signature(self, processor: Callable[..., Any]) -> None:
+        """Validate that a history processor has been correct signature.
+
+        Valid signatures:
+        - sync: (messages) -> msgs
+        - sync with ctx: (ctx, messages) -> msgs
+        - async: async (messages) -> msgs
+        - async with ctx: async (ctx, messages) -> msgs
+
+        Args:
+            processor: The processor to validate
+
+        Raises:
+            ValueError: If signature is not valid
+        """
+        # Define constant for parameter validation
+        two_params = 2
+
+        sig = inspect.signature(processor)
+        params = list(sig.parameters.values())
+
+        # Check parameter count
+        if len(params) not in (1, two_params):
+            msg = f"History processor must take 1 or {two_params} arguments, got {len(params)}"
+            raise ValueError(msg)
+
+        # Second parameter (if present) must be named 'messages' or similar
+        if len(params) == two_params:
+            last_param_name = params[1].name.lower()
+            if last_param_name not in ("messages", "msgs", "history"):
+                msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
+                raise ValueError(msg)
+
+    def _resolve_history_processors(self) -> list[Callable[..., Any]]:
+        """Resolve history processors from config with caching.
+
+        Returns:
+            List of resolved processor callables
+        """
+        # Return cached result if available
+        if self._resolved_history_processors is not None:
+            return self._resolved_history_processors
+
+        # Handle direct function list from deprecated history_processors parameter
+        if self._direct_history_processors is not None:
+            resolved: list[Callable[..., Any]] = []
+            for processor in self._direct_history_processors:
+                self._validate_processor_signature(processor)
+                resolved.append(processor)
+            # Cache resolved processors
+            self._resolved_history_processors = resolved
+            return resolved
+
+        # Get history processors from memory config
+        if not (memory_cfg := self.conversation._config):
+            self._resolved_history_processors = []
+            return []
+
+        processor_paths = getattr(memory_cfg, "history_processors", None)
+        if not processor_paths:
+            self._resolved_history_processors = []
+            return []
+
+        from agentpool.utils.importing import import_callable
+
+        resolved: list[Callable[..., Any]] = []
+        for path in processor_paths:
+            try:
+                processor = import_callable(path)
+                # Validate signature
+                self._validate_processor_signature(processor)
+                resolved.append(processor)
+            except Exception as e:
+                msg = f"Failed to resolve history processor '{path}': {e}"
+                raise ValueError(msg) from e
+
+        # Cache resolved processors
+        self._resolved_history_processors = resolved
+        return resolved
 
     @classmethod
     def from_config(
@@ -339,9 +434,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     case (str() as sys_prompt) | StaticPromptConfig(content=sys_prompt):
                         sys_prompts.append(sys_prompt)
                     case FilePromptConfig(path=path, variables=variables):
-                        template_path = Path(path)
-                        if not template_path.is_absolute() and config.config_file_path:
-                            template_path = Path(config.config_file_path).parent / path
+                        # ConfigPath has already resolved the path relative to config directory
+                        # Just use it directly
+                        template_path = Path(str(path))
                         template_content = template_path.read_text("utf-8")
                         if variables:
                             from jinja2 import Template
@@ -353,9 +448,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         sys_prompts.append(content)
                     case LibraryPromptConfig(reference=reference):
                         if agent_pool is None:
-                            raise ValueError(
-                                f"Cannot resolve library prompt {reference!r}: no agent pool"
-                            )
+                            msg = f"Cannot resolve library prompt {reference!r}: no agent pool"
+                            raise ValueError(msg)
                         try:
                             content = agent_pool.prompt_manager.get.sync(reference)
                             sys_prompts.append(content)
@@ -371,15 +465,28 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         toolsets_list = config.get_toolsets()
         if config_tool_provider := config.get_tool_provider():
             toolsets_list.append(config_tool_provider)
-        # Convert workers config to a toolset
-        if workers := config.get_workers():
-            toolsets_list.append(WorkersTools(workers=workers, name="workers"))
+        # Convert workers config to a toolset (backwards compatibility)
+        if config.workers:
+            workers_provider = WorkersTools(workers=list(config.workers), name="workers")
+            toolsets_list.append(workers_provider)
         # Resolve output type from config
         resolved_output_type = to_type(t, manifest.responses) if (t := config.output_type) else str
         # Merge event handlers
         config_handlers = config.get_event_handlers()
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
-        resolved_model = manifest.resolve_model(config.model)
+
+        # Handle model configuration - resolve model_variants reference if needed
+        from llmling_models_config import StringModelConfig
+
+        model_config = config.model
+        if (
+            isinstance(model_config, StringModelConfig)
+            and model_config.identifier in manifest.model_variants
+        ):
+            # The identifier is a model_variants key, use the variant config
+            model_config = manifest.model_variants[model_config.identifier]
+
+        resolved_model = manifest.resolve_model(model_config)
         return cls(
             model=resolved_model.get_model(),
             model_settings=resolved_model.get_model_settings(),
@@ -406,7 +513,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             builtin_tools=config.get_builtin_tools() or None,
             usage_limits=config.usage_limits,
             providers=config.model_providers,
-            history_processors=config.get_history_processors() or None,
         )
 
     async def __aenter__(self) -> Self:
@@ -537,7 +643,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     @property
     def model_name(self) -> str | None:
         """Get the model name in a consistent format (provider:model_name)."""
-        return self._model.model_id if self._model else None
+        # Construct full model ID with provider prefix (e.g., "anthropic:claude-haiku-4-5")
+        return f"{self._model.system}:{self._model.model_name}" if self._model else None
 
     def to_tool(
         self,
@@ -585,16 +692,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         tool_name = name or f"ask_{self.name}"
         wrapped_tool.__doc__ = docstring
         wrapped_tool.__name__ = tool_name
-        return FunctionTool.from_callable(wrapped_tool, source="agent")
+        return Tool.from_callable(wrapped_tool, source="agent")
 
     async def get_agentlet[AgentOutputType](
         self,
         model: ModelType | None,
         output_type: type[AgentOutputType] | None,
         input_provider: InputProvider | None = None,
-    ) -> PydanticAgent[TDeps, AgentOutputType]:
+        run_ctx: AgentRunContext | None = None,
+    ) -> PydanticAgent[AgentContext[TDeps], AgentOutputType]:
         """Create pydantic-ai agent from current state."""
         from agentpool.agents.native_agent.tool_wrapping import wrap_tool
+        from agentpool.utils.context_wrapping import wrap_instruction
 
         tools = await self.tools.get_tools(state="enabled")
         final_type = to_type(output_type) if output_type not in [None, str] else self._output_type
@@ -604,54 +713,100 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             model_ = actual_model
 
-        agent = PydanticAgent(
+        # Resolve history processors with caching
+        history_processors = self._resolve_history_processors()
+
+        # CRITICAL: Pass run_ctx for event queue isolation (RFC-0021)
+        context_for_tools = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
+
+        # Collect pydantic_ai.tools.Tool instances using Tool.to_pydantic_ai()
+        pydantic_ai_tools = []
+        for tool in tools:
+            wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
+            pydantic_ai_tool = tool.to_pydantic_ai(function_override=wrapped)
+            pydantic_ai_tools.append(pydantic_ai_tool)
+
+        # Collect and wrap instructions from all resource providers
+        all_instructions: list[Any] = []
+
+        # Start with formatted system prompt as a static instruction
+        if self._formatted_system_prompt:
+            all_instructions.append(self._formatted_system_prompt)
+
+        # Collect instructions from all providers
+        for provider in self.tools.providers:
+            try:
+                provider_instructions = await provider.get_instructions()
+                # Wrap each instruction for pydantic-ai compatibility
+                for instruction_fn in provider_instructions:
+                    try:
+                        wrapped_instruction = wrap_instruction(instruction_fn, fallback="")
+                        all_instructions.append(wrapped_instruction)
+                    except Exception:
+                        # Wrap failure - log and skip this instruction
+                        logger.exception(
+                            "Failed to wrap instruction, skipping",
+                            provider=provider.name,
+                            instruction=instruction_fn,
+                        )
+                        continue
+            except Exception as e:
+                # Provider failure - log and continue
+                logger.exception(
+                    "Failed to get instructions from provider",
+                    provider=provider.name,
+                    error=str(e),
+                )
+                continue
+
+        # Resolve history processors with caching
+        history_processors = self._resolve_history_processors()
+
+        return PydanticAgent(
             name=self.name,
             model=model_,
             model_settings=self.model_settings,
-            instructions=self._formatted_system_prompt,
+            instructions=all_instructions,
             retries=self._retries,
             end_strategy=self._end_strategy,
             output_retries=self._output_retries,
-            deps_type=self.deps_type or NoneType,
-            output_type=final_type,
+            deps_type=AgentContext[TDeps],
+            output_type=cast(Any, final_type),
+            tools=pydantic_ai_tools,
             builtin_tools=self._builtin_tools,
-            history_processors=self._history_processors or None,
+            history_processors=history_processors,
         )
 
-        context_for_tools = self.get_context(input_provider=input_provider)
-
-        for tool in tools:
-            wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
-
-            prepare_fn = None
-            if tool.schema_override:
-
-                def create_prepare(
-                    t: Tool,
-                ) -> Callable[[RunContext[Any], ToolDefinition], Awaitable[ToolDefinition | None]]:
-                    async def prepare_schema(
-                        ctx: RunContext[Any], tool_def: ToolDefinition
-                    ) -> ToolDefinition | None:
-                        if not t.schema_override:
-                            return None
-                        return ToolDefinition(
-                            name=t.schema_override.get("name") or t.name,
-                            description=t.schema_override.get("description") or t.description,
-                            parameters_json_schema=t.schema_override.get("parameters"),
-                        )
-
-                    return prepare_schema
-
-                prepare_fn = create_prepare(tool)
-
-            if get_argument_key(wrapped, RunContext):
-                agent.tool(prepare=prepare_fn)(wrapped)
-            else:
-                agent.tool_plain(prepare=prepare_fn)(wrapped)
-        return agent  # type: ignore[return-value]
-
-    async def _stream_events(
+    async def _process_node_stream(
         self,
+        run_ctx: AgentRunContext,
+        node_stream: AsyncIterator[Any],
+        *,
+        pending_tcs: dict[str, BaseToolCallPart],
+        message_id: str,
+    ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
+        """Process events from a node stream (ModelRequest or CallTools).
+
+        Args:
+            run_ctx: Per-run context for state isolation
+            node_stream: Stream of events from the node
+            pending_tcs: Dictionary of pending tool calls
+            message_id: Current message ID
+
+        Yields:
+            Processed stream events
+        """
+        async with merge_queue_into_iterator(node_stream, run_ctx.event_queue) as merged:
+            async for event in merged:
+                if run_ctx.cancelled:
+                    break
+                yield event
+                if combined := process_tool_event(self.name, event, pending_tcs, message_id):
+                    yield combined
+
+    async def _stream_events(  # noqa: PLR0915
+        self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -660,6 +815,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         store_history: bool = True,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         input_provider: InputProvider | None = None,
         wait_for_connections: bool | None = None,
@@ -674,76 +830,138 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         start_time = time.perf_counter()
         history_list = message_history.get_history()
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
-        yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
-        agentlet = await self.get_agentlet(None, self._output_type, input_provider)
+        yield RunStartedEvent(
+            session_id=self.session_id,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
+        )
+        agentlet = await self.get_agentlet(None, self._output_type, input_provider, run_ctx)
         response_msg: ChatMessage[Any] | None = None
         # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
-        async with agentlet.iter(
-            prompts,
-            deps=deps,  # type: ignore[arg-type]
-            message_history=[m for run in history_list for m in run.to_pydantic_ai()],
-            usage_limits=self._default_usage_limits,
-        ) as agent_run:
-            pending_tcs: dict[str, BaseToolCallPart] = {}
+        # Track tool call starts to combine with results later
+        # Create AgentContext with user deps stored in .data
+        agent_deps = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
+        if deps is not None:
+            agent_deps.data = deps
+
+        # Run the entire agent iteration in an isolated task to prevent CancelScope
+        # issues when consumer breaks from iteration. This ensures all pydantic-ai
+        # context managers (CancelScope, TaskGroup, ContextVar) exit in the correct task.
+        event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
+        iteration_done = asyncio.Event()
+        iteration_error: BaseException | None = None
+        response_msg: ChatMessage[Any] | None = None
+        response_time: float = 0.0
+
+        async def agent_iteration_task() -> None:
+            """Background task that runs agentlet.iter() and feeds events to queue."""
+            nonlocal iteration_error, response_msg
+            history = [m for run in history_list for m in run.to_pydantic_ai()]
             try:
-                async for node in agent_run:
-                    if self._cancelled:
-                        self.log.info("Stream cancelled by user")
-                        break
-                    match node:
-                        case End():
+                async with agentlet.iter(
+                    prompts,
+                    deps=agent_deps,
+                    message_history=history,
+                    usage_limits=self._default_usage_limits,
+                ) as agent_run:
+                    pending_tcs: dict[str, BaseToolCallPart] = {}
+                    async for node in agent_run:
+                        if run_ctx.cancelled or iteration_done.is_set():
+                            self.log.info("Stream cancelled by user")
                             break
-                        # Stream events from model request or tool call nodes
-                        case ModelRequestNode() | CallToolsNode():
-                            async with (
-                                node.stream(agent_run.ctx) as stream,
-                                merge_queue_into_iterator(stream, self._event_queue) as merged,  # type: ignore[arg-type]
-                            ):
-                                async for event in merged:
-                                    if self._cancelled:
-                                        break
-                                    yield event
-                                    if combined := process_tool_event(
-                                        self.name,
-                                        event,  # ty: ignore[invalid-argument-type]
-                                        pending_tcs,
-                                        message_id,
-                                    ):
-                                        yield combined
+                        if isinstance(node, End):
+                            break
+
+                        # Stream events from node (model request or tool call)
+                        if isinstance(node, ModelRequestNode | CallToolsNode):
+                            async with node.stream(agent_run.ctx) as stream:
+                                async with merge_queue_into_iterator(
+                                    stream, run_ctx.event_queue
+                                ) as merged:  # type: ignore[arg-type]
+                                    async for event in merged:
+                                        if run_ctx.cancelled or iteration_done.is_set():
+                                            break
+                                        await event_queue.put(event)
+                                        if combined := process_tool_event(
+                                            self.name, event, pending_tcs, message_id
+                                        ):
+                                            await event_queue.put(combined)
+
+                    # Build response message
+                    response_time = time.perf_counter() - start_time
+                    if run_ctx.cancelled:
+                        partial_content = extract_text_from_messages(
+                            agent_run.all_messages(), include_interruption_note=True
+                        )
+                        response_msg = ChatMessage(
+                            content=partial_content,
+                            role="assistant",
+                            name=self.name,
+                            message_id=message_id,
+                            session_id=self.session_id,
+                            parent_id=user_msg.message_id,
+                            response_time=response_time,
+                            finish_reason="stop",
+                        )
+                        await event_queue.put(StreamCompleteEvent(message=response_msg))
+                    elif agent_run.result:
+                        response_msg = await ChatMessage.from_run_result(
+                            agent_run.result,
+                            agent_name=self.name,
+                            message_id=message_id,
+                            session_id=self.session_id,
+                            parent_id=user_msg.message_id,
+                            response_time=time.perf_counter() - start_time,
+                            metadata=None,
+                        )
+                    else:
+                        raise RuntimeError("Stream completed without producing a result")
             except asyncio.CancelledError:
-                self.log.info("Stream cancelled via task cancellation")
-                self._cancelled = True
+                self.log.info("Agent iteration task cancelled")
+            except BaseException as e:
+                iteration_error = e
+            finally:
+                # Signal end of iteration
+                await event_queue.put(None)
 
-            # Build response message
-            response_time = time.perf_counter() - start_time
-            if self._cancelled:
-                partial_content = extract_text_from_messages(
-                    agent_run.all_messages(), include_interruption_note=True
-                )
-                response_msg = ChatMessage(
-                    content=partial_content,
-                    role="assistant",
-                    name=self.name,
-                    message_id=message_id,
-                    session_id=self.session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=response_time,
-                    finish_reason="stop",
-                )
-                yield StreamCompleteEvent(message=response_msg)
-                return
+        # Start the agent iteration task
+        iteration_task = asyncio.create_task(agent_iteration_task())
 
-            if agent_run.result:
-                response_msg = await ChatMessage.from_run_result(
-                    agent_run.result,
-                    agent_name=self.name,
-                    message_id=message_id,
-                    session_id=self.session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=response_time,
-                )
-            else:
-                raise RuntimeError("Stream completed without producing a result")
+        try:
+            # Yield events from the queue
+            while True:
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                    if event is None:  # End of stream
+                        break
+                    yield event
+                except TimeoutError:
+                    # Check if we should exit
+                    if run_ctx.cancelled:
+                        break
+                    continue
+
+            # Re-raise any error from iteration task
+            if iteration_error is not None:
+                raise iteration_error
+
+        finally:
+            # Signal iteration to stop
+            iteration_done.set()
+            # Only set cancelled if the iteration task was actually cancelled
+            if iteration_task.cancelled():
+                run_ctx.cancelled = True
+            # Cancel task if still running
+            if not iteration_task.done():
+                iteration_task.cancel()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(iteration_task),
+                        timeout=2.0,
+                    )
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # Cleanup will happen in background
 
         # Send additional enriched completion event
         yield StreamCompleteEvent(message=response_msg)
@@ -772,12 +990,15 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             # Direct Model instance assignment (no signal emission)
             self._model = model
-            assert self.model_name is not None
-            await self.update_state(config_id="model", value_id=self.model_name)
 
-    async def _interrupt(self) -> None:
-        """Cancel the current stream task."""
-        if (task := self._current_stream_task) and not task.done():
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Cancel the current stream task.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
+        task = run_ctx.current_task if run_ctx else None
+        if task and not task.done():
             task.cancel()
 
     @asynccontextmanager
@@ -803,8 +1024,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pause_routing: Whether to pause message routing
             model: Temporary model override
         """
-        from pydantic_ai.models import Model
-
         old_model = self._model
         old_settings = self.model_settings
         if output_type:
@@ -823,13 +1042,15 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
             if pause_routing:  # Routing
                 await stack.enter_async_context(self.connections.paused_routing())
-            match model:
-                case str():
+
+            if model is not None:  # Model
+                if isinstance(model, str):
                     self._model, settings = self._resolve_model_string(model)
                     if settings:
                         self.model_settings = settings
-                case Model():
+                else:
                     self._model = model
+
             try:
                 yield self
             finally:  # Restore model and settings
@@ -852,9 +1073,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from tokonomics.model_discovery import get_all_models
 
         delta = timedelta(days=200)
-        if self._providers:
-            return await get_all_models(providers=self._providers, max_age=delta)
-        return await get_all_models(providers=["models.dev"], max_age=delta)
+        return await get_all_models(providers=self._providers or ["models.dev"], max_age=delta)
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for this agent."""
@@ -883,10 +1102,33 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             await self.update_state(config_id="mode", value_id=mode_id)
 
         elif category_id == "model":
+            self.log.info(f"_set_mode called for model: {mode_id}")
+            # Validate model exists (check both tokonomics models and model_variants)
+            is_valid = False
+            if models := await self.get_available_models():
+                valid_ids = [m.pydantic_ai_id for m in models]
+                if mode_id in valid_ids:
+                    is_valid = True
+                    self.log.info(f"Model {mode_id} validated against tokonomics")
+            # Also check model_variants from manifest
+            if (
+                not is_valid
+                and self.agent_pool
+                and mode_id in self.agent_pool.manifest.model_variants
+            ):
+                is_valid = True
+                self.log.info(f"Model {mode_id} validated against model_variants")
+            if not is_valid:
+                self.log.warning(
+                    f"Model {mode_id} validation failed. Available variants: {list(self.agent_pool.manifest.model_variants.keys()) if self.agent_pool else 'N/A'}"
+                )
+                raise UnknownModeError(mode_id, valid_ids if models else [])
             # Set the model directly
+            old_model = self._model
             self._model, settings = self._resolve_model_string(mode_id)
             if settings:
                 self.model_settings = settings
+            self.log.info(f"Model changed from {old_model} to {self._model}")
             await self.update_state(config_id="model", value_id=mode_id)
         else:
             raise UnknownCategoryError(category_id, ["mode", "model"])
@@ -899,7 +1141,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     ) -> list[SessionData]:
         """List sessions from storage.
 
-        For native agents, queries the storage manager for all sessions
+        For native agents, queries the pool's session store for all sessions
         associated with this agent. Fetches conversation titles from storage.
 
         Args:
@@ -909,23 +1151,28 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             List of SessionData objects
         """
-        storage = self.storage
-        if not storage:
+        if not self.agent_pool:
             return []
+        # Get sessions from session store
         try:
-            session_ids = await storage.list_session_ids(agent_name=self.name)
+            # Get session IDs from store
+            session_ids = await self.agent_pool.storage.list_session_ids(agent_name=self.name)
+            # Load each session to get full SessionData
             result: list[SessionData] = []
             for session_id in session_ids:
-                if session_data := await storage.load_session(session_id):
+                if session_data := await self.agent_pool.storage.load_session(session_id):
                     # Filter by cwd if specified
                     if cwd is not None and session_data.cwd != cwd:
                         continue
                     # Fetch title from conversation storage if not in metadata
-                    if not session_data.title and (
-                        title := await storage.get_session_title(session_data.session_id)
+                    if (
+                        not session_data.title
+                        and (storage := self.agent_pool.storage)
+                        and (title := await storage.get_session_title(session_data.session_id))
                     ):
                         session_data = session_data.with_metadata(title=title)
                     result.append(session_data)
+                    # Check limit
                     if limit is not None and len(result) >= limit:
                         break
 
@@ -946,26 +1193,28 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             SessionData if session was found and loaded, None otherwise
         """
-        storage = self.storage
-        if not storage:
+        if not self.agent_pool:
             return None
+
         try:
-            session_data = await storage.load_session(session_id)
+            # Load session data from session store
+            session_data = await self.agent_pool.storage.load_session(session_id)
             if not session_data:
                 return None
-            # Load conversation history if available from storage providers
-            if storage.providers:
-                provider = storage.providers[0]
-                if provider.can_load_history:
-                    messages = await provider.get_session_messages(session_id=session_id)
-                    self.conversation.chat_messages.clear()
-                    self.conversation.chat_messages.extend(messages)
-                    msg = "Session loaded with conversation history"
-                    self.log.info(msg, session_id=session_id, message_count=len(messages))
-                else:
-                    self.log.info("Session loaded (no history support)", session_id=session_id)
-            else:
-                self.log.info("Session loaded (no storage providers)", session_id=session_id)
+            # Load conversation history using storage manager's get_session_messages
+            # This uses get_history_provider() to select the correct provider
+            try:
+                messages = await self.agent_pool.storage.get_session_messages(session_id)
+                # Restore to conversation history
+                self.conversation.chat_messages.clear()
+                self.conversation.chat_messages.extend(messages)
+                msg = "Session loaded with conversation history"
+                self.log.info(msg, session_id=session_id, message_count=len(messages))
+            except RuntimeError as e:
+                # No capable provider found for loading history
+                self.log.info(
+                    "Session loaded (no history support)", session_id=session_id, error=str(e)
+                )
 
         except Exception:
             self.log.exception("Failed to load session", session_id=session_id)

@@ -14,6 +14,7 @@ from .events import (
     RichAgentStreamEvent,
     RunErrorEvent,
     RunStartedEvent,
+    SpawnSessionStart,
     StreamWithCommandsEvent,
     StreamCompleteEvent,
     SubAgentEvent,
@@ -23,6 +24,7 @@ from .events import (
     ToolCallContentItem,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    ToolResultMetadataEvent,
 )
 from .event_emitter import StreamEventEmitter
 from .builtin_handlers import (
@@ -58,6 +60,7 @@ __all__ = [
     "RichAgentStreamEvent",
     "RunErrorEvent",
     "RunStartedEvent",
+    "SpawnSessionStart",
     "StreamCompleteEvent",
     "StreamEventEmitter",
     "StreamPipeline",
@@ -70,6 +73,7 @@ __all__ = [
     "ToolCallContentItem",
     "ToolCallProgressEvent",
     "ToolCallStartEvent",
+    "ToolResultMetadataEvent",
     "detailed_print_handler",
     "event_handler_processor",
     "resolve_event_handlers",

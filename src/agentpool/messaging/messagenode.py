@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from evented.event_data import EventData
     from evented_config import EventConfig
 
+    from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.common_types import (
         AnyTransformFn,
         AsyncFilterFn,
@@ -60,11 +61,9 @@ class MessageNode[TDeps, TResult](ABC):
         agent_pool: AgentPool[Any] | None = None,
         enable_logging: bool = True,
         event_configs: Sequence[EventConfig] | None = None,
-        storage: StorageManager | None = None,
     ) -> None:
         """Initialize message node."""
         super().__init__()
-        self._storage = storage
 
         from agentpool.mcp_server.manager import MCPManager
         from agentpool.messaging import EventManager
@@ -80,20 +79,26 @@ class MessageNode[TDeps, TResult](ABC):
         self.log = logger.bind(agent_name=self._name)
         self.agent_pool = agent_pool
         self.description = description
+        self.session_id: str | None = None
+        self.parent_session_id: str | None = None
+        self.session_title: str | None = None
         self.connections = ConnectionManager(self)
         cfgs = list(event_configs) if event_configs else None
-        self._events = EventManager(configs=cfgs, event_callbacks=[_event_handler])
+        self._events = EventManager(
+            configs=cfgs,
+            event_callbacks=[_event_handler],
+            session_id=self.session_id,
+            parent_session_id=self.parent_session_id,
+        )
         name_ = f"node_{self._name}"
         self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name)
         self.enable_db_logging = enable_logging
-        self.session_id: str | None = None
-        self.session_title: str | None = None
 
     async def log_session(
         self,
         initial_prompt: str | None = None,
         model: str | None = None,
-        agent_type: str | None = None,
+        parent_session_id: str | None = None,
     ) -> None:
         """Log conversation to storage if enabled.
 
@@ -104,7 +109,7 @@ class MessageNode[TDeps, TResult](ABC):
         Args:
             initial_prompt: Optional initial prompt to trigger title generation.
             model: Requested model identifier for this session.
-            agent_type: Type of agent backend (native, claude, codex, etc.).
+            parent_session_id: Optional parent session ID.
         """
 
         def _set_session_title(title: str) -> None:
@@ -116,10 +121,30 @@ class MessageNode[TDeps, TResult](ABC):
                 session_id=self.session_id,
                 node_name=self.name,
                 model=model,
-                agent_type=agent_type,
                 initial_prompt=initial_prompt,
+                parent_session_id=parent_session_id,
                 on_title_generated=_set_session_title,
             )
+
+    async def emit_agent_event(self, event: RichAgentStreamEvent[Any]) -> None:
+        """Emit an agent stream event via the event manager.
+
+        Args:
+            event: The agent stream event to emit
+        """
+        await self._events.emit_agent_event(event, source_session_id=self.session_id)
+
+    def set_session_context(self, session_id: str, parent_session_id: str | None = None) -> None:
+        """Set session context for the node and its event manager.
+
+        Args:
+            session_id: The session ID to set
+            parent_session_id: Optional parent session ID
+        """
+        self.session_id = session_id
+        self.parent_session_id = parent_session_id
+        self._events.session_id = session_id
+        self._events.parent_session_id = parent_session_id
 
     async def __aenter__(self) -> Self:
         """Initialize base message node."""
@@ -168,9 +193,7 @@ class MessageNode[TDeps, TResult](ABC):
 
     @property
     def storage(self) -> StorageManager | None:
-        """Get storage manager (per-agent override or from pool)."""
-        if self._storage is not None:
-            return self._storage
+        """Get storage manager from pool."""
         return self.agent_pool.storage if self.agent_pool else None
 
     @property
@@ -196,7 +219,6 @@ class MessageNode[TDeps, TResult](ABC):
         Returns:
             Tool instance that can be registered
         """
-        from agentpool.agents.base_agent import BaseAgent
         from agentpool.tools.base import FunctionTool
 
         async def wrapped(prompt: str) -> TResult:
@@ -209,11 +231,6 @@ class MessageNode[TDeps, TResult](ABC):
             docstring = f"{docstring}\n\n{self.description}"
         wrapped.__doc__ = docstring
         wrapped.__name__ = tool_name
-        if isinstance(self, BaseAgent):  # override TResult with concrete type
-            wrapped.__annotations__ = {"prompt": str, "return": self._output_type or Any}
-        else:
-            wrapped.__annotations__ = {"prompt": str, "return": Any}
-
         return FunctionTool.from_callable(wrapped)
 
     @overload

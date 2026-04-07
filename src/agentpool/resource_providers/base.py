@@ -13,12 +13,15 @@ from agentpool_config.tools import ToolHints
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
     from types import TracebackType
 
-    from pydantic_ai import ModelRequestPart
+    from pydantic_ai import ModelRequestPart, RunContext
+    from pydantic_ai.tools import ToolDefinition
     from schemez import OpenAIFunctionDefinition
 
+    from agentpool.agents.context import AgentContext
+    from agentpool.prompts.instructions import InstructionFunc
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo
     from agentpool.skills.skill import Skill
@@ -134,6 +137,10 @@ class ResourceProvider:
         """Get available skills. Override to provide skills."""
         return []
 
+    async def get_instructions(self) -> list[InstructionFunc]:
+        """Get available instruction functions. Override to provide instructions."""
+        return []
+
     async def get_skill_instructions(self, skill_name: str) -> str:
         """Get full instructions for a specific skill.
 
@@ -188,6 +195,10 @@ class ResourceProvider:
         name_override: str | None = None,
         description_override: str | None = None,
         schema_override: OpenAIFunctionDefinition | None = None,
+        prepare: Callable[
+            [RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]
+        ]
+        | None = None,
     ) -> Tool:
         """Create a tool from a function.
 
@@ -203,6 +214,7 @@ class ResourceProvider:
             name_override: Override the name of the tool
             description_override: Override the description of the tool
             schema_override: Override the schema of the tool
+            prepare: Optional prepare function to modify tool definition before execution
 
         Returns:
             Tool created from the function
@@ -216,6 +228,7 @@ class ResourceProvider:
             name_override=name_override,
             description_override=description_override,
             schema_override=schema_override,
+            prepare=prepare,
             hints=ToolHints(
                 read_only=read_only,
                 destructive=destructive,

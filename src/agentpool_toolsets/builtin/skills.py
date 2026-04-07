@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.resource_providers import StaticResourceProvider
 
@@ -85,8 +87,27 @@ class SkillsTools(StaticResourceProvider):
     available commands.
     """
 
-    def __init__(self, name: str = "skills") -> None:
+    def __init__(
+        self,
+        name: str = "skills",
+        *,
+        injection_mode: Literal["off", "metadata", "full"] | None = None,
+        max_skills: int | None = None,
+    ) -> None:
+        """Initialize the SkillsTools provider.
+
+        Args:
+            name: Provider name for resource identification
+            injection_mode: Skill injection mode for agent-specific overrides:
+                - "off": No skill injection
+                - "metadata": Inject skill metadata only
+                - "full": Inject full skill instructions
+                Defaults to None (use global/default settings)
+            max_skills: Maximum number of skills to inject. Defaults to None (no limit)
+        """
         super().__init__(name=name)
+        self.injection_mode = injection_mode
+        self.max_skills = max_skills
         self._tools = [
             self.create_tool(load_skill, category="read", read_only=True, idempotent=True),
             self.create_tool(list_skills, category="read", read_only=True, idempotent=True),

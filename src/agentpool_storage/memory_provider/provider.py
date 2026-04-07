@@ -95,7 +95,7 @@ class MemoryStorageProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
-        agent_type: str | None = None,
+        parent_session_id: str | None = None,
     ) -> None:
         """Store conversation in memory (idempotent)."""
         if any(c["id"] == session_id for c in self.conversations):
@@ -103,9 +103,9 @@ class MemoryStorageProvider(StorageProvider):
         self.conversations.append({
             "id": session_id,
             "agent_name": node_name,
+            "parent_id": parent_session_id,
             "title": None,
             "start_time": start_time or get_now(),
-            "agent_type": agent_type,
         })
 
     async def update_session_title(self, session_id: str, title: str) -> None:

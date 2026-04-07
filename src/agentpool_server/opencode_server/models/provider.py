@@ -23,6 +23,13 @@ class ModelCost(OpenCodeBaseModel):
     cache_write: float | None = None
 
 
+class ModelModalities(OpenCodeBaseModel):
+    """Modalities supported by a model."""
+
+    input: list[str] = Field(default_factory=lambda: ["text"])
+    output: list[str] = Field(default_factory=lambda: ["text"])
+
+
 class ModelLimit(OpenCodeBaseModel):
     """Limit information for a model."""
 
@@ -38,6 +45,7 @@ class Model(OpenCodeBaseModel):
     attachment: bool = False
     cost: ModelCost
     limit: ModelLimit
+    modalities: ModelModalities = Field(default_factory=ModelModalities)
     options: dict[str, Any] = Field(default_factory=dict)
     reasoning: bool = False
     release_date: str = ""

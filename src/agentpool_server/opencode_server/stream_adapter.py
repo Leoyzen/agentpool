@@ -7,8 +7,9 @@ and persistence are handled by the caller.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent, RequestUsage
 from pydantic_ai.messages import (
@@ -23,13 +24,12 @@ from pydantic_ai.messages import (
 
 from agentpool.agents.events import (
     CompactionEvent,
-    DiffContentItem,
     FileContentItem,
     LocationContentItem,
     RunErrorEvent,
+    RunStartedEvent,
     StreamCompleteEvent,
     SubAgentEvent,
-    TerminalContentItem,
     TextContentItem,
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
@@ -41,26 +41,26 @@ from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import _convert_params_for_ui
+from agentpool_server.opencode_server.event_processor import EventProcessor
+from agentpool_server.opencode_server.event_processor_context import (
+    EventProcessorContext,
+)
 from agentpool_server.opencode_server.models import (
+    MessagePath,
+    MessageTime,
+    MessageUpdatedEvent,
+    MessageWithParts,
     PartUpdatedEvent,
-    SessionCompactedEvent,
     SessionErrorEvent,
+    TimeCreated,
+    TokenCache,
     Tokens,
 )
-from agentpool_server.opencode_server.models.events import FileEditedEvent
 from agentpool_server.opencode_server.models.parts import (
-    ReasoningPart,
     StepFinishPart,
     TextPart,
-    TimeStart,
-    TimeStartEnd,
-    TimeStartEndCompacted,
     TimeStartEndOptional,
     ToolPart,
-    ToolStateCompleted,
-    ToolStateError,
-    ToolStatePending,
-    ToolStateRunning,
 )
 
 
@@ -68,11 +68,12 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 
     from agentpool.agents.events import ToolCallContentItem
-    from agentpool.agents.events.events import RichAgentStreamEvent, SubAgentType
-    from agentpool.messaging.messages import TokenCost
+    from agentpool.agents.events.events import RichAgentStreamEvent
+    from agentpool.messaging import ChatMessage
     from agentpool_server.opencode_server.models import MessageWithParts
     from agentpool_server.opencode_server.models.events import Event
     from agentpool_server.opencode_server.models.parts import ToolState
+    from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)
 
@@ -83,56 +84,87 @@ class OpenCodeStreamAdapter:
 
     Owns all mutable tracking state (tool parts, text accumulation, token
     counters). Yields OpenCode ``Event`` objects ready for broadcasting.
+
+    The adapter does NOT own:
+    - Broadcasting (caller does ``state.broadcast_event``)
+    - Agent invocation (caller provides the async iterator)
+    - Message creation (caller sets up user/assistant messages)
+    - Storage persistence (caller persists after streaming)
+    - LSP warmup (caller provides ``on_file_paths`` callback)
+
+    Args:
+        state: The server state for session management and event routing.
+        session_id: The OpenCode session ID.
+        assistant_msg_id: The assistant message ID.
+        assistant_msg: The mutable assistant message to append parts to.
+        working_dir: Working directory for path context.
+        on_file_paths: Optional callback invoked with file paths discovered during
+            tool progress events (used for LSP warmup).
     """
 
+    state: ServerState
     session_id: str
-    """The OpenCode session ID."""
-
     assistant_msg_id: str
-    """The assistant message ID."""
-
     assistant_msg: MessageWithParts
-    """The mutable assistant message to append parts to."""
-
     working_dir: str
-    """Working directory for path context."""
-
     on_file_paths: Callable[[list[str]], None] | None = None
-    """Optional callback invoked with file paths discovered during tool progress events."""
 
-    # --- mutable tracking state ---
-    _response_text: str = field(default="", init=False)
-    _usage: RequestUsage = field(default_factory=RequestUsage, init=False)
-    _cost_info: TokenCost | None = field(default=None, init=False)
-
-    _tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
-    _tool_outputs: dict[str, str] = field(default_factory=dict, init=False)
-    _tool_inputs: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
-
-    _text_part: TextPart | None = field(default=None, init=False)
-    _reasoning_part: ReasoningPart | None = field(default=None, init=False)
-    _stream_start_ms: int = field(default=0, init=False)
+    # Event processor and context for stream processing
+    processor: EventProcessor = field(default_factory=EventProcessor, init=False)
+    main_context: EventProcessorContext = field(init=False)
+    _cost_info: Any = field(default=None, init=False)
 
     def __post_init__(self) -> None:
-        self._stream_start_ms = now_ms()
+        self.main_context = EventProcessorContext(
+            session_id=self.session_id,
+            assistant_msg_id=self.assistant_msg_id,
+            assistant_msg=self.assistant_msg,
+            state=self.state,
+            working_dir=self.working_dir,
+        )
 
     # --- public read-only accessors ---
 
     @property
     def response_text(self) -> str:
-        return self._response_text
+        return self.main_context.response_text
+
+    @property
+    def input_tokens(self) -> int:
+        return self.main_context.input_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        return self.main_context.output_tokens
 
     @property
     def usage(self) -> RequestUsage:
-        return self._usage
+        """Return usage statistics for the current response."""
+        return RequestUsage(
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+        )
 
     @property
-    def cost_info(self) -> TokenCost | None:
-        return self._cost_info
+    def total_cost(self) -> float:
+        return self.main_context.total_cost
+
+    @property
+    def cost_info(self) -> Any:
+        """Return cost information for the current response."""
+
+        # Use main_context's cost tracking
+        class SimpleCostInfo:
+            def __init__(self, total):
+                self.total_cost = total
+
+        return (
+            SimpleCostInfo(self.main_context.total_cost) if self.main_context.total_cost else None
+        )
 
     @property
     def text_part(self) -> TextPart | None:
-        return self._text_part
+        return self.main_context.text_part
 
     # --- main entry point ---
 
@@ -147,11 +179,31 @@ class OpenCodeStreamAdapter:
         """
         try:
             async for event in stream:
-                for oc_event in self._handle_event(event):
+                async for oc_event in self.processor.process(event, self.main_context):
                     yield oc_event
+        except asyncio.CancelledError:
+            # Stream was cancelled by user - this is expected behavior
+            # Don't propagate the error, just log it
+            logger.debug("Stream cancelled by user", session_id=self.session_id)
+            raise  # Re-raise so caller can handle cleanup
         except Exception as e:  # noqa: BLE001
-            self._response_text = f"Error calling agent: {e}"
+            self.main_context.response_text = f"Error calling agent: {e}"
             yield SessionErrorEvent.from_exception(session_id=self.session_id, exception=e)
+
+    async def _handle_event(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[Event]:
+        """Backward-compatible event handler that delegates to EventProcessor.
+
+        This method is deprecated but kept for tests that directly call it.
+        Use process_stream instead for new code.
+
+        Args:
+            event: The agent stream event to process.
+
+        Yields:
+            OpenCode Event objects for broadcasting.
+        """
+        async for oc_event in self.processor.process(event, self.main_context):
+            yield oc_event
 
     def finalize(self) -> Iterator[Event]:
         """Yield final events after the stream has ended.
@@ -160,423 +212,45 @@ class OpenCodeStreamAdapter:
         streamed), the step-finish part, and the final text timing update.
         """
         response_time = now_ms()
+        start = self.main_context.stream_start_ms
+
         # Final text part
-        if self._response_text and self._text_part is None:
+        if self.main_context.response_text and self.main_context.text_part is None:
             # Text was never streamed incrementally — create a text part now
             text_part = TextPart(
                 id=identifier.ascending("part"),
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
-                text=self._response_text,
-                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
+                text=self.main_context.response_text,
+                time=TimeStartEndOptional(start=start, end=response_time),
             )
             self.assistant_msg.parts.append(text_part)
             yield PartUpdatedEvent.create(text_part)
-        elif self._text_part is not None:
+        elif self.main_context.text_part is not None:
             # Update streamed text part with final timing
             final_text_part = TextPart(
-                id=self._text_part.id,
+                id=self.main_context.text_part.id,
                 message_id=self.assistant_msg_id,
                 session_id=self.session_id,
-                text=self._response_text,
-                time=TimeStartEndOptional(start=self._stream_start_ms, end=response_time),
+                text=self.main_context.response_text,
+                time=TimeStartEndOptional(start=start, end=response_time),
             )
             self.assistant_msg.update_part(final_text_part)
 
         # Step finish
+        cache = TokenCache(read=0, write=0)
+        tokens = Tokens(
+            cache=cache,
+            input=self.main_context.input_tokens,
+            output=self.main_context.output_tokens,
+            reasoning=0,
+        )
         step_finish = StepFinishPart(
             id=identifier.ascending("part"),
             message_id=self.assistant_msg_id,
             session_id=self.session_id,
-            tokens=Tokens.from_pydantic_ai(self._usage),
-            cost=float(self._cost_info.total_cost) if self._cost_info else 0.0,
+            tokens=tokens,
+            cost=self.main_context.total_cost,
         )
         self.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
-
-    # --- private event dispatch ---
-
-    def _handle_event(self, event: RichAgentStreamEvent[Any]) -> Iterator[Event]:
-        """Dispatch a single agent event to the appropriate handler."""
-        match event:
-            case PartStartEvent(part=PydanticTextPart(content=delta)):
-                yield from self._on_text_start(delta)
-
-            case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
-                yield from self._on_text_delta(delta)
-
-            case PartStartEvent(part=ThinkingPart(content=delta)):
-                yield from self._on_thinking_start(delta)
-
-            case PartDeltaEvent(delta=ThinkingPartDelta(content_delta=delta)):
-                yield from self._on_thinking_delta(delta)
-
-            case ToolCallStartEvent(
-                tool_name=tool_name,
-                tool_call_id=tool_call_id,
-                raw_input=raw_input,
-                title=title,
-            ):
-                yield from self._on_tool_call_start(tool_name, tool_call_id, raw_input, title)
-
-            case (
-                FunctionToolCallEvent(part=tc_part)
-                | PartStartEvent(part=PydanticToolCallPart() as tc_part)
-            ) if tc_part.tool_call_id not in self._tool_parts:
-                yield from self._on_pydantic_tool_call(tc_part)
-
-            case ToolCallProgressEvent(
-                tool_call_id=tool_call_id,
-                title=title,
-                items=items,
-                tool_name=tool_name,
-                tool_input=event_tool_input,
-            ) if tool_call_id:
-                yield from self._on_tool_progress(
-                    tool_call_id, title, items, tool_name, event_tool_input
-                )
-
-            case ToolCallCompleteEvent(
-                tool_call_id=tool_call_id,
-                tool_result=result,
-                metadata=event_metadata,
-            ) if tool_call_id in self._tool_parts:
-                yield from self._on_tool_complete(tool_call_id, result, event_metadata)
-
-            case StreamCompleteEvent(message=msg) if msg:
-                self._usage = msg.usage
-                self._cost_info = msg.cost_info
-
-            case SubAgentEvent(
-                source_name=source_name,
-                source_type=source_type,
-                event=wrapped_event,
-                depth=depth,
-            ):
-                yield from self._on_subagent(source_name, source_type, wrapped_event, depth)
-
-            case CompactionEvent(session_id=compact_session_id, phase="completed"):
-                yield SessionCompactedEvent.create(session_id=compact_session_id)
-
-            case RunErrorEvent(message=error_message, agent_name=agent_name):
-                error_prefix = f"[{agent_name}] " if agent_name else ""
-                yield SessionErrorEvent.create(
-                    session_id=self.session_id,
-                    error_name="AgentError",
-                    error_message=f"{error_prefix}{error_message}",
-                )
-
-    # --- text streaming ---
-
-    def _on_text_start(self, delta: str) -> Iterator[Event]:
-        self._response_text = delta
-        self._text_part = TextPart(
-            id=identifier.ascending("part"),
-            message_id=self.assistant_msg_id,
-            session_id=self.session_id,
-            text=delta,
-        )
-        self.assistant_msg.parts.append(self._text_part)
-        yield PartUpdatedEvent.create(self._text_part, delta=delta)
-
-    def _on_text_delta(self, delta: str) -> Iterator[Event]:
-        self._response_text += delta
-        if self._text_part is not None:
-            updated = TextPart(
-                id=self._text_part.id,
-                message_id=self.assistant_msg_id,
-                session_id=self.session_id,
-                text=self._response_text,
-            )
-            self.assistant_msg.update_part(updated)
-            self._text_part = updated
-            yield PartUpdatedEvent.create(updated, delta=delta)
-
-    # --- thinking / reasoning ---
-
-    def _on_thinking_start(self, delta: str) -> Iterator[Event]:
-        """Handle initial thinking part - create ReasoningPart and emit update."""
-        # Skip empty reasoning content
-        if not delta or not delta.strip():
-            return
-
-        self._reasoning_part = ReasoningPart(
-            id=identifier.ascending("part"),
-            message_id=self.assistant_msg_id,
-            session_id=self.session_id,
-            text=delta,
-            time=TimeStartEndOptional.now(),
-        )
-        self.assistant_msg.parts.append(self._reasoning_part)
-        yield PartUpdatedEvent.create(self._reasoning_part)
-
-    def _on_thinking_delta(self, delta: str | None) -> Iterator[Event]:
-        """Handle incremental thinking updates - update existing ReasoningPart."""
-        # Skip empty reasoning content
-        if not delta or not delta.strip():
-            return
-
-        if self._reasoning_part is not None:
-            updated = ReasoningPart(
-                id=self._reasoning_part.id,
-                message_id=self.assistant_msg_id,
-                session_id=self.session_id,
-                text=self._reasoning_part.text + delta,
-                time=self._reasoning_part.time,
-            )
-            self.assistant_msg.update_part(updated)
-            self._reasoning_part = updated
-            yield PartUpdatedEvent.create(updated, delta=delta)
-
-    # --- tool call start (rich events from toolsets / Claude Code) ---
-
-    def _on_tool_call_start(
-        self,
-        tool_name: str,
-        tool_call_id: str,
-        raw_input: dict[str, Any] | None,
-        title: str | None,
-    ) -> Iterator[Event]:
-        ui_input = _convert_params_for_ui(raw_input) if raw_input else {}
-
-        if tool_call_id in self._tool_parts:
-            # Update existing part with the custom title
-            existing = self._tool_parts[tool_call_id]
-            self._tool_inputs[tool_call_id] = ui_input or self._tool_inputs.get(tool_call_id, {})
-            start = TimeStart(start=self._stream_start_ms)
-            state = ToolStateRunning(time=start, input=self._tool_inputs[tool_call_id], title=title)
-            updated = ToolPart(
-                id=existing.id,
-                message_id=existing.message_id,
-                session_id=existing.session_id,
-                tool=existing.tool,
-                call_id=existing.call_id,
-                state=state,
-            )
-            self._tool_parts[tool_call_id] = updated
-            self.assistant_msg.update_part(updated)
-            yield PartUpdatedEvent.create(updated)
-        else:
-            # Create new tool part
-            self._tool_inputs[tool_call_id] = ui_input
-            self._tool_outputs[tool_call_id] = ""
-            tool_part = ToolPart(
-                id=identifier.ascending("part"),
-                message_id=self.assistant_msg_id,
-                session_id=self.session_id,
-                tool=tool_name,
-                call_id=tool_call_id,
-                state=ToolStateRunning(time=TimeStart.now(), input=ui_input, title=title),
-            )
-            self._tool_parts[tool_call_id] = tool_part
-            self.assistant_msg.parts.append(tool_part)
-            yield PartUpdatedEvent.create(tool_part)
-
-    # --- pydantic-ai tool call events (fallback for pydantic-ai agents) ---
-
-    def _on_pydantic_tool_call(self, tc_part: PydanticToolCallPart) -> Iterator[Event]:
-        tool_call_id = tc_part.tool_call_id
-        tool_name = tc_part.tool_name
-        raw_input = safe_args_as_dict(tc_part)
-        ui_input = _convert_params_for_ui(raw_input)
-        self._tool_inputs[tool_call_id] = ui_input
-        self._tool_outputs[tool_call_id] = ""
-        rich_info = derive_rich_tool_info(tool_name, raw_input)
-        tool_part = ToolPart(
-            id=identifier.ascending("part"),
-            message_id=self.assistant_msg_id,
-            session_id=self.session_id,
-            tool=tool_name,
-            call_id=tool_call_id,
-            state=ToolStateRunning(time=TimeStart.now(), input=ui_input, title=rich_info.title),
-        )
-        self._tool_parts[tool_call_id] = tool_part
-        self.assistant_msg.parts.append(tool_part)
-        yield PartUpdatedEvent.create(tool_part)
-
-    # --- tool progress ---
-
-    def _on_tool_progress(
-        self,
-        tool_call_id: str,
-        title: str | None,
-        items: Sequence[ToolCallContentItem],
-        tool_name: str | None,
-        event_tool_input: dict[str, Any] | None,
-    ) -> Iterator[Event]:
-        new_output = ""
-        file_paths: list[str] = []
-        for item in items:
-            match item:
-                case TextContentItem(text=text):
-                    new_output += text
-                case FileContentItem(content=content, path=path):
-                    new_output += content
-                    file_paths.append(path)
-                case LocationContentItem(path=path):
-                    file_paths.append(path)
-                case TerminalContentItem() | DiffContentItem():
-                    pass
-                case _ as unreachable:
-                    assert_never(unreachable)
-
-        if file_paths:
-            if self.on_file_paths is not None:
-                self.on_file_paths(file_paths)
-            # Emit file.edited for each file path (matches OpenCode's edit/write/patch tools)
-            for fp in file_paths:
-                yield FileEditedEvent.create(file=fp)
-
-        if new_output:
-            self._tool_outputs[tool_call_id] = self._tool_outputs.get(tool_call_id, "") + new_output
-
-        if tool_call_id in self._tool_parts:
-            existing = self._tool_parts[tool_call_id]
-            existing_title = _extract_title_from_tool_state(existing.state)
-            accumulated_output = self._tool_outputs.get(tool_call_id, "")
-            tool_state = ToolStateRunning(
-                time=TimeStart.now(),
-                title=title or existing_title,
-                input=self._tool_inputs.get(tool_call_id, {}),
-                metadata={"output": accumulated_output} if accumulated_output else None,
-            )
-            updated = ToolPart(
-                id=existing.id,
-                message_id=existing.message_id,
-                session_id=existing.session_id,
-                tool=existing.tool,
-                call_id=existing.call_id,
-                state=tool_state,
-            )
-            self._tool_parts[tool_call_id] = updated
-            self.assistant_msg.update_part(updated)
-            yield PartUpdatedEvent.create(updated)
-        else:
-            # Create new tool part from progress event
-            ui_input = _convert_params_for_ui(event_tool_input) if event_tool_input else {}
-            self._tool_inputs[tool_call_id] = ui_input
-            accumulated_output = self._tool_outputs.get(tool_call_id, "")
-            tool_state = ToolStateRunning(
-                time=TimeStart.now(),
-                input=ui_input,
-                title=title or tool_name or "Running...",
-                metadata={"output": accumulated_output} if accumulated_output else None,
-            )
-            tool_part = ToolPart(
-                id=identifier.ascending("part"),
-                message_id=self.assistant_msg_id,
-                session_id=self.session_id,
-                tool=tool_name or "unknown",
-                call_id=tool_call_id,
-                state=tool_state,
-            )
-            self._tool_parts[tool_call_id] = tool_part
-            self.assistant_msg.parts.append(tool_part)
-            yield PartUpdatedEvent.create(tool_part)
-
-    # --- tool complete ---
-
-    def _on_tool_complete(
-        self,
-        tool_call_id: str,
-        result: Any,
-        event_metadata: dict[str, Any] | None,
-    ) -> Iterator[Event]:
-        existing = self._tool_parts[tool_call_id]
-        tool_input = self._tool_inputs.get(tool_call_id, {})
-        new_state: ToolStateCompleted | ToolStateError
-        if isinstance(result, dict) and result.get("error"):
-            t = TimeStartEnd(start=self._stream_start_ms, end=now_ms())
-            error_string = str(result.get("error", "Unknown error"))
-            new_state = ToolStateError(error=error_string, input=tool_input, time=t)
-        else:
-            new_state = ToolStateCompleted(
-                title=f"Completed {existing.tool}",
-                input=tool_input,
-                output=str(result) if result else "",
-                metadata=event_metadata or {},
-                time=TimeStartEndCompacted(start=self._stream_start_ms, end=now_ms()),
-            )
-
-        updated = ToolPart(
-            id=existing.id,
-            message_id=existing.message_id,
-            session_id=existing.session_id,
-            tool=existing.tool,
-            call_id=existing.call_id,
-            state=new_state,
-        )
-        self._tool_parts[tool_call_id] = updated
-        self.assistant_msg.update_part(updated)
-        yield PartUpdatedEvent.create(updated)
-
-    # --- sub-agent / team events ---
-
-    def _on_subagent(
-        self,
-        source_name: str,
-        source_type: SubAgentType,
-        wrapped_event: RichAgentStreamEvent[Any],
-        depth: int,
-    ) -> Iterator[Event]:
-        indent = "  " * (depth - 1)
-
-        match wrapped_event:
-            case StreamCompleteEvent(message=msg):
-                match source_type:
-                    case "team_parallel":
-                        type_label = " (parallel)"
-                        icon = "⚡"
-                    case "team_sequential":
-                        type_label = " (sequential)"
-                        icon = "→"
-                    case _:
-                        type_label = ""
-                        icon = "→"
-                indicator = f"{indent}{icon} {source_name}{type_label}"
-                indicator_part = TextPart(
-                    id=identifier.ascending("part"),
-                    message_id=self.assistant_msg_id,
-                    session_id=self.session_id,
-                    text=indicator,
-                    time=TimeStartEndOptional.now(),
-                )
-                self.assistant_msg.parts.append(indicator_part)
-                yield PartUpdatedEvent.create(indicator_part)
-
-                content = str(msg.content) if msg.content else "(no output)"
-                content_part = TextPart(
-                    id=identifier.ascending("part"),
-                    message_id=self.assistant_msg_id,
-                    session_id=self.session_id,
-                    text=content,
-                    time=TimeStartEndOptional.now(),
-                )
-                self.assistant_msg.parts.append(content_part)
-                yield PartUpdatedEvent.create(content_part)
-
-            case ToolCallCompleteEvent(tool_name=tool_name, tool_result=result):
-                result_str = str(result) if result else ""
-                preview = result_str[:60] + "..." if len(result_str) > 60 else result_str  # noqa: PLR2004
-                summary_part = TextPart(
-                    id=identifier.ascending("part"),
-                    message_id=self.assistant_msg_id,
-                    session_id=self.session_id,
-                    text=f"{indent}  ├─ {tool_name}: {preview}",
-                    time=TimeStartEndOptional.now(),
-                )
-                self.assistant_msg.parts.append(summary_part)
-                yield PartUpdatedEvent.create(summary_part)
-
-
-def _extract_title_from_tool_state(state: ToolState) -> str:
-    """Extract the title from a tool state."""
-    match state:
-        case ToolStateRunning(title=title):
-            return title or ""
-        case ToolStateCompleted(title=title):
-            return title or ""
-        case ToolStatePending() | ToolStateError():
-            return ""
-        case _ as unreachable:
-            assert_never(unreachable)

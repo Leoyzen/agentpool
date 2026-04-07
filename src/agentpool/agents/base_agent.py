@@ -19,6 +19,7 @@ from upathtools.filesystems import IsolatedMemoryFileSystem
 
 from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
 from agentpool.agents.modes import ModeInfo
+from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory, MessageNode
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from upathtools.filesystems import OverlayFileSystem
 
     from acp.schema import AvailableCommandsUpdate
-    from agentpool.agents.context import AgentContext
+    from agentpool.agents.context import AgentContext, AgentRunContext
     from agentpool.agents.events import (
         CommandCompleteEvent,
         CommandOutputEvent,
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
         StreamWithCommandsEvent,
     )
     from agentpool.agents.modes import ConfigOptionChanged, ModeCategory, ModeCategoryId
+    from agentpool.agents.native_agent import Agent
     from agentpool.common_types import (
         AgentName,
         AnyEventHandlerType,
@@ -61,7 +63,6 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
     from agentpool.sessions import SessionData
-    from agentpool.storage import StorageManager
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
@@ -171,7 +172,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         hooks: AgentHooks | None = None,
-        storage: StorageManager | None = None,
     ) -> None:
         """Initialize base agent with shared infrastructure.
 
@@ -191,7 +191,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             event_handlers: Event handlers for this agent
             commands: Slash commands to register with this agent
             hooks: Agent hooks for intercepting agent behavior at run and tool events
-            storage: Optional per-agent StorageManager. Falls back to pool.storage if not provided.
         """
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
@@ -208,13 +207,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             agent_pool=agent_pool,
             enable_logging=enable_logging,
             event_configs=event_configs,
-            storage=storage,
         )
         self._infinite = False
         self.deps_type = deps_type  # or type(None)
         self._background_task: asyncio.Task[ChatMessage[Any]] | None = None
         self._event_queue: asyncio.Queue[RichAgentStreamEvent[Any]] = asyncio.Queue()
-        self.conversation = MessageHistory(storage=self.storage)
+        storage = agent_pool.storage if agent_pool else None
+        self.conversation = MessageHistory(storage=storage)
         match env:
             case ExecutionEnvironment():
                 self.env = env
@@ -226,7 +225,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._output_type: type[TResult] = output_type
         self.tools = ToolManager()
         handlers = resolve_event_handlers(event_handlers)
-        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)  # ty: ignore[invalid-assignment]
+        self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
@@ -257,12 +256,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
     @overload
     def __and__(  # if other doesnt define deps, we take the agents one
-        self, other: ProcessorCallback[Any] | MessageNode[TDeps, Any]
+        self, other: ProcessorCallback[Any] | Team[TDeps] | Agent[TDeps, Any]
     ) -> Team[TDeps]: ...
 
     @overload
     def __and__(  # otherwise, we dont know and deps is Any
-        self, other: ProcessorCallback[Any] | MessageNode[Any, Any]
+        self, other: ProcessorCallback[Any] | Team[Any] | Agent[Any, Any]
     ) -> Team[Any]: ...
 
     def __and__(self, other: MessageNode[Any, Any] | ProcessorCallback[Any]) -> Team[Any]:
@@ -278,7 +277,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         match other:
             case Team():
                 return Team([self, *other.nodes])
-            case Callable():  # ty: ignore[invalid-match-pattern]
+            case Callable():
                 agent_2 = Agent.from_callback(other, agent_pool=self.agent_pool)  # ty: ignore[no-matching-overload]
                 return Team([self, agent_2])
             case MessageNode():
@@ -362,6 +361,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         tool_call_id: str | None = None,
         tool_input: dict[str, Any] | None = None,
         tool_name: str | None = None,
+        run_ctx: Any = None,
     ) -> AgentContext[Any]:
         """Create a new context for this agent.
 
@@ -371,12 +371,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id: Optional tool call ID
             tool_input: Optional tool input
             tool_name: Optional tool name
+            run_ctx: Optional run context (for RFC-0021)
 
         Returns:
             A new AgentContext instance
         """
-        from agentpool.agents.context import AgentContext
-
         return AgentContext(
             node=self,
             pool=self.agent_pool,
@@ -459,7 +458,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             latest = None
             while (max_count is None or count < max_count) and not self._cancelled:
                 try:
-                    agent_ctx = self.get_context(input_provider=kwargs.get("input_provider"))
+                    agent_ctx = self.get_context()
                     current_prompts = [
                         call_with_context(p, agent_ctx, **kwargs) if callable(p) else p
                         for p in prompt
@@ -571,6 +570,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         store_history: bool = True,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         message_history: MessageHistory | None = None,
         input_provider: InputProvider | None = None,
@@ -589,6 +589,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             store_history: Whether to store in history
             message_id: Optional message ID
             session_id: Optional conversation ID
+            parent_session_id: Optional parent conversation ID
             parent_id: Optional parent message ID
             message_history: Optional message history
             input_provider: Optional input provider
@@ -604,13 +605,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Initialize session_id once for the entire run (including queued prompts)
         if self.session_id is None:
             self.session_id = session_id or generate_session_id()
+            self.parent_session_id = parent_session_id
             user_prompts = [str(p) for p in prompts if isinstance(p, str)]
             initial_prompt = user_prompts[-1] if user_prompts else None
             await self.log_session(
-                initial_prompt, model=self.model_name, agent_type=self.AGENT_TYPE
+                initial_prompt, model=self.model_name, parent_session_id=self.parent_session_id
             )
         elif session_id and self.session_id != session_id:
             self.session_id = session_id
+            self.parent_session_id = parent_session_id
 
         # Reset cancellation state and track current task
         self._cancelled = False
@@ -629,6 +632,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     store_history=store_history,
                     message_id=message_id,
                     session_id=session_id,
+                    parent_session_id=parent_session_id,
                     parent_id=parent_id,
                     message_history=message_history,
                     input_provider=input_provider,
@@ -650,6 +654,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         store_history: bool = True,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         message_history: MessageHistory | None = None,
         input_provider: InputProvider | None = None,
@@ -667,6 +672,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             store_history: Whether to store in history
             message_id: Optional message ID
             session_id: Optional conversation ID
+            parent_session_id: Optional parent conversation ID
             parent_id: Optional parent message ID
             message_history: Optional message history
             input_provider: Optional input provider
@@ -710,28 +716,40 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Stream events from implementation
         final_message = None
         conversation = message_history if message_history is not None else self.conversation
+
+        # Create minimal run context for RFC-0021 compatibility
+        # Prefer explicit session_id, then self.session_id, otherwise let AgentRunContext generate
+        session_id_to_use = session_id or self.session_id
+        if session_id_to_use:
+            run_ctx = AgentRunContext(session_id=session_id_to_use, deps=deps)
+        else:
+            run_ctx = AgentRunContext(deps=deps)
+
         await self.message_received.emit(user_msg)
         try:
             # Execute pre-run hooks
             if self.hooks:
                 pre_run_result = await self.hooks.run_pre_run_hooks(
                     agent_name=self.name,
-                    prompt=str(user_msg.content),  # TODO: allow UserContent for hook?
+                    prompt=user_msg.content
+                    if isinstance(user_msg.content, str)
+                    else str(user_msg.content),
                     session_id=self.session_id,
-                    env=self.env,
                 )
                 if pre_run_result.get("decision") == "deny":
                     reason = pre_run_result.get("reason", "Blocked by pre-run hook")
                     raise RuntimeError(f"Run blocked: {reason}")  # noqa: TRY301
 
-            context = self.get_context(input_provider=input_provider)
+            context = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
             async for event in self._stream_events(
+                run_ctx,
                 [*pending_parts, *converted_prompts],
                 user_msg=user_msg,
                 effective_parent_id=effective_parent_id,
                 store_history=store_history,
                 message_id=message_id,
                 session_id=session_id,
+                parent_session_id=parent_session_id,
                 parent_id=parent_id,
                 message_history=conversation,
                 input_provider=input_provider,
@@ -757,12 +775,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if final_message is not None:
             # Execute post-run hooks
             if self.hooks:
+                prompt_str = (
+                    user_msg.content if isinstance(user_msg.content, str) else str(user_msg.content)
+                )
                 await self.hooks.run_post_run_hooks(
                     agent_name=self.name,
-                    prompt=str(user_msg.content),
+                    prompt=prompt_str,
                     result=final_message.content,
                     session_id=self.session_id,
-                    env=self.env,
                 )
 
             # Emit signal (always - for event handlers)
@@ -791,7 +811,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Command output and completion events
         """
-        from slashed import CommandExecutedEvent, CommandOutputEvent as SlashedCommandOutputEvent
+        from slashed.events import (
+            CommandExecutedEvent,
+            CommandOutputEvent as SlashedCommandOutputEvent,
+        )
 
         from agentpool.agents.events import CommandCompleteEvent, CommandOutputEvent
 
@@ -810,8 +833,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         cmd_ctx = self._command_store.create_context(data=self.get_context())
         command_str = f"{cmd_name} {args}".strip()
         try:
-            coro = self._command_store.execute_command(command_str, cmd_ctx)
-            execute_task = asyncio.create_task(coro)
+            execute_task = asyncio.create_task(
+                self._command_store.execute_command(command_str, cmd_ctx)
+            )
             success = True
             # Yield events from queue as command runs
             while not execute_task.done():
@@ -893,6 +917,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     @abstractmethod
     def _stream_events(
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -900,6 +925,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         effective_parent_id: str | None,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         input_provider: InputProvider | None = None,
         deps: TDeps | None = None,
@@ -912,11 +938,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Prompts are pre-converted to UserContent format by run_stream().
 
         Args:
+            run_ctx: Per-execution isolated state container for this run (RFC-0021)
             prompts: Converted prompts in UserContent format
             user_msg: Pre-created user ChatMessage (from base class)
             effective_parent_id: Resolved parent message ID for threading
             message_id: Optional message ID
             session_id: Optional conversation ID
+            parent_session_id: Optional parent conversation ID
             parent_id: Optional parent message ID
             input_provider: Optional input provider
             message_history: Optional message history
@@ -967,7 +995,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
 
     def is_cancelled(self) -> bool:
-        """Check if the agent has been cancelled."""
+        """Check if the agent has been cancelled.
+
+        Returns:
+            True if cancellation was requested
+        """
         return self._cancelled
 
     async def interrupt(self) -> None:
@@ -1013,6 +1045,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         store_history: bool = True,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         message_history: MessageHistory | None = None,
         deps: TDeps | None = None,
@@ -1032,6 +1065,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             message_id: Optional message id for the returned message.
                         Automatically generated if not provided.
             session_id: Optional conversation id for the returned message.
+            parent_session_id: Optional parent conversation id.
             parent_id: Parent message id
             message_history: Optional MessageHistory object to
                              use instead of agent's own conversation
@@ -1054,6 +1088,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             store_history=store_history,
             message_id=message_id,
             session_id=session_id,
+            parent_session_id=parent_session_id,
             parent_id=parent_id,
             message_history=message_history,
             deps=deps,

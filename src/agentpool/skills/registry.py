@@ -45,6 +45,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
         self,
         skills_dir: JoinablePathLike | AbstractFileSystem,
         base_path: str | None = None,
+        replace: bool = True,
         **storage_options: Any,
     ) -> None:
         """Register skills from a given path.
@@ -53,6 +54,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             skills_dir: Path to the directory containing skills, or filesystem instance.
             base_path: When skills_dir is a filesystem, the path within that filesystem
                       to look for skills. Defaults to root_marker if not specified.
+            replace: Whether to replace existing skills with same name.
             storage_options: Additional options to pass to the filesystem.
         """
         from upathtools.async_ops import to_async_fs
@@ -69,7 +71,7 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
         try:
             entries = await fs._ls(search_path, detail=True)
         except FileNotFoundError:
-            logger.warning("Skills directory not found", path=search_path)
+            logger.debug("Skills directory not found", path=search_path)
             return
 
         skill_dirs = [
@@ -95,14 +97,36 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
                 continue
 
             try:
-                skill = Skill.from_skill_dir(skill_dir_path)
-                self.register(skill.name, skill, replace=True)
+                skill = self._parse_skill(skill_dir_path)
+                self.register(skill.name, skill, replace=replace)
             except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to parse skill",
                     path=str(skill_dir_path),
                     error=str(e),
                 )
+
+    def _parse_skill(self, skill_dir_path: JoinablePathLike) -> Skill:
+        """Parse a skill from its directory path.
+
+        Args:
+            skill_dir_path: Path to the skill directory containing SKILL.md
+
+        Returns:
+            Parsed Skill instance
+
+        Raises:
+            ToolError: If skill cannot be parsed
+        """
+        from upathtools import to_upath
+
+        path = to_upath(skill_dir_path)
+
+        try:
+            # Use the Skill class method to properly parse SKILL.md with frontmatter
+            return Skill.from_skill_dir(path)
+        except FileNotFoundError as e:
+            raise ToolError(f"SKILL.md not found in {path}") from e
 
     @property
     def _error_class(self) -> type[ToolError]:

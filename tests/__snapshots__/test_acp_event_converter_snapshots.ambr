@@ -1,0 +1,702 @@
+# serializer version: 1
+# name: TestInlineModeSnapshots.test_long_text[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [writer]',
+      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+    }),
+    dict({
+      'raw_output': 'This is a long message that gets streamed in multi',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+    }),
+    dict({
+      'raw_output': 'ple chunks. Each chunk should be a separate delta ',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+    }),
+    dict({
+      'raw_output': 'event. The header should only be emitted once. Sub',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+    }),
+    dict({
+      'raw_output': 'sequent deltas should have no prefix repetition.',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_mixed_events[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [analyzer]',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+    dict({
+      'raw_output': 'Thinking: Need to analyze',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+    dict({
+      'raw_output': 'Let me check',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+    dict({
+      'raw_output': '''
+        
+        🔧 [analyzer] Using tool: grep
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+    dict({
+      'raw_output': '''
+        ✅ [analyzer] grep: No errors found
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+    dict({
+      'raw_output': ' - all good!',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_nested_subagents[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [coordinator]',
+      'tool_call_id': '08e9f150-dad2-4e20-9328-206b4b18bae6',
+    }),
+    dict({
+      'raw_output': 'Delegating to researcher',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '08e9f150-dad2-4e20-9328-206b4b18bae6',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '08e9f150-dad2-4e20-9328-206b4b18bae6',
+    }),
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [researcher]',
+      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+    }),
+    dict({
+      'raw_output': 'Thinking: Searching',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+    }),
+    dict({
+      'raw_output': '''
+        
+        🔧 [researcher] Using tool: search
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+    }),
+    dict({
+      'raw_output': '''
+        ✅ [researcher] search: Results found
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_text_stream[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [assistant]',
+      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+    }),
+    dict({
+      'raw_output': 'Hello',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+    }),
+    dict({
+      'raw_output': ' world',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+    }),
+    dict({
+      'raw_output': '!',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_thinking_stream[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [researcher]',
+      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+    }),
+    dict({
+      'raw_output': 'Thinking: Analyzing',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+    }),
+    dict({
+      'raw_output': 'Thinking:  the',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+    }),
+    dict({
+      'raw_output': 'Thinking:  problem',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_tool_call[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [coder]',
+      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+    }),
+    dict({
+      'raw_output': "I'll search for files",
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+    }),
+    dict({
+      'raw_output': '''
+        
+        🔧 [coder] Using tool: search
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+    }),
+    dict({
+      'raw_output': '''
+        ✅ [coder] search: Found 3 files
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_tool_call_error[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [executor]',
+      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+    }),
+    dict({
+      'raw_output': 'Executing command',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+    }),
+    dict({
+      'raw_output': '''
+        
+        🔧 [executor] Using tool: bash
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+    }),
+    dict({
+      'raw_output': '''
+        ❌ [executor] bash: Build failed: missing dependency
+        
+        Fix the errors and try again.
+  
+      ''',
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+    }),
+  ])
+# ---
+# name: TestLegacyModeSnapshots.test_text_stream[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **assistant**: 
+        ''',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Hello',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' world',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '!',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestLegacyModeSnapshots.test_tool_call[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coder**: 
+        ''',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': "I'll search for files",
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🔧 [coder] Using tool: search
+  
+        ''',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            ✅ [coder] search: Found 3 files
+  
+        ''',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_long_text[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [writer]: agent start',
+      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [writer]: streaming...',
+      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [writer]: streaming...',
+      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [writer]: streaming...',
+      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [writer]: streaming...',
+      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [writer]: completed',
+      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_mixed_events[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [analyzer]: agent start',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '💭 [analyzer]: thinking...',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [analyzer]: streaming...',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🔧 [analyzer]: calling grep...',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '✅ [analyzer]: grep completed',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [analyzer]: streaming...',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [analyzer]: completed',
+      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_nested_subagents[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [coordinator]: agent start',
+      'tool_call_id': 'bc8ffa5f-2ee2-4f96-b942-d1c5ca04d171',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [coordinator]: streaming...',
+      'tool_call_id': 'bc8ffa5f-2ee2-4f96-b942-d1c5ca04d171',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [coordinator]: completed',
+      'tool_call_id': 'bc8ffa5f-2ee2-4f96-b942-d1c5ca04d171',
+    }),
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [researcher]: agent start',
+      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '💭 [researcher]: thinking...',
+      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🔧 [researcher]: calling search...',
+      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '✅ [researcher]: search completed',
+      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [researcher]: completed',
+      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_text_stream[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [assistant]: agent start',
+      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [assistant]: streaming...',
+      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [assistant]: streaming...',
+      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [assistant]: streaming...',
+      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [assistant]: completed',
+      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_thinking_stream[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [researcher]: agent start',
+      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '💭 [researcher]: thinking...',
+      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '💭 [researcher]: thinking...',
+      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '💭 [researcher]: thinking...',
+      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [researcher]: completed',
+      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_tool_call[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [coder]: agent start',
+      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [coder]: streaming...',
+      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🔧 [coder]: calling search...',
+      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '✅ [coder]: search completed',
+      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [coder]: completed',
+      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_tool_call_error[asyncio]
+  list([
+    dict({
+      'kind': 'other',
+      'raw_input': dict({
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '🤖 [executor]: agent start',
+      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🤖 [executor]: streaming...',
+      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '🔧 [executor]: calling bash...',
+      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'title': '❌ [executor]: bash failed',
+      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'title': '✅ [executor]: completed',
+      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+    }),
+  ])
+# ---

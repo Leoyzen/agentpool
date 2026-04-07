@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
 
@@ -21,6 +25,46 @@ if TYPE_CHECKING:
 ConfirmationResult = Literal["allow", "skip", "abort_run", "abort_chain"]
 
 logger = get_logger(__name__)
+
+
+@dataclass(kw_only=True)
+class AgentRunContext:
+    """Per-execution isolated state container for agent runs.
+
+    This dataclass holds all state that is specific to a single run execution,
+    ensuring isolation between concurrent runs. It is separate from AgentContext
+    which is the PydanticAI context passed to tools.
+
+    Attributes:
+        cancelled: Whether the run has been cancelled.
+        current_task: The asyncio.Task for the current run, if any.
+        event_queue: Queue for streaming events from this run.
+        injection_manager: Manages prompt injection and queuing for this run.
+        session_id: Unique identifier for this run session.
+        deps: Optional dependencies passed to the run.
+        start_time: Timestamp when the run started (for metrics).
+    """
+
+    cancelled: bool = False
+    """Whether the run has been cancelled."""
+
+    current_task: asyncio.Task[Any] | None = None
+    """The asyncio.Task for the current run, if any."""
+
+    event_queue: asyncio.Queue[Any] = field(default_factory=asyncio.Queue)
+    """Queue for streaming events from this run."""
+
+    injection_manager: PromptInjectionManager = field(default_factory=PromptInjectionManager)
+    """Manages prompt injection and queuing for this run."""
+
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    """Unique identifier for this run session."""
+
+    deps: Any = None
+    """Optional dependencies passed to the run."""
+
+    start_time: float = field(default_factory=time.perf_counter)
+    """Timestamp when the run started (for metrics)."""
 
 
 @dataclass(kw_only=True)
@@ -41,6 +85,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
 
     model_name: str | None = None
     """Model name in provider:model format (e.g., 'anthropic:claude-haiku-4-5')."""
+
+    run_ctx: AgentRunContext | None = None
+    """Reference to the per-run context for accessing run-isolated state like event_queue."""
 
     @property
     def native_agent(self) -> Agent[TDeps, Any]:
@@ -68,7 +115,11 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             tool_call_id=self.tool_call_id or "",
             tool_input=self.tool_input,
         )
-        await self.agent._event_queue.put(progress_event)
+        # Use run_ctx.event_queue for per-run isolation, fallback to agent queue
+        if self.run_ctx is not None:
+            await self.run_ctx.event_queue.put(progress_event)
+        else:
+            await self.agent._event_queue.put(progress_event)
 
     @property
     def events(self) -> StreamEventEmitter:

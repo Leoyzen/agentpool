@@ -115,12 +115,31 @@ def get_argument_key(
         target_types = {_type_to_string(arg_type)}
 
     # Get type hints including return type if requested
-    hints = get_type_hints(func, include_extras=True)
+    try:
+        hints = get_type_hints(func, include_extras=True)
+    except NameError:
+        # Fallback to inspect.signature which is more lenient with forward refs
+        sig = inspect.signature(func)
+        hints = {k: v.annotation for k, v in sig.parameters.items()}
+
     if not include_return:
         hints.pop("return", None)
 
     # Check each parameter's type annotation
     for key, param_type_ in hints.items():
+        # Fallback for common context names if type hint is Any or missing
+        type_str = _type_to_string(param_type_)
+        if type_str in ("Any", "inspect._empty", "_empty"):
+            target_name = _type_to_string(arg_type)
+            result_key: str | Literal[False] = False
+            if (target_name == "AgentContext" and key in ("ctx", "agent_ctx", "context")) or (
+                target_name == "RunContext" and key in ("run_ctx", "ctx")
+            ):
+                result_key = key
+
+            if result_key:
+                return result_key
+
         # Handle type aliases
         param_type = (
             param_type_.__value__ if isinstance(param_type_, TypeAliasType) else param_type_
@@ -133,10 +152,9 @@ def get_argument_key(
         origin = get_origin(param_type)
         if origin is Union or origin is UnionType:
             union_members = get_args(param_type)
-            # Check each union member
+            # Check each union member and if complete union type matches
             if any(_type_to_string(t) in target_types for t in union_members):
                 return key
-            # Also check if the complete union type matches
             if _type_to_string(param_type) in target_types:
                 return key
 
@@ -145,15 +163,6 @@ def get_argument_key(
         # This avoids matching nested contexts like RunContext[AgentContext]
         if origin is not None and _type_to_string(origin) in target_types:
             return key
-
-        # if origin is not None:
-        #     # Check if the generic type (e.g., list) matches
-        #     if _type_to_string(origin) in target_types:
-        #         return key
-        #     # Check type arguments (e.g., str in list[str])
-        #     args = get_args(param_type)
-        #     if any(_type_to_string(arg) in target_types for arg in args):
-        #         return key
 
     return False
 

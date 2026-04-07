@@ -22,10 +22,17 @@ from agentpool_config.tools import ToolHints
 
 
 if TYPE_CHECKING:
+    from pydantic_ai import RunContext
+
+    from agentpool.agents.context import AgentContext
+
+
+if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from mcp.types import Tool as MCPTool, ToolAnnotations
-    from pydantic_ai import UserContent
+    from pydantic_ai import RunContext, UserContent
+    from pydantic_ai.tools import ToolDefinition
     from schemez import FunctionSchema, Property
 
     from agentpool.common_types import ToolSource
@@ -82,6 +89,15 @@ class Tool[TOutputType = Any]:
     schema_override: schemez.OpenAIFunctionDefinition | None = None
     """Schema override. If not set, the schema is inferred from the callable."""
 
+    prepare: (
+        Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]
+        | None
+    ) = None
+    """Prepare function for tool schema customization."""
+
+    function_schema: Any | None = None
+    """Function schema override for pydantic-ai tools."""
+
     hints: ToolHints = field(default_factory=ToolHints)
     """Hints for the tool."""
 
@@ -113,18 +129,219 @@ class Tool[TOutputType = Any]:
 
     @abstractmethod
     def get_callable(self) -> Callable[..., TOutputType | Awaitable[TOutputType]]:
-        """Get the callable for this tool. Subclasses must implement."""
+        """Get callable for this tool. Subclasses must implement."""
         ...
 
-    def to_pydantic_ai(self) -> PydanticAiTool:
-        """Convert tool to Pydantic AI tool."""
-        metadata = {**self.metadata, "agent_name": self.agent_name, "category": self.category}
+    def _get_effective_prepare(
+        self,
+    ) -> (
+        Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]
+        | None
+    ):
+        """Get the effective prepare function for this tool.
+
+        Returns self.prepare if set. If schema_override is set but prepare is not,
+        generates a prepare function that applies the schema_override values.
+
+        Returns:
+            Prepare function or None.
+        """
+        if self.prepare is not None:
+            return self.prepare
+
+        # If we have a schema_override, generate a prepare function
+        if self.schema_override is not None:
+            return self._generate_schema_override_prepare()
+
+        return None
+
+    def _generate_schema_override_prepare(
+        self,
+    ) -> Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition]]:
+        """Generate a prepare function that applies schema_override values.
+
+        This allows schema_override to be propagated to the PydanticAI tool
+        without requiring user to manually specify a prepare function.
+
+        Returns:
+            A prepare function that applies schema_override values.
+        """
+        assert self.schema_override is not None
+        schema_override = self.schema_override
+
+        async def prepare_override(
+            ctx: RunContext[AgentContext], tool_def: ToolDefinition
+        ) -> ToolDefinition:
+            """Apply schema_override values to tool definition."""
+            from pydantic_ai.tools import ToolDefinition
+
+            # Create new ToolDefinition with overridden values
+            new_def = ToolDefinition(
+                name=schema_override.get("name", tool_def.name),
+                description=schema_override.get("description", tool_def.description),
+                parameters_json_schema=schema_override.get(
+                    "parameters", tool_def.parameters_json_schema
+                ),
+            )
+            return new_def
+
+        return prepare_override
+
+    def _detect_takes_ctx(self, func: Callable[..., Any] | None = None) -> bool:
+        """Detect if function takes RunContext parameter.
+
+        Args:
+            func: The callable to inspect. If None, uses self.get_callable().
+
+        Returns:
+            True if function has a RunContext parameter, False otherwise.
+        """
+        if func is None:
+            func = self.get_callable()
+
+        # Check for RunContext in function signature
+        sig = inspect.signature(func)
+        for param in sig.parameters.values():
+            # Check by string type name (works across TYPE_CHECKING)
+            if param.annotation == "RunContext" or (
+                hasattr(param.annotation, "__name__") and param.annotation.__name__ == "RunContext"
+            ):
+                return True
+        return False
+
+    def _get_json_schema(self, func: Callable[..., Any] | None = None) -> dict[str, Any] | None:
+        """Get effective JSON schema for this tool.
+
+        Returns a JSON schema dict if a custom schema is needed
+        (from schema_override or fallback to schemez), or None if
+        pydantic-ai should infer the schema automatically.
+
+        Args:
+            func: The callable to use for schema generation. If None, uses self.get_callable().
+
+        Returns:
+            JSON schema dict or None.
+        """
+        if func is None:
+            func = self.get_callable()
+
+        # If no schema_override, let pydantic-ai infer the schema
+        if self.schema_override is None:
+            return None
+
+        # Try primary path with pydantic_ai.function_schema
+        try:
+            from pydantic_ai._function_schema import (  # type: ignore[attr-defined]
+                GenerateJsonSchema,
+                function_schema,
+            )
+
+            schema = function_schema(func, schema_generator=GenerateJsonSchema)
+
+            # Apply schema_override to generated schema
+            # Merge top-level description
+            if "description" in self.schema_override:
+                schema.json_schema["description"] = self.schema_override["description"]
+
+            if "parameters" in self.schema_override:
+                override_params = self.schema_override["parameters"]
+                # Merge custom parameter definitions (which include descriptions)
+                if "properties" in override_params:
+                    for param_name, param_def in override_params["properties"].items():
+                        if param_name in schema.json_schema.get("properties", {}):
+                            # Update existing parameter with custom description
+                            schema.json_schema["properties"][param_name].update(param_def)
+                        else:
+                            # Add new parameter
+                            schema.json_schema.setdefault("properties", {})[param_name] = param_def
+        except Exception as e:
+            # Fallback to schemez if pydantic_ai.function_schema fails
+            from pydantic.errors import PydanticUndefinedAnnotation
+
+            if isinstance(e, (PydanticUndefinedAnnotation, NameError)):
+                logger.warning(
+                    "pydantic_ai.function_schema failed for %s, falling back to schemez: %s",
+                    self.name,
+                    str(e),
+                )
+            else:
+                raise
+
+            # Fallback: use schemez to generate schema
+            from pydantic_ai import RunContext
+
+            from agentpool.agents.context import AgentContext
+
+            # Use schema_override description if provided, otherwise use self.description
+            desc = (
+                self.schema_override.get("description", self.description)
+                if self.schema_override
+                else self.description
+            )
+
+            # Use schemez to generate JSON schema
+            schema = schemez.create_schema(  # type: ignore
+                func,
+                name_override=self.name,
+                description_override=desc,
+                exclude_types=[AgentContext, RunContext],
+            )
+
+            # Return only the parameters part (the "object" schema)
+            # Use model_dump - schemez.FunctionSchema has this method (pydantic-compatible)
+            schema_dump = getattr(schema, "model_dump")()  # noqa: B009, type: ignore[attr-defined]
+            return schema_dump["parameters"]  # type: ignore[no-any-return]
+        else:
+            return schema.json_schema
+
+    def to_pydantic_ai(
+        self, function_override: Callable[..., TOutputType | Awaitable[TOutputType]] | None = None
+    ) -> PydanticAiTool:
+        """Convert tool to Pydantic AI tool.
+
+        Args:
+            function_override: Optional callable to override self.get_callable().
+
+        Returns:
+            PydanticAiTool instance configured for this tool.
+        """
+        base_metadata = self.metadata or {}
+        metadata = {
+            **base_metadata,
+            "agent_name": self.agent_name,
+            "category": self.category,
+        }
+        function = function_override if function_override is not None else self.get_callable()
+
+        # Check if we have a custom JSON schema that needs to be used
+        json_schema = self._get_json_schema(function)
+
+        # If we have a custom schema, use Tool.from_schema
+        if json_schema is not None:
+            # Detect if function takes RunContext parameter
+            takes_ctx = self._detect_takes_ctx(function)
+
+            # Import Tool.from_schema at runtime to avoid circular imports
+            from pydantic_ai.tools import Tool as PydanticAiToolClass
+
+            tool_instance = PydanticAiToolClass.from_schema(
+                function=function,
+                name=self.name,
+                description=self.description,
+                json_schema=json_schema,
+                takes_ctx=takes_ctx,
+            )
+            # Tool.from_schema doesn't accept prepare parameter, assign it manually
+            tool_instance.prepare = self._get_effective_prepare()  # type: ignore[assignment]
+            return tool_instance
+        # No custom schema, let pydantic-ai infer it automatically
         return PydanticAiTool(
-            function=self.get_callable(),
+            function=function,
             name=self.name,
             description=self.description,
             requires_approval=self.requires_confirmation,
             metadata=metadata,
+            prepare=self._get_effective_prepare(),  # type: ignore[arg-type]
         )
 
     @property
@@ -235,6 +452,11 @@ class Tool[TOutputType = Any]:
         name_override: str | None = None,
         description_override: str | None = None,
         schema_override: schemez.OpenAIFunctionDefinition | None = None,
+        prepare: (
+            Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]
+            | None
+        ) = None,
+        function_schema: Any | None = None,
         hints: ToolHints | None = None,
         category: ToolKind | None = None,
         enabled: bool = True,
@@ -247,6 +469,8 @@ class Tool[TOutputType = Any]:
             name_override=name_override,
             description_override=description_override,
             schema_override=schema_override,
+            prepare=prepare,
+            function_schema=function_schema,
             hints=hints,
             category=category,
             enabled=enabled,
@@ -298,6 +522,11 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
         name_override: str | None = None,
         description_override: str | None = None,
         schema_override: schemez.OpenAIFunctionDefinition | None = None,
+        prepare: (
+            Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]
+            | None
+        ) = None,
+        function_schema: Any | None = None,
         hints: ToolHints | None = None,
         category: ToolKind | None = None,
         enabled: bool = True,
@@ -327,6 +556,8 @@ class FunctionTool[TOutputType = Any](Tool[TOutputType]):
             callable=callable_obj,  # pyright: ignore[reportArgumentType]
             import_path=import_path,
             schema_override=schema_override,
+            prepare=prepare,
+            function_schema=function_schema,
             category=category,
             hints=hints or ToolHints(),
             enabled=enabled,

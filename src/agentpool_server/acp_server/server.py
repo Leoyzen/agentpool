@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from acp import serve
 from agentpool import AgentPool
@@ -50,6 +50,7 @@ class ACPServer(BaseServer):
         load_skills: bool = True,
         config_path: str | None = None,
         transport: Transport = "stdio",
+        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
     ) -> None:
         """Initialize ACP server with configuration.
 
@@ -63,6 +64,7 @@ class ACPServer(BaseServer):
             load_skills: Whether to load client-side skills from .claude/skills
             config_path: Path to the configuration file (for tracking/hot-switching)
             transport: Transport configuration ("stdio", "websocket", or transport object)
+            subagent_display_mode: How to display nested agent output in ACP clients
         """
         super().__init__(pool, name=name, raise_exceptions=True)
         self.debug_messages = debug_messages
@@ -72,6 +74,7 @@ class ACPServer(BaseServer):
         self.load_skills = load_skills
         self.config_path = config_path
         self.transport: Transport = transport
+        self.subagent_display_mode = subagent_display_mode
 
     @classmethod
     def from_config(
@@ -84,6 +87,7 @@ class ACPServer(BaseServer):
         agent: str | None = None,
         load_skills: bool = True,
         transport: Transport = "stdio",
+        subagent_display_mode: Literal["inline", "tool_box"] | None = None,
     ) -> Self:
         """Create ACP server from configuration path or manifest.
 
@@ -95,6 +99,7 @@ class ACPServer(BaseServer):
             agent: Optional specific agent name to use (defaults to first agent)
             load_skills: Whether to load client-side skills from .claude/skills
             transport: Transport configuration ("stdio", "websocket", or transport object)
+            subagent_display_mode: Override for subagent display mode (argument > config > default)
 
         Returns:
             Configured ACP server instance with agent pool
@@ -105,6 +110,20 @@ class ACPServer(BaseServer):
         # Determine config_path for tracking
         config_path = config.config_file_path if isinstance(config, AgentsManifest) else str(config)
 
+        # Resolve subagent_display_mode with priority: argument > config > default
+        resolved_display_mode: Literal["inline", "tool_box"]
+        if subagent_display_mode is not None:
+            resolved_display_mode = subagent_display_mode
+        # Fall back to config value
+        elif isinstance(config, AgentsManifest):
+            config_mode: str = getattr(config.pool_server, "subagent_display_mode", "tool_box")
+            if config_mode in ("inline", "tool_box"):
+                resolved_display_mode = config_mode  # type: ignore[assignment]
+            else:
+                resolved_display_mode = "tool_box"
+        else:
+            resolved_display_mode = "tool_box"
+
         server = cls(
             pool,
             debug_messages=debug_messages,
@@ -114,6 +133,7 @@ class ACPServer(BaseServer):
             load_skills=load_skills,
             config_path=config_path,
             transport=transport,
+            subagent_display_mode=resolved_display_mode,
         )
         agent_names = list(server.pool.all_agents.keys())
 
@@ -159,6 +179,7 @@ class ACPServer(BaseServer):
             debug_commands=self.debug_commands,
             load_skills=self.load_skills,
             server=self,
+            subagent_display_mode=self.subagent_display_mode,  # type: ignore[arg-type]
         )
         debug_file = self.debug_file if self.debug_messages else None
         self.log.info("ACP server started")

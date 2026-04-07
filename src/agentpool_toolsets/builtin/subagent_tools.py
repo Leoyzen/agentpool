@@ -9,23 +9,27 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai import ModelRetry
 from pydantic_ai.messages import TextPartDelta, ThinkingPartDelta
-from upathtools.filesystems.base import WrapperFileSystem
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.agents.events import PartDeltaEvent, StreamCompleteEvent, SubAgentEvent
+from agentpool.agents.events import (
+    PartDeltaEvent,
+    SpawnSessionStart,
+    StreamCompleteEvent,
+    SubAgentEvent,
+)
 from agentpool.agents.events.processors import batch_stream_deltas
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.tools.exceptions import ToolError
+from agentpool.utils import identifiers as identifier
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from fsspec.asyn import AsyncFileSystem
+    from fsspec.implementations.memory import MemoryFileSystem
 
     from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool.agents.events.events import SubAgentType
 
 
 logger = get_logger(__name__)
@@ -52,13 +56,16 @@ def _generate_task_id(description: str) -> str:
 async def _stream_task(
     ctx: AgentContext,
     source_name: str,
-    source_type: SubAgentType,
+    source_type: Literal["agent", "team_parallel", "team_sequential"],
     stream: AsyncIterator[RichAgentStreamEvent[Any]],
     *,
     batch_deltas: bool = False,
     depth: int = 1,
-    parent_tool_call_id: str | None = None,
-) -> str:
+    child_session_id: str | None = None,
+    parent_session_id: str | None = None,
+    tool_call_id: str | None = None,
+    prompt: str | None = None,
+) -> dict[str, Any]:
     """Stream a task's execution, emitting SubAgentEvents into parent stream.
 
     Args:
@@ -68,13 +75,32 @@ async def _stream_task(
         stream: Async iterator of stream events from agent.run_stream()
         batch_deltas: If True, batch consecutive text/thinking deltas for fewer UI updates
         depth: Nesting depth for nested task delegation
-        parent_tool_call_id: Tool call ID of the parent task that spawned this subagent
-
-    Returns:
-        Final text content from the stream
+        child_session_id: ID of the child session
+        parent_session_id: ID of the parent session
+        tool_call_id: ID of the tool call
+        prompt: The task prompt (for metadata)
     """
     if batch_deltas:
         stream = batch_stream_deltas(stream)
+
+    # Ensure we have valid IDs (generate fallbacks as needed)
+    _child_session_id = child_session_id or identifier.ascending("session")
+    _parent_session_id = parent_session_id or ctx.node.session_id or identifier.ascending("session")
+    _tool_call_id = tool_call_id or ctx.tool_call_id
+
+    # Emit SpawnSessionStart before streaming begins
+    spawn_event = SpawnSessionStart(
+        child_session_id=_child_session_id,
+        parent_session_id=_parent_session_id,
+        tool_call_id=_tool_call_id,
+        spawn_mechanism="task",
+        source_name=source_name,
+        source_type=source_type,
+        depth=getattr(ctx, "current_depth", 0) + 1,
+        description=f"Run {source_name} task",
+        metadata={"prompt": prompt[:200]} if prompt else {},
+    )
+    await ctx.events.emit_event(spawn_event)
 
     final_content: str = ""
     async for event in stream:
@@ -85,7 +111,9 @@ async def _stream_task(
                 source_type=event.source_type,
                 event=event.event,
                 depth=event.depth + depth,
-                parent_tool_call_id=event.parent_tool_call_id,
+                child_session_id=event.child_session_id,
+                parent_session_id=event.parent_session_id,
+                tool_call_id=event.tool_call_id or tool_call_id,
             )
             await ctx.events.emit_event(nested_event)
         else:
@@ -95,7 +123,9 @@ async def _stream_task(
                 source_type=source_type,
                 event=event,
                 depth=depth,
-                parent_tool_call_id=parent_tool_call_id,
+                child_session_id=child_session_id,
+                parent_session_id=parent_session_id,
+                tool_call_id=tool_call_id,
             )
             await ctx.events.emit_event(subagent_event)
 
@@ -104,11 +134,16 @@ async def _stream_task(
                 content = event.message.content
                 final_content = str(content) if content else ""
 
-    return final_content
+    return {
+        "output": final_content,
+        "metadata": {
+            "sessionId": child_session_id,
+        },
+    }
 
 
 async def _stream_task_to_fs(
-    fs: AsyncFileSystem,
+    fs: MemoryFileSystem,
     task_id: str,
     source_name: str,
     stream: AsyncIterator[RichAgentStreamEvent[Any]],
@@ -132,16 +167,20 @@ async def _stream_task_to_fs(
             # Handle nested SubAgentEvents - unwrap inner event
             inner_event = event.event if isinstance(event, SubAgentEvent) else event
 
-            match inner_event:
-                case (
-                    PartDeltaEvent(delta=TextPartDelta(content_delta=str(text)))
-                    | PartDeltaEvent(delta=ThinkingPartDelta(content_delta=str(text)))
-                ) if text:
-                    content_parts.append(text)
-                    # Write incrementally (overwrite with accumulated content)
-                    await fs._pipe(output_path, "".join(content_parts).encode("utf-8"))
-                case StreamCompleteEvent(message=msg) if msg.content:
-                    await fs._pipe(output_path, str(msg.content).encode("utf-8"))
+            # Collect text deltas
+            if isinstance(inner_event, PartDeltaEvent) and inner_event.delta:
+                delta = inner_event.delta
+                if isinstance(delta, (TextPartDelta, ThinkingPartDelta)) and delta.content_delta:
+                    content_parts.append(delta.content_delta)
+                # Write incrementally (overwrite with accumulated content)
+                fs.pipe(output_path, "".join(content_parts).encode("utf-8"))
+
+            # Final content from StreamCompleteEvent
+            elif isinstance(inner_event, StreamCompleteEvent):
+                content = inner_event.message.content
+                if content:
+                    final_content = str(content)
+                    fs.pipe(output_path, final_content.encode("utf-8"))
 
         logger.info(
             "Async task completed",
@@ -226,7 +265,7 @@ class SubagentTools(StaticResourceProvider):
         prompt: str,
         description: str,
         async_mode: bool = False,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Execute a task on an agent or team.
 
         Launch a task to be executed by a specialized agent or team.
@@ -245,8 +284,7 @@ class SubagentTools(StaticResourceProvider):
             async_mode: If True, run in background and return task ID immediately
 
         Returns:
-            In sync mode: The result of the task execution
-            In async mode: Task ID and output file path
+            Structured output containing result and metadata
         """
         from agentpool import Team, TeamRun
         from agentpool.agents.base_agent import BaseAgent
@@ -269,13 +307,13 @@ class SubagentTools(StaticResourceProvider):
         node = ctx.pool.nodes[agent_or_team]
         match node:
             case Team():
-                source_type: SubAgentType = "team_parallel"
+                source_type: Literal["team_parallel", "team_sequential", "agent"] = "team_parallel"
             case TeamRun():
                 source_type = "team_sequential"
             case BaseAgent():
                 source_type = "agent"
             case _:
-                raise ValueError(f"Unexpected node type: {type(node)}")
+                source_type = "agent"
 
         if not isinstance(node, SupportsRunStream):
             msg = f"Node {agent_or_team} does not support streaming"
@@ -288,6 +326,24 @@ class SubagentTools(StaticResourceProvider):
             async_mode=async_mode,
         )
 
+        # Generate unique session ID for the subagent run
+        child_session_id = identifier.ascending("session")
+        parent_session_id = ctx.node.session_id or identifier.ascending("session")
+
+        # Emit SpawnSessionStart for both sync and async modes
+        spawn_event = SpawnSessionStart(
+            child_session_id=child_session_id,
+            parent_session_id=parent_session_id,
+            tool_call_id=ctx.tool_call_id,
+            spawn_mechanism="task",
+            source_name=agent_or_team,
+            source_type=source_type,
+            depth=getattr(ctx, "current_depth", 0) + 1,
+            description=f"Run {agent_or_team} task",
+            metadata={"prompt": prompt[:200]} if prompt else {},
+        )
+        await ctx.events.emit_event(spawn_event)
+
         if async_mode:
             # Generate task ID and start background task
             task_id = _generate_task_id(description)
@@ -296,7 +352,7 @@ class SubagentTools(StaticResourceProvider):
             # Create the task directory
             fs = ctx.internal_fs
             fs.mkdirs(f"/tasks/{task_id}", exist_ok=True)
-            fs = WrapperFileSystem(fs)
+
             # Start streaming to filesystem in background
             # Store task reference to prevent garbage collection
             task = asyncio.create_task(
@@ -304,7 +360,9 @@ class SubagentTools(StaticResourceProvider):
                     fs=fs,
                     task_id=task_id,
                     source_name=agent_or_team,
-                    stream=node.run_stream(prompt),
+                    stream=node.run_stream(
+                        prompt, session_id=child_session_id, parent_session_id=parent_session_id
+                    ),
                 ),
                 name=f"async_task_{task_id}",
             )
@@ -312,19 +370,31 @@ class SubagentTools(StaticResourceProvider):
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
 
-            return (
-                f"Task started in background.\n"
-                f"Task ID: {task_id}\n"
-                f"Output will be written to: {output_path}\n"
-                f"Use the read tool to check the output file for results."
-            )
+            return {
+                "output": (
+                    f"Task started in background.\n"
+                    f"Task ID: {task_id}\n"
+                    f"Output will be written to: {output_path}\n"
+                    f"Use the read tool to check the output file for results."
+                ),
+                "metadata": {
+                    "taskId": task_id,
+                    "sessionId": child_session_id,
+                    "outputFile": output_path,
+                },
+            }
 
         # Synchronous mode - stream with SubAgentEvent wrapping
         return await _stream_task(
             ctx,
             source_name=agent_or_team,
             source_type=source_type,
-            stream=node.run_stream(prompt),
+            stream=node.run_stream(
+                prompt, session_id=child_session_id, parent_session_id=parent_session_id
+            ),
             batch_deltas=self._batch_stream_deltas,
-            parent_tool_call_id=ctx.tool_call_id,
+            child_session_id=child_session_id,
+            parent_session_id=parent_session_id,
+            tool_call_id=ctx.tool_call_id,
+            prompt=prompt,
         )

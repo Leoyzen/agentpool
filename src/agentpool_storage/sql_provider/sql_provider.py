@@ -151,26 +151,43 @@ class SQLModelProvider(StorageProvider):
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
-        agent_type: str | None = None,
+        parent_session_id: str | None = None,
     ) -> None:
-        """Log conversation to database (idempotent)."""
+        """Log conversation to database.
+
+        Uses upsert semantics to handle duplicate session IDs gracefully.
+        If the session already exists, it will be silently ignored.
+        """
         from sqlalchemy import select
 
         from agentpool_storage.sql_provider.models import Conversation
 
         async with AsyncSession(self.engine) as session:
+            # Soft validation: check if parent exists (warn but don't crash)
+            if parent_session_id:
+                result = await session.execute(
+                    select(Conversation).where(Conversation.id == parent_session_id)
+                )
+                if not result.scalar_one_or_none():
+                    logger.warning(
+                        "Parent session not found",
+                        parent_session_id=parent_session_id,
+                        session_id=session_id,
+                    )
+
             existing = await session.execute(
                 select(Conversation.id).where(Conversation.id == session_id)  # type: ignore[call-overload]
             )
             if existing.scalar_one_or_none() is not None:
                 return
+
             now = start_time or get_now()
             convo = Conversation(
                 id=session_id,
                 agent_name=node_name,
+                parent_id=parent_session_id,
                 start_time=now,
                 model=model,
-                agent_type=agent_type,
             )
             session.add(convo)
             await session.commit()
