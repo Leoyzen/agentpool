@@ -29,7 +29,6 @@ from agentpool_config.workers import WorkerConfig  # noqa: TC001
 
 
 if TYPE_CHECKING:
-
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool
@@ -237,6 +236,28 @@ class NativeAgentConfig(BaseAgentConfig):
         """Convert model inputs to appropriate format."""
         if isinstance((model := data.get("model")), str):
             data["model"] = {"type": "string", "identifier": model}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_workers_shorthand(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Convert worker string shorthand to AgentWorkerConfig objects.
+
+        Supports:
+        - Plain string: "worker_name" -> {"type": "agent", "name": "worker_name"}
+        - Dict with type: {"type": "agent", "name": "worker_name"} (unchanged)
+        """
+        from agentpool_config.workers import AgentWorkerConfig
+
+        if workers := data.get("workers"):
+            resolved_workers: list[dict[str, Any] | AgentWorkerConfig] = []
+            for worker in workers:
+                if isinstance(worker, str):
+                    # Convert plain string to AgentWorkerConfig dict
+                    resolved_workers.append({"type": "agent", "name": worker})
+                else:
+                    resolved_workers.append(worker)
+            data["workers"] = resolved_workers
         return data
 
     def get_agent[TDeps](
