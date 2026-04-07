@@ -89,7 +89,6 @@ def opencode_command(
     # Load manifest from merged config data with config context for path resolution
     # Config context must be maintained for AgentPool initialization (for relative path resolution)
     try:
-        manifest = AgentsManifest.model_validate(resolved.data)
         if resolved.primary_path:
             # 为 manifest 和每个 agent/team 设置 config_file_path
             # 这对于相对路径解析（如 file prompts）至关重要
@@ -99,6 +98,7 @@ def opencode_command(
                     for name, config in nodes.items()
                 }
 
+        manifest = AgentsManifest.model_validate(resolved.data)
             manifest = manifest.model_copy(
                 update={
                     "config_file_path": resolved.primary_path,
