@@ -89,23 +89,21 @@ def opencode_command(
     # Load manifest from merged config data with config context for path resolution
     # Config context must be maintained for AgentPool initialization (for relative path resolution)
         try:
-        if resolved.primary_path:
-            # 为 manifest 和每个 agent/team 设置 config_file_path
-            # 这对于相对路径解析（like file prompts）至关重要
-            def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
-                return {
-                    name: config.model_copy(update={"config_file_path": resolved.primary_path})
-                    for name, config in nodes.items()
-                }
+            if resolved.primary_path:
+                # 为 manifest 和每个 agent/team 设置 config_file_path
+                # 这对于相对路径解析（如 file prompts）至关重要
+                def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
+                    return {
+                        name: config.model_copy(update={"config_file_path": resolved.primary_path})
+                        for name, config in nodes.items()
+                    }
 
-        manifest = AgentsManifest.model_validate(resolved.data)
-        manifest = manifest.model_copy(
+            manifest = AgentsManifest.model_validate(resolved.data)
+            manifest = manifest.model_copy(
                 update={
                     "config_file_path": resolved.primary_path,
                     "agents": update_with_path(manifest.agents),
-                    "teams": update_with_path(manifest.teams),
-                }
-            )
+                    "expected an indented block after 'try' statement on line 91"
     except Exception as e:
         raise t.BadParameter(f"Invalid merged configuration: {e}") from e
 
