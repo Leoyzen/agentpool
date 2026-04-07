@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from collections.abc import Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, Self
+
+from agentpool_config.context import ConfigContextManager
 from llmling_models_config import AnyModelConfig, StringModelConfig
 from pydantic import ConfigDict, Field, model_validator
 from schemez import Schema
@@ -616,24 +619,31 @@ class AgentsManifest(Schema):
 
         try:
             data = yamling.load_yaml_file(path, resolve_inherit=True)
-            agent_def = cls.model_validate(data)
             path_str = str(path)
-
-            def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
-                return {
-                    name: config.model_copy(update={"config_file_path": path_str})
-                    for name, config in nodes.items()
-                }
-
             absolute_config_path = os.path.abspath(path_str)
-        return agent_def.model_copy(
-        update={
-            "config_file_path": absolute_config_path,
-            "agents": update_with_path(agent_def.agents),
-            "agents": update_with_path(agent_def.agents),
-            "teams": update_with_path(agent_def.teams),
-        }
-    )
+
+            # IMPORTANT: Enter ConfigContextManager BEFORE model_validate
+            # This ensures CONFIG_DIR is set when ConfigPath fields are validated
+            with (
+                ConfigContextManager(absolute_config_path)
+                if absolute_config_path
+                else nullcontext()
+            ):
+                agent_def = cls.model_validate(data)
+
+                def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
+                    return {
+                        name: config.model_copy(update={"config_file_path": absolute_config_path})
+                        for name, config in nodes.items()
+                    }
+
+                return agent_def.model_copy(
+                    update={
+                        "config_file_path": absolute_config_path,
+                        "agents": update_with_path(agent_def.agents),
+                        "teams": update_with_path(agent_def.teams),
+                    }
+                )
         except Exception as exc:
             raise ValueError(f"Failed to load agent config from {path}") from exc
 

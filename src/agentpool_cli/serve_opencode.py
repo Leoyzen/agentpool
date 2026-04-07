@@ -88,7 +88,9 @@ def opencode_command(
 
     # Load manifest from merged config data with config context for path resolution
     # Config context must be maintained for AgentPool initialization (for relative path resolution)
-        try:
+    try:
+        with ConfigContextManager(resolved.primary_path):
+            manifest = AgentsManifest.model_validate(resolved.data)
             if resolved.primary_path:
                 # 为 manifest 和每个 agent/team 设置 config_file_path
                 # 这对于相对路径解析（如 file prompts）至关重要
@@ -98,9 +100,54 @@ def opencode_command(
                         for name, config in nodes.items()
                     }
 
-         manifest = AgentsManifest.model_validate(resolved.data)
-            except Exception as e:
-            raise t.BadParameter(f"Invalid merged configuration: {e}") from e
+                manifest = manifest.model_copy(
+                    update={
+                        "config_file_path": resolved.primary_path,
+                        "agents": update_with_path(manifest.agents),
+                        "teams": update_with_path(manifest.teams),
+                    }
+                )
+
+            # Initialize observability BEFORE configuring logging
+            # This ensures logfire is configured before StructlogProcessor is added
+            from agentpool.observability import registry
+
+            registry.configure_observability(manifest.observability)
+
+            # Always log to file with rollover
+            log_dir = user_log_path("agentpool", appauthor=False)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "opencode.log"
+            ap_log.configure_logging(force=True, log_file=str(log_file))
+            logger.info("Configured file logging with rollover", log_file=str(log_file))
+
+            # Log which config layers were used
+            if resolved.layers:
+                sources = [
+                    f"{layer.source}:{layer.path}" for layer in resolved.layers if layer.path
+                ]
+                logger.info("Config layers loaded", sources=sources, host=host, port=port)
+            else:
+                logger.info(
+                    "Starting OpenCode server with built-in defaults only", host=host, port=port
+                )
+
+            # Load agent from merged manifest (needs config context for path resolution)
+            pool = AgentPool(manifest, main_agent_name=agent)
+    except Exception as e:
+        raise t.BadParameter(f"Invalid merged configuration: {e}") from e
+
+    async def run_server() -> None:
+        async with pool:
+            # Load agent rules from global and project locations
+            await pool.main_agent.load_rules(working_dir)
+
+            server = OpenCodeServer(
+                pool.main_agent,
+                host=host,
+                port=port,
+                working_dir=working_dir,
+            )
             logger.info("Server starting", url=f"http://{host}:{port}")
             await server.run_async()
 
