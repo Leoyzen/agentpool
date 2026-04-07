@@ -17,6 +17,7 @@ from anyenv.signals import Signal
 import anyio
 from upathtools.filesystems import IsolatedMemoryFileSystem
 
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
 from agentpool.agents.modes import ModeInfo
 from agentpool.agents.context import AgentContext, AgentRunContext
@@ -229,7 +230,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self.hooks = hooks
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
-        self._injection_manager = PromptInjectionManager()
+        self._background_run_ctx: AgentRunContext | None = None
+        self._current_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
         self._connect_pending: bool = False
@@ -361,7 +363,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         tool_call_id: str | None = None,
         tool_input: dict[str, Any] | None = None,
         tool_name: str | None = None,
-        run_ctx: Any = None,
+        run_ctx: AgentRunContext | None = None,
     ) -> AgentContext[Any]:
         """Create a new context for this agent.
 
@@ -371,7 +373,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id: Optional tool call ID
             tool_input: Optional tool input
             tool_name: Optional tool name
-            run_ctx: Optional run context (for RFC-0021)
+            run_ctx: Optional per-run context for accessing run-isolated state
 
         Returns:
             A new AgentContext instance
@@ -385,6 +387,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             tool_call_id=tool_call_id,
             tool_input=tool_input or {},
             tool_name=tool_name,
+            run_ctx=run_ctx,
         )
 
     @property
@@ -452,13 +455,19 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         self._infinite = max_count is None
 
+        # Create run context for background task
+        self._background_run_ctx = AgentRunContext()
+
         async def _continuous() -> ChatMessage[Any]:
             count = 0
             self.log.debug("Starting continuous run", max_count=max_count, interval=interval)
             latest = None
-            while (max_count is None or count < max_count) and not self._cancelled:
+            # _background_run_ctx is always set before starting the task
+            run_ctx = self._background_run_ctx
+            assert run_ctx is not None
+            while (max_count is None or count < max_count) and not run_ctx.cancelled:
                 try:
-                    agent_ctx = self.get_context()
+                    agent_ctx = self.get_context(run_ctx=run_ctx)
                     current_prompts = [
                         call_with_context(p, agent_ctx, **kwargs) if callable(p) else p
                         for p in prompt
@@ -474,7 +483,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     break
                 except Exception:
                     # Check if we were cancelled (may surface as other exceptions)
-                    if self._cancelled:
+                    if run_ctx.cancelled:
                         self.log.debug("Continuous run cancelled via flag")
                         break
                     count += 1
@@ -484,7 +493,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return latest  # type: ignore[return-value]
 
         await self.stop()  # Cancel any existing background task
-        self._cancelled = False  # Reset cancellation flag for new run
+        self._cancelled = False  # Reset cancellation flag for backward compat
+        self._background_run_ctx.cancelled = False
         task = asyncio.create_task(_continuous(), name=f"background_{self.name}")
         self.log.debug("Started background task", task_name=task.get_name())
         self._background_task = task
@@ -492,7 +502,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
     async def stop(self) -> None:
         """Stop continuous execution if running."""
-        self._cancelled = True  # Signal cancellation via flag
+        self._cancelled = True  # Signal cancellation via flag for backward compat
+        if self._background_run_ctx:
+            self._background_run_ctx.cancelled = True
         if self._background_task and not self._background_task.done():
             self._background_task.cancel()
             with suppress(asyncio.CancelledError):  # Expected when we cancel the task
@@ -530,7 +542,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.queue_prompt("Now analyze the results")
                 return "Initial work done"
         """
-        self._injection_manager.queue(*prompts)
+        # Use current run context if available, otherwise background context
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            run_ctx.injection_manager.queue(*prompts)
 
     def inject_prompt(self, message: str) -> None:
         """Inject a message into the conversation mid-run.
@@ -549,19 +564,30 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.inject_prompt("Also check the test coverage")
                 return "Changes made"
         """
-        self._injection_manager.inject(message)
+        # Use current run context if available, otherwise background context
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            run_ctx.injection_manager.inject(message)
 
     def has_queued_prompts(self) -> bool:
         """Check if there are queued prompts waiting to be processed."""
-        return self._injection_manager.has_queued()
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            return run_ctx.injection_manager.has_queued()
+        return False
 
     def has_pending_injections(self) -> bool:
         """Check if there are pending injections."""
-        return self._injection_manager.has_pending()
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            return run_ctx.injection_manager.has_pending()
+        return False
 
     def clear_queued_prompts(self) -> None:
         """Clear all queued prompts and pending injections."""
-        self._injection_manager.clear()
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        if run_ctx is not None:
+            run_ctx.injection_manager.clear()
 
     @method_spawner
     async def run_stream(
@@ -615,19 +641,24 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self.session_id = session_id
             self.parent_session_id = parent_session_id
 
+        # Create per-run context for state isolation
+        run_ctx = AgentRunContext(deps=deps)
         # Reset cancellation state and track current task
-        self._cancelled = False
-        self._current_stream_task = asyncio.current_task()
+        run_ctx.cancelled = False
+        run_ctx.current_task = asyncio.current_task()
         # Queue the initial prompts
-        self._injection_manager.insert_queued(prompts)
+        run_ctx.injection_manager.insert_queued(prompts)
 
         try:
+            # Set current run context for external access (e.g., tools calling queue_prompt)
+            self._current_run_ctx = run_ctx
             # Process queued prompts until queue is empty
-            while self._injection_manager.has_queued() and not self._cancelled:
-                current_prompts = self._injection_manager.pop_queued()
+            while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
+                current_prompts = run_ctx.injection_manager.pop_queued()
                 if current_prompts is None:
                     break
                 async for event in self._run_stream_once(
+                    run_ctx,
                     *current_prompts,
                     store_history=store_history,
                     message_id=message_id,
@@ -643,13 +674,18 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     yield event
 
                 # After each iteration, flush unconsumed injections to queue
-                self._injection_manager.flush_pending_to_queue()
+                run_ctx.injection_manager.flush_pending_to_queue()
         finally:
-            self._current_stream_task = None
-            self._injection_manager.clear()  # Clean slate for next run
+            # Clean up per-call injection manager (isolated from other concurrent calls)
+            # Only clear _current_run_ctx if it still points to this run (prevents
+            # affecting other concurrent calls that may have started after this one)
+            if self._current_run_ctx is run_ctx:
+                self._current_run_ctx = None
+            run_ctx.injection_manager.clear()
 
     async def _run_stream_once(
         self,
+        run_ctx: AgentRunContext,
         *prompts: PromptCompatible,
         store_history: bool = True,
         message_id: str | None = None,
@@ -830,7 +866,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Temporarily set event handler on command store
         old_handler = self._command_store.event_handler
         self._command_store.event_handler = event_queue.put
-        cmd_ctx = self._command_store.create_context(data=self.get_context())
+        # Use current run_ctx if available (for event queue isolation)
+        run_ctx = self._current_run_ctx or self._background_run_ctx
+        cmd_ctx = self._command_store.create_context(data=self.get_context(run_ctx=run_ctx))
         command_str = f"{cmd_name} {args}".strip()
         try:
             execute_task = asyncio.create_task(
@@ -938,8 +976,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Prompts are pre-converted to UserContent format by run_stream().
 
         Args:
-            run_ctx: Per-execution isolated state container for this run (RFC-0021)
-            prompts: Converted prompts in UserContent format
+            run_ctx: Per-run context for state isolation            prompts: Converted prompts in UserContent format
             user_msg: Pre-created user ChatMessage (from base class)
             effective_parent_id: Resolved parent message ID for threading
             message_id: Optional message ID
@@ -995,27 +1032,42 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
 
     def is_cancelled(self) -> bool:
-        """Check if the agent has been cancelled.
+        """Check if agent has been cancelled.
 
         Returns:
             True if cancellation was requested
         """
-        return self._cancelled
+        # Check both instance flag (for backward compat) and background run context
+        background_cancelled = (
+            self._background_run_ctx.cancelled if self._background_run_ctx else False
+        )
+        return self._cancelled or background_cancelled
 
-    async def interrupt(self) -> None:
+    async def interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
         """Interrupt the currently running stream.
 
         Sets the cancelled flag, calls subclass-specific _interrupt(),
         and emits the interrupted signal.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
         """
         self._cancelled = True
-        await self._interrupt()
+        if run_ctx:
+            run_ctx.cancelled = True
+        if self._background_run_ctx:
+            self._background_run_ctx.cancelled = True
+        await self._interrupt(run_ctx)
         await self.interrupted.emit(self.InterruptEvent(agent_name=self.name))
         logger.info("Agent interrupted", agent=self.name)
 
     @abstractmethod
-    async def _interrupt(self) -> None:
-        """Subclass-specific interrupt implementation."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Subclass-specific interrupt implementation.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
 
     async def get_stats(self) -> MessageStats:
         """Get message statistics."""

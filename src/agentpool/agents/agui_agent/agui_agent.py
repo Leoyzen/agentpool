@@ -30,6 +30,7 @@ from pydantic_ai import (
 
 from agentpool.agents.agui_agent.helpers import execute_tool_call, parse_sse_stream
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
@@ -268,13 +269,18 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         self.tool_confirmation_mode = mode  # type: ignore[assignment]
         self.log.info("Tool confirmation mode changed", mode=mode)
 
-    async def _interrupt(self) -> None:
-        """Cancel the current stream task."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Cancel the current stream task.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if self._current_stream_task and not self._current_stream_task.done():
             self._current_stream_task.cancel()
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -282,6 +288,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         effective_parent_id: str | None,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         input_provider: InputProvider | None = None,
         deps: TDeps | None = None,
@@ -316,7 +323,12 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         thread_id = self._sdk_session_id or self.session_id
-        yield RunStartedEvent(session_id=thread_id, run_id=run_id, agent_name=self.name)
+        yield RunStartedEvent(
+            session_id=thread_id,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
+        )
         # Convert existing conversation history to AG-UI format
         # AG-UI protocol expects full history with each request (stateless server)
         # Extract ModelMessages from ChatMessages
@@ -332,7 +344,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         try:  # Loop to handle tool calls - agent may request multiple rounds
             while True:
                 # Check for cancellation at start of each iteration
-                if self._cancelled:
+                if run_ctx.cancelled:
                     self.log.info("Stream cancelled by user")
                     break
 
@@ -352,6 +364,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     async with self._client.stream("POST", self.endpoint, json=data) as response:
                         response.raise_for_status()
                         async for event in self._process_events(
+                            run_ctx=run_ctx,
                             response=response,
                             response_parts=response_parts,
                             tool_calls_pending=tool_calls_pending,
@@ -361,11 +374,13 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     self.log.exception("HTTP error during AG-UI run")
                     raise
                 # If cancelled or no pending tool calls, break out of the while loop
-                if self._cancelled or not tool_calls_pending:
+                if run_ctx.cancelled or not tool_calls_pending:
                     break
                 # Execute pending tool calls locally and collect results
                 tools_by_name = {t.name: t for t in tools}
-                base_ctx = self.get_context(data=deps, input_provider=effective_input_provider)
+                base_ctx = self.get_context(
+                    data=deps, input_provider=effective_input_provider, run_ctx=run_ctx
+                )
                 pending_tool_results = []
                 for tc_id, (tool_name, args) in tool_calls_pending.items():
                     tool = tools_by_name.get(tool_name)
@@ -377,6 +392,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                         tool_call_id=tc_id,
                         tool_name=tool_name,
                         tool_input=args,
+                        run_ctx=run_ctx,
                     )
                     result = await execute_tool_call(
                         tool,
@@ -406,11 +422,11 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 self.log.debug("Continuing with tool results", count=len(pending_tool_results))
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
-            self._cancelled = True
+            run_ctx.cancelled = True
 
         # Handle cancellation - emit partial message
         text = "".join([i.content for i in response_parts if isinstance(i, TextPart)])
-        if self._cancelled:
+        if run_ctx.cancelled:
             # Flush any remaining response parts
             if response_parts:
                 model_messages.append(ModelResponse(parts=response_parts))
@@ -432,7 +448,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             model_messages.append(ModelResponse(parts=response_parts))
 
         # Final drain of event queue after stream completes
-        async for e in self._drain_event_queue():
+        async for e in self._drain_event_queue(run_ctx):
             yield e
         # Calculate approximate token usage from what we can observe
         usage, cost_info = await calculate_usage_from_parts(
@@ -455,16 +471,19 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         )
         yield StreamCompleteEvent(message=final_message)  # Post-processing handled by base class
 
-    async def _drain_event_queue(self) -> AsyncIterator[RichAgentStreamEvent[Any]]:
+    async def _drain_event_queue(
+        self, run_ctx: AgentRunContext
+    ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         """Drain the event queue and yield events."""
-        while not self._event_queue.empty():
+        while not run_ctx.event_queue.empty():
             try:
-                yield self._event_queue.get_nowait()
+                yield run_ctx.event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
     async def _process_events(
         self,
+        run_ctx: AgentRunContext,
         response: httpx.Response,
         response_parts: list[TextPart | ThinkingPart | ToolCallPart],
         tool_calls_pending: dict[str, tuple[str, dict[str, Any]]],
@@ -488,7 +507,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         chunk_transformer = ChunkTransformer()  # Create chunk transformer for this run
         async for raw_event in parse_sse_stream(response):
             # Check for cancellation during streaming
-            if self._cancelled:
+            if run_ctx.cancelled:
                 self.log.info("Stream cancelled during event processing")
                 break
             # Transform chunks to proper START/CONTENT/END sequences
@@ -517,7 +536,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
 
                 # Convert to native event and distribute to handlers
                 if native_event := agui_to_native_event(event):
-                    async for e in self._drain_event_queue():
+                    async for e in self._drain_event_queue(run_ctx):
                         yield e
                     yield native_event
 

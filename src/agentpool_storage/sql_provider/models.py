@@ -238,6 +238,9 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     agent_name: str = Field(index=True)
     """Name of the agent handling the conversation"""
 
+    parent_id: str | None = Field(default=None, index=True)
+    """Parent conversation ID for subagent/forked sessions."""
+
     title: str | None = Field(default=None, index=True)
     """Generated title for the conversation"""
 

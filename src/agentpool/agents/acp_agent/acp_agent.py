@@ -43,14 +43,17 @@ from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
+from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.acp_agent.session_state import ACPSessionState
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
+    ToolResultMetadataEvent,
 )
-from agentpool.agents.events.processors import event_to_part
+
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -116,10 +119,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     def __init__(
         self,
         *,
-        # Command (exactly one of command or registry_id must be set)
-        command: str | None = None,
+        # Required
+        command: str,
         args: list[str] | None = None,
-        registry_id: str | None = None,
         # Identity
         name: str | None = None,
         description: str | None = None,
@@ -149,13 +151,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
     ) -> None:
         from agentpool.mcp_server.tool_bridge import ToolManagerBridge
 
-        if not command and not registry_id:
-            raise ValueError("Exactly one of 'command' or 'registry_id' must be provided")
-        if command and registry_id:
-            raise ValueError("Exactly one of 'command' or 'registry_id' must be provided, not both")
-
         super().__init__(
-            name=name or command or registry_id,  # type: ignore[arg-type]
+            name=name or command,
             description=description,
             deps_type=deps_type,
             display_name=display_name,
@@ -171,10 +168,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         )
         # Permission handling
         self.auto_approve = auto_approve
-        # Command / registry
+        # Command
         self._command = command
         self._args = args or []
-        self._registry_id = registry_id
         # Environment
         self._cwd = cwd
         self._env_vars = env_vars or {}
@@ -199,8 +195,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._state: ACPSessionState | None = None
         self._extra_mcp_servers: list[McpServer] = []
         self._sessions_cache: list[SessionData] | None = None
-        # Create bridge (not started yet) - pass injection_manager for mid-run injection support
-        self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
+        # ToolManagerBridge gets injection_manager from node's run context
+        self._tool_bridge = ToolManagerBridge(node=self)
         # Track the prompt task for cancellation
         self._prompt_task: asyncio.Task[Any] | None = None
 
@@ -221,7 +217,6 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         return cls(
             command=config.get_command(),
             args=config.get_args(),
-            registry_id=config.get_registry_id(),
             # Identity
             name=config.name,
             description=config.description,
@@ -317,24 +312,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         await self._cleanup()
         await super().__aexit__(exc_type, exc_val, exc_tb)
 
-    async def _resolve_command(self) -> list[str]:
-        """Resolve the command to run, either from explicit command or registry."""
-        if self._command:
-            return [self._command, *self._args]
-        # Registry-based resolution
-        assert self._registry_id is not None
-        from acp.registry import fetch_agent, prepare_agent
-
-        agent = await fetch_agent(self._registry_id)
-        if agent is None:
-            raise RuntimeError(f"Agent {self._registry_id!r} not found in ACP registry")
-        # Merge registry env vars (agent-specific take precedence)
-        self._env_vars = {**agent.dist.env, **self._env_vars}
-        return await prepare_agent(agent, self._args)
-
     async def _start_process(self) -> Process:
         """Start the ACP server subprocess."""
-        cmd = await self._resolve_command()
+        args = self._args
+        cmd = [self._command, *args]
         self.log.info("Starting ACP subprocess", command=cmd)
         env = {**os.environ, **self._env_vars}
         cwd = str(self._cwd) if self._cwd else None
@@ -420,6 +401,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -427,6 +409,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         effective_parent_id: str | None,
         message_id: str | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
         parent_id: str | None = None,
         input_provider: InputProvider | None = None,
         deps: TDeps | None = None,
@@ -438,11 +421,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             to_finish_reason,
         )
 
-        # Resolve input provider: explicit parameter overrides agent default
-        effective_input_provider = input_provider or self._input_provider
-        run_context = self.get_context(data=deps, input_provider=effective_input_provider)
-        if self._client_handler:
-            self._client_handler._input_provider = effective_input_provider
+        # Update input provider if provided
+        if input_provider is not None and self._client_handler:
+            self._client_handler._input_provider = input_provider
         if not self._api or not self._sdk_session_id or not self._state:
             raise AgentNotInitializedError
 
@@ -453,11 +434,14 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         model_messages.append(initial_request)
         current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         text_chunks: list[str] = []
+
         assert self.session_id is not None
-        yield RunStartedEvent(session_id=self.session_id, run_id=run_id, agent_name=self.name)
-        # Persist SDK session ID to storage for cross-referencing
-        if self.storage and self.session_id and self._sdk_session_id:
-            await self.storage.update_sdk_session_id(self.session_id, self._sdk_session_id)
+        yield RunStartedEvent(
+            session_id=self.session_id,
+            run_id=run_id,
+            agent_name=self.name,
+            parent_session_id=parent_session_id,
+        )
         final_blocks = convert_to_acp_content(prompts)
         # Handle ephemeral execution (fork session if store_history=False)
         session_id = self._sdk_session_id
@@ -489,13 +473,17 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 if native_event := acp_to_native_event(update):
                     yield native_event
 
+        tool_metadata: dict[str, dict[str, Any]] = {}
         try:
             async with (
-                self._tool_bridge.set_run_context(run_context, prompt=prompts),
-                merge_queue_into_iterator(poll_acp_events(), self._event_queue) as merged_events,  # ty: ignore[invalid-argument-type]
+                self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
+                merge_queue_into_iterator(poll_acp_events(), run_ctx.event_queue) as merged_events,
             ):
                 async for event in merged_events:
-                    if self._cancelled:
+                    if isinstance(event, ToolResultMetadataEvent):
+                        tool_metadata[event.tool_call_id] = event.metadata
+                        continue
+                    if run_ctx.cancelled:
                         self.log.info("Stream cancelled by user")
                         break
                     if isinstance(event, ToolCallCompleteEvent):
@@ -504,16 +492,13 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             enriched_event = replace(enriched_event, agent_name=self.name)
                         if (
                             enriched_event.metadata is None
-                            and enriched_event.tool_call_id in self._tool_bridge.tool_metadata
+                            and enriched_event.tool_call_id in tool_metadata
                         ):
                             enriched_event = replace(
-                                enriched_event,
-                                metadata=self._tool_bridge.tool_metadata[
-                                    enriched_event.tool_call_id
-                                ],
+                                enriched_event, metadata=tool_metadata[enriched_event.tool_call_id]
                             )
                         event = enriched_event  # noqa: PLW2901
-                    part = event_to_part(event)  # ty: ignore[invalid-argument-type]
+                    part = event_to_part(event)
                     if isinstance(part, TextPart):
                         text_chunks.append(part.content)
                     if part:
@@ -521,9 +506,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     yield event
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
-            self._cancelled = True
+            run_ctx.cancelled = True
 
-        if self._cancelled:
+        if run_ctx.cancelled:
             message = ChatMessage[str](
                 content="".join(text_chunks),
                 role="assistant",
@@ -533,6 +518,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 parent_id=user_msg.message_id,
                 model_name=self.model_name,
                 messages=model_messages,
+                metadata=None,
                 finish_reason="stop",
             )
             yield StreamCompleteEvent(message=message)
@@ -569,6 +555,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             parent_id=user_msg.message_id,
             model_name=self.model_name,
             messages=model_messages,
+            metadata=None,
             finish_reason=finish_reason,
             usage=usage,
             cost_info=cost_info,
@@ -594,8 +581,12 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         self.auto_approve = auto_approve
         self.log.info("Auto-approve mode changed", auto_approve=auto_approve)
 
-    async def _interrupt(self) -> None:
-        """Send CancelNotification to remote ACP server and cancel local tasks."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Send CancelNotification to remote ACP server and cancel local tasks.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if self._api and self._sdk_session_id:
             try:
                 await self._api.cancel(self._sdk_session_id)

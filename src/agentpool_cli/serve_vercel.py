@@ -55,6 +55,7 @@ def vercel_command(  # noqa: PLR0915
 
     from agentpool import AgentPool, AgentsManifest
     from agentpool.agents.events import StreamCompleteEvent
+    from agentpool_config.context import ConfigContextManager
 
     logger.info("Server PID", pid=os.getpid())
 
@@ -67,7 +68,8 @@ def vercel_command(  # noqa: PLR0915
         msg = str(e)
         raise t.BadParameter(msg) from e
 
-    manifest = AgentsManifest.from_file(config_path)
+    with ConfigContextManager(config_path):
+        manifest = AgentsManifest.from_file(config_path)
     pool = AgentPool(manifest, main_agent_name=agent_name)
 
     if show_messages:

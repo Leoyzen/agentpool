@@ -83,6 +83,7 @@ from pydantic_ai import (
 from pydantic_ai.usage import RequestUsage
 
 from agentpool.agents.base_agent import BaseAgent
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.claude_code_agent.converters import (
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
@@ -340,15 +341,15 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         self._client: ClaudeSDKClient | None = None
         self._connection_task: asyncio.Task[None] | None = None
         self._sdk_session_id: str | None = session_id
-        # ToolBridge state for exposing toolsets via MCP
-        self._tool_bridge = ToolManagerBridge(node=self, injection_manager=self._injection_manager)
+        # ToolBridge gets injection_manager from node's run context
+        self._tool_bridge = ToolManagerBridge(node=self)
         self._mcp_servers: dict[str, McpServerConfig] = {}  # Claude SDK MCP server configs
         # Track pending tool call for permission matching
         self._pending_tool_call_ids: dict[str, str] = {}
         # Create Claude storage provider for session management
         self._claude_storage = ClaudeStorageProvider()
         self._hook_manager = ClaudeCodeHookManager(
-            agent_name=self.name,
+            agent=self,
             agent_hooks=hooks,
             event_queue=self._event_queue,
             get_session_id=lambda: self.session_id,
@@ -828,6 +829,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
     async def _stream_events(  # noqa: PLR0915
         self,
+        run_ctx: AgentRunContext,
         prompts: list[UserContent],
         *,
         user_msg: ChatMessage[Any],
@@ -1252,8 +1254,12 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         # Emit stream complete - post-processing handled by base class
         yield StreamCompleteEvent[TResult](message=chat_message)
 
-    async def _interrupt(self) -> None:
-        """Call Claude SDK's native interrupt() to stop the query."""
+    async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+        """Call Claude SDK's native interrupt() to stop the query.
+
+        Args:
+            run_ctx: Optional per-run context for the stream to interrupt
+        """
         if self._client:
             try:
                 await self._client.interrupt()

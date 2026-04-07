@@ -89,6 +89,7 @@ __all__ = [
     "ResolvedConfig",
     "SSEMCPServerConfig",
     "SessionQuery",
+    "SkillsConfig",
     "StdioMCPServerConfig",
     "StdoutEventHandlerConfig",
     "StreamableHTTPMCPServerConfig",

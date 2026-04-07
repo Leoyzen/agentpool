@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, ImportString
 from schemez import Schema
 
+from agentpool_config.paths import ConfigPath
 from agentpool_config.prompt_hubs import PromptHubConfig
 
 
@@ -72,7 +73,7 @@ class FilePromptConfig(BaseSystemPrompt):
     type: Literal["file"] = Field("file", init=False)
     """File prompt reference."""
 
-    path: str = Field(
+    path: ConfigPath = Field(
         examples=["prompts/system.j2", "/templates/agent_prompt.jinja"],
         title="Template file path",
     )

@@ -49,7 +49,7 @@ class TestSessionCreatedEvent:
         # Verify the session was created correctly
         assert "id" in session_data
         assert session_data["title"] == "Test Session"
-        assert session_data["projectID"] == "default"  # camelCase with ID suffix
+        assert session_data["projectID"] == "global"  # Non-git directory returns "global"
         # Verify the session.created event was emitted
         created_events = event_capture.get_events_by_type("session.created")
         assert len(created_events) == 1
@@ -57,7 +57,7 @@ class TestSessionCreatedEvent:
         assert isinstance(event, SessionCreatedEvent)
         assert event.properties.info.id == session_data["id"]
         assert event.properties.info.title == session_data["title"]
-        assert event.properties.info.project_id == "default"  # Python attr is snake_case
+        assert event.properties.info.project_id == "global"  # Non-git directory returns "global"
 
     async def test_session_created_event_should_be_emitted_before_session_updated(
         self,
@@ -109,7 +109,7 @@ class TestSessionCRUD:
         assert "id" in session
         assert session["id"].startswith("ses_")  # Session IDs use "ses_" prefix
         assert session["title"] == "My Session"
-        assert session["projectID"] == "default"  # camelCase with ID suffix
+        assert session["projectID"] == "global"  # Non-git directory returns "global"
         assert session["directory"] == str(tmp_project_dir)
         assert session["version"] == "1"
         assert "time" in session
@@ -209,6 +209,25 @@ class TestSessionCRUD:
         """Deleting a non-existent session should return 404."""
         response = await async_client.delete("/session/nonexistent-id")
 
+        assert response.status_code == 404
+
+    async def test_get_session_messages_returns_messages(self, async_client: AsyncClient):
+        """Getting session messages should return all messages for the session."""
+        # Create a session
+        create_response = await async_client.post("/session", json={"title": "Message Test"})
+        session_id = create_response.json()["id"]
+
+        # Initially, there should be no messages
+        messages_response = await async_client.get(f"/session/{session_id}/message")
+        assert messages_response.status_code == 200
+        messages = messages_response.json()
+        assert len(messages) == 0
+
+    async def test_get_session_messages_nonexistent_session_returns_404(
+        self, async_client: AsyncClient
+    ):
+        """Getting messages for a non-existent session should return 404."""
+        response = await async_client.get("/session/nonexistent-session-id/message")
         assert response.status_code == 404
 
     async def test_list_sessions_empty(self, async_client: AsyncClient):

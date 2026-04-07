@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, Self
-
 from llmling_models_config import AnyModelConfig, StringModelConfig
 from pydantic import ConfigDict, Field, model_validator
 from schemez import Schema
@@ -303,7 +303,9 @@ class AgentsManifest(Schema):
 
     Docs: https://phil65.github.io/agentpool/YAML%20Configuration/mcp_configuration/
     """
-    pool_server: MCPPoolServerConfig = Field(default_factory=MCPPoolServerConfig)
+    pool_server: MCPPoolServerConfig | ACPPoolServerConfig = Field(
+        default_factory=MCPPoolServerConfig
+    )
     """Pool server configuration.
 
     This MCP server configuration is used for the pool MCP server,

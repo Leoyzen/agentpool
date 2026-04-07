@@ -6,6 +6,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Self
 
 from pydantic_ai import RunUsage
+from sqlalchemy import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel, desc, select
 
@@ -160,6 +162,9 @@ class SQLModelProvider(StorageProvider):
         """
         from sqlalchemy import select
 
+        Uses upsert semantics to handle duplicate session IDs gracefully.
+        If the session already exists, it will be silently ignored.
+        """
         from agentpool_storage.sql_provider.models import Conversation
 
         async with AsyncSession(self.engine) as session:
@@ -182,6 +187,21 @@ class SQLModelProvider(StorageProvider):
                 return
 
             now = start_time or get_now()
+
+            # Use upsert to avoid UNIQUE constraint violations
+            # First check if session already exists
+            existing = await session.execute(
+                select(Conversation).where(Conversation.id == session_id)
+            )
+            if existing.scalar_one_or_none():
+                # Session already exists, skip insertion
+                logger.debug(
+                    "Session already exists, skipping log_session",
+                    session_id=session_id,
+                )
+                return
+
+            # Insert new session
             convo = Conversation(
                 id=session_id,
                 agent_name=node_name,
@@ -686,107 +706,41 @@ class SQLModelProvider(StorageProvider):
             await session.execute(stmt)
             await session.commit()
 
-    # Session data methods
+    # Session persistence methods
 
     async def save_session(self, data: SessionData) -> None:
-        """Save or update session data.
+        """Save or update session data."""
+        from agentpool_storage.session_store import SQLSessionStore
 
-        Uses the Conversation table to store session lifecycle data alongside
-        conversation tracking data.
-        """
-        from sqlalchemy import delete
-
-        async with AsyncSession(self.engine) as session:
-            # Delete existing if present (upsert via delete+insert)
-            stmt = delete(Conversation).where(Conversation.id == data.session_id)  # type: ignore[arg-type]
-            await session.execute(stmt)
-            # Insert new/updated
-            convo = Conversation(
-                id=data.session_id,
-                agent_name=data.agent_name,
-                pool_id=data.pool_id,
-                project_id=data.project_id,
-                parent_id=data.parent_id,
-                version=data.version,
-                cwd=data.cwd,
-                agent_type=data.agent_type,
-                sdk_session_id=data.sdk_session_id,
-                start_time=data.created_at,
-                last_active=data.last_active,
-                metadata_json=data.metadata,
-                title=data.title,
-            )
-            session.add(convo)
-            await session.commit()
-            logger.debug("Saved session", session_id=data.session_id)
+        store = SQLSessionStore(self.config)
+        async with store:
+            await store.save(data)
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load session data by ID."""
-        from agentpool.sessions.models import SessionData
+        from agentpool_storage.session_store import SQLSessionStore
 
-        async with AsyncSession(self.engine) as session:
-            stmt = select(Conversation).where(Conversation.id == session_id)
-            result = await session.execute(stmt)
-            row = result.scalars().first()
-            if row is None:
-                return None
-            return SessionData(
-                session_id=row.id,
-                agent_name=row.agent_name,
-                pool_id=row.pool_id,
-                project_id=row.project_id,
-                parent_id=row.parent_id,
-                version=row.version,
-                cwd=row.cwd,
-                agent_type=row.agent_type,
-                sdk_session_id=row.sdk_session_id,
-                created_at=row.start_time,
-                last_active=row.last_active,
-                metadata=row.metadata_json or {},
-            )
+        store = SQLSessionStore(self.config)
+        async with store:
+            return await store.load(session_id)
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a session."""
-        from sqlalchemy import delete
+        from agentpool_storage.session_store import SQLSessionStore
 
-        async with AsyncSession(self.engine) as session:
-            stmt = delete(Conversation).where(Conversation.id == session_id)  # type: ignore[arg-type]
-            result = await session.execute(stmt)
-            await session.commit()
-            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]
-            if deleted:
-                logger.debug("Deleted session", session_id=session_id)
-            return deleted
+        store = SQLSessionStore(self.config)
+        async with store:
+            return await store.delete(session_id)
 
     async def list_session_ids(
         self,
+        *,
         pool_id: str | None = None,
         agent_name: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered."""
-        async with AsyncSession(self.engine) as session:
-            stmt = select(Conversation.id)
-            if pool_id is not None:
-                stmt = stmt.where(Conversation.pool_id == pool_id)
-            if agent_name is not None:
-                stmt = stmt.where(Conversation.agent_name == agent_name)
-            stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
+        from agentpool_storage.session_store import SQLSessionStore
 
-    async def update_sdk_session_id(
-        self,
-        session_id: str,
-        sdk_session_id: str,
-    ) -> None:
-        """Update the external SDK session ID for a session."""
-        from sqlalchemy import update
-
-        async with AsyncSession(self.engine) as db:
-            stmt = (
-                update(Conversation)
-                .where(Conversation.id == session_id)  # type: ignore[arg-type]
-                .values(sdk_session_id=sdk_session_id)
-            )
-            await db.execute(stmt)
-            await db.commit()
+        store = SQLSessionStore(self.config)
+        async with store:
+            return await store.list_sessions(pool_id=pool_id, agent_name=agent_name)

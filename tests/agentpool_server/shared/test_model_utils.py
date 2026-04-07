@@ -102,7 +102,7 @@ class TestExtractProvider:
         """Return openai for OpenAIModelConfig."""
         from llmling_models_config import OpenAIModelConfig
 
-        config = OpenAIModelConfig(identifier="gpt-5.1")
+        config = OpenAIModelConfig(identifier="gpt-5")
         result = _extract_provider(config)
         assert result == "openai"
 

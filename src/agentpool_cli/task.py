@@ -57,6 +57,7 @@ def task_command(
 ) -> None:
     """Execute a task with the specified agent."""
     from agentpool import AgentsManifest
+    from agentpool_config.context import ConfigContextManager
 
     logger = log.get_logger(__name__)
     try:
@@ -67,7 +68,8 @@ def task_command(
             msg = str(e)
             raise t.BadParameter(msg) from e
 
-        manifest = AgentsManifest.from_file(config_path)
+        with ConfigContextManager(config_path):
+            manifest = AgentsManifest.from_file(config_path)
         result = asyncio.run(execute_job(agent_name, task_name, manifest, prompt=prompt))
         print(result)
 

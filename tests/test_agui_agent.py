@@ -6,11 +6,18 @@ import sys
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ag_ui.core import TextMessageContentEvent, ToolCallStartEvent
+import pytest
+
+# Skip all tests in this module if ag_ui is not available
+try:
+    from ag_ui.core import TextMessageContentEvent, ToolCallStartEvent
+except ImportError:
+    pytest.skip("ag_ui module not available", allow_module_level=True)
+    raise  # Will never reach here but keeps type checking happy
+
 import anyio
 import httpx
 from pydantic_ai import PartDeltaEvent
-import pytest
 
 from agentpool.agents.agui_agent import AGUIAgent
 from agentpool.agents.agui_agent.agui_converters import agui_to_native_event
@@ -21,7 +28,6 @@ from agentpool.talk.stats import MessageStats
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
 
 @pytest.fixture
 def mock_sse_response():

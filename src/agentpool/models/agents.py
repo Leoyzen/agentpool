@@ -29,6 +29,7 @@ from agentpool_config.workers import WorkerConfig  # noqa: TC001
 
 
 if TYPE_CHECKING:
+
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation import AgentPool

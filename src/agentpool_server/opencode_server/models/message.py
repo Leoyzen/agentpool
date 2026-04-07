@@ -240,6 +240,11 @@ class MessageWithParts(OpenCodeBaseModel):
     info: MessageInfo
     parts: list[Part] = Field(default_factory=list)
 
+    @property
+    def role(self) -> Literal["user", "assistant"]:
+        """Return the role of the message (user or assistant)."""
+        return self.info.role
+
     @classmethod
     def user(
         cls,

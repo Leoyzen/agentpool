@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Self, assert_never
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from agentpool.utils.tasks import TaskManager
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from agentpool.sessions.models import ProjectData, SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_config.storage import BaseStorageProviderConfig
-    from agentpool_storage.models import ConversationData, GroupBy, QueryFilters, StatsFilters
+    from agentpool_storage.models import ConversationData, QueryFilters, StatsFilters
 
 
 class StoredMessage:
@@ -99,7 +99,15 @@ class StorageProvider:
         agent_type: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
-        """Log a conversation (if supported)."""
+        """Log a conversation (if supported).
+
+        Args:
+            session_id: Unique identifier for this session
+            node_name: Name of the agent/node creating the session
+            start_time: When the session started (defaults to now)
+            model: Model identifier used in this session
+            parent_session_id: Optional ID of the parent session (for subagent tracking)
+        """
 
     async def update_session_title(self, session_id: str, title: str) -> None:
         """Update the title of a conversation.
@@ -278,7 +286,7 @@ class StorageProvider:
     def aggregate_stats(
         self,
         rows: Sequence[tuple[str | None, str | None, datetime, TokenCost | None]],
-        group_by: GroupBy,
+        group_by: Literal["agent", "model", "hour", "day"],
     ) -> dict[str, dict[str, Any]]:
         """Aggregate statistics data by specified grouping.
 
@@ -300,8 +308,6 @@ class StorageProvider:
                     key = timestamp.strftime("%Y-%m-%d %H:00")
                 case "day":
                     key = timestamp.strftime("%Y-%m-%d")
-                case _ as unreachable:
-                    assert_never(unreachable)
 
             entry = stats[key]
             entry["messages"] += 1
@@ -329,7 +335,11 @@ class StorageProvider:
         """
         raise NotImplementedError
 
-    async def get_session_counts(self, *, agent_name: str | None = None) -> tuple[int, int]:
+    async def get_session_counts(
+        self,
+        *,
+        agent_name: str | None = None,
+    ) -> tuple[int, int]:
         """Get counts of conversations and messages.
 
         Args:
@@ -340,7 +350,10 @@ class StorageProvider:
         """
         raise NotImplementedError
 
-    async def delete_session_messages(self, session_id: str) -> int:
+    async def delete_session_messages(
+        self,
+        session_id: str,
+    ) -> int:
         """Delete all messages for a session.
 
         Used for compaction - removes existing messages so they can be
@@ -402,7 +415,10 @@ class StorageProvider:
         msg = f"{self.__class__.__name__} does not support project storage"
         raise NotImplementedError(msg)
 
-    async def list_projects(self, limit: int | None = None) -> list[ProjectData]:
+    async def list_projects(
+        self,
+        limit: int | None = None,
+    ) -> list[ProjectData]:
         """List all projects, ordered by last_active descending.
 
         Args:
@@ -435,7 +451,7 @@ class StorageProvider:
         msg = f"{self.__class__.__name__} does not support project storage"
         raise NotImplementedError(msg)
 
-    # Session data methods
+    # Session persistence methods
 
     async def save_session(self, data: SessionData) -> None:
         """Save or update session data.
@@ -443,6 +459,8 @@ class StorageProvider:
         Args:
             data: Session data to persist
         """
+        msg = f"{self.__class__.__name__} does not support session storage"
+        raise NotImplementedError(msg)
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load session data by ID.
@@ -453,7 +471,8 @@ class StorageProvider:
         Returns:
             Session data if found, None otherwise
         """
-        return None
+        msg = f"{self.__class__.__name__} does not support session storage"
+        raise NotImplementedError(msg)
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a session.
@@ -464,10 +483,12 @@ class StorageProvider:
         Returns:
             True if session was deleted, False if not found
         """
-        return False
+        msg = f"{self.__class__.__name__} does not support session storage"
+        raise NotImplementedError(msg)
 
     async def list_session_ids(
         self,
+        *,
         pool_id: str | None = None,
         agent_name: str | None = None,
     ) -> list[str]:
@@ -480,16 +501,5 @@ class StorageProvider:
         Returns:
             List of session IDs
         """
-        return []
-
-    async def update_sdk_session_id(
-        self,
-        session_id: str,
-        sdk_session_id: str,
-    ) -> None:
-        """Update the external SDK session ID for a session.
-
-        Args:
-            session_id: Internal session identifier
-            sdk_session_id: External SDK session ID (e.g. Claude JSONL stem, Codex thread ID)
-        """
+        msg = f"{self.__class__.__name__} does not support session storage"
+        raise NotImplementedError(msg)

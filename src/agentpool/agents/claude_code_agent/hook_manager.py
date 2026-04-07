@@ -8,7 +8,7 @@ Centralizes all hook-related logic:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     )
     from exxec import ExecutionEnvironment
 
-    from agentpool.agents.prompt_injection import PromptInjectionManager
+    from agentpool.agents.claude_code_agent.claude_code_agent import ClaudeCodeAgent
     from agentpool.hooks import AgentHooks
 
 logger = get_logger(__name__)
@@ -36,31 +36,29 @@ class ClaudeCodeHookManager:
 
     Responsibilities:
     - Builds SDK hooks configuration from multiple sources
-    - Consumes injections from PromptInjectionManager
+    - Consumes injections from PromptInjectionManager (via agent's run context)
     - Provides clean API for hook-related operations
     """
 
     def __init__(
         self,
         *,
-        agent_name: str,
+        agent: ClaudeCodeAgent[Any, Any],
         agent_hooks: AgentHooks | None = None,
-        injection_manager: PromptInjectionManager | None = None,
         set_mode: Callable[[str, str], Awaitable[None]] | None = None,
         env: ExecutionEnvironment | None = None,
     ) -> None:
         """Initialize hook manager.
 
         Args:
-            agent_name: Name of the agent (for logging/events)
+            agent: The agent instance (for accessing per-run injection manager)
             agent_hooks: Optional AgentHooks for pre/post tool hooks
-            injection_manager: Shared injection manager from BaseAgent
             set_mode: Callback to set agent mode (mode_id, category_id)
             env: Agent's execution environment, passed to command hooks
         """
-        self.agent_name = agent_name
+        self.agent_name = agent.name
         self.agent_hooks = agent_hooks
-        self._injection_manager = injection_manager
+        self._agent = agent
         self._set_mode = set_mode
         self._env = env
 
@@ -102,14 +100,17 @@ class ClaudeCodeHookManager:
     ) -> SyncHookJSONOutput:
         """Handle PostToolUse hook for injection and observation.
 
-        Consumes pending injection from the shared PromptInjectionManager
+        Consumes pending injection from the agent's run context injection manager
         and adds it as additionalContext in the response.
         """
         from clawd_code_sdk.models import PostToolUseHookSpecificOutput
 
         result: SyncHookJSONOutput = {"continue_": True}
-        # Consume pending injection from shared manager
-        if self._injection_manager and (injection := await self._injection_manager.consume()):
+        # Consume pending injection from run context (isolated per-call)
+        injection_manager = (
+            self._agent._current_run_ctx.injection_manager if self._agent._current_run_ctx else None
+        )
+        if injection_manager and (injection := await injection_manager.consume()):
             tool_name = input_data.get("tool_name", "unknown")
             logger.debug("Injecting context after tool use", agent=self.agent_name, tool=tool_name)
             result["hookSpecificOutput"] = PostToolUseHookSpecificOutput(

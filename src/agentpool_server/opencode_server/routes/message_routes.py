@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
+from pydantic_ai import UserContent
 
+from agentpool.common_types import PathReference
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -41,7 +45,6 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
-
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
@@ -81,23 +84,109 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
             # Start server for workspace root
             root_uri = f"file://{state.working_dir}"
             logger.info("Starting server...", server_id=server_id)
-            try:
-                await lsp_manager.start_server(server_id, root_uri)
-                servers_started = True
-                logger.info("Server started successfully", server_id=server_id)
-            except Exception as e:  # noqa: BLE001
-                # Don't fail on LSP startup errors
-                logger.info("Failed to start server", error=e, server_id=server_id)
 
-        # Emit lsp.updated event if any servers started
-        if servers_started:
-            logger.info("Broadcasting LspUpdatedEvent")
-            await state.broadcast_event(LspUpdatedEvent())
-        logger.info("warmup_files task completed")
+    async def warmup() -> None:
+        """Run warmup and handle exceptions."""
+        try:
+            await warmup_files()
+        except Exception:
+            logger.exception("LSP warmup failed")
 
-    # Run warmup in background (don't block the event handler)
-    logger.info("Creating background task for warmup")
-    state.create_background_task(warmup_files(), name="lsp-warmup")
+    # Fire and forget - don't block message processing
+    asyncio.create_task(warmup())
+
+
+async def _maybe_generate_title(
+    state: StateDep,
+    session_id: str,
+    user_prompt: Sequence[UserContent | PathReference],
+) -> None:
+    """Generate title for session if this is the first user message.
+
+    Checks if the session only has system/initialization messages (no user messages yet).
+    If so, triggers title generation via the storage manager.
+
+    Args:
+        state: Server state containing storage manager
+        session_id: The session ID to check
+        user_prompt: The user's prompt to use for title generation
+    """
+    # Check if this is the first user message by looking at existing messages
+    existing_messages = state.messages.get(session_id, [])
+
+    # Count user messages (not assistant, not system)
+    user_message_count = sum(
+        1 for msg in existing_messages if hasattr(msg.info, "role") and msg.info.role == "user"
+    )
+
+    # Only generate title on first user message
+    if user_message_count != 1:
+        return
+
+    # Check if storage manager has title generation configured
+    storage = state.pool.storage if state.pool else None
+    if storage is None:
+        return
+
+    # Check if title is already set (not default)
+    session = state.sessions.get(session_id)
+    if session and session.title and session.title != "New Session":
+        return
+
+    try:
+        # Convert user_prompt to string for title generation
+        # Extract text content from the sequence
+        prompt_text_parts: list[str] = []
+        for item in user_prompt:
+            if isinstance(item, str):
+                prompt_text_parts.append(item)
+            else:
+                # Try to get text attribute, fallback to string representation
+                text = getattr(item, "text", None)
+                if text:
+                    prompt_text_parts.append(str(text))
+        prompt_text = " ".join(prompt_text_parts) if prompt_text_parts else ""
+
+        # Trigger title generation via log_session with initial_prompt
+        await storage.log_session(
+            session_id=session_id,
+            node_name=state.agent.name,
+            initial_prompt=prompt_text,
+            on_title_generated=lambda title: _update_session_title(state, session_id, title),
+        )
+    except Exception:
+        logger.exception("Failed to generate title", session_id=session_id)
+
+
+def _update_session_title(state: StateDep, session_id: str, title: str) -> None:
+    """Update session title in state and storage.
+
+    Args:
+        state: Server state
+        session_id: The session ID to update
+        title: The new title
+    """
+    import asyncio
+
+    # Update in-memory session
+    session = state.sessions.get(session_id)
+    if session:
+        session.title = title
+
+    # Update in storage (fire and forget)
+    async def _update() -> None:
+        try:
+            await state.pool.storage.update_session_title(session_id, title)
+        except Exception:
+            logger.exception("Failed to update session title", session_id=session_id)
+
+    # Schedule the async update
+    try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(_update())
+    except RuntimeError:
+        # No event loop running, ignore
+        pass
 
 
 async def persist_message_to_storage(
@@ -229,6 +318,10 @@ async def _process_message_locked(  # noqa: PLR0915
         fs=state.fs,
         tools=state.agent.tools,
     )
+
+    # --- Trigger title generation on first message ---
+    await _maybe_generate_title(state, session_id, user_prompt)
+
     # --- Create assistant message ---
     assistant_msg_id = identifier.ascending("message")
     now = now_ms()
@@ -334,31 +427,60 @@ async def _process_message_locked(  # noqa: PLR0915
 
     await run_with_model()
 
-    for oc_event in adapter.finalize():
-        await state.broadcast_event(oc_event)
+    async def run_with_model():
+        try:
+            iterator = agent.run_stream(*user_prompt, session_id=session_id)
+            async for oc_event in adapter.process_stream(iterator):
+                await state.broadcast_event(oc_event)
+        finally:
+            # Restore original model if we changed it
+            if original_model is not None:
+                with contextlib.suppress(Exception):
+                    await agent.set_model(original_model)
+                    logger.info("Restored original model", model=original_model)
 
-    # --- Finalize assistant message ---
-    response_time = now_ms()
-    preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
-    logger.info("Response text", text_preview=preview)
-    tokens = Tokens.from_pydantic_ai(adapter.usage)
-    cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
-    msg_time = MessageTime(created=now, completed=response_time)
-    update = {"time": msg_time, "tokens": tokens, "cost": cost}
-    updated_assistant = assistant_msg.model_copy(update=update)
-    assistant_msg_with_parts.info = updated_assistant
-    await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
-    await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-    # --- Mark session idle ---
-    status = SessionStatus(type="idle")
-    state.session_status[session_id] = status
-    await state.broadcast_event(SessionStatusEvent.create(session_id, status))
-    await state.broadcast_event(SessionIdleEvent.create(session_id))
-    # --- Update session timestamp ---
-    session = state.sessions[session_id]
-    state.sessions[session_id] = session.model_copy(
-        update={"time": TimeCreatedUpdated(created=session.time.created, updated=response_time)}
-    )
+    response_time: int | None = None
+    cancelled = False
+    try:
+        await run_with_model()
+
+        for oc_event in adapter.finalize():
+            await state.broadcast_event(oc_event)
+
+        # --- Finalize assistant message ---
+        response_time = now_ms()
+        preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
+        logger.info("Response text", text_preview=preview)
+        tokens = Tokens.from_pydantic_ai(adapter.usage)
+        cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
+        msg_time = MessageTime(created=now, completed=response_time)
+        update = {"time": msg_time, "tokens": tokens, "cost": cost}
+        updated_assistant = assistant_msg.model_copy(update=update)
+        assistant_msg_with_parts.info = updated_assistant
+        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+    except asyncio.CancelledError:
+        # User cancelled the request (e.g., pressed ESC)
+        logger.info("Request cancelled by user", session_id=session_id)
+        cancelled = True
+        # Persist partial message if there's any content
+        if adapter.response_text:
+            await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+    finally:
+        # --- Mark session idle ---
+        # Always set session to idle, even if processing failed or was cancelled
+        status = SessionStatus(type="idle")
+        state.session_status[session_id] = status
+        await state.broadcast_event(SessionStatusEvent.create(session_id, status))
+        await state.broadcast_event(SessionIdleEvent.create(session_id))
+        # --- Update session timestamp ---
+        if response_time is not None:
+            session = state.sessions[session_id]
+            state.sessions[session_id] = session.model_copy(
+                update={
+                    "time": TimeCreatedUpdated(created=session.time.created, updated=response_time)
+                }
+            )
     return assistant_msg_with_parts
 
 

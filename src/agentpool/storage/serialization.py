@@ -9,23 +9,25 @@ from pydantic import ConfigDict, TypeAdapter
 from agentpool.log import get_logger
 
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from collections.abc import Sequence
 
-    from pydantic_ai import ModelMessage, ModelRequestPart, ModelResponsePart
+from pydantic_ai import ModelMessage, ModelResponsePart
+
+if TYPE_CHECKING:
+    from pydantic_ai import ModelRequestPart
 
 
 logger = get_logger(__name__)
 
 # Type adapter for serializing ModelResponsePart sequences
 parts_adapter = TypeAdapter(
-    list,
+    list[ModelResponsePart],
     config=ConfigDict(ser_json_bytes="base64", val_json_bytes="base64"),
 )
 
 # Type adapter for serializing ModelMessage sequences
 messages_adapter = TypeAdapter(
-    list,
+    list[ModelMessage],
     config=ConfigDict(ser_json_bytes="base64", val_json_bytes="base64"),
 )
 

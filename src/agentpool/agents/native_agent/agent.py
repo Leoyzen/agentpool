@@ -299,7 +299,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self.sys_prompts = SystemPrompts(all_prompts, prompt_manager=prompt_manager)
         self._formatted_system_prompt: str | None = None  # Set in __aenter__
         self._hook_manager = NativeAgentHookManager(
-            agent_name=self.name,
+            agent=self,
             agent_hooks=hooks,
         )
         self._default_usage_limits = usage_limits

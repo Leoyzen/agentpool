@@ -37,6 +37,7 @@ def agui_command(
     import anyio
 
     from agentpool import AgentPool, AgentsManifest
+    from agentpool_config.context import ConfigContextManager
     from agentpool_server.agui_server import AGUIServer
 
     logger.info("Server PID", pid=os.getpid())
@@ -50,7 +51,8 @@ def agui_command(
         msg = str(e)
         raise t.BadParameter(msg) from e
 
-    manifest = AgentsManifest.from_file(config_path)
+    with ConfigContextManager(config_path):
+        manifest = AgentsManifest.from_file(config_path)
 
     async def run_server() -> None:
         async with AgentPool(manifest) as pool:

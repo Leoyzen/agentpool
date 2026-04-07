@@ -15,6 +15,7 @@ from agentpool_server.opencode_server.models.common import (  # noqa: TC001
 
 SessionStatusType = Literal["idle", "busy", "retry"]
 TodoStatus = Literal["pending", "in_progress", "completed"]
+TodoPriority = Literal["high", "medium", "low"]
 
 
 class SessionSummary(OpenCodeBaseModel):
@@ -124,3 +125,4 @@ class Todo(OpenCodeBaseModel):
     id: str
     content: str
     status: TodoStatus = "pending"
+    priority: TodoPriority = "medium"

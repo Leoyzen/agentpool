@@ -32,6 +32,7 @@ class MemoryStorageProvider(StorageProvider):
         self.conversations: list[dict[str, Any]] = []
         self.commands: list[dict[str, Any]] = []
         self.projects: dict[str, ProjectData] = {}
+        self.sessions: dict[str, SessionData] = {}
 
     def cleanup(self) -> None:
         """Clear all stored data."""
@@ -39,6 +40,7 @@ class MemoryStorageProvider(StorageProvider):
         self.conversations.clear()
         self.commands.clear()
         self.projects.clear()
+        self.sessions.clear()
 
     async def filter_messages(self, query: SessionQuery) -> list[ChatMessage[str]]:
         """Filter messages from memory."""
@@ -97,9 +99,10 @@ class MemoryStorageProvider(StorageProvider):
         model: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
-        """Store conversation in memory (idempotent)."""
-        if any(c["id"] == session_id for c in self.conversations):
-            return
+        """Store conversation in memory."""
+        if next((i for i in self.conversations if i["id"] == session_id), None):
+            msg = f"Duplicate conversation ID: {session_id}"
+            raise ValueError(msg)
         self.conversations.append({
             "id": session_id,
             "agent_name": node_name,
@@ -107,6 +110,7 @@ class MemoryStorageProvider(StorageProvider):
             "title": None,
             "start_time": start_time or get_now(),
         })
+        # Note: parent_session_id is accepted but not stored (no-op for memory provider)
 
     async def update_session_title(self, session_id: str, title: str) -> None:
         """Update the title of a conversation."""
@@ -376,6 +380,40 @@ class MemoryStorageProvider(StorageProvider):
         self.messages = [m for m in self.messages if m.session_id != session_id]
         return original_count - len(self.messages)
 
+    # Session persistence methods
+
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data."""
+        self.sessions[data.session_id] = data
+
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data by ID."""
+        return self.sessions.get(session_id)
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session."""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            return True
+        return False
+
+    async def list_session_ids(
+        self,
+        *,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs, optionally filtered."""
+        result = []
+        for session_id, data in self.sessions.items():
+            if pool_id is not None and data.pool_id != pool_id:
+                continue
+            if agent_name is not None and data.agent_name != agent_name:
+                continue
+            result.append(session_id)
+        return result
+
+    # Project methods
     # Project methods
 
     async def save_project(self, project: ProjectData) -> None:
@@ -423,80 +461,3 @@ class MemoryStorageProvider(StorageProvider):
         if project_id in self.projects:
             project = self.projects[project_id]
             self.projects[project_id] = project.touch()
-
-    # Session data methods
-
-    async def save_session(self, data: SessionData) -> None:
-        """Save or update session data in memory."""
-        # Also store/update the conversation entry
-        # Remove existing conversation if present
-        self.conversations = [c for c in self.conversations if c["id"] != data.session_id]
-        self.conversations.append({
-            "id": data.session_id,
-            "agent_name": data.agent_name,
-            "title": data.title,
-            "start_time": data.created_at,
-            "pool_id": data.pool_id,
-            "project_id": data.project_id,
-            "parent_id": data.parent_id,
-            "version": data.version,
-            "cwd": data.cwd,
-            "agent_type": data.agent_type,
-            "sdk_session_id": data.sdk_session_id,
-            "last_active": data.last_active,
-            "metadata": data.metadata,
-        })
-
-    async def load_session(self, session_id: str) -> SessionData | None:
-        """Load session data by ID from memory."""
-        from agentpool.sessions import models as session_models
-
-        for conv in self.conversations:
-            if conv["id"] == session_id:
-                return session_models.SessionData(
-                    session_id=conv["id"],
-                    agent_name=conv["agent_name"],
-                    pool_id=conv.get("pool_id"),
-                    project_id=conv.get("project_id"),
-                    parent_id=conv.get("parent_id"),
-                    version=conv.get("version", "1"),
-                    cwd=conv.get("cwd"),
-                    agent_type=conv.get("agent_type"),
-                    sdk_session_id=conv.get("sdk_session_id"),
-                    created_at=conv["start_time"],
-                    last_active=conv.get("last_active", conv["start_time"]),
-                    metadata=conv.get("metadata", {}),
-                )
-        return None
-
-    async def delete_session(self, session_id: str) -> bool:
-        """Delete a session from memory."""
-        original_count = len(self.conversations)
-        self.conversations = [c for c in self.conversations if c["id"] != session_id]
-        return len(self.conversations) < original_count
-
-    async def list_session_ids(
-        self,
-        pool_id: str | None = None,
-        agent_name: str | None = None,
-    ) -> list[str]:
-        """List session IDs from memory."""
-        result = []
-        for conv in self.conversations:
-            if pool_id is not None and conv.get("pool_id") != pool_id:
-                continue
-            if agent_name is not None and conv["agent_name"] != agent_name:
-                continue
-            result.append(conv["id"])
-        return result
-
-    async def update_sdk_session_id(
-        self,
-        session_id: str,
-        sdk_session_id: str,
-    ) -> None:
-        """Update the external SDK session ID in memory."""
-        for conv in self.conversations:
-            if conv["id"] == session_id:
-                conv["sdk_session_id"] = sdk_session_id
-                return
