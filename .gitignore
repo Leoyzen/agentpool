@@ -18,6 +18,7 @@ junit.xml
 .python-version
 # dotenv
 .env
+.envrc
 # virtualenv
 .venv
 # mkdocs documentation
