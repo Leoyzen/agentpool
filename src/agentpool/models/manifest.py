@@ -24,7 +24,7 @@ from agentpool_config.converters import ConversionConfig
 from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 from agentpool_config.observability import ObservabilityConfig
 from agentpool_config.output_types import StructuredResponseConfig
-from agentpool_config.pool_server import MCPPoolServerConfig
+from agentpool_config.pool_server import ACPPoolServerConfig, MCPPoolServerConfig
 from agentpool_config.skills import SkillsConfig
 from agentpool_config.storage import StorageConfig
 from agentpool_config.system_prompts import PromptLibraryConfig
