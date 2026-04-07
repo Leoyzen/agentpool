@@ -626,13 +626,14 @@ class AgentsManifest(Schema):
                 }
 
             absolute_config_path = os.path.abspath(path_str)
-            return agent_def.model_copy(
-                update={
-                    "config_file_path": absolute_config_path,
-                    "agents": update_with_path(agent_def.agents),
-                    "teams": update_with_path(agent_def.teams),
-                }
-            )
+        return agent_def.model_copy(
+        update={
+            "config_file_path": absolute_config_path,
+            "agents": update_with_path(agent_def.agents),
+            "agents": update_with_path(agent_def.agents),
+            "teams": update_with_path(agent_def.teams),
+        }
+    )
         except Exception as exc:
             raise ValueError(f"Failed to load agent config from {path}") from exc
 

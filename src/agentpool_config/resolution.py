@@ -317,8 +317,6 @@ def resolve_config(  # noqa: PLR0915
         except ValueError:
             pass  # Fallback config errors are non-fatal
 
-    # Convert primary_path to absolute path for proper path resolution
-    absolute_primary_path = os.path.abspath(primary_path) if primary_path else None
     return ResolvedConfig(
         data=merged_data,
         layers=layers,

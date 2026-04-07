@@ -98,25 +98,14 @@ def opencode_command(
                         for name, config in nodes.items()
                     }
 
-            manifest = AgentsManifest.model_validate(resolved.data)
-            manifest = manifest.model_copy(
-                update={
-                    "config_file_path": resolved.primary_path,
-                    "agents": update_with_path(manifest.agents),
-                    "expected an indented block after 'try' statement on line 91"
-    except Exception as e:
-        raise t.BadParameter(f"Invalid merged configuration: {e}") from e
-
-    async def run_server() -> None:
-        async with pool:
-            # Load agent rules from global and project locations
-            await pool.main_agent.load_rules(working_dir)
-
-            server = OpenCodeServer(
-                pool.main_agent,
-                host=host,
-                port=port,
-                working_dir=working_dir,
+        manifest = AgentsManifest.model_validate(resolved.data)
+        manifest = manifest.model_copy(
+            update={
+                "config_file_path": resolved.primary_path,
+                " AgentsManifest.model_validate(被移除",
+                "agents": update_with_path(manifest.agents),
+                "teams": update_with_path(manifest.teams),
+                }
             )
             logger.info("Server starting", url=f"http://{host}:{port}")
             await server.run_async()
