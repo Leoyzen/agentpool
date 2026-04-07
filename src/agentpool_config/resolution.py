@@ -320,7 +320,7 @@ def resolve_config(  # noqa: PLR0915
     return ResolvedConfig(
         data=merged_data,
         layers=layers,
-        primary_path=absolute_primary_path,
+        primary_path=absolute_config_path,
     )
 
 
