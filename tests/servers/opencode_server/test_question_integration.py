@@ -135,5 +135,320 @@ async def test_question_with_descriptions():
     await task
 
 
+async def test_multi_question_rfc0010_example():
+    """Test multi-question with RFC-0010 schema format (q0, q1, etc.).
+
+    RFC-0010 example schema format:
+    {
+        "type": "object",
+        "properties": {
+            "q0": {"type": "string", "enum": ["opt1", "opt2"]},
+            "q1": {"type": "array", "items": {"enum": ["val1", "val2"]}}
+        }
+    }
+    """
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+
+    # RFC-0010 example schema with q0, q1 format
+    schema = {
+        "type": "object",
+        "properties": {
+            "q0": {
+                "type": "string",
+                "enum": ["opt1", "opt2"],
+                "title": "First Choice",
+                "description": "Select your first option",
+            },
+            "q1": {
+                "type": "array",
+                "items": {"enum": ["val1", "val2"]},
+                "title": "Features",
+                "description": "Select multiple features",
+            },
+        },
+    }
+    params = types.ElicitRequestFormParams(
+        message="Configuration questions", requestedSchema=schema
+    )
+
+    # Start elicitation in background
+    task = asyncio.create_task(provider.get_elicitation(params))
+    await asyncio.sleep(0.1)
+
+    # Verify question was created with multiple questions
+    assert len(state.pending_questions) == 1
+    question_id = next(iter(state.pending_questions.keys()))
+    pending = state.pending_questions[question_id]
+
+    # Verify 2 questions created
+    assert len(pending.questions) == 2
+
+    # First question (q0) - single-select enum
+    question1 = pending.questions[0]
+    assert question1.question == "Select your first option"
+    assert question1.header == "First Choice"[:12]  # Truncated title
+    assert question1.multiple is None  # Single-select
+    assert len(question1.options) == 2
+    assert question1.options[0].label == "opt1"
+    assert question1.options[1].label == "opt2"
+
+    # Second question (q1) - multi-select array
+    question2 = pending.questions[1]
+    assert question2.question == "Select multiple features"
+    assert question2.header == "Features"[:12]  # Truncated title
+    assert question2.multiple is True  # Multi-select
+    assert len(question2.options) == 2
+    assert question2.options[0].label == "val1"
+    assert question2.options[1].label == "val2"
+
+    # Simulate user answers (answering both questions)
+    success = provider.resolve_question(question_id, [["opt1"], ["val1", "val2"]])
+    assert success
+
+    # Wait for result
+    result = await task
+
+    # Verify result preserves original property keys (q0, q1)
+    assert isinstance(result, types.ElicitResult)
+    assert result.action == "accept"
+    assert result.content == {"q0": "opt1", "q1": ["val1", "val2"]}
+
+    assert question_id not in state.pending_questions
+
+
+async def test_multi_question_cancellation():
+    """Test cancellation during multi-question flow."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+
+    # Multi-question schema with 3 questions
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "title": "Name", "description": "Your name"},
+            "role": {
+                "type": "string",
+                "enum": ["admin", "user"],
+                "title": "Role",
+                "description": "Select role",
+            },
+            "features": {
+                "type": "array",
+                "items": {"enum": ["a", "b"]},
+                "title": "Features",
+                "description": "Select features",
+            },
+        },
+    }
+    params = types.ElicitRequestFormParams(message="User details", requestedSchema=schema)
+
+    task = asyncio.create_task(provider.get_elicitation(params))
+    await asyncio.sleep(0.1)
+
+    # Get question and cancel it
+    question_id = next(iter(state.pending_questions.keys()))
+    future = state.pending_questions[question_id].future
+    future.cancel()
+
+    result = await task
+
+    # Should return cancel action
+    assert isinstance(result, types.ElicitResult)
+    assert result.action == "cancel"
+
+    # Clean up if still present
+    assert question_id not in state.pending_questions
+
+
+async def test_multi_question_partial_answers():
+    """Test multi-question with partial answers (fewer than questions)."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+
+    # Schema with 3 questions
+    schema = {
+        "type": "object",
+        "properties": {
+            "a": {"type": "string", "enum": ["x", "y"], "title": "A", "description": "Select A"},
+            "b": {"type": "string", "enum": ["m", "n"], "title": "B", "description": "Select B"},
+            "c": {"type": "string", "enum": ["p", "q"], "title": "C", "description": "Select C"},
+        },
+    }
+    params = types.ElicitRequestFormParams(message="Selections", requestedSchema=schema)
+
+    task = asyncio.create_task(provider.get_elicitation(params))
+    await asyncio.sleep(0.1)
+
+    question_id = next(iter(state.pending_questions.keys()))
+
+    # Provide only 2 answers for 3 questions
+    success = provider.resolve_question(question_id, [["x"], ["m"]])
+    assert success
+
+    result = await task
+
+    assert isinstance(result, types.ElicitResult)
+    assert result.action == "accept"
+    # Only first 2 properties should have answers
+    assert result.content == {"a": "x", "b": "m"}
+    assert question_id not in state.pending_questions
+
+
+async def test_multi_question_empty_object_declines():
+    """Test that empty object schema returns decline."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+
+    # Empty object schema (no properties)
+    schema = {"type": "object", "properties": {}}
+    params = types.ElicitRequestFormParams(message="Empty config", requestedSchema=schema)
+
+    result = await provider.get_elicitation(params)
+
+    # Empty object schema doesn't match len(props) >= 1, goes to fallback case
+    # which returns decline
+    assert isinstance(result, types.ElicitResult)
+    assert result.action == "decline"
+
+
+async def test_multi_question_rfc0010_backward_compat():
+    """Test RFC-0010 schema maintains backward compatibility with single questions."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+
+    # Single property schema (should still use multi-question handler per Task 4)
+    schema = {
+        "type": "object",
+        "properties": {
+            "q0": {
+                "type": "string",
+                "enum": ["yes", "no"],
+                "title": "Confirm",
+                "description": "Proceed?",
+            },
+        },
+    }
+    params = types.ElicitRequestFormParams(message="Confirm action", requestedSchema=schema)
+
+    task = asyncio.create_task(provider.get_elicitation(params))
+    await asyncio.sleep(0.1)
+
+    assert len(state.pending_questions) == 1
+    question_id = next(iter(state.pending_questions.keys()))
+    pending = state.pending_questions[question_id]
+
+    # Single question in multi-question format
+    assert len(pending.questions) == 1
+    assert pending.questions[0].question == "Proceed?"
+
+    # Resolve
+    provider.resolve_question(question_id, [["yes"]])
+    result = await task
+
+    assert isinstance(result, types.ElicitResult)
+    assert result.action == "accept"
+    assert result.content == {"q0": "yes"}
+
+
+async def test_multi_question_event_structure():
+    """Test that SSE QuestionAskedEvent has correct structure for multi-questions."""
+    from agentpool_server.opencode_server.models.events import QuestionAskedEvent
+    from agentpool_server.opencode_server.models.question import QuestionInfo, QuestionOption
+
+    # Create a QuestionsAskedEvent with multiple questions
+    questions = [
+        QuestionInfo(
+            question="Select your first option",
+            header="First Choice",
+            options=[
+                QuestionOption(label="opt1", description=""),
+                QuestionOption(label="opt2", description=""),
+            ],
+            multiple=None,
+        ),
+        QuestionInfo(
+            question="Select features",
+            header="Features",
+            options=[
+                QuestionOption(label="val1", description=""),
+                QuestionOption(label="val2", description=""),
+            ],
+            multiple=True,
+        ),
+    ]
+
+    event = QuestionAskedEvent.create(
+        request_id="test-req-123",
+        session_id="test-session",
+        questions=questions,
+    )
+
+    # Verify event structure
+    assert event.type == "question.asked"
+    assert event.properties.id == "test-req-123"
+    assert event.properties.session_id == "test-session"
+
+    # Verify questions array
+    assert len(event.properties.questions) == 2
+
+    # First question
+    q1 = event.properties.questions[0]
+    assert q1.question == "Select your first option"
+    assert q1.header == "First Choice"
+    assert q1.multiple is None
+    assert len(q1.options) == 2
+    assert q1.options[0].label == "opt1"
+
+    # Second question
+    q2 = event.properties.questions[1]
+    assert q2.question == "Select features"
+    assert q2.header == "Features"
+    assert q2.multiple is True
+    assert len(q2.options) == 2
+    assert q2.options[0].label == "val1"
+
+    # Verify tool is None (not passed)
+    assert event.properties.tool is None
+
+
+async def test_multi_question_max_limit():
+    """Test that multi-questions are capped at 10."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+
+    # Create schema with 12 properties (exceeds max)
+    properties = {
+        f"q{i}": {"type": "string", "enum": ["a", "b"], "title": f"Q{i}"} for i in range(12)
+    }
+    schema = {"type": "object", "properties": properties}
+    params = types.ElicitRequestFormParams(message="Many questions", requestedSchema=schema)
+
+    task = asyncio.create_task(provider.get_elicitation(params))
+    await asyncio.sleep(0.1)
+
+    question_id = next(iter(state.pending_questions.keys()))
+    pending = state.pending_questions[question_id]
+
+    # Should be limited to 10 questions
+    assert len(pending.questions) == 10
+
+    # Clean up
+    pending.future.cancel()
+    await task
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
