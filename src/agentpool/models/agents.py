@@ -395,13 +395,8 @@ class NativeAgentConfig(BaseAgentConfig):
                     msg = f"History processor must take 1 or {two_params} arguments, got {len(params)}"
                     raise ValueError(msg)
 
-                # Second parameter (if present) must be named 'messages' or similar
-                if len(params) == two_params:
-                    last_param_name = params[1].name.lower()
-                    if last_param_name not in ("messages", "msgs", "history"):
-                        msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
-                        raise ValueError(msg)
-
+                # Parameter names are not restricted - users can use any valid Python names
+                # Removed restrictive check for 'messages', 'msgs', 'history' to improve flexibility
                 resolved.append(processor)
             except Exception as e:
                 msg = f"Failed to resolve history processor '{path}': {e}"
