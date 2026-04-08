@@ -59,14 +59,19 @@ async def test_list_sessions_non_blocking():
     agent = ClaudeCodeAgent(name="test", model="claude-sonnet-4-5")
 
     # Mock list_session_metadata to simulate slow I/O
-    async def slow_list_metadata(*args, **kwargs):
-        await asyncio.sleep(0.1)  # Simulate slow I/O
+    def slow_list_metadata(*args, **kwargs):
+        # This is a sync function, as list_session_metadata should be
+        # asyncio.to_thread will handle running it in a thread pool
+        time.sleep(0.1)  # Simulate slow I/O (blocking)
         return [
             SessionMetadata(
                 session_id="test1",
+                path=Path("/fake/path/test1"),
                 first_timestamp="2025-01-01T00:00:00",
                 last_timestamp="2025-01-01T01:00:00",
+                cwd=None,
                 message_count=10,
+                title="Test Session",
             )
         ]
 
@@ -78,7 +83,7 @@ async def test_list_sessions_non_blocking():
     with patch.object(
         agent._claude_storage,
         "list_session_metadata",
-        side_effect=lambda *args, **kwargs: asyncio.run(slow_list_metadata(*args, **kwargs)),
+        side_effect=slow_list_metadata,
     ):
         # This should complete quickly and not block
         # In a real scenario with asyncio.to_thread, other tasks can run
@@ -106,28 +111,29 @@ async def test_list_sessions_concurrent_safety():
     concurrent_count = 0
     max_concurrent = 0
 
-    async def list_metadata_with_tracking(*args, **kwargs):
+    def list_metadata_with_tracking(*args, **kwargs):
         nonlocal concurrent_count, max_concurrent
         concurrent_count += 1
         max_concurrent = max(max_concurrent, concurrent_count)
-        await asyncio.sleep(0.05)
+        time.sleep(0.05)  # Blocking sleep - asyncio.to_thread will handle
         concurrent_count -= 1
         return [
             SessionMetadata(
                 session_id=f"test_{kwargs.get('project_path', 'default')}",
+                path=Path(f"/fake/path/test_{kwargs.get('project_path', 'default')}"),
                 first_timestamp="2025-01-01T00:00:00",
                 last_timestamp="2025-01-01T01:00:00",
+                cwd=None,
                 message_count=10,
+                title="Test Session",
             )
         ]
 
-    # Mock the storage provider
+    # Mock storage provider
     with patch.object(
         agent._claude_storage,
         "list_session_metadata",
-        side_effect=lambda *args, **kwargs: asyncio.run(
-            list_metadata_with_tracking(*args, **kwargs)
-        ),
+        side_effect=list_metadata_with_tracking,
     ):
         # Run multiple concurrent calls
         tasks = [agent.list_sessions(limit=1, cwd=Path(f"/path{i}")) for i in range(5)]
@@ -185,8 +191,10 @@ async def test_load_session_non_blocking():
     agent = ClaudeCodeAgent(name="test", model="claude-sonnet-4-5")
 
     # Mock get_session_messages to simulate slow I/O
-    async def slow_get_messages(*args, **kwargs):
-        await asyncio.sleep(0.05)
+    def slow_get_messages(*args, **kwargs):
+        # This is a sync function, as get_session_messages should be
+        # asyncio.to_thread will handle running it in a thread pool
+        time.sleep(0.05)  # Simulate slow I/O (blocking)
         return [
             ChatMessage(
                 content="Test message",
@@ -194,11 +202,11 @@ async def test_load_session_non_blocking():
             )
         ]
 
-    # Mock the storage provider
+    # Mock storage provider
     with patch.object(
         agent._claude_storage,
         "get_session_messages",
-        side_effect=lambda *args, **kwargs: asyncio.run(slow_get_messages(*args, **kwargs)),
+        side_effect=slow_get_messages,
     ):
         # This should complete and not block
         session_data = await agent.load_session("test_session")
