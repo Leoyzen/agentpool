@@ -184,6 +184,11 @@ class SQLModelProvider(StorageProvider):
     ) -> None:
         """Log conversation to database.
 
+        ``parent_session_id`` maps to ``Conversation.parent_id`` and the
+        ``conversation.parent_id`` column (RFC-0011; migration
+        ``2f5ee67f43ce_add_parent_id_to_conversation``). The ORM model must keep this
+        field in sync with the INSERT ``values()`` call below.
+
         Uses upsert semantics to handle duplicate session IDs gracefully.
         If the session already exists, it will be silently ignored.
         """
