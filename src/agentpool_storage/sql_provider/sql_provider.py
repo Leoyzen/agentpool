@@ -204,6 +204,7 @@ class SQLModelProvider(StorageProvider):
 
             now = start_time or get_now()
 
+            # Conversation.parent_id (models.Conversation) stores parent_session_id for hierarchy.
             # Use dialect-specific upsert to avoid UNIQUE constraint violations
             stmt = self._get_insert_stmt().values(
                 id=session_id,
@@ -211,12 +212,11 @@ class SQLModelProvider(StorageProvider):
                 parent_id=parent_session_id,
                 title=None,
                 start_time=now,
+                model=model,
             )
 
-            # Apply conflict handling if supported by dialect  # @gemini-code-assist /review - Fixed to support PostgreSQL conflict handling
-            if self.engine.dialect.name == "sqlite":
-                stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
-            elif hasattr(stmt, "on_conflict_do_nothing"):
+            # Apply conflict handling if supported by dialect
+            if self.engine.dialect.name == "sqlite" or hasattr(stmt, "on_conflict_do_nothing"):
                 stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
 
             await session.execute(stmt)

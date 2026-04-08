@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import uuid
 
 from clawd_code_sdk.models.content_blocks import (
-    ToolResultBlock,  # @gemini-code-assist /review - Fixed class name
-    ToolUseBlock,  # @gemini-code-assist /review - Fixed class name
     TextBlock,
     ThinkingBlock,
+    ToolResultBlock,  # @gemini-code-assist /review - Fixed class name
+    ToolUseBlock,  # @gemini-code-assist /review - Fixed class name
 )
 from clawd_code_sdk.storage.models import (
     ClaudeApiMessage,
@@ -258,9 +258,7 @@ def build_pydantic_message(
                 case ThinkingBlock(thinking=thinking, signature=signature) if thinking:
                     resp_parts.append(ThinkingPart(content=thinking, signature=signature))
                 case ToolUseBlock(id=block_id, name=name) if block_id and name:
-                    args: dict[str, Any] | None = (
-                        block.input or {}
-                    )  # @gemini-code-assist /review - Fixed type annotation
+                    args: dict[str, Any] = block.input or {}
                     resp_parts.append(
                         ToolCallPart(tool_name=block.name, args=args, tool_call_id=block.id)
                     )

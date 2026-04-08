@@ -162,7 +162,6 @@ class SkillsInstructionProvider(ResourceProvider):
 
     def _format_skill_full(self, name: str, skill: Any, instructions: str) -> str:
         """Format full skill content in XML."""
-        desc = escape(str(skill.description)) if hasattr(skill, "description") else ""
         path = str(skill.skill_path) if hasattr(skill, "skill_path") else ""
 
         return f"""  <skill_content id="{escape(name)}" name="{escape(name)}">
