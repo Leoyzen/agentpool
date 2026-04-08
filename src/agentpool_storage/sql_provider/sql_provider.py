@@ -220,9 +220,17 @@ class SQLModelProvider(StorageProvider):
                 model=model,
             )
 
-            # Apply conflict handling if supported by dialect
-            if self.engine.dialect.name == "sqlite" or hasattr(stmt, "on_conflict_do_nothing"):
+            # Apply dialect-specific "insert or ignore duplicate PK" semantics
+            dialect_name = self.engine.dialect.name
+            if dialect_name in ("sqlite", "postgresql") and hasattr(
+                stmt, "on_conflict_do_nothing"
+            ):
                 stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+            elif dialect_name in ("mysql", "mariadb") and hasattr(
+                stmt, "on_duplicate_key_update"
+            ):
+                # MySQL/MariaDB have no on_conflict_do_nothing; update PK to itself is a no-op
+                stmt = stmt.on_duplicate_key_update(id=stmt.inserted.id)
 
             await session.execute(stmt)
             await session.commit()
