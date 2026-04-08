@@ -729,6 +729,8 @@ class StorageManager:
         """Generate title from initial prompt (internal, fire-and-forget).
 
         Called automatically by log_session when initial_prompt is provided.
+        Persisting the title to storage is handled inside `_generate_title_core`
+        (via ``update_session_title``), not by this wrapper.
 
         Args:
             session_id: ID of the conversation to title

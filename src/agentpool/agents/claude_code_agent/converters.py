@@ -543,7 +543,7 @@ def to_output_format(output_type: type) -> dict[str, Any] | None:
 
 async def claude_message_to_events(
     message: Any,
-    agent_name: str,  # @gemini-code-assist /review - Fixed unused parameter
+    agent_name: str,
 ) -> AsyncIterator[Any]:
     """Convert Claude SDK messages to agentpool events.
 
@@ -557,7 +557,7 @@ async def claude_message_to_events(
     from clawd_code_sdk.models.content_blocks import (
         TextBlock,
         ThinkingBlock,
-        ToolResultBlock,  # @gemini-code-assist /review - Fixed import name
+        ToolResultBlock,
         ToolUseBlock,
     )
     from pydantic_ai import TextPartDelta

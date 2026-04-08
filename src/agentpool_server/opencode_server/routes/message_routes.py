@@ -398,9 +398,18 @@ async def _process_message_locked(  # noqa: PLR0915
                     logger.warning(
                         f"Available model_variants: {list(state.pool.manifest.model_variants.keys())}"
                     )
-        except Exception as e:  # noqa: BLE001
-            # Agent doesn't support model selection, ignore
-            logger.warning(f"Failed to switch model: {e}")
+        except (
+            AttributeError,
+            NotImplementedError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as e:
+            # Expected when the agent does not support switching, the ID is invalid, or ACP is
+            # disconnected / remote refuses model changes.
+            logger.warning("Failed to switch model (unsupported or invalid)", error=str(e))
+        except Exception:
+            logger.exception("Unexpected error while switching model")
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(

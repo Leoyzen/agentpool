@@ -9,8 +9,8 @@ import uuid
 from clawd_code_sdk.models.content_blocks import (
     TextBlock,
     ThinkingBlock,
-    ToolResultBlock,  # @gemini-code-assist /review - Fixed class name
-    ToolUseBlock,  # @gemini-code-assist /review - Fixed class name
+    ToolResultBlock,
+    ToolUseBlock,
 )
 from clawd_code_sdk.storage.models import (
     ClaudeApiMessage,
