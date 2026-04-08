@@ -899,6 +899,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         pending_tool_calls: dict[str, ToolUseBlock] = {}
         # tool_use_id -> display tool name for claude_message_to_events when ToolResult is alone
         tool_call_display_names: dict[str, str] = {}
+        # tool_use_id -> input dict for claude_message_to_events ToolCallCompleteEvent
+        tool_call_inputs: dict[str, dict[str, Any]] = {}
         # Track tool calls that already had ToolCallStartEvent emitted (via StreamEvent)
         emitted_tool_starts: set[str] = set()
         tool_accumulator = ToolCallAccumulator()
@@ -967,6 +969,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                     pending_tool_calls[tc_id] = block
                                     display_name = _strip_mcp_prefix(name)
                                     tool_call_display_names[tc_id] = display_name
+                                    if isinstance(input_data, dict):
+                                        tool_call_inputs[tc_id] = input_data
                                     tool_call_part = ToolCallPart(
                                         tool_name=display_name, args=input_data, tool_call_id=tc_id
                                     )
@@ -1105,6 +1109,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                 tool_name = _strip_mcp_prefix(raw_tool_name)
                                 if tc_id:
                                     tool_call_display_names[tc_id] = tool_name
+                                    # Initialize with empty dict, will be filled by input_json_delta events
+                                    tool_call_inputs[tc_id] = {}
                                 tool_accumulator.start(tc_id, tool_name)
                                 # Track for permission matching - callback uses raw name
                                 self._pending_tool_call_ids[raw_tool_name] = tc_id
@@ -1163,6 +1169,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                             message,
                             agent_name=self.name,
                             tool_names_by_id=tool_call_display_names,
+                            tool_inputs_by_id=tool_call_inputs,
                         ):
                             yield event
 
