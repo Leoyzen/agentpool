@@ -18,6 +18,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, Any
 
 import anyenv
@@ -49,6 +50,35 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+_MAX_PROJECT_SEGMENT_LEN = 240
+
+
+def encode_claude_project_dir_name(project_path: str) -> str:
+    r"""Map a cwd/project path to a single directory name under ``~/.claude/projects``.
+
+    Claude Code stores one subdirectory per project; the name must be a **relative**
+    single path segment so joining with ``projects_path`` cannot escape to arbitrary
+    absolute locations (``Path(base) / \"/etc\"`` would ignore ``base``).
+
+    The encoding mirrors common Claude layouts: absolute paths become segments like
+    ``-Users-name-repo`` (slashes replaced, leading slash preserved as ``-``).
+    """
+    raw = (project_path or ".").strip() or "."
+    p = Path(raw).expanduser()
+    try:
+        resolved = p.resolve()
+    except (OSError, RuntimeError):
+        resolved = p
+    s = str(resolved)
+    # Normalize to POSIX-style for encoding
+    s = s.replace("\\", "/")
+    body = "-" + s[1:] if s.startswith("/") else s
+    body = body.replace("/", "-")
+    # Drop path traversal remnants and reserved characters for directory names
+    body = re.sub(r"[^\w\-.+]", "_", body)
+    body = body.strip("._-") or "unknown"
+    return body[:_MAX_PROJECT_SEGMENT_LEN]
 
 
 def write_entry(session_path: Path, entry: ClaudeJSONLEntry) -> None:
@@ -281,6 +311,25 @@ def _parse_session_full(session_id: str, session_path: Path) -> ParsedSession | 
     )
 
 
+def _conversation_title_from_messages(
+    messages: list[Any],
+    *,
+    max_len: int = 60,
+) -> str:
+    """First-line title from the first user message, for session list UIs."""
+    for msg in messages:
+        if getattr(msg, "role", None) != "user":
+            continue
+        content = getattr(msg, "content", None)
+        if not content:
+            continue
+        text = content if isinstance(content, str) else str(content)
+        first_line = text.split("\n")[0].strip()
+        if first_line:
+            return first_line[:max_len] + ("..." if len(first_line) > max_len else "")
+    return ""
+
+
 class ClaudeStorageProvider(StorageProvider):
     """Storage provider that reads/writes Claude Code's native format.
 
@@ -327,9 +376,8 @@ class ClaudeStorageProvider(StorageProvider):
 
     def _get_project_dir(self, project_path: str) -> Path:
         """Get the directory for a project's conversations."""
-        return (
-            self.projects_path / project_path
-        )  # @gemini-code-assist /review - Fixed removed non-existent encode_project_path call
+        safe_name = encode_claude_project_dir_name(project_path)
+        return self.projects_path / safe_name
 
     def _find_session_path(self, session_id: str) -> Path | None:
         """Find the file path for a session by ID.
@@ -519,10 +567,11 @@ class ClaudeStorageProvider(StorageProvider):
                 if parsed.total_tokens
                 else None
             )
+            title = _conversation_title_from_messages(parsed.messages)
             conv_data = ConversationData(
                 id=parsed.session_id,
                 agent=parsed.messages[0].name or "claude",
-                title="",  # @gemini-code-assist /review - Fixed: removed extract_title call
+                title=title,
                 start_time=(parsed.first_timestamp or get_now()).isoformat(),
                 messages=parsed.messages,
                 token_usage=token_usage_data,

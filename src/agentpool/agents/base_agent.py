@@ -763,13 +763,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         final_message = None
         conversation = message_history if message_history is not None else self.conversation
 
-        # Create minimal run context for RFC-0021 compatibility
-        # Prefer explicit session_id, then self.session_id, otherwise let AgentRunContext generate
-        session_id_to_use = session_id or self.session_id
-        if session_id_to_use:
-            run_ctx = AgentRunContext(session_id=session_id_to_use, deps=deps)
-        else:
-            run_ctx = AgentRunContext(deps=deps)
+        # run_ctx is created by run_stream() (or future callers); do not replace it here or
+        # per-run isolation (event queue, injections, cancellation) breaks.
 
         await self.message_received.emit(user_msg)
         try:

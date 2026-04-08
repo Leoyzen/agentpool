@@ -217,9 +217,15 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 self._direct_history_processors = list(history_processors)
             elif isinstance(session, MemoryConfig):
                 memory_cfg = session
-                # Merge processors
                 if memory_cfg.history_processors is None:
                     memory_cfg.history_processors = []
+                if memory_cfg.history_processors and history_processors:
+                    logger.warning(
+                        "history_processors parameter is merged with session.history_processors; "
+                        "prefer configuring processors only on MemoryConfig",
+                        session_processors=len(memory_cfg.history_processors),
+                        param_processors=len(history_processors),
+                    )
                 # Store processors for manual resolution
                 self._direct_history_processors = list(history_processors)
             else:
@@ -348,40 +354,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if self._resolved_history_processors is not None:
             return self._resolved_history_processors
 
-        # Handle direct function list from deprecated history_processors parameter
-        if self._direct_history_processors is not None:
-            resolved: list[Callable[..., Any]] = []
+        resolved: list[Callable[..., Any]] = []
+
+        # Import paths from MemoryConfig (session)
+        if memory_cfg := self.conversation._config:
+            processor_paths = getattr(memory_cfg, "history_processors", None) or []
+            if processor_paths:
+                from agentpool.utils.importing import import_callable
+
+                for path in processor_paths:
+                    try:
+                        processor = import_callable(path)
+                        self._validate_processor_signature(processor)
+                        resolved.append(processor)
+                    except Exception as e:
+                        msg = f"Failed to resolve history processor '{path}': {e}"
+                        raise ValueError(msg) from e
+
+        # Deprecated direct callables (append after config-based processors)
+        if self._direct_history_processors:
             for processor in self._direct_history_processors:
                 self._validate_processor_signature(processor)
                 resolved.append(processor)
-            # Cache resolved processors
-            self._resolved_history_processors = resolved
-            return resolved
 
-        # Get history processors from memory config
-        if not (memory_cfg := self.conversation._config):
-            self._resolved_history_processors = []
-            return []
-
-        processor_paths = getattr(memory_cfg, "history_processors", None)
-        if not processor_paths:
-            self._resolved_history_processors = []
-            return []
-
-        from agentpool.utils.importing import import_callable
-
-        resolved: list[Callable[..., Any]] = []
-        for path in processor_paths:
-            try:
-                processor = import_callable(path)
-                # Validate signature
-                self._validate_processor_signature(processor)
-                resolved.append(processor)
-            except Exception as e:
-                msg = f"Failed to resolve history processor '{path}': {e}"
-                raise ValueError(msg) from e
-
-        # Cache resolved processors
         self._resolved_history_processors = resolved
         return resolved
 
