@@ -8,6 +8,15 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic_ai.usage import RunUsage
 from sqlalchemy import insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+try:
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+except ImportError:
+    pg_insert = None  # type: ignore
+try:
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
+except ImportError:
+    mysql_insert = None  # type: ignore
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel, desc, select
 
@@ -146,6 +155,24 @@ class SQLModelProvider(StorageProvider):
             session.add(msg)
             await session.commit()
 
+    def _get_insert_stmt(self) -> Any:
+        """Get appropriate insert statement for database dialect.
+
+        Returns:
+            SQLAlchemy insert statement with dialect-specific conflict handling support.
+        """
+        dialect_name = self.engine.dialect.name
+
+        if dialect_name == "sqlite":
+            return sqlite_insert(Conversation)
+        elif pg_insert is not None:
+            return pg_insert(Conversation)
+        elif mysql_insert is not None:
+            return mysql_insert(Conversation)
+        else:
+            # Generic fallback without conflict handling
+            return insert(Conversation)
+
     async def log_session(
         self,
         *,
@@ -177,15 +204,19 @@ class SQLModelProvider(StorageProvider):
 
             now = start_time or get_now()
 
-            # Use upsert to avoid UNIQUE constraint violations
-            stmt = sqlite_insert(Conversation).values(
+            # Use dialect-specific upsert to avoid UNIQUE constraint violations
+            stmt = self._get_insert_stmt().values(
                 id=session_id,
                 agent_name=node_name,
                 parent_id=parent_session_id,
                 title=None,
                 start_time=now,
             )
-            stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+
+            # Apply conflict handling if supported by dialect
+            if self.engine.dialect.name == "sqlite":
+                stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+
             await session.execute(stmt)
             await session.commit()
 
