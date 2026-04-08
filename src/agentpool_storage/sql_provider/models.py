@@ -230,6 +230,11 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
 
     Unified model that stores both conversation tracking data (messages, tokens, cost)
     and session lifecycle data (pool_id, project_id, cwd, metadata).
+
+    Note:
+        ``parent_id`` is written by ``SQLModelProvider.log_session`` and backed by migration
+        ``2f5ee67f43ce_add_parent_id_to_conversation``. Do not drop this field without updating
+        the INSERT and migrations.
     """
 
     id: str = Field(primary_key=True)
@@ -239,7 +244,7 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     """Name of the agent handling the conversation"""
 
     parent_id: str | None = Field(default=None, index=True)
-    """Parent conversation ID for subagent/forked sessions."""
+    """Parent session for fork/subagent hierarchy (RFC-0011); kept in sync with log_session."""
 
     title: str | None = Field(default=None, index=True)
     """Generated title for the conversation"""
