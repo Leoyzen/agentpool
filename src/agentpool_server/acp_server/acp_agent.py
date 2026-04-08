@@ -740,6 +740,13 @@ class AgentPoolACPAgent(ACPAgent):
             await session.agent.set_model(params.model_id)
             logger.info("Set model", model_id=params.model_id, session_id=params.session_id)
             return SetSessionModelResponse()
+        except (AttributeError, NotImplementedError) as e:
+            logger.warning(
+                "Agent does not support model switching",
+                error=str(e),
+                session_id=params.session_id,
+            )
+            return None
         except Exception:
             logger.exception("Failed to set session model", session_id=params.session_id)
             return None
