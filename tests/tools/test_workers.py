@@ -7,6 +7,7 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
+from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent, SubAgentEvent
 
 
 if TYPE_CHECKING:
@@ -222,6 +223,162 @@ async def test_structured_worker_output(default_model: str):
         assert isinstance(structured_result, StructuredResponse)
         assert structured_result.message
         assert structured_result.value
+
+
+async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
+    """Test that worker tool emits SpawnSessionStart event."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        # Set up test model to trigger worker tool
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        # Collect events through run_stream
+        async for event in main_agent.run_stream("Ask worker: do something"):
+            if isinstance(event, SpawnSessionStart):
+                events.append(event)
+
+    # Verify SpawnSessionStart was emitted
+    assert len(events) == 1
+    spawn_event = events[0]
+    assert spawn_event.source_name == "worker"
+    assert spawn_event.spawn_mechanism == "task"
+    assert spawn_event.child_session_id is not None
+    assert spawn_event.parent_session_id is not None
+    assert spawn_event.child_session_id.startswith("ses_")
+
+
+async def test_worker_emits_subagent_events(tmp_path: Path):
+    """Test that worker tool emits SubAgentEvent wrapping worker events."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    subagent_events: list[SubAgentEvent] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker output")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        # Collect events through run_stream
+        async for event in main_agent.run_stream("Ask worker: do something"):
+            if isinstance(event, SubAgentEvent):
+                subagent_events.append(event)
+
+    # Verify SubAgentEvents were emitted
+    assert len(subagent_events) > 0
+
+    # Find the StreamCompleteEvent wrapped in SubAgentEvent
+    complete_events = [e for e in subagent_events if isinstance(e.event, StreamCompleteEvent)]
+    assert len(complete_events) > 0
+
+    # Verify event has correct session tracking
+    for event in subagent_events:
+        assert event.child_session_id is not None
+        assert event.child_session_id.startswith("ses_")
+        assert event.source_name == "worker"
+
+
+async def test_worker_session_isolation(tmp_path: Path):
+    """Test that worker runs have isolated session IDs."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        # Set up test model to call worker twice
+        main_model = TestModel(call_tools=["ask_worker", "ask_worker"])
+        worker_model = TestModel(custom_output_text="Result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        # Collect events through run_stream
+        async for event in main_agent.run_stream("Ask worker twice"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    # Verify each worker run got a unique session ID
+    assert len(spawn_events) == 2
+    session_ids = [e.child_session_id for e in spawn_events]
+    assert session_ids[0] != session_ids[1], "Each worker run should have unique session ID"
+
+    # Verify parent session is consistent
+    parent_ids = [e.parent_session_id for e in spawn_events]
+    assert parent_ids[0] == parent_ids[1], "All worker runs should share same parent session"
+
+
+async def test_worker_team_emits_events(tmp_path: Path):
+    """Test that team workers also emit proper events."""
+    TEAM_CONFIG = """\
+agents:
+  main:
+    type: native
+    model: test
+    display_name: Main Agent
+    workers:
+      - my_team
+
+  agent1:
+    type: native
+    model: test
+    display_name: Agent 1
+    system_prompt: "You are agent 1."
+
+  agent2:
+    type: native
+    model: test
+    display_name: Agent 2
+    system_prompt: "You are agent 2."
+
+teams:
+  my_team:
+    mode: parallel
+    members: [agent1, agent2]
+"""
+    config_path = write_config(TEAM_CONFIG, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        assert isinstance(main_agent, Agent)
+
+        main_model = TestModel(call_tools=["ask_my_team"])
+        await main_agent.set_model(main_model)
+
+        # Collect events through run_stream
+        async for event in main_agent.run_stream("Ask team to do something"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    # Verify SpawnSessionStart was emitted for team
+    assert len(spawn_events) == 1
+    assert spawn_events[0].source_name == "my_team"
+    assert spawn_events[0].source_type == "team_parallel"
 
 
 if __name__ == "__main__":
