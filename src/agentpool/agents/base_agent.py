@@ -6,6 +6,7 @@ from abc import abstractmethod
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -17,10 +18,9 @@ from anyenv.signals import Signal
 import anyio
 from upathtools.filesystems import IsolatedMemoryFileSystem
 
-from agentpool.agents.context import AgentRunContext
+from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
 from agentpool.agents.modes import ModeInfo
-from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory, MessageNode
@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from upathtools.filesystems import OverlayFileSystem
 
     from acp.schema import AvailableCommandsUpdate
-    from agentpool.agents.context import AgentContext, AgentRunContext
     from agentpool.agents.events import (
         CommandCompleteEvent,
         CommandOutputEvent,
@@ -70,6 +69,13 @@ if TYPE_CHECKING:
 
     # Union type for state updates emitted via state_updated signal
     type StateUpdate = ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
+
+
+# ContextVar for per-execution isolation of _current_run_ctx (RFC-0021 compliance)
+_current_run_ctx_var: ContextVar[AgentRunContext | None] = ContextVar(
+    "_current_run_ctx_var",
+    default=None,
+)
 
 
 logger = get_logger(__name__)
@@ -196,7 +202,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
 
-        from agentpool.agents.prompt_injection import PromptInjectionManager
         from agentpool.agents.staged_content import StagedContent
         from agentpool_commands import get_commands
 
@@ -231,7 +236,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
         self._background_run_ctx: AgentRunContext | None = None
-        self._current_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
         self._connect_pending: bool = False
@@ -241,6 +245,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Internal filesystem for tool/session state (can get written to via AgentContext)
         self._internal_fs = IsolatedMemoryFileSystem()
         self.staged_content = StagedContent()
+
+    @property
+    def _current_run_ctx(self) -> AgentRunContext | None:
+        """Get current run context (using ContextVar for concurrency safety)."""
+        return _current_run_ctx_var.get()
 
     def __repr__(self) -> str:
         typ = self.__class__.__name__
@@ -651,7 +660,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         try:
             # Set current run context for external access (e.g., tools calling queue_prompt)
-            self._current_run_ctx = run_ctx
+            _current_run_ctx_var.set(run_ctx)
             # Process queued prompts until queue is empty
             while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
                 current_prompts = run_ctx.injection_manager.pop_queued()
@@ -679,8 +688,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             # Clean up per-call injection manager (isolated from other concurrent calls)
             # Only clear _current_run_ctx if it still points to this run (prevents
             # affecting other concurrent calls that may have started after this one)
-            if self._current_run_ctx is run_ctx:
-                self._current_run_ctx = None
+            if _current_run_ctx_var.get() is run_ctx:
+                _current_run_ctx_var.set(None)
             run_ctx.injection_manager.clear()
 
     async def _run_stream_once(
@@ -704,6 +713,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Session initialization is handled by the caller.
 
         Args:
+            run_ctx: Per-run context for state isolation
             *prompts: Input prompts (various formats supported)
             store_history: Whether to store in history
             message_id: Optional message ID
@@ -976,7 +986,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Prompts are pre-converted to UserContent format by run_stream().
 
         Args:
-            run_ctx: Per-run context for state isolation            prompts: Converted prompts in UserContent format
+            run_ctx: Per-run context for state isolation
+            prompts: Converted prompts in UserContent format
             user_msg: Pre-created user ChatMessage (from base class)
             effective_parent_id: Resolved parent message ID for threading
             message_id: Optional message ID
