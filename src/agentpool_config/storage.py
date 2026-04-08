@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from platformdirs import user_data_dir
 from pydantic import ConfigDict, Field
@@ -16,6 +16,7 @@ from yamling import FormatType
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+    from agentpool.sessions.store import MemorySessionStore
     from agentpool_storage.base import StorageProvider
 
 
@@ -383,9 +384,10 @@ class StorageConfig(Schema):
         """Get the session store from the first SQL provider.
 
         Returns:
-            Session store if available, None otherwise
+            Session store if available, MemorySessionStore as fallback, None otherwise.
         """
         for provider in self.effective_providers:
             if hasattr(provider, "get_session_store"):
                 return provider.get_session_store()
-        return None
+        # Fallback to MemorySessionStore for compatibility
+        return MemorySessionStore()
