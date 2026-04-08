@@ -969,6 +969,36 @@ async def test_schema_override_parameters_non_dict_keeps_original_schema() -> No
     assert out_good.parameters_json_schema == good_override["parameters"]
 
 
+def test_get_json_schema_no_toolresult_return_warning_with_schema_override() -> None:
+    """Dataclass ToolResult return + schema_override must not emit return-schema UserWarnings."""
+    import warnings
+
+    from agentpool.tools.base import FunctionTool, ToolResult
+
+    def returns_tool_result(x: int) -> ToolResult:
+        return ToolResult(content=str(x))
+
+    schema_override: OpenAIFunctionDefinition = {
+        "name": "tr_tool",
+        "description": "Uses ToolResult",
+        "parameters": {
+            "type": "object",
+            "properties": {"x": {"type": "integer"}},
+        },
+    }
+
+    tool = FunctionTool.from_callable(returns_tool_result, schema_override=schema_override)
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        js = tool._get_json_schema()
+
+    assert js is not None
+    assert "properties" in js
+    bad = [w for w in recorded if "Could not generate return schema" in str(w.message)]
+    assert not bad, [str(w.message) for w in bad]
+
+
 if __name__ == "__main__":
     import pytest
 

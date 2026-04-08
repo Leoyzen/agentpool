@@ -6,6 +6,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 import inspect
 from typing import TYPE_CHECKING, Any, Literal
+import warnings
 
 import logfire
 from pydantic_ai.tools import Tool as PydanticAiTool
@@ -247,7 +248,17 @@ class Tool[TOutputType = Any]:
                 function_schema,
             )
 
-            schema = function_schema(func, schema_generator=GenerateJsonSchema)
+            # ToolResult is a dataclass, not a Pydantic model: GenerateJsonSchema cannot
+            # build a return-value JSON Schema and emits UserWarning, then falls back to an
+            # unconstrained return schema anyway. Parameters schema is unaffected. Suppress
+            # only that known warning to keep logs clean (see PR discussion / MCP tool metadata).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message=r"Could not generate return schema for .+",
+                )
+                schema = function_schema(func, schema_generator=GenerateJsonSchema)
 
             # Apply schema_override to generated schema
             # Merge top-level description
