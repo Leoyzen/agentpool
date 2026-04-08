@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING
 import uuid
 
+from clawd_code_sdk.storage.helpers import encode_project_path, extract_title
 from clawd_code_sdk.storage.models import (
     ClaudeApiMessage,
     ClaudeAssistantEntry,
-    ClaudeTextBlock,
-    ClaudeThinkingBlock,
-    ClaudeToolResultBlock,
-    ClaudeToolUseBlock,
     ClaudeUsage,
     ClaudeUserEntry,
     ClaudeUserMessage,
+)
+from clawd_code_sdk.models.content_blocks import (
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
 from pydantic_ai.messages import (
     ModelRequest,
@@ -64,7 +68,7 @@ def chat_message_to_entry(
         )
 
     # Assistant message
-    content_blocks = [ClaudeTextBlock(type="text", text=message.content)]
+    content_blocks = [TextBlock(type="text", text=message.content)]
     usage = ClaudeUsage()
     if message.cost_info:
         usage = ClaudeUsage(
@@ -104,9 +108,9 @@ def extract_text_content(message: ClaudeApiMessage | ClaudeUserMessage) -> str:
     text_parts: list[str] = []
     for part in msg_content:
         match part:
-            case ClaudeTextBlock(text=text) if text:
+            case TextBlock(text=text) if text:
                 text_parts.append(text)
-            case ClaudeThinkingBlock(thinking=thinking) if thinking:
+            case ThinkingBlock(thinking=thinking) if thinking:
                 # Include thinking in display content
                 text_parts.append(f"<thinking>\n{thinking}\n</thinking>")
     return "\n".join(text_parts)
@@ -217,7 +221,7 @@ def build_pydantic_message(
         else:
             for block in msg_content:
                 match block:
-                    case ClaudeTextBlock(text=text) if text:
+                    case TextBlock(text=text) if text:
                         parts.append(UserPromptPart(content=block.text, timestamp=timestamp))
                     case ClaudeToolResultBlock(tool_use_id=tool_use_id) if tool_use_id:
                         # Reconstruct tool return - look up tool name from mapping
@@ -251,9 +255,9 @@ def build_pydantic_message(
     else:
         for block in msg_content:
             match block:
-                case ClaudeTextBlock(text=text) if text:
+                case TextBlock(text=text) if text:
                     resp_parts.append(TextPart(content=text))
-                case ClaudeThinkingBlock(thinking=thinking, signature=signature) if thinking:
+                case ThinkingBlock(thinking=thinking, signature=signature) if thinking:
                     resp_parts.append(ThinkingPart(content=thinking, signature=signature))
                 case ClaudeToolUseBlock(id=block_id, name=name) if block_id and name:
                     args = block.input or {}

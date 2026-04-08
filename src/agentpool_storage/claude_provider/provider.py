@@ -35,7 +35,7 @@ from agentpool_storage.claude_provider.converters import (
     extract_title,
     normalize_model_name,
 )
-from agentpool_storage.claude_provider.models import (
+from clawd_code_sdk.storage.models import (
     ClaudeAssistantEntry,
     ClaudeEntry,
     ClaudeJSONLEntry,
