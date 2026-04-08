@@ -16,8 +16,9 @@ from yamling import FormatType
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from agentpool.sessions.store import MemorySessionStore
     from agentpool_storage.base import StorageProvider
+
+from agentpool.sessions.store import MemorySessionStore
 
 
 FilterMode = Literal["and", "override"]

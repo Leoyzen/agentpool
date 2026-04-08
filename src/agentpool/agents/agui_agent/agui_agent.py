@@ -30,7 +30,6 @@ from pydantic_ai import (
 
 from agentpool.agents.agui_agent.helpers import execute_tool_call, parse_sse_stream
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
@@ -56,6 +55,7 @@ if TYPE_CHECKING:
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
 
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType, StrPath, ToolType

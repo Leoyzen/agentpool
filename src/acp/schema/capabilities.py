@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import Field
 
 from acp.schema.base import AnnotatedObject
-from acp.schema.slash_commands import AvailableCommand
+
+
+if TYPE_CHECKING:
+    from acp.schema.slash_commands import AvailableCommand
 
 
 class FileSystemCapability(AnnotatedObject):

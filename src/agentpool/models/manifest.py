@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import nullcontext
-from collections.abc import Sequence
 from functools import cached_property
+import os
 from typing import TYPE_CHECKING, Annotated, Any, Self
 
-from agentpool_config.context import ConfigContextManager
 from llmling_models_config import AnyModelConfig, StringModelConfig
 from pydantic import ConfigDict, Field, model_validator
 from schemez import Schema
@@ -24,6 +22,7 @@ from agentpool.models.codex_agents import CodexAgentConfig
 from agentpool.models.file_agents import FileAgentConfig
 from agentpool_config.commands import CommandConfig, StaticCommandConfig
 from agentpool_config.compaction import CompactionConfig
+from agentpool_config.context import ConfigContextManager
 from agentpool_config.converters import ConversionConfig
 from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 from agentpool_config.observability import ObservabilityConfig

@@ -13,11 +13,11 @@ from agentpool.utils.todos import (
     PRIORITY_LABELS,
     STATUS_ICONS,
     PlanEntry,
-    PlanEntryPriority,
-    PlanEntryStatus,
     TodoPriority,
     TodoStatus,
+    TodoTracker,
 )
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

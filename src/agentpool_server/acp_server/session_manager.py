@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from acp.schema import Implementation, McpServer
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
+    from agentpool.sessions import SessionStore
     from agentpool.storage.manager import StorageManager
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
@@ -50,6 +51,11 @@ class ACPSessionManager:
     def storage(self) -> StorageManager:
         """Get the pool's storage manager for persistence."""
         return self._pool.storage
+
+    @property
+    def session_store(self) -> SessionStore | None:
+        """Get the pool's session store for session CRUD operations."""
+        return self._pool.sessions.store
 
     async def create_session(
         self,
@@ -96,7 +102,8 @@ class ACPSessionManager:
                 cwd=cwd,
                 metadata={"protocol": "acp", "mcp_server_count": len(mcp_servers or [])},
             )
-            await self.storage.save_session(data)
+            if self.session_store:
+                await self.session_store.save(data)
             # Create the ACP-specific runtime session
             session = ACPSession(
                 session_id=session_id,
@@ -148,7 +155,7 @@ class ACPSessionManager:
             if session_id in self._active:
                 return self._active[session_id]
             # Try to load from pool's session store
-            data = await self.storage.load_session(session_id)
+            data = await self.session_store.load(session_id) if self.session_store else None
             if data is None:
                 logger.warning("Session not found in store", session_id=session_id)
                 return None
@@ -193,7 +200,8 @@ class ACPSessionManager:
             logger.info("Closed ACP session", session_id=session_id)
 
         if delete:
-            await self.storage.delete_session(session_id)
+            if self.session_store:
+                await self.session_store.delete(session_id)
             logger.info("Deleted session from store", session_id=session_id)
 
     async def update_session_agent(self, session_id: str, agent_name: str) -> None:
@@ -206,10 +214,10 @@ class ACPSessionManager:
         if not self._active.get(session_id):
             return
         # Load, update, and save session data
-        data = await self.storage.load_session(session_id)
-        if data:
+        data = await self.session_store.load(session_id) if self.session_store else None
+        if data and self.session_store:
             updated = data.with_agent(agent_name)
-            await self.storage.save_session(updated)
+            await self.session_store.save(updated)
 
     async def list_sessions(self, *, active_only: bool = False) -> list[str]:
         """List session IDs.
@@ -223,7 +231,9 @@ class ACPSessionManager:
         if active_only:
             return list(self._active.keys())
 
-        return await self.storage.list_session_ids()
+        if self.session_store:
+            return await self.session_store.list_sessions()
+        return []
 
     async def close_all_sessions(self) -> int:
         """Close all active sessions.

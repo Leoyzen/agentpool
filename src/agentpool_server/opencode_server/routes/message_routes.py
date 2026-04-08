@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Sequence
+import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -23,7 +23,6 @@ from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
     FilePartInput,
-    LspUpdatedEvent,
     MessagePath,
     MessageRequest,
     MessageTime,
@@ -45,6 +44,7 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
@@ -226,7 +226,7 @@ async def list_messages(
     return messages[-limit:] if limit else messages
 
 
-async def _process_message(  # noqa: PLR0915
+async def _process_message(
     session_id: str,
     request: MessageRequest,
     state: StateDep,
@@ -401,7 +401,6 @@ async def _process_message_locked(  # noqa: PLR0915
         except Exception as e:  # noqa: BLE001
             # Agent doesn't support model selection, ignore
             logger.warning(f"Failed to switch model: {e}")
-            pass
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(

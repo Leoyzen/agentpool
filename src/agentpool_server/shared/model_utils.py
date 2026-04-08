@@ -155,7 +155,6 @@ def _apply_configured_variants(
         Model,
         ModelCost,
         ModelLimit,
-        ModelModalities,
         Provider,
     )
 

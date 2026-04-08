@@ -37,13 +37,6 @@ class ModelLimit(OpenCodeBaseModel):
     output: float
 
 
-class ModelModalities(OpenCodeBaseModel):
-    """Modalities supported by a model."""
-
-    input: list[str] = Field(default_factory=lambda: ["text"])
-    output: list[str] = Field(default_factory=lambda: ["text"])
-
-
 class Model(OpenCodeBaseModel):
     """Model information."""
 

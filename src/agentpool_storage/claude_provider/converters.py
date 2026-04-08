@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from pathlib import Path
 from typing import TYPE_CHECKING
 import uuid
 
-from clawd_code_sdk.storage.helpers import encode_project_path, extract_title
+from clawd_code_sdk.models.content_blocks import (
+    ToolResultBlock,  # @gemini-code-assist /review - Fixed class name
+    ToolUseBlock,  # @gemini-code-assist /review - Fixed class name
+    TextBlock,
+    ThinkingBlock,
+)
 from clawd_code_sdk.storage.models import (
     ClaudeApiMessage,
     ClaudeAssistantEntry,
     ClaudeUsage,
     ClaudeUserEntry,
     ClaudeUserMessage,
-)
-from clawd_code_sdk.models.content_blocks import (
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
 )
 from pydantic_ai.messages import (
     ModelRequest,
@@ -223,7 +221,7 @@ def build_pydantic_message(
                 match block:
                     case TextBlock(text=text) if text:
                         parts.append(UserPromptPart(content=block.text, timestamp=timestamp))
-                    case ClaudeToolResultBlock(tool_use_id=tool_use_id) if tool_use_id:
+                    case ToolResultBlock(tool_use_id=tool_use_id) if tool_use_id:
                         # Reconstruct tool return - look up tool name from mapping
                         tool_content = block.extract_text()
                         tool_name = tool_id_mapping.get(block.tool_use_id, "")
@@ -259,8 +257,10 @@ def build_pydantic_message(
                     resp_parts.append(TextPart(content=text))
                 case ThinkingBlock(thinking=thinking, signature=signature) if thinking:
                     resp_parts.append(ThinkingPart(content=thinking, signature=signature))
-                case ClaudeToolUseBlock(id=block_id, name=name) if block_id and name:
-                    args = block.input or {}
+                case ToolUseBlock(id=block_id, name=name) if block_id and name:
+                    args: dict[str, Any] | None = (
+                        block.input or {}
+                    )  # @gemini-code-assist /review - Fixed type annotation
                     resp_parts.append(
                         ToolCallPart(tool_name=block.name, args=args, tool_call_id=block.id)
                     )

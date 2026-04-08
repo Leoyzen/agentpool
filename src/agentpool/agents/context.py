@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import time
-import uuid
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Any, Literal
+import uuid
 
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger

@@ -367,6 +367,7 @@ class NativeAgentConfig(BaseAgentConfig):
             ValueError: If processor resolution fails or signature is invalid
         """
         import inspect
+
         from agentpool.utils.importing import import_callable
 
         # Get session config

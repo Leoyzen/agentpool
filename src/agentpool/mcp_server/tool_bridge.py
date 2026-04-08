@@ -41,7 +41,6 @@ if TYPE_CHECKING:
 
     from agentpool.agents import AgentContext
     from agentpool.agents.base_agent import BaseAgent
-    from agentpool.agents.prompt_injection import PromptInjectionManager
     from agentpool.tools.base import Tool
 _ = ResourceChangeEvent  # Used at runtime in method signature
 

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Self
 
 from agentpool.log import get_logger
 
+
 if TYPE_CHECKING:
     from types import TracebackType
 

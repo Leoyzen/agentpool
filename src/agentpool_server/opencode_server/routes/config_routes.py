@@ -18,7 +18,6 @@ from agentpool_server.opencode_server.models import (
     Model,
     ModelCost,
     ModelLimit,
-    ModelModalities,
     Provider,
     ProviderListResponse,
     ProvidersResponse,

@@ -12,6 +12,7 @@ from anyenv.signals import Signal
 from pydantic import BaseModel
 
 from agentpool.log import get_logger
+from agentpool.messaging import ChatMessage
 from agentpool.utils.identifiers import generate_session_id
 from agentpool.utils.tasks import TaskManager
 from agentpool_config.session import SessionQuery

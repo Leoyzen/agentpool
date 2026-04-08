@@ -13,12 +13,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast,
 from uuid import uuid4
 
 import logfire
-from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode, RunContext
+from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
-from pydantic_ai.tools import ToolDefinition
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentContext, AgentRunContext
+from agentpool.agents.context import AgentContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
@@ -37,7 +36,6 @@ if TYPE_CHECKING:
 
     from exxec import ExecutionEnvironment
     from pydantic_ai import BaseToolCallPart, UsageLimits, UserContent
-    from pydantic_ai.builtin_tools import AbstractBuiltinTool
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.settings import ModelSettings
@@ -47,6 +45,7 @@ if TYPE_CHECKING:
     from toprompt import AnyPromptType
     from upathtools import JoinablePathLike
 
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import (
@@ -146,7 +145,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         env: ExecutionEnvironment | StrPath | None = None,
         hooks: AgentHooks | None = None,
         tool_confirmation_mode: ToolConfirmationMode = "per_tool",
-        builtin_tools: Sequence[AbstractBuiltinTool] | None = None,
+        builtin_tools: Sequence[AbstractBuiltinTool] | None = None,  # type: ignore[name-defined]
         usage_limits: UsageLimits | None = None,
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
@@ -960,7 +959,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         asyncio.shield(iteration_task),
                         timeout=2.0,
                     )
-                except (asyncio.TimeoutError, asyncio.CancelledError):
+                except (TimeoutError, asyncio.CancelledError):
                     pass  # Cleanup will happen in background
 
         # Send additional enriched completion event

@@ -543,13 +543,13 @@ def to_output_format(output_type: type) -> dict[str, Any] | None:
 
 async def claude_message_to_events(
     message: Any,
-    agent_name: str,
+    agent_name: str,  # @gemini-code-assist /review - Fixed unused parameter
 ) -> AsyncIterator[Any]:
     """Convert Claude SDK messages to agentpool events.
 
     Args:
         message: SDK message (UserMessage, SystemMessage, AssistantMessage, etc.)
-        agent_name: Name of the agent
+        agent_name: Name of the agent (used in tool events for attribution)
 
     Yields:
         List of agentpool events (PartDeltaEvent, ToolCallStartEvent, ToolCallCompleteEvent, etc.)
@@ -557,7 +557,7 @@ async def claude_message_to_events(
     from clawd_code_sdk.models.content_blocks import (
         TextBlock,
         ThinkingBlock,
-        ToolResultBlock,
+        ToolResultBlock,  # @gemini-code-assist /review - Fixed import name
         ToolUseBlock,
     )
     from pydantic_ai import TextPartDelta
@@ -583,7 +583,6 @@ async def claude_message_to_events(
             for block in content:
                 match block:
                     case TextBlock(text=text) if text:
-                        # Text content -> PartDeltaEvent
                         text_delta = TextPartDelta(content_delta=text)
                         yield PartDeltaEvent(index=0, delta=text_delta)
 

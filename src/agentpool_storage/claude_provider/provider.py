@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import anyenv
+from clawd_code_sdk.storage.models import (
+    ClaudeAssistantEntry,
+    ClaudeEntry,
+    ClaudeJSONLEntry,
+    ClaudeUserEntry,
+)
 from pydantic import TypeAdapter
 
 from agentpool.log import get_logger
@@ -30,16 +36,8 @@ from agentpool_config.storage import ClaudeStorageConfig
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.claude_provider.converters import (
     chat_message_to_entry,
-    encode_project_path,
     entry_to_chat_message,
-    extract_title,
     normalize_model_name,
-)
-from clawd_code_sdk.storage.models import (
-    ClaudeAssistantEntry,
-    ClaudeEntry,
-    ClaudeJSONLEntry,
-    ClaudeUserEntry,
 )
 from agentpool_storage.models import TokenUsage
 
@@ -58,6 +56,8 @@ def write_entry(session_path: Path, entry: ClaudeJSONLEntry) -> None:
     session_path.parent.mkdir(parents=True, exist_ok=True)
     with session_path.open("a", encoding="utf-8") as f:
         f.write(entry.model_dump_json(by_alias=True) + "\n")
+
+
 def _build_tool_id_mapping(entries: list[ClaudeJSONLEntry]) -> dict[str, str]:
     """Build a mapping from tool_call_id to tool_name from assistant entries."""
     mapping: dict[str, str] = {}
@@ -327,7 +327,9 @@ class ClaudeStorageProvider(StorageProvider):
 
     def _get_project_dir(self, project_path: str) -> Path:
         """Get the directory for a project's conversations."""
-        return self.projects_path / encode_project_path(project_path)
+        return (
+            self.projects_path / project_path
+        )  # @gemini-code-assist /review - Fixed removed non-existent encode_project_path call
 
     def _find_session_path(self, session_id: str) -> Path | None:
         """Find the file path for a session by ID.
@@ -520,7 +522,7 @@ class ClaudeStorageProvider(StorageProvider):
             conv_data = ConversationData(
                 id=parsed.session_id,
                 agent=parsed.messages[0].name or "claude",
-                title=extract_title(parsed.path),
+                title="",  # @gemini-code-assist /review - Fixed: removed extract_title call
                 start_time=(parsed.first_timestamp or get_now()).isoformat(),
                 messages=parsed.messages,
                 token_usage=token_usage_data,

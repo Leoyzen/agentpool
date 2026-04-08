@@ -29,4 +29,3 @@ def raise_if_usage_limit_reached(message) -> None:
     Raises:
         SomeError: If usage limit has been reached (not implemented).
     """
-    pass

@@ -1231,8 +1231,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 cache_write_tokens=usage_dict.get("cache_creation_input_tokens", 0),
             )
 
-        # Determine finish reason - check if we were cancelled
-        # Build metadata with file tracking and SDK session ID
+        # Per-run cancellation: use run_ctx.cancelled, not self._cancelled, so concurrent
+        # runs on the same agent do not leak cancellation state across executions.
+        finish_reason = "stop" if run_ctx and run_ctx.cancelled else None
+
         metadata = {}
         if self._sdk_session_id:
             metadata["sdk_session_id"] = self._sdk_session_id
@@ -1249,11 +1251,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,
-            finish_reason="stop" if self._cancelled else None,
+            finish_reason=finish_reason,
             metadata=metadata,
         )
 
-        # Emit stream complete - post-processing handled by base class
         yield StreamCompleteEvent[TResult](message=chat_message)
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:

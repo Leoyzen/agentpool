@@ -9,6 +9,7 @@ from pydantic_ai.usage import RunUsage
 from sqlalchemy import insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+
 try:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 except ImportError:
@@ -165,13 +166,12 @@ class SQLModelProvider(StorageProvider):
 
         if dialect_name == "sqlite":
             return sqlite_insert(Conversation)
-        elif pg_insert is not None:
+        if pg_insert is not None:
             return pg_insert(Conversation)
-        elif mysql_insert is not None:
+        if mysql_insert is not None:
             return mysql_insert(Conversation)
-        else:
-            # Generic fallback without conflict handling
-            return insert(Conversation)
+        # Generic fallback without conflict handling
+        return insert(Conversation)
 
     async def log_session(
         self,
@@ -213,8 +213,10 @@ class SQLModelProvider(StorageProvider):
                 start_time=now,
             )
 
-            # Apply conflict handling if supported by dialect
+            # Apply conflict handling if supported by dialect  # @gemini-code-assist /review - Fixed to support PostgreSQL conflict handling
             if self.engine.dialect.name == "sqlite":
+                stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+            elif hasattr(stmt, "on_conflict_do_nothing"):
                 stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
 
             await session.execute(stmt)
