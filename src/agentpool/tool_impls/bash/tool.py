@@ -29,6 +29,74 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+DANGEROUS_COMMANDS = {
+    "rm",
+    "rmdir",
+    "dd",
+    "mkfs",
+    "format",
+    "fdisk",
+    "reboot",
+    "shutdown",
+    "halt",
+    "poweroff",
+    "su",
+    "sudo",
+    "chmod",
+    "chown",
+    "chroot",
+    "passwd",
+    "usermod",
+    "userdel",
+    "groupmod",
+    "killall",
+    "kill",
+}
+
+DANGEROUS_PATTERNS = [
+    r"&&",
+    r"\|\|",
+    r";",
+    r"\|",
+    r"`",
+    r"\$\(.*\)",  # command substitution $(...)
+    r">\s*/dev/",
+    r"<\s*/dev/",
+    r">\s*/",  # output redirection to root
+]
+
+
+def validate_command(command: str) -> tuple[bool, str | None]:
+    """Validate shell command for dangerous patterns.
+
+    Args:
+        command: Command string to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    cmd_stripped = command.strip()
+
+    # Check for dangerous command operators
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, cmd_stripped):
+            return False, f"Dangerous command operator detected: {pattern}"
+
+    # Check for dangerous base commands
+    parts = cmd_stripped.split()
+    if not parts:
+        return False, "Empty command"
+
+    base_cmd = parts[0].lower()
+
+    # Check if base command is in dangerous list
+    for dangerous in DANGEROUS_COMMANDS:
+        if base_cmd == dangerous or base_cmd.startswith(f"{dangerous} "):
+            return False, f"Dangerous command detected: {dangerous}"
+
+    return True, None
+
+
 @dataclass
 class BashTool(Tool[ToolResult]):
     """Execute shell commands and return the output.
@@ -88,6 +156,19 @@ class BashTool(Tool[ToolResult]):
         exit_code: int | None = None
         error_msg: str | None = None
         env = self._get_env(ctx)
+
+        # Validate command before execution
+        is_valid, validation_error = validate_command(command)
+        if not is_valid:
+            logger.warning(
+                "Bash command validation failed",
+                command=command[:100] if len(command) > 100 else command,
+                error=validation_error,
+            )
+            return ToolResult(
+                content=f"Command rejected: {validation_error}",
+                metadata={"output": "", "exit": None, "description": command},
+            )
 
         # Check if we're running in ACP - terminal streams client-side
         from exxec.acp_provider import ACPExecutionEnvironment

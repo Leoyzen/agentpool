@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -66,14 +67,18 @@ class ZedStorageProvider(StorageProvider):
             # If path is directory, add default db location
             self.db_path = self.db_path / "threads" / "threads.db"
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a SQLite connection."""
+    async def _get_connection(self) -> sqlite3.Connection:
+        """Get a SQLite connection asynchronously."""
         if not self.db_path.exists():
             msg = f"Zed threads database not found: {self.db_path}"
             raise FileNotFoundError(msg)
-        return sqlite3.connect(self.db_path)
 
-    def _list_threads(
+        def _connect_sync():
+            return sqlite3.connect(self.db_path)
+
+        return await asyncio.to_thread(_connect_sync)
+
+    async def _list_threads(
         self,
         *,
         since: datetime | None = None,
@@ -88,56 +93,63 @@ class ZedStorageProvider(StorageProvider):
         Returns:
             List of (id, summary, updated_at) tuples
         """
-        try:
-            conn = self._get_connection()
-            query = "SELECT id, summary, updated_at FROM threads"
-            params: list[Any] = []
-            if since:
-                query += " WHERE updated_at >= ?"
-                params.append(since.isoformat())
-            query += " ORDER BY updated_at DESC"
-            if limit:
-                query += " LIMIT ?"
-                params.append(limit)
-            cursor = conn.execute(query, params)
-            threads = cursor.fetchall()
-            conn.close()
-        except FileNotFoundError:
-            return []
-        except sqlite3.Error as e:
-            logger.warning("Failed to list Zed threads", error=str(e))
-            return []
-        else:
-            return threads
 
-    def _load_thread(self, thread_id: str) -> ZedThread | None:
+        def _list_threads_sync():
+            try:
+                conn = sqlite3.connect(self.db_path)
+                query = "SELECT id, summary, updated_at FROM threads"
+                params: list[Any] = []
+                if since:
+                    query += " WHERE updated_at >= ?"
+                    params.append(since.isoformat())
+                query += " ORDER BY updated_at DESC"
+                if limit:
+                    query += " LIMIT ?"
+                    params.append(limit)
+                cursor = conn.execute(query, params)
+                threads = cursor.fetchall()
+                conn.close()
+                return threads
+            except FileNotFoundError:
+                return []
+            except sqlite3.Error as e:
+                logger.warning("Failed to list Zed threads", error=str(e))
+                return []
+
+        return await asyncio.to_thread(_list_threads_sync)
+
+    async def _load_thread(self, thread_id: str) -> ZedThread | None:
         """Load a single thread by ID."""
-        try:
-            conn = self._get_connection()
-            query = "SELECT data_type, data FROM threads WHERE id = ? LIMIT 1"
-            cursor = conn.execute(query, (thread_id,))
-            row = cursor.fetchone()
-            conn.close()
-            if row is None:
+
+        def _load_thread_sync():
+            try:
+                conn = sqlite3.connect(self.db_path)
+                query = "SELECT data_type, data FROM threads WHERE id = ? LIMIT 1"
+                cursor = conn.execute(query, (thread_id,))
+                row = cursor.fetchone()
+                conn.close()
+                if row is None:
+                    return None
+
+                data_type, data = row
+                return ZedThread.from_compressed(data, data_type)
+            except FileNotFoundError:
+                return None
+            except (sqlite3.Error, Exception) as e:  # noqa: BLE001
+                logger.warning("Failed to load Zed thread", thread_id=thread_id, error=str(e))
                 return None
 
-            data_type, data = row
-            return ZedThread.from_compressed(data, data_type)
-        except FileNotFoundError:
-            return None
-        except (sqlite3.Error, Exception) as e:  # noqa: BLE001
-            logger.warning("Failed to load Zed thread", thread_id=thread_id, error=str(e))
-            return None
+        return await asyncio.to_thread(_load_thread_sync)
 
     async def filter_messages(self, query: SessionQuery) -> list[ChatMessage[str]]:
         """Filter messages based on query."""
         messages: list[ChatMessage[str]] = []
         # Narrow thread list when a specific name is requested
-        threads = self._list_threads()
+        threads = await self._list_threads()
         if query.name:
             threads = [(tid, s, u) for tid, s, u in threads if query.name in (tid, s)]
         for thread_id, _summary, _updated_at in threads:
-            thread = self._load_thread(thread_id)
+            thread = await self._load_thread(thread_id)
             if thread is None:
                 continue
             for msg in helpers.thread_to_chat_messages(thread, thread_id):
@@ -181,9 +193,9 @@ class ZedStorageProvider(StorageProvider):
         """Get filtered conversations with their messages."""
         result: list[ConversationData] = []
         # Use SQL-level filtering for efficiency
-        for thread_id, summary, updated_at_str in self._list_threads(since=filters.since):
+        for thread_id, summary, updated_at_str in await self._list_threads(since=filters.since):
             updated_at = parse_iso_timestamp(updated_at_str)
-            thread = self._load_thread(thread_id)
+            thread = await self._load_thread(thread_id)
             if thread is None:
                 continue
             messages = helpers.thread_to_chat_messages(thread, thread_id)
@@ -225,9 +237,9 @@ class ZedStorageProvider(StorageProvider):
             lambda: {"total_tokens": 0, "messages": 0, "models": set()}
         )
         # Use SQL-level filtering for efficiency
-        for thread_id, _summary, updated_at_str in self._list_threads(since=filters.cutoff):
+        for thread_id, _summary, updated_at_str in await self._list_threads(since=filters.cutoff):
             timestamp = parse_iso_timestamp(updated_at_str)
-            thread = self._load_thread(thread_id)
+            thread = await self._load_thread(thread_id)
             if thread is None:
                 continue
             model = f"{thread.model.provider}:{thread.model.model}" if thread.model else "unknown"
@@ -263,7 +275,7 @@ class ZedStorageProvider(StorageProvider):
         conv_count = 0
         msg_count = 0
         try:
-            conn = self._get_connection()
+            conn = await self._get_connection()
             cursor = conn.execute("SELECT data_type, data FROM threads")
             for data_type, data in cursor:
                 json_data = helpers._decompress(data, data_type)

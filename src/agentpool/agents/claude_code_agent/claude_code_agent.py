@@ -356,7 +356,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             agent_hooks=hooks,
             set_mode=self._set_mode,
             env=self.env,
+            get_session_id=lambda: self.session_id,
         )
+        # Per-run context for async callbacks (e.g., _can_use_tool)
+        # Set in _stream_events for each run to maintain concurrency safety
+        self._callback_run_ctx: AgentRunContext | None = None
 
     @classmethod
     def from_config(
@@ -595,7 +599,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # Handle AskUserQuestion specially - this is Claude asking for clarification
         if tool_name == "AskUserQuestion":
-            agent_ctx = self.get_context(run_ctx=self._current_run_ctx)
+            agent_ctx = self.get_context(run_ctx=self._callback_run_ctx)
             return await handle_clarifying_questions(agent_ctx, input_data, context)
         # Auto-grant if bypassPermissions mode is active
         if self._permission_mode == "bypassPermissions":
@@ -634,7 +638,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 tool_call_id=tool_call_id,
                 tool_input=input_data,
                 tool_name=tool_name,
-                run_ctx=self._current_run_ctx,
+                run_ctx=self._callback_run_ctx,
             )
             result = await self._input_provider.get_tool_confirmation(
                 context=ctx,
@@ -906,6 +910,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         fork_client = None
         client = self._client
         result_message: ResultMessage | None = None
+        # Store run_ctx for async callbacks (e.g., _can_use_tool)
+        # Must be thread-safe for concurrent runs on same agent
+        self._callback_run_ctx = run_ctx
 
         if not store_history and self._sdk_session_id:
             # Create fork client that shares parent's context but has separate session ID
@@ -927,7 +934,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Merge SDK messages with event queue for real-time tool event streaming
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
-                self._tool_bridge.set_run_context(agent_ctx, prompt=prompts),
+                self._tool_bridge.set_run_context(agent_ctx, input_provider, prompt=prompts),
                 merge_queue_into_iterator(stream, run_ctx.event_queue) as events,
             ):
                 async for event_or_message in events:
@@ -1201,6 +1208,8 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             raise
 
         finally:
+            # Clear callback run context to prevent leaks
+            self._callback_run_ctx = None
             # Disconnect fork client if we created one
             if fork_client:
                 try:

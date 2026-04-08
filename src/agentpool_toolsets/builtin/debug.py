@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -12,7 +13,10 @@ import anyenv
 from pydantic_ai import RunContext  # noqa: TC002
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
+
+logger = get_logger(__name__)
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -269,7 +273,54 @@ class DebugTools(StaticResourceProvider):
         Returns:
             Result of execution or error message
         """
-        # Emit progress with the code being executed
+        # Security warning
+        logger.warning(
+            "Executing introspection code in debug tool. "
+            "This should only be used with trusted agents in development mode.",
+            agent_name=ctx.agent.name,
+            code_length=len(code),
+            title=title,
+        )
+
+        # Validate code before execution
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return f"Syntax Error: {e}"
+
+        # Check for dangerous constructs
+        for node in ast.walk(tree):
+            # Disallow imports
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                return "Error: Import statements are not allowed in introspection code"
+            # Disallow function calls that aren't attribute accesses on safe objects
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    # Block dangerous builtins
+                    dangerous_builtins = {
+                        "exec",
+                        "eval",
+                        "compile",
+                        "__import__",
+                        "open",
+                        "exit",
+                        "quit",
+                        "globals",
+                        "locals",
+                        "vars",
+                        "dir",
+                        "getattr",
+                        "setattr",
+                        "delattr",
+                        "hasattr",
+                    }
+                    if node.func.id in dangerous_builtins:
+                        return f"Error: Function call to {node.func.id} is not allowed"
+            # Disallow dangerous names
+            if isinstance(node, ast.Name) and node.id in {"exec", "eval", "compile", "__import__"}:
+                return f"Error: Use of {node.id} is not allowed"
+
+        # Emit progress with code being executed
         await ctx.events.tool_call_progress(
             title="Executing introspection code",
             status="in_progress",
@@ -281,12 +332,44 @@ class DebugTools(StaticResourceProvider):
             """Save a value to persist between introspection calls."""
             self._namespace_storage[key] = value
 
+        # Create restricted namespace with safe builtins only
+        safe_builtins = {
+            "print": print,
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "bool": bool,
+            "list": list,
+            "dict": dict,
+            "tuple": tuple,
+            "set": set,
+            "range": range,
+            "type": type,
+            "isinstance": isinstance,
+            "repr": repr,
+            "abs": abs,
+            "all": all,
+            "any": any,
+            "max": max,
+            "min": min,
+            "sum": sum,
+            "sorted": sorted,
+            "enumerate": enumerate,
+            "zip": zip,
+            "reversed": reversed,
+            "slice": slice,
+            "isinstance": isinstance,
+            "issubclass": issubclass,
+        }
+
         namespace: dict[str, Any] = {
             "ctx": ctx,
             "run_ctx": run_ctx,
             "me": ctx.agent,
             "save": save,
             "state": self._namespace_storage.copy(),
+            "__builtins__": safe_builtins,
         }
         start_time = datetime.now(UTC)
         exit_code = 0

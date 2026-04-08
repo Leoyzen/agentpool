@@ -117,8 +117,23 @@ class StorageManager:
             try:
                 await provider.__aexit__(exc_type, exc_val, exc_tb)
             except Exception as e:
-                errors.append(e)
-                logger.exception("Error cleaning up provider", provider=provider)
+                # Create a more informative error message with provider context
+                provider_name = provider.__class__.__name__
+                error_msg = f"Error in {provider_name}: {type(e).__name__}: {e}"
+                logger.exception(
+                    "Error cleaning up provider",
+                    provider=provider_name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                # Wrap error with context for better debugging
+                from contextlib import chained_exception as create_chained_exception
+
+                chained_error = create_chained_exception(
+                    error_msg,
+                    e,
+                )
+                errors.append(chained_error)
 
         await self.task_manager.cleanup_tasks()
 
@@ -315,9 +330,14 @@ class StorageManager:
         async def reset_provider(provider: StorageProvider) -> tuple[int, int]:
             try:
                 return await provider.reset(agent_name=agent_name, hard=hard)
-            except Exception:
+            except Exception as e:
                 cls_name = provider.__class__.__name__
-                logger.exception("Error resetting provider", provider=cls_name)
+                logger.exception(
+                    "Error resetting provider",
+                    provider=cls_name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
                 return (0, 0)
 
         results = await asyncio.gather(*(reset_provider(provider) for provider in self.providers))
@@ -527,7 +547,7 @@ class StorageManager:
 
         Args:
             message_id: ID of the message
-            session_id: Optional session ID hint for faster lookup
+            session_id: When set, only return the message if it belongs to this session.
 
         Returns:
             The message if found, None otherwise.
@@ -714,8 +734,13 @@ class StorageManager:
                 title=metadata.title,
             )
             await self.metadata_generated.emit(event)
-        except Exception:
-            logger.exception("Failed to generate session title", session_id=session_id)
+        except Exception as e:
+            logger.exception(
+                "Failed to generate session title",
+                session_id=session_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return None
         else:
             return metadata

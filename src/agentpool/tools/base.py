@@ -459,9 +459,181 @@ class Tool[TOutputType = Any]:
         description: str | None = None,
     ) -> FunctionTool[Any]:
         """Create a FunctionTool from a code string."""
-        namespace: dict[str, Any] = {}
-        exec(code, namespace)
-        func = next((v for v in namespace.values() if callable(v)), None)
+        import ast
+
+        # Validate code before execution
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            msg = f"Invalid Python syntax: {e}"
+            raise ValueError(msg) from e
+
+        # Check for dangerous constructs
+        for node in ast.walk(tree):
+            # Disallow imports
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                msg = "Import statements are not allowed in code execution"
+                raise ValueError(msg)
+            # Disallow function calls that aren't attribute accesses on safe objects
+            if isinstance(node, ast.Call):
+                # Allow simple calls like print(), str(), int(), etc.
+                if isinstance(node.func, ast.Name):
+                    # Basic builtins that are safe
+                    safe_builtins = {
+                        "print",
+                        "len",
+                        "str",
+                        "int",
+                        "float",
+                        "bool",
+                        "list",
+                        "dict",
+                        "tuple",
+                        "set",
+                        "range",
+                        "type",
+                        "isinstance",
+                        "repr",
+                        "ascii",
+                        "bin",
+                        "hex",
+                        "oct",
+                        "abs",
+                        "all",
+                        "any",
+                        "max",
+                        "min",
+                        "sum",
+                        "sorted",
+                        "enumerate",
+                        "zip",
+                        "reversed",
+                        "slice",
+                        "issubclass",
+                        "super",
+                    }
+                    if node.func.id not in safe_builtins:
+                        msg = f"Function call to {node.func.id} is not allowed"
+                        raise ValueError(msg)
+                # Allow method calls on objects
+                elif isinstance(node.func, ast.Attribute):
+                    # Disallow dangerous method calls
+                    dangerous_methods = {
+                        "open",
+                        "read",
+                        "write",
+                        "exec",
+                        "eval",
+                        "compile",
+                        "import",
+                        "reload",
+                        "globals",
+                        "locals",
+                        "vars",
+                        "dir",
+                        "hasattr",
+                        "getattr",
+                        "setattr",
+                        "delattr",
+                        "__getattribute__",
+                        "__setattr__",
+                        "__delattr__",
+                    }
+                    if node.func.attr in dangerous_methods:
+                        msg = f"Method call to {node.func.attr} is not allowed"
+                        raise ValueError(msg)
+                    # Allow method calls on built-in types
+                    if isinstance(node.func.value, ast.Name):
+                        if node.func.value.id in {
+                            "str",
+                            "int",
+                            "float",
+                            "list",
+                            "dict",
+                            "tuple",
+                            "set",
+                        }:
+                            continue
+                    # Disallow other method calls for safety
+                    msg = f"Method call to {node.func.attr} is not allowed on this object type"
+                    raise ValueError(msg)
+                # Disallow complex calls
+                else:
+                    msg = "Complex function calls are not allowed"
+                    raise ValueError(msg)
+            # Disallow exec, eval, compile
+            if isinstance(node, ast.Name) and node.id in {"exec", "eval", "compile", "__import__"}:
+                msg = f"Use of {node.id} is not allowed"
+                raise ValueError(msg)
+            # Disallow attribute access to dangerous properties
+            if isinstance(node, ast.Attribute):
+                dangerous_attrs = {
+                    "__class__",
+                    "__bases__",
+                    "__subclasses__",
+                    "__mro__",
+                    "__globals__",
+                    "__code__",
+                    "__closure__",
+                    "__func__",
+                    "__self__",
+                    "__dict__",
+                }
+                if node.attr in dangerous_attrs:
+                    msg = f"Access to attribute {node.attr} is not allowed"
+                    raise ValueError(msg)
+            # Disallow calls to type() or accessing type information
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == "type":
+                    if len(node.args) > 1:
+                        msg = "Using type() to create classes is not allowed"
+                        raise ValueError(msg)
+
+        # Create restricted namespace with only safe builtins
+        safe_namespace: dict[str, Any] = {
+            "__builtins__": {
+                "print": print,
+                "len": len,
+                "str": str,
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "list": list,
+                "dict": dict,
+                "tuple": tuple,
+                "set": set,
+                "range": range,
+                "type": type,
+                "isinstance": isinstance,
+                "repr": repr,
+                "ascii": ascii,
+                "bin": bin,
+                "hex": hex,
+                "oct": oct,
+                "abs": abs,
+                "all": all,
+                "any": any,
+                "max": max,
+                "min": min,
+                "sum": sum,
+                "sorted": sorted,
+                "enumerate": enumerate,
+                "zip": zip,
+                "reversed": reversed,
+                "slice": slice,
+                "issubclass": issubclass,
+                "super": super,
+            }
+        }
+
+        logger.warning(
+            "Executing user-provided code in Tool.from_code. "
+            "This should only be used with trusted code sources.",
+            code_length=len(code),
+        )
+
+        exec(code, safe_namespace)
+        func = next((v for v in safe_namespace.values() if callable(v)), None)
         if not func:
             msg = "No callable found in provided code"
             raise ValueError(msg)
