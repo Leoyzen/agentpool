@@ -754,6 +754,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         final_message = None
         conversation = message_history if message_history is not None else self.conversation
         await self.message_received.emit(user_msg)
+
+        # Save user message to conversation history immediately
+        # This ensures user messages are preserved even if the run is cancelled
+        # or no assistant response is generated (e.g., elicitation cancelled)
+        if store_history:
+            conversation.add_chat_messages([user_msg])
+
         try:
             # Execute pre-run hooks
             if self.hooks:
@@ -823,8 +830,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             #   Current behavior: store_history controls both DB logging AND conversation context
             if store_history:
                 # Log to persistent storage and add to conversation context
+                # Note: user_msg was already added at the start of the run
+                # Use extend_last=True to include both user_msg and final_message in _last_messages
                 await self.log_message(final_message)
-                conversation.add_chat_messages([user_msg, final_message])
+                conversation.add_chat_messages([final_message], extend_last=True)
             # Route to connected agents (always - they decide what to do with it)
             await self.connections.route_message(final_message, wait=wait_for_connections)
 

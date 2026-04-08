@@ -240,9 +240,20 @@ class MessageHistory:
         finally:
             self.chat_messages = old_history
 
-    def add_chat_messages(self, messages: Sequence[ChatMessage[Any]]) -> None:
-        """Add new messages to history and update last_messages."""
-        self._last_messages = list(messages)
+    def add_chat_messages(
+        self, messages: Sequence[ChatMessage[Any]], *, extend_last: bool = False
+    ) -> None:
+        """Add new messages to history and update last_messages.
+
+        Args:
+            messages: Messages to add to conversation history
+            extend_last: If True, extend existing _last_messages instead of replacing.
+                        Used when messages are added across multiple calls in a single run.
+        """
+        if extend_last:
+            self._last_messages.extend(messages)
+        else:
+            self._last_messages = list(messages)
         self.chat_messages.extend(messages)
 
     @property
