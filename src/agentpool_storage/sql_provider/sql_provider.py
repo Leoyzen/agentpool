@@ -159,6 +159,9 @@ class SQLModelProvider(StorageProvider):
     def _get_insert_stmt(self) -> Any:
         """Get appropriate insert statement for database dialect.
 
+        Invariant (PR #10): branch on ``engine.dialect.name`` only. Do not prefer
+        ``pg_insert`` merely because psycopg is installed while connected to MySQL.
+
         Returns:
             SQLAlchemy insert statement with dialect-specific conflict handling support.
         """

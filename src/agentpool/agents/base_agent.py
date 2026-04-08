@@ -658,6 +658,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Queue the initial prompts
         run_ctx.injection_manager.insert_queued(prompts)
 
+        # RFC-0021: always reset with the token from set(); do not set(None) (breaks nesting).
         token = _current_run_ctx_var.set(run_ctx)
         try:
             # Process queued prompts until queue is empty

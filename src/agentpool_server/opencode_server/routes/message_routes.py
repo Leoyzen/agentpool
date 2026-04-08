@@ -398,18 +398,10 @@ async def _process_message_locked(  # noqa: PLR0915
                     logger.warning(
                         f"Available model_variants: {list(state.pool.manifest.model_variants.keys())}"
                     )
-        except (
-            AttributeError,
-            NotImplementedError,
-            TypeError,
-            ValueError,
-            RuntimeError,
-        ) as e:
-            # Expected when the agent does not support switching, the ID is invalid, or ACP is
-            # disconnected / remote refuses model changes.
-            logger.warning("Failed to switch model (unsupported or invalid)", error=str(e))
-        except Exception:
-            logger.exception("Unexpected error while switching model")
+        except Exception as e:  # noqa: BLE001
+            # Broad catch: agents differ on how they signal unsupported/invalid model switching.
+            # Keep behavior stable for OpenCode (see PR #10 review iterations).
+            logger.warning(f"Failed to switch model: {e}")
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
