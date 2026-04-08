@@ -32,6 +32,7 @@ from agentpool.utils.time_utils import get_now
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
+    from contextvars import Token
     from datetime import datetime
 
     from evented_config import EventConfig
@@ -658,9 +659,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Queue the initial prompts
         run_ctx.injection_manager.insert_queued(prompts)
 
-        # RFC-0021: always reset with the token from set(); do not set(None) (breaks nesting).
-        token = _current_run_ctx_var.set(run_ctx)
+        # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
+        # token is initialized so finally always has a bound name; reset only if set() succeeded.
+        token: Token[AgentRunContext | None] | None = None
         try:
+            token = _current_run_ctx_var.set(run_ctx)
             # Process queued prompts until queue is empty
             while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
                 current_prompts = run_ctx.injection_manager.pop_queued()
@@ -685,7 +688,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # After each iteration, flush unconsumed injections to queue
                 run_ctx.injection_manager.flush_pending_to_queue()
         finally:
-            _current_run_ctx_var.reset(token)
+            if token is not None:
+                _current_run_ctx_var.reset(token)
             run_ctx.injection_manager.clear()
 
     async def _run_stream_once(
