@@ -74,6 +74,7 @@ class SessionManager:
             session_data = SessionData(
                 session_id=child_session_id,
                 agent_name=agent_name,
+                agent_type=agent_type,
                 parent_id=parent_session_id,
                 pool_id=self.pool.manifest.name if self.pool.manifest else None,
                 cwd=None,

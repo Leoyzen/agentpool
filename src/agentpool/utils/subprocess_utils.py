@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+import shlex
 from typing import TYPE_CHECKING
 
 import anyio
@@ -178,16 +179,65 @@ async def run_with_process_monitor[T](
 
 
 async def start_process(
-    startup_command: str, startup_delay: float = 2.0
+    startup_command: str,
+    startup_delay: float = 2.0,
+    *,
+    use_shell: bool = False,
 ) -> asyncio.subprocess.Process:
-    """Start a long-running process (+ make sure it's running)."""
-    logger.info("Starting process", command=startup_command)
-    process = await asyncio.create_subprocess_shell(
-        startup_command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
+    """Start a long-running process (+ make sure it's running).
+
+    Args:
+        startup_command: Command to execute (string or list)
+        startup_delay: Seconds to wait for process to start
+        use_shell: If True, execute via /bin/sh (DANGEROUS, only for trusted commands).
+                    If False, use safer subprocess_exec mode.
+
+    Returns:
+        The running subprocess.
+
+    Raises:
+        RuntimeError: If process exits during startup delay
+    """
+    if use_shell:
+        logger.warning(
+            "Starting process with shell=True. This is a security risk if command contains untrusted input. "
+            "Only use shell=True with trusted commands.",
+            command=startup_command,
+        )
+        # Parse command safely with shell
+        process = await asyncio.create_subprocess_shell(
+            startup_command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+    else:
+        # Safer mode: use create_subprocess_exec
+        try:
+            # Try to parse command into args (basic shell-like parsing)
+            args = shlex.split(startup_command)
+        except ValueError as e:
+            # Fallback: treat entire command as single argument
+            logger.warning(
+                "Failed to parse command with shlex, treating as single argument",
+                command=startup_command,
+                error=str(e),
+            )
+            args = [startup_command]
+
+        # Get executable and arguments
+        executable = args[0] if args else startup_command
+        exec_args = args[1:] if len(args) > 1 else []
+
+        process = await asyncio.create_subprocess_exec(
+            executable,
+            *exec_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+
+    logger.info("Starting process", command=startup_command, shell=use_shell)
     logger.debug("Waiting for startup", command=startup_command, delay=startup_delay)
     await anyio.sleep(startup_delay)
     if process.returncode is not None:  # Check if process is still running

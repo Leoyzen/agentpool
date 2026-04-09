@@ -164,17 +164,17 @@ class SkillsInstructionProvider(ResourceProvider):
         """Format full skill content in XML."""
         path = str(skill.skill_path) if hasattr(skill, "skill_path") else ""
 
-        return f"""  <skill_content id="{escape(name)}" name="{escape(name)}">
-    <instructions>
-      <skill-instruction>
-      Base directory for this skill: {path}/
-      File references (@path) are relative to this directory.
+        # No leading indentation inside instruction text (LLM-sensitive); outer XML only.
+        return f"""<skill_content id="{escape(name)}" name="{escape(name)}">
+<instructions>
+<skill-instruction>
+Base directory for this skill: {path}/
+File references (@path) are relative to this directory.
 
-      {instructions}
-      </skill-instruction>
-
-      <user-request>
-      $ARGUMENTS
-      </user-request>
-    </instructions>
-  </skill_content>"""
+{instructions}
+</skill-instruction>
+<user-request>
+$ARGUMENTS
+</user-request>
+</instructions>
+</skill_content>"""

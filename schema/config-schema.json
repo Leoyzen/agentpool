@@ -886,6 +886,55 @@
       "title": "ACPAgentWorkerConfig",
       "type": "object"
     },
+    "ACPPoolServerConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for ACP (Agent Client Protocol) server.",
+      "properties": {
+        "type": {
+          "const": "acp",
+          "default": "acp",
+          "description": "ACP server type.",
+          "title": "Type",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether this server is currently enabled.",
+          "title": "Server enabled",
+          "type": "boolean"
+        },
+        "file_access": {
+          "default": true,
+          "description": "Whether to allow file system access.",
+          "title": "File access",
+          "type": "boolean"
+        },
+        "terminal_access": {
+          "default": true,
+          "description": "Whether to allow terminal/shell access.",
+          "title": "Terminal access",
+          "type": "boolean"
+        },
+        "raise_exceptions": {
+          "default": false,
+          "description": "Whether to raise exceptions during server start.",
+          "title": "Raise exceptions",
+          "type": "boolean"
+        },
+        "subagent_display_mode": {
+          "default": "tool_box",
+          "description": "How to display nested agent output in ACP clients:\n- \"tool_box\": Displays subagent output in a tool box (current default)\n- \"inline\": Displays subagent output inline with the main agent's text",
+          "enum": [
+            "inline",
+            "tool_box"
+          ],
+          "title": "Subagent display mode",
+          "type": "string"
+        }
+      },
+      "title": "ACPPoolServerConfig",
+      "type": "object"
+    },
     "ACPStorageConfig": {
       "additionalProperties": false,
       "description": "ACP server storage configuration.\n\nRead-only provider that queries a connected ACP server for session history.\nThe connection is established at runtime by the agent, not from config.",
@@ -1569,6 +1618,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         }
       },
       "title": "Agent CLI Tool",
@@ -4167,6 +4250,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "timeout": {
           "default": null,
@@ -6806,6 +6923,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "builtin_type": {
           "const": "code_execution",
@@ -10866,6 +11017,40 @@
             "null"
           ]
         },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
+        },
         "environment": {
           "anyOf": [
             {
@@ -11383,6 +11568,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "environment": {
           "anyOf": [
@@ -12521,6 +12740,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "environment": {
           "anyOf": [
@@ -15352,13 +15605,43 @@
           "type": "string"
         },
         "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "title": "Path",
+                  "type": "string"
+                },
+                "protocol": {
+                  "default": null,
+                  "title": "Protocol",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "storage_options": {
+                  "additionalProperties": true,
+                  "title": "Storage Options",
+                  "type": "object"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            }
+          ],
           "description": "Path to the Jinja template file.",
           "examples": [
             "prompts/system.j2",
             "/templates/agent_prompt.jinja"
           ],
-          "title": "Template file path",
-          "type": "string"
+          "title": "Template file path"
         },
         "variables": {
           "additionalProperties": true,
@@ -15441,6 +15724,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "builtin_type": {
           "const": "file_search",
@@ -17012,6 +17329,40 @@
             "null"
           ]
         },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
+        },
         "environment": {
           "anyOf": [
             {
@@ -17898,6 +18249,40 @@
             "null"
           ]
         },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
+        },
         "builtin_type": {
           "const": "image_generation",
           "default": "image_generation",
@@ -18195,6 +18580,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "import_path": {
           "description": "Import path to the tool function.",
@@ -18603,12 +19022,15 @@
               {
                 "description": null,
                 "enabled": true,
+                "function_schema": null,
                 "hints": null,
                 "import_path": "webbrowser.open",
                 "instructions": null,
                 "metadata": {},
                 "name": "web_browser",
+                "prepare": null,
                 "requires_confirmation": false,
+                "schema_override": null,
                 "type": "import"
               }
             ],
@@ -18971,7 +19393,7 @@
       "description": "Collection of context sources for an agent.\n\nSupports both simple paths and rich resource types for content loading,\nplus AgentPool's prompt system for dynamic content generation.\n\nDocs: https://phil65.github.io/agentpool/YAML%20Configuration/knowledge_configuration/",
       "properties": {
         "paths": {
-          "description": "Quick access to files and URLs.",
+          "description": "Quick access to files and URLs.\n\nPaths are automatically resolved relative to the config file location\nvia ConfigPath validation.",
           "examples": [
             [
               "docs/readme.md",
@@ -18982,7 +19404,37 @@
             ]
           ],
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "title": "Path",
+                    "type": "string"
+                  },
+                  "protocol": {
+                    "default": null,
+                    "title": "Protocol",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "storage_options": {
+                    "additionalProperties": true,
+                    "title": "Storage Options",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            ]
           },
           "title": "Resource paths",
           "type": "array"
@@ -19598,6 +20050,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "environment": {
           "anyOf": [
@@ -20432,6 +20918,40 @@
             "null"
           ]
         },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
+        },
         "builtin_type": {
           "const": "mcp_server",
           "default": "mcp_server",
@@ -21077,6 +21597,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "builtin_type": {
           "const": "memory",
@@ -23352,25 +23906,11 @@
             ],
             [
               {
-                "description": null,
-                "enabled": true,
-                "hints": null,
-                "import_path": "webbrowser.open",
-                "instructions": null,
-                "metadata": {},
+                "import_path": "webbrowser:open",
                 "name": "web_browser",
-                "requires_confirmation": false,
                 "type": "import"
               },
               {
-                "description": null,
-                "enabled": true,
-                "environment": null,
-                "instructions": null,
-                "metadata": {},
-                "name": null,
-                "output_limit": null,
-                "requires_confirmation": false,
                 "timeout": 30.0,
                 "type": "bash"
               }
@@ -23763,13 +24303,12 @@
           "title": "Knowledge sources"
         },
         "workers": {
-          "description": "Worker agents which will be available as tools.\n\nCan be worker config objects or plain strings (agent names, resolved as AgentWorkerConfig).\n\nDocs: https://phil65.github.io/agentpool/YAML%20Configuration/worker_configuration/",
+          "description": "Worker agents which will be available as tools.\n\nDocs: https://phil65.github.io/agentpool/YAML%20Configuration/worker_configuration/",
           "documentation_url": "https://phil65.github.io/agentpool/YAML%20Configuration/worker_configuration/",
           "examples": [
             [
               {
                 "name": "web_agent",
-                "pass_message_history": false,
                 "reset_history_on_run": true,
                 "type": "agent"
               }
@@ -23779,41 +24318,30 @@
                 "name": "analysis_team",
                 "type": "team"
               }
-            ],
-            [
-              "web_agent",
-              "code_analyzer"
             ]
           ],
           "items": {
-            "anyOf": [
+            "discriminator": {
+              "mapping": {
+                "acp_agent": "#/$defs/ACPAgentWorkerConfig",
+                "agent": "#/$defs/AgentWorkerConfig",
+                "agui_agent": "#/$defs/AGUIAgentWorkerConfig",
+                "team": "#/$defs/TeamWorkerConfig"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
               {
-                "discriminator": {
-                  "mapping": {
-                    "acp_agent": "#/$defs/ACPAgentWorkerConfig",
-                    "agent": "#/$defs/AgentWorkerConfig",
-                    "agui_agent": "#/$defs/AGUIAgentWorkerConfig",
-                    "team": "#/$defs/TeamWorkerConfig"
-                  },
-                  "propertyName": "type"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/TeamWorkerConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/AgentWorkerConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/ACPAgentWorkerConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/AGUIAgentWorkerConfig"
-                  }
-                ]
+                "$ref": "#/$defs/TeamWorkerConfig"
               },
               {
-                "type": "string"
+                "$ref": "#/$defs/AgentWorkerConfig"
+              },
+              {
+                "$ref": "#/$defs/ACPAgentWorkerConfig"
+              },
+              {
+                "$ref": "#/$defs/AGUIAgentWorkerConfig"
               }
             ]
           },
@@ -27344,6 +27872,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         }
       },
       "title": "Ask User Tool",
@@ -27415,6 +27977,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "environment": {
           "anyOf": [
@@ -30523,6 +31119,75 @@
       "title": "SessionQuery",
       "type": "object"
     },
+    "SkillsConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for custom skill discovery paths.\n\nSkills are discovered from configured directories, allowing\nusers to add custom skills from local paths. The discovery\nfollows \"first path wins\" semantics - earlier paths in the list\ntake precedence over later ones.\n\nDefault paths (when include_default=True):\n- ~/.claude/skills/ (user home directory)\n- .claude/skills/ (relative to current directory)",
+      "properties": {
+        "paths": {
+          "description": "List of custom paths to search for skills.\n\nPaths can be:\n- Absolute: /home/user/skills\n- Relative: ./my-skills (resolved against config file location or CWD)\n- Remote: s3://bucket/skills, github://org/repo/skills\n\nEarlier paths take precedence over later ones (\"first path wins\").",
+          "examples": [
+            [
+              "/path/to/skills",
+              "./my-skills",
+              "s3://bucket/skills"
+            ]
+          ],
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "title": "Path",
+                    "type": "string"
+                  },
+                  "protocol": {
+                    "default": null,
+                    "title": "Protocol",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "storage_options": {
+                    "additionalProperties": true,
+                    "title": "Storage Options",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Custom skill paths",
+          "type": "array"
+        },
+        "include_default": {
+          "default": true,
+          "description": "Whether to include default skill paths in discovery.\n\nDefault paths are appended after custom paths:\n- ~/.claude/skills/\n- .claude/skills/\n\nSet to False to disable default paths entirely.",
+          "examples": [
+            true,
+            false
+          ],
+          "title": "Include default paths",
+          "type": "boolean"
+        },
+        "instruction": {
+          "$ref": "#/$defs/SkillsInstructionConfig",
+          "description": "Configuration for dynamic skills injection via ResourceProvider."
+        }
+      },
+      "title": "SkillsConfig",
+      "type": "object",
+      "x-doc-title": "Skills Configuration",
+      "x-icon": "octicon:mortar-board-16"
+    },
     "SkillsFilesystemConfig": {
       "additionalProperties": true,
       "description": "Configuration for Skills filesystem.",
@@ -30601,6 +31266,45 @@
       "title": "Skills Configuration",
       "type": "object"
     },
+    "SkillsInstructionConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for dynamic skills injection via ResourceProvider.\n\nControls how skills are dynamically injected into agent prompts as\ninstructions. This enables agents to discover and use skills without\nexplicit tool calls, making skill usage more natural and context-aware.\n\nModes:\n- \"off\": No dynamic skill injection (default, backward compatible)\n- \"metadata\": Inject only skill metadata (name, description, triggers)\n- \"full\": Inject complete skill content including prompts and examples\n  for maximum capability at the cost of more tokens",
+      "properties": {
+        "mode": {
+          "default": "off",
+          "description": "Dynamic skill injection mode.\n\n- \"off\": No skill injection (default, backward compatible)\n- \"metadata\": Inject skill names and descriptions only\n- \"full\": Inject complete skill content including prompts",
+          "enum": [
+            "off",
+            "metadata",
+            "full"
+          ],
+          "examples": [
+            "off",
+            "metadata",
+            "full"
+          ],
+          "title": "Injection mode",
+          "type": "string"
+        },
+        "max_skills": {
+          "default": 20,
+          "description": "Maximum number of skills to inject.\n\nLimits the number of skills included in prompts to prevent\nexcessive token usage. Skills are ranked by relevance when\nthis limit is exceeded.",
+          "examples": [
+            10,
+            20,
+            50
+          ],
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Maximum skills",
+          "type": "integer"
+        }
+      },
+      "title": "SkillsInstructionConfig",
+      "type": "object",
+      "x-doc-title": "Skills Instruction Configuration",
+      "x-icon": "octicon:mortar-board-16"
+    },
     "SkillsToolsetConfig": {
       "additionalProperties": false,
       "description": "Configuration for skills toolset.\n\nProvides tools to discover and load Claude Code Skills from the pool's\nskills registry. Skills are discovered from configured directories\n(e.g., ~/.claude/skills/, .claude/skills/).",
@@ -30646,6 +31350,49 @@
           "default": null,
           "description": "Optional tool filter to enable/disable specific tools.",
           "title": "Tool filter"
+        },
+        "injection_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "metadata",
+                "full"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Dynamic skill injection mode.\n\nIf set, overrides the global SkillsInstructionConfig.mode for this toolset:\n- \"off\": No skill injection (default, backward compatible)\n- \"metadata\": Inject skill names and descriptions only\n- \"full\": Inject complete skill content including prompts",
+          "examples": [
+            "off",
+            "metadata",
+            "full"
+          ],
+          "title": "Injection mode"
+        },
+        "max_skills": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum number of skills to inject.\n\nIf set, overrides the global SkillsInstructionConfig.max_skills for this toolset.\nLimits the number of skills included in prompts to prevent excessive token usage.",
+          "examples": [
+            10,
+            20,
+            50
+          ],
+          "title": "Maximum skills"
         }
       },
       "title": "SkillsToolsetConfig",
@@ -36371,6 +37118,40 @@
             "null"
           ]
         },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
+        },
         "builtin_type": {
           "const": "web_fetch",
           "default": "web_fetch",
@@ -36647,6 +37428,40 @@
             "string",
             "null"
           ]
+        },
+        "prepare": {
+          "default": null,
+          "description": "Prepare function for tool schema customization (pydantic-ai style).",
+          "examples": [
+            "mymodule:my_prepare_function"
+          ],
+          "title": "Prepare function",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function_schema": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Function schema override for pydantic-ai tools.",
+          "title": "Function schema override"
+        },
+        "schema_override": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema override for tool function definition.",
+          "title": "Schema override"
         },
         "builtin_type": {
           "const": "web_search",
@@ -38168,13 +38983,25 @@
       "type": "array"
     },
     "pool_server": {
-      "$ref": "#/$defs/MCPPoolServerConfig",
-      "description": "Pool server configuration.\n\nThis MCP server configuration is used for the pool MCP server,\nwhich exposes pool functionality to other applications / clients."
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MCPPoolServerConfig"
+        },
+        {
+          "$ref": "#/$defs/ACPPoolServerConfig"
+        }
+      ],
+      "description": "Pool server configuration.\n\nThis MCP server configuration is used for the pool MCP server,\nwhich exposes pool functionality to other applications / clients.",
+      "title": "Pool Server"
     },
     "prompts": {
       "$ref": "#/$defs/PromptLibraryConfig",
       "description": "Prompt library configuration.\n\nThis configuration defines the prompt library, which is used to provide prompts to the nodes.\n\nDocs: https://phil65.github.io/agentpool/YAML%20Configuration/prompt_configuration/",
       "documentation_url": "https://phil65.github.io/agentpool/YAML%20Configuration/prompt_configuration/"
+    },
+    "skills": {
+      "$ref": "#/$defs/SkillsConfig",
+      "description": "Custom skill discovery paths configuration.\n\nDefines where to search for custom skills. Skills are discovered from\nconfigured directories following \"first path wins\" semantics.\n\nExample:\n    ```yaml\n    skills:\n      paths:\n        - ./my-skills\n        - s3://bucket/skills\n      include_default: true\n    ```"
     },
     "commands": {
       "additionalProperties": {

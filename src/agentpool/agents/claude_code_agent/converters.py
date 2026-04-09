@@ -8,6 +8,7 @@ event types as native agents.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 
 from clawd_code_sdk import (
@@ -49,6 +50,16 @@ from agentpool_server.opencode_server.models.tool_metadata import (
     TodoMetadata,
     WriteMetadata,
 )
+
+
+# Match claude_code_agent._strip_mcp_prefix (avoid import cycle with claude_code_agent)
+_MCP_TOOL_PATTERN = re.compile(r"^mcp__agentpool-(.+)-tools__(.+)$")
+
+
+def _strip_mcp_tool_name(tool_name: str) -> str:
+    if match := _MCP_TOOL_PATTERN.match(tool_name):
+        return match.group(2)
+    return tool_name
 
 
 if TYPE_CHECKING:
@@ -544,12 +555,19 @@ def to_output_format(output_type: type) -> dict[str, Any] | None:
 async def claude_message_to_events(
     message: Any,
     agent_name: str,
+    *,
+    tool_names_by_id: dict[str, str] | None = None,
+    tool_inputs_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> AsyncIterator[Any]:
     """Convert Claude SDK messages to agentpool events.
 
     Args:
         message: SDK message (UserMessage, SystemMessage, AssistantMessage, etc.)
-        agent_name: Name of the agent (used in tool events for attribution)
+        agent_name: Name of agent (used in tool events for attribution)
+        tool_names_by_id: Optional id->name map from conversation (e.g. prior assistant turn)
+            when this message only contains ToolResultBlock entries.
+        tool_inputs_by_id: Optional id->input map from conversation (e.g. prior assistant turn)
+            to preserve tool input data in completion events.
 
     Yields:
         List of agentpool events (PartDeltaEvent, ToolCallStartEvent, ToolCallCompleteEvent, etc.)
@@ -560,12 +578,18 @@ async def claude_message_to_events(
         ToolResultBlock,
         ToolUseBlock,
     )
-    from pydantic_ai import TextPartDelta
+    from pydantic_ai import TextPartDelta, ThinkingPartDelta
 
     from agentpool.agents.events import (
         PartDeltaEvent,
         ToolCallCompleteEvent,
         ToolCallStartEvent,
+    )
+
+    resolved_message_id = (
+        str(mid)
+        if (mid := getattr(message, "message_id", None) or getattr(message, "id", None))
+        else ""
     )
 
     # Process based on message type and content structure
@@ -580,26 +604,38 @@ async def claude_message_to_events(
 
         # Handle list of content blocks (map tool_use_id -> name from prior ToolUse in this message)
         if isinstance(content, list):
-            tool_names_by_id: dict[str, str] = {}
+            external_names = dict(tool_names_by_id or {})
+            external_inputs = dict(tool_inputs_by_id or {})
+            tool_names_in_message: dict[str, str] = {}
+            tool_inputs_in_message: dict[str, dict[str, Any]] = {}
             for block in content:
+                match block:
+                    case ToolUseBlock(id=tool_id, name=name, input=input_data) if tool_id and name:
+                        tool_names_in_message[tool_id] = _strip_mcp_tool_name(name)
+                        if isinstance(input_data, dict):
+                            tool_inputs_in_message[tool_id] = input_data
+                    case _:
+                        pass
+            merged_tool_names = {**external_names, **tool_names_in_message}
+            merged_tool_inputs = {**external_inputs, **tool_inputs_in_message}
+
+            for index, block in enumerate(content):
                 match block:
                     case TextBlock(text=text) if text:
                         text_delta = TextPartDelta(content_delta=text)
-                        yield PartDeltaEvent(index=0, delta=text_delta)
+                        yield PartDeltaEvent(index=index, delta=text_delta)
 
                     case ThinkingBlock(thinking=thinking) if thinking:
-                        # Thinking content -> PartDeltaEvent (wrapped in thinking tags for display)
-                        thinking_text = f"<thinking>\n{thinking}\n</thinking>"
-                        thinking_delta = TextPartDelta(content_delta=thinking_text)
-                        yield PartDeltaEvent(index=0, delta=thinking_delta)
+                        thinking_delta = ThinkingPartDelta(content_delta=thinking)
+                        yield PartDeltaEvent(index=index, delta=thinking_delta)
 
                     case ToolUseBlock(id=tool_id, name=name, input=input_data) if tool_id and name:
-                        tool_names_by_id[tool_id] = name
+                        display_name = _strip_mcp_tool_name(name)
                         # Tool use -> ToolCallStartEvent
                         yield ToolCallStartEvent(
                             tool_call_id=tool_id,
-                            tool_name=name,
-                            title=f"Calling tool: {name}",
+                            tool_name=display_name,
+                            title=f"Calling tool: {display_name}",
                             kind="other",
                             raw_input=input_data if isinstance(input_data, dict) else {},
                             content=[],
@@ -615,17 +651,17 @@ async def claude_message_to_events(
                         if isinstance(result_content, str):
                             normalized_result = result_content
                         elif isinstance(result_content, list):
-                            # Convert list of dicts to a more structured format
+                            # Pass through list result (e.g., from multi-tool responses)
                             normalized_result = result_content
                         else:
                             normalized_result = result_content or ""
 
                         yield ToolCallCompleteEvent(
-                            tool_name=tool_names_by_id.get(tool_id, "tool"),
+                            tool_name=merged_tool_names.get(tool_id, "tool"),
                             tool_call_id=tool_id,
-                            tool_input={},
+                            tool_input=merged_tool_inputs.get(tool_id, {}),
                             tool_result=normalized_result,
                             agent_name=agent_name,
-                            message_id="",  # Not available in this context
+                            message_id=resolved_message_id,
                             metadata={"is_error": is_error} if is_error else None,
                         )

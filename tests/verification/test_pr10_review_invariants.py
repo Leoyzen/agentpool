@@ -53,3 +53,29 @@ async def test_claude_tool_complete_event_resolves_tool_name_from_tool_use() -> 
     assert isinstance(events[1], ToolCallCompleteEvent)
     complete = events[1]
     assert complete.tool_name == "read_file"
+
+
+@pytest.mark.asyncio
+async def test_claude_tool_complete_event_resolves_tool_name_from_external_map() -> None:
+    """ToolResultBlock alone should use tool_names_by_id from the conversation."""
+    from clawd_code_sdk.models.content_blocks import ToolResultBlock
+
+    from agentpool.agents.claude_code_agent.converters import claude_message_to_events
+    from agentpool.agents.events import ToolCallCompleteEvent
+
+    msg = SimpleNamespace(
+        content=[ToolResultBlock(tool_use_id="call-1", content="ok", is_error=False)]
+    )
+
+    events = [
+        e
+        async for e in claude_message_to_events(
+            msg,
+            agent_name="agent",
+            tool_names_by_id={"call-1": "read_file"},
+        )
+    ]
+
+    assert len(events) == 1
+    assert isinstance(events[0], ToolCallCompleteEvent)
+    assert events[0].tool_name == "read_file"

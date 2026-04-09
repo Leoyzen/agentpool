@@ -379,9 +379,6 @@ class NativeAgentConfig(BaseAgentConfig):
         if not processor_paths:
             return []
 
-        # Define constant for parameter validation
-        two_params = 2
-
         # Resolve import paths to callables
         resolved: list[Callable[..., Any]] = []
         for path in processor_paths:
@@ -393,8 +390,8 @@ class NativeAgentConfig(BaseAgentConfig):
                 params = list(sig.parameters.values())
 
                 # Check parameter count
-                if len(params) not in (1, two_params):
-                    msg = f"History processor must take 1 or {two_params} arguments, got {len(params)}"
+                if len(params) not in (1, 2):
+                    msg = f"History processor must take 1 or 2 arguments, got {len(params)}"
                     raise ValueError(msg)
 
                 # Parameter names are not restricted - users can use any valid Python names

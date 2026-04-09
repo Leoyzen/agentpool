@@ -159,7 +159,7 @@ class StorageProvider:
 
         Args:
             message_id: ID of the message
-            session_id: Optional session ID hint for faster lookup
+            session_id: When set, only return the message if it belongs to this session.
 
         Returns:
             The message if found, None otherwise.

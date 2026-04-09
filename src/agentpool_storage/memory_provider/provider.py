@@ -156,8 +156,17 @@ class MemoryStorageProvider(StorageProvider):
         *,
         session_id: str | None = None,
     ) -> ChatMessage[str] | None:
-        """Get a single message by ID."""
-        return next((msg for msg in self.messages if msg.message_id == message_id), None)
+        """Get a single message by ID.
+
+        When ``session_id`` is set, the message must belong to that session.
+        """
+        for msg in self.messages:
+            if msg.message_id != message_id:
+                continue
+            if session_id is not None and msg.session_id != session_id:
+                return None
+            return msg
+        return None
 
     async def get_message_ancestry(
         self,
@@ -170,7 +179,8 @@ class MemoryStorageProvider(StorageProvider):
         current_id: str | None = message_id
 
         while current_id:
-            msg = await self.get_message(current_id, session_id=session_id)
+            # Do not pass session_id: parent messages may belong to another session (forks).
+            msg = await self.get_message(current_id, session_id=None)
             if not msg:
                 break
             ancestors.append(msg)

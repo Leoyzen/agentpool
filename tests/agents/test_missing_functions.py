@@ -198,6 +198,8 @@ def test_converter_imports():
 async def test_claude_message_to_events_content_blocks():
     """Test claude_message_to_events with different content block types."""
 
+    from pydantic_ai import ThinkingPartDelta
+
     from agentpool.agents.claude_code_agent.converters import claude_message_to_events
     from agentpool.agents.events import (
         PartDeltaEvent,
@@ -233,7 +235,7 @@ async def test_claude_message_to_events_content_blocks():
 
     assert len(events) == 1
     assert isinstance(events[0], PartDeltaEvent)
-    assert "<thinking>" in events[0].delta.content_delta
+    assert isinstance(events[0].delta, ThinkingPartDelta)
     assert "This is thinking content" in events[0].delta.content_delta
 
     # Test message with ToolUseBlock
@@ -279,6 +281,7 @@ async def test_claude_message_to_events_content_blocks():
 
     assert len(events) == 3
     assert all(isinstance(e, PartDeltaEvent) for e in events)
+    assert [e.index for e in events] == [0, 1, 2]
 
     print("✓ claude_message_to_events handles different content block types correctly")
 

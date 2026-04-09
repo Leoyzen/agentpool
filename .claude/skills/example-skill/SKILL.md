@@ -1,5 +1,5 @@
 ---
-name: Example Skill
+name: example-skill
 description: A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading.
 ---
 

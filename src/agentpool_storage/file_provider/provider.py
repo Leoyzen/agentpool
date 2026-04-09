@@ -316,15 +316,17 @@ class FileProvider(StorageProvider):
         *,
         session_id: str | None = None,
     ) -> ChatMessage[str] | None:
-        """Get a single message by ID."""
-        return next(
-            (
-                self._to_chat_message(m)
-                for m in self._data["messages"]
-                if m.get("message_id") == message_id
-            ),
-            None,
-        )
+        """Get a single message by ID.
+
+        When ``session_id`` is set, the message must belong to that session.
+        """
+        for m in self._data["messages"]:
+            if m.get("message_id") != message_id:
+                continue
+            if session_id is not None and m.get("session_id") != session_id:
+                return None
+            return self._to_chat_message(m)
+        return None
 
     async def get_message_ancestry(
         self,
@@ -336,7 +338,8 @@ class FileProvider(StorageProvider):
         ancestors: list[ChatMessage[str]] = []
         current_id: str | None = message_id
         while current_id:
-            msg = await self.get_message(current_id, session_id=session_id)
+            # Do not pass session_id: parent messages may belong to another session (forks).
+            msg = await self.get_message(current_id, session_id=None)
             if not msg:
                 break
             ancestors.append(msg)

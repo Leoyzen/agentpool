@@ -303,9 +303,15 @@ class SQLModelProvider(StorageProvider):
         *,
         session_id: str | None = None,
     ) -> ChatMessage[str] | None:
-        """Get a single message by ID."""
+        """Get a single message by ID.
+
+        When ``session_id`` is set, the message must belong to that session.
+        """
         async with AsyncSession(self.engine) as session:
-            result = await session.execute(select(Message).where(Message.id == message_id))
+            stmt = select(Message).where(Message.id == message_id)
+            if session_id is not None:
+                stmt = stmt.where(Message.session_id == session_id)
+            result = await session.execute(stmt)
             msg = result.scalar_one_or_none()
             return to_chat_message(msg) if msg else None
 

@@ -211,14 +211,25 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Handle deprecated history_processors parameter
         if history_processors is not None:
             # Convert to session configuration
-            if session is None:
-                memory_cfg = MemoryConfig(history_processors=[])
+            if session is None or isinstance(session, str):
+                memory_cfg = MemoryConfig.from_value(session)
+                if memory_cfg.history_processors is None:
+                    memory_cfg.history_processors = []
+                # Merge history_processors from parameter with config
+                if memory_cfg.history_processors and history_processors:
+                    logger.warning(
+                        "history_processors parameter is merged with session.history_processors; "
+                        "prefer configuring processors only on MemoryConfig",
+                        session_processors=len(memory_cfg.history_processors),
+                        param_processors=len(history_processors),
+                    )
                 # Store processors for manual resolution
                 self._direct_history_processors = list(history_processors)
             elif isinstance(session, MemoryConfig):
                 memory_cfg = session
                 if memory_cfg.history_processors is None:
                     memory_cfg.history_processors = []
+                # Merge history_processors from parameter with config
                 if memory_cfg.history_processors and history_processors:
                     logger.warning(
                         "history_processors parameter is merged with session.history_processors; "
