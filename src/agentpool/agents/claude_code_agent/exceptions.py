@@ -14,12 +14,12 @@ class ThinkingModeAlreadyConfiguredError(ValueError):
         super().__init__(msg)
 
 
-
 def raise_if_usage_limit_reached(message) -> None:
     """Check if usage limit has been reached.
 
-    Stub implementation for compatibility.
-    TODO: Implement actual usage limit checking.
+    Note: This is currently a stub for compatibility. Usage limits
+    are handled by the Claude Code SDK internally. This function exists
+    to maintain API compatibility with other agent implementations.
 
     Args:
         message: AssistantMessage to check for usage limits.
@@ -28,6 +28,8 @@ def raise_if_usage_limit_reached(message) -> None:
         None
 
     Raises:
-        SomeError: If usage limit has been reached (not implemented).
+        UsageLimitExceeded: If usage limit has been reached (not implemented here).
     """
+    # Usage limits are handled internally by the Claude Code SDK
+    # This function is a stub for API compatibility
     pass

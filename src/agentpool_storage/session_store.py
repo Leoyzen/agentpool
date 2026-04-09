@@ -216,7 +216,7 @@ class SQLSessionStore:
 
             stmt = stmt.order_by(Session.last_active.desc())  # type: ignore[attr-defined]
             result = await session.execute(stmt)
-            # When selecting a single column, scalars() gives us the values directly
+            # When selecting a single column, scalars() gives us values directly
             return list(result.scalars().all())
 
     async def cleanup_expired(self, max_age_hours: int = 24) -> int:

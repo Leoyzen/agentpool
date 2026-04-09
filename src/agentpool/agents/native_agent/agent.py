@@ -13,12 +13,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast,
 from uuid import uuid4
 
 import logfire
-from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode, RunContext
+from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
-from pydantic_ai.tools import ToolDefinition
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentContext, AgentRunContext
+from agentpool.agents.context import AgentContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
@@ -36,8 +35,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import BaseToolCallPart, UsageLimits, UserContent
-    from pydantic_ai.builtin_tools import AbstractBuiltinTool
+    from pydantic_ai import AgentBuiltinTool, BaseToolCallPart, UsageLimits, UserContent
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.settings import ModelSettings
@@ -47,6 +45,7 @@ if TYPE_CHECKING:
     from toprompt import AnyPromptType
     from upathtools import JoinablePathLike
 
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import (
@@ -146,10 +145,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         env: ExecutionEnvironment | StrPath | None = None,
         hooks: AgentHooks | None = None,
         tool_confirmation_mode: ToolConfirmationMode = "per_tool",
-        builtin_tools: Sequence[AbstractBuiltinTool] | None = None,
+        builtin_tools: Sequence[AgentBuiltinTool] | None = None,
         usage_limits: UsageLimits | None = None,
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
+        history_processors: Sequence[Callable[..., Any]] | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -197,6 +197,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers: Model providers for model discovery (e.g., ["openai", "anthropic"]).
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
+            history_processors: History processors (deprecated - use session=MemoryConfig(history_processors=[...]))
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -207,9 +208,35 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from agentpool_config.session import MemoryConfig
 
         self.model_settings = model_settings
-        memory_cfg = (
-            session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
-        )
+        # Handle deprecated history_processors parameter
+        if history_processors is not None:
+            # Convert to session configuration
+            if session is None:
+                memory_cfg = MemoryConfig(history_processors=[])
+                # Store processors for manual resolution
+                self._direct_history_processors = list(history_processors)
+            elif isinstance(session, MemoryConfig):
+                memory_cfg = session
+                if memory_cfg.history_processors is None:
+                    memory_cfg.history_processors = []
+                if memory_cfg.history_processors and history_processors:
+                    logger.warning(
+                        "history_processors parameter is merged with session.history_processors; "
+                        "prefer configuring processors only on MemoryConfig",
+                        session_processors=len(memory_cfg.history_processors),
+                        param_processors=len(history_processors),
+                    )
+                # Store processors for manual resolution
+                self._direct_history_processors = list(history_processors)
+            else:
+                raise ValueError(
+                    "Cannot use history_processors parameter with non-MemoryConfig session"
+                )
+        else:
+            memory_cfg = (
+                session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
+            )
+            self._direct_history_processors = None
         # Collect MCP servers from config
         all_mcp_servers = list(mcp_servers) if mcp_servers else []
         if agent_config and agent_config.mcp_servers:
@@ -327,30 +354,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if self._resolved_history_processors is not None:
             return self._resolved_history_processors
 
-        # Get history processors from memory config
-        if not (memory_cfg := self.conversation._config):
-            self._resolved_history_processors = []
-            return []
-
-        processor_paths = getattr(memory_cfg, "history_processors", None)
-        if not processor_paths:
-            self._resolved_history_processors = []
-            return []
-
-        from agentpool.utils.importing import import_callable
-
         resolved: list[Callable[..., Any]] = []
-        for path in processor_paths:
-            try:
-                processor = import_callable(path)
-                # Validate signature
+
+        # Import paths from MemoryConfig (session)
+        if memory_cfg := self.conversation._config:
+            processor_paths = getattr(memory_cfg, "history_processors", None) or []
+            if processor_paths:
+                from agentpool.utils.importing import import_callable
+
+                for path in processor_paths:
+                    try:
+                        processor = import_callable(path)
+                        self._validate_processor_signature(processor)
+                        resolved.append(processor)
+                    except Exception as e:
+                        msg = f"Failed to resolve history processor '{path}': {e}"
+                        raise ValueError(msg) from e
+
+        # Deprecated direct callables (append after config-based processors)
+        if self._direct_history_processors:
+            for processor in self._direct_history_processors:
                 self._validate_processor_signature(processor)
                 resolved.append(processor)
-            except Exception as e:
-                msg = f"Failed to resolve history processor '{path}': {e}"
-                raise ValueError(msg) from e
 
-        # Cache resolved processors
         self._resolved_history_processors = resolved
         return resolved
 
@@ -917,7 +943,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         finally:
             # Signal iteration to stop
             iteration_done.set()
-            # Only set cancelled if the iteration task was actually cancelled
+            # Only set cancelled if iteration task was actually cancelled
             if iteration_task.cancelled():
                 run_ctx.cancelled = True
             # Cancel task if still running
@@ -928,7 +954,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         asyncio.shield(iteration_task),
                         timeout=2.0,
                     )
-                except (asyncio.TimeoutError, asyncio.CancelledError):
+                except (TimeoutError, asyncio.CancelledError):
                     pass  # Cleanup will happen in background
 
         # Send additional enriched completion event

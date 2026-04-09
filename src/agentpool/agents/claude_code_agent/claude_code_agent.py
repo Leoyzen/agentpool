@@ -70,7 +70,6 @@ from pydantic_ai import (
     ModelRequest,
     ModelResponse,
     PartEndEvent,
-    RunUsage,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -80,18 +79,21 @@ from pydantic_ai import (
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.usage import RequestUsage
+from pydantic_ai.usage import RequestUsage, RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.claude_code_agent.converters import (
+    claude_message_to_events,
     confirmation_result_to_native,
     convert_mcp_servers_to_sdk_format,
     convert_to_opencode_metadata,
+    to_claude_system_prompt,
+    to_output_format,
     to_thinking_config,
 )
 from agentpool.agents.claude_code_agent.exceptions import raise_if_usage_limit_reached
 from agentpool.agents.claude_code_agent.static_info import models_to_category
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     PartDeltaEvent,
     PartStartEvent,
@@ -145,6 +147,7 @@ if TYPE_CHECKING:
         ClaudeCodeCommandInfo,
         ClaudeCodeServerInfo,
     )
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType, StrPath
@@ -352,6 +355,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             agent=self,
             agent_hooks=hooks,
             set_mode=self._set_mode,
+            env=self.env,
         )
 
     @classmethod
@@ -591,7 +595,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         # Handle AskUserQuestion specially - this is Claude asking for clarification
         if tool_name == "AskUserQuestion":
-            agent_ctx = self.get_context(run_ctx=self._current_run_ctx)
+            agent_ctx = self.get_context()
             return await handle_clarifying_questions(agent_ctx, input_data, context)
         # Auto-grant if bypassPermissions mode is active
         if self._permission_mode == "bypassPermissions":
@@ -627,10 +631,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             display_name = _strip_mcp_prefix(tool_name)
             self.log.debug("Permission request", tool_name=display_name, tool_call_id=tool_call_id)
             ctx = self.get_context(
-                tool_call_id=tool_call_id,
-                tool_input=input_data,
-                tool_name=tool_name,
-                run_ctx=self._current_run_ctx,
+                tool_call_id=tool_call_id, tool_input=input_data, tool_name=tool_name
             )
             result = await self._input_provider.get_tool_confirmation(
                 context=ctx,
@@ -919,8 +920,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             assert first_msg.subtype == "init"
             self._sdk_session_id = first_msg.data["session_id"]
             # Merge SDK messages with event queue for real-time tool event streaming
+            agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
-                self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
+                self._tool_bridge.set_run_context(agent_ctx, prompt=prompts),
                 merge_queue_into_iterator(stream, run_ctx.event_queue) as events,
             ):
                 async for event_or_message in events:
@@ -1229,8 +1231,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 cache_write_tokens=usage_dict.get("cache_creation_input_tokens", 0),
             )
 
-        # Determine finish reason - check if we were cancelled
-        # Build metadata with file tracking and SDK session ID
+        # Per-run cancellation: use run_ctx.cancelled, not self._cancelled, so concurrent
+        # runs on the same agent do not leak cancellation state across executions.
+        finish_reason = "stop" if run_ctx and run_ctx.cancelled else None
+
         metadata = {}
         if self._sdk_session_id:
             metadata["sdk_session_id"] = self._sdk_session_id
@@ -1247,11 +1251,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             cost_info=cost_info,
             usage=request_usage or RequestUsage(),
             response_time=result_message.duration_ms / 1000 if result_message else None,
-            finish_reason="stop" if run_ctx.cancelled else None,
+            finish_reason=finish_reason,
             metadata=metadata,
         )
 
-        # Emit stream complete - post-processing handled by base class
         yield StreamCompleteEvent[TResult](message=chat_message)
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
@@ -1384,7 +1387,11 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         without loading full message content.
         """
         # Use fast metadata listing - avoids parsing all message content
-        metadata_list = self._claude_storage.list_session_metadata(project_path=cwd)
+        # Run in thread pool to avoid blocking event loop
+        metadata_list = await asyncio.to_thread(
+            self._claude_storage.list_session_metadata,
+            project_path=cwd,
+        )
         result: list[SessionData] = []
         default_cwd = str(self.env.cwd or Path.cwd())
         for meta in metadata_list:

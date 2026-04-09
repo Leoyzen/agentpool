@@ -14,7 +14,7 @@ Configuration is resolved from multiple layers (in precedence order):
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, Any
 
 from platformdirs import user_log_path
 import typer as t
@@ -92,7 +92,21 @@ def opencode_command(
         with ConfigContextManager(resolved.primary_path):
             manifest = AgentsManifest.model_validate(resolved.data)
             if resolved.primary_path:
-                manifest = manifest.model_copy(update={"config_file_path": resolved.primary_path})
+                # 为 manifest 和每个 agent/team 设置 config_file_path
+                # 这对于相对路径解析（如 file prompts）至关重要
+                def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
+                    return {
+                        name: config.model_copy(update={"config_file_path": resolved.primary_path})
+                        for name, config in nodes.items()
+                    }
+
+                manifest = manifest.model_copy(
+                    update={
+                        "config_file_path": resolved.primary_path,
+                        "agents": update_with_path(manifest.agents),
+                        "teams": update_with_path(manifest.teams),
+                    }
+                )
 
             # Initialize observability BEFORE configuring logging
             # This ensures logfire is configured before StructlogProcessor is added

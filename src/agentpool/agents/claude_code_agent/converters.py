@@ -52,7 +52,7 @@ from agentpool_server.opencode_server.models.tool_metadata import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import AsyncIterator, Iterator, Sequence
 
     from clawd_code_sdk import PermissionResult, ThinkingConfig
     from clawd_code_sdk.models import (
@@ -262,7 +262,7 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata:
     old_string = result["oldString"]
     new_string = result["newString"]
     structured_patch = result["structuredPatch"]
-    # Compute the "after" content by applying the edit
+    # Compute "after" content by applying edit
     after_content = original_file
     if original_file is not None and old_string and new_string:
         after_content = original_file.replace(old_string, new_string, 1)
@@ -273,8 +273,8 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata:
     additions, deletions = _count_diff_changes(structured_patch)
     filediff = FileDiff(
         file=file_path,
-        before=original_file,
-        after=after_content,
+        before=original_file or "",
+        after=after_content or "",
         additions=additions,
         deletions=deletions,
     )
@@ -512,3 +512,120 @@ def build_sdk_hooks_from_agent_hooks(
         result["PostToolUse"] = [HookMatcher(matcher="*", hooks=[on_post_tool_use])]  # type: ignore[list-item]
 
     return result
+
+
+def to_claude_system_prompt(prompt: str | None) -> str | None:
+    """Convert agent system prompt to Claude SDK format.
+
+    Args:
+        prompt: System prompt string or None
+
+    Returns:
+        Formatted system prompt for Claude SDK, or None if input is None
+    """
+    return prompt
+
+
+def to_output_format(output_type: type) -> dict[str, Any] | None:
+    """Convert output type to Claude SDK output format.
+
+    Args:
+        output_type: Type hint for structured output
+
+    Returns:
+        Output format dict for Claude SDK, or None for str or None
+    """
+    if output_type is None or output_type is str:
+        return None
+    # For structured output, Claude SDK expects JSON schema
+    return {"type": "json_object"}
+
+
+async def claude_message_to_events(
+    message: Any,
+    agent_name: str,
+) -> AsyncIterator[Any]:
+    """Convert Claude SDK messages to agentpool events.
+
+    Args:
+        message: SDK message (UserMessage, SystemMessage, AssistantMessage, etc.)
+        agent_name: Name of the agent (used in tool events for attribution)
+
+    Yields:
+        List of agentpool events (PartDeltaEvent, ToolCallStartEvent, ToolCallCompleteEvent, etc.)
+    """
+    from clawd_code_sdk.models.content_blocks import (
+        TextBlock,
+        ThinkingBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    from pydantic_ai import TextPartDelta
+
+    from agentpool.agents.events import (
+        PartDeltaEvent,
+        ToolCallCompleteEvent,
+        ToolCallStartEvent,
+    )
+
+    # Process based on message type and content structure
+    if hasattr(message, "content"):
+        content = message.content
+
+        # Handle string content (legacy/simple case)
+        if isinstance(content, str):
+            text_delta = TextPartDelta(content_delta=content)
+            yield PartDeltaEvent(index=0, delta=text_delta)
+            return
+
+        # Handle list of content blocks (map tool_use_id -> name from prior ToolUse in this message)
+        if isinstance(content, list):
+            tool_names_by_id: dict[str, str] = {}
+            for block in content:
+                match block:
+                    case TextBlock(text=text) if text:
+                        text_delta = TextPartDelta(content_delta=text)
+                        yield PartDeltaEvent(index=0, delta=text_delta)
+
+                    case ThinkingBlock(thinking=thinking) if thinking:
+                        # Thinking content -> PartDeltaEvent (wrapped in thinking tags for display)
+                        thinking_text = f"<thinking>\n{thinking}\n</thinking>"
+                        thinking_delta = TextPartDelta(content_delta=thinking_text)
+                        yield PartDeltaEvent(index=0, delta=thinking_delta)
+
+                    case ToolUseBlock(id=tool_id, name=name, input=input_data) if tool_id and name:
+                        tool_names_by_id[tool_id] = name
+                        # Tool use -> ToolCallStartEvent
+                        yield ToolCallStartEvent(
+                            tool_call_id=tool_id,
+                            tool_name=name,
+                            title=f"Calling tool: {name}",
+                            kind="other",
+                            raw_input=input_data if isinstance(input_data, dict) else {},
+                            content=[],
+                            locations=[],
+                        )
+
+                    case ToolResultBlock(
+                        tool_use_id=tool_id, content=result_content, is_error=is_error
+                    ) if tool_id:
+                        # Tool result -> ToolCallCompleteEvent
+                        # Normalize content to a string or dict
+                        normalized_result: Any
+                        if isinstance(result_content, str):
+                            normalized_result = result_content
+                        elif isinstance(result_content, list):
+                            # Convert list of dicts to a more structured format
+                            normalized_result = result_content
+                        else:
+                            normalized_result = result_content or ""
+
+                        yield ToolCallCompleteEvent(
+                            tool_name=tool_names_by_id.get(tool_id, "tool"),
+                            tool_call_id=tool_id,
+                            tool_input={},
+                            tool_result=normalized_result,
+                            agent_name=agent_name,
+                            message_id="",  # Not available in this context
+                            metadata={"is_error": is_error} if is_error else None,
+                        )

@@ -6,6 +6,7 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 import inspect
 from typing import TYPE_CHECKING, Any, Literal
+import warnings
 
 import logfire
 from pydantic_ai.tools import Tool as PydanticAiTool
@@ -140,12 +141,61 @@ class Tool[TOutputType = Any]:
     ):
         """Get the effective prepare function for this tool.
 
-        Returns self.prepare if set.
+        Returns self.prepare if set. If schema_override is set but prepare is not,
+        generates a prepare function that applies the schema_override values.
 
         Returns:
             Prepare function or None.
         """
-        return self.prepare
+        if self.prepare is not None:
+            return self.prepare
+
+        # If we have a schema_override, generate a prepare function
+        if self.schema_override is not None:
+            return self._generate_schema_override_prepare()
+
+        return None
+
+    def _generate_schema_override_prepare(
+        self,
+    ) -> Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition]]:
+        """Generate a prepare function that applies schema_override values.
+
+        This allows schema_override to be propagated to the PydanticAI tool
+        without requiring user to manually specify a prepare function.
+
+        Returns:
+            A prepare function that applies schema_override values.
+        """
+        assert self.schema_override is not None
+        schema_override = self.schema_override
+
+        async def prepare_override(
+            ctx: RunContext[AgentContext], tool_def: ToolDefinition
+        ) -> ToolDefinition:
+            """Apply schema_override values to tool definition."""
+            from pydantic_ai.tools import ToolDefinition
+
+            raw_params = schema_override.get("parameters")
+            if raw_params is not None and not isinstance(raw_params, dict):
+                logger.warning(
+                    "schema_override.parameters must be a dict; keeping original parameters schema",
+                    tool=schema_override.get("name", tool_def.name),
+                    parameters_type=type(raw_params).__name__,
+                )
+                parameters_json_schema = tool_def.parameters_json_schema
+            elif isinstance(raw_params, dict):
+                parameters_json_schema = raw_params
+            else:
+                parameters_json_schema = tool_def.parameters_json_schema
+
+            return ToolDefinition(
+                name=schema_override.get("name", tool_def.name),
+                description=schema_override.get("description", tool_def.description),
+                parameters_json_schema=parameters_json_schema,
+            )
+
+        return prepare_override
 
     def _detect_takes_ctx(self, func: Callable[..., Any] | None = None) -> bool:
         """Detect if function takes RunContext parameter.
@@ -191,12 +241,24 @@ class Tool[TOutputType = Any]:
 
         # Try primary path with pydantic_ai.function_schema
         try:
+            # pydantic-ai function_schema is internal API but needed for schema generation
+            # This is the standard way to generate schemas for tools in pydantic-ai
             from pydantic_ai._function_schema import (  # type: ignore[attr-defined]
                 GenerateJsonSchema,
                 function_schema,
             )
 
-            schema = function_schema(func, schema_generator=GenerateJsonSchema)
+            # ToolResult is a dataclass, not a Pydantic model: GenerateJsonSchema cannot
+            # build a return-value JSON Schema and emits UserWarning, then falls back to an
+            # unconstrained return schema anyway. Parameters schema is unaffected. Suppress
+            # only that known warning to keep logs clean (see PR discussion / MCP tool metadata).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message=r"Could not generate return schema for .+",
+                )
+                schema = function_schema(func, schema_generator=GenerateJsonSchema)
 
             # Apply schema_override to generated schema
             # Merge top-level description
@@ -240,6 +302,7 @@ class Tool[TOutputType = Any]:
             )
 
             # Use schemez to generate JSON schema
+            # type: ignore is needed because schemez is not strictly typed
             schema = schemez.create_schema(  # type: ignore
                 func,
                 name_override=self.name,
@@ -249,7 +312,9 @@ class Tool[TOutputType = Any]:
 
             # Return only the parameters part (the "object" schema)
             # Use model_dump - schemez.FunctionSchema has this method (pydantic-compatible)
+            # type: ignore[attr-defined] is needed because schemez is a third-party library
             schema_dump = getattr(schema, "model_dump")()  # noqa: B009, type: ignore[attr-defined]
+            # type: ignore[no-any-return] is needed because mypy can't infer the return type
             return schema_dump["parameters"]  # type: ignore[no-any-return]
         else:
             return schema.json_schema

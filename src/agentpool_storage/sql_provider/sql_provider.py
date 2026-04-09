@@ -5,9 +5,19 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Self
 
-from pydantic_ai import RunUsage
+from pydantic_ai.usage import RunUsage
 from sqlalchemy import insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+
+try:
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+except ImportError:
+    pg_insert = None  # type: ignore
+try:
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
+except ImportError:
+    mysql_insert = None  # type: ignore
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel, desc, select
 
@@ -146,6 +156,26 @@ class SQLModelProvider(StorageProvider):
             session.add(msg)
             await session.commit()
 
+    def _get_insert_stmt(self) -> Any:
+        """Get appropriate insert statement for database dialect.
+
+        Invariant (PR #10): branch on ``engine.dialect.name`` only. Do not prefer
+        ``pg_insert`` merely because psycopg is installed while connected to MySQL.
+
+        Returns:
+            SQLAlchemy insert statement with dialect-specific conflict handling support.
+        """
+        dialect_name = self.engine.dialect.name
+
+        if dialect_name == "sqlite":
+            return sqlite_insert(Conversation)
+        if dialect_name == "postgresql" and pg_insert is not None:
+            return pg_insert(Conversation)
+        if dialect_name in ("mysql", "mariadb") and mysql_insert is not None:
+            return mysql_insert(Conversation)
+        # Generic fallback (or dialect without dialect-specific insert helper)
+        return insert(Conversation)
+
     async def log_session(
         self,
         *,
@@ -156,6 +186,11 @@ class SQLModelProvider(StorageProvider):
         parent_session_id: str | None = None,
     ) -> None:
         """Log conversation to database.
+
+        ``parent_session_id`` maps to ``Conversation.parent_id`` and the
+        ``conversation.parent_id`` column (RFC-0011; migration
+        ``2f5ee67f43ce_add_parent_id_to_conversation``). The ORM model must keep this
+        field in sync with the INSERT ``values()`` call below.
 
         Uses upsert semantics to handle duplicate session IDs gracefully.
         If the session already exists, it will be silently ignored.
@@ -177,28 +212,31 @@ class SQLModelProvider(StorageProvider):
 
             now = start_time or get_now()
 
-            # Use upsert to avoid UNIQUE constraint violations
-            # First check if session already exists
-            existing = await session.execute(
-                select(Conversation).where(Conversation.id == session_id)
-            )
-            if existing.scalar_one_or_none():
-                # Session already exists, skip insertion
-                logger.debug(
-                    "Session already exists, skipping log_session",
-                    session_id=session_id,
-                )
-                return
-
-            # Insert new session
-            convo = Conversation(
+            # Conversation.parent_id (models.Conversation) stores parent_session_id for hierarchy.
+            # Use dialect-specific upsert to avoid UNIQUE constraint violations
+            stmt = self._get_insert_stmt().values(
                 id=session_id,
                 agent_name=node_name,
                 parent_id=parent_session_id,
+                title=None,
                 start_time=now,
                 model=model,
             )
-            session.add(convo)
+
+            # Apply dialect-specific "insert or ignore duplicate PK" semantics
+            dialect_name = self.engine.dialect.name
+            if dialect_name in ("sqlite", "postgresql") and hasattr(
+                stmt, "on_conflict_do_nothing"
+            ):
+                # Conversation.id is the primary key (indexed); required for ON CONFLICT target.
+                stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+            elif dialect_name in ("mysql", "mariadb") and hasattr(
+                stmt, "on_duplicate_key_update"
+            ):
+                # MySQL/MariaDB have no on_conflict_do_nothing; update PK to itself is a no-op
+                stmt = stmt.on_duplicate_key_update(id=stmt.inserted.id)
+
+            await session.execute(stmt)
             await session.commit()
 
     async def update_session_title(self, session_id: str, title: str) -> None:

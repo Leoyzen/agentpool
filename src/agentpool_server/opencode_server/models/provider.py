@@ -23,18 +23,18 @@ class ModelCost(OpenCodeBaseModel):
     cache_write: float | None = None
 
 
-class ModelLimit(OpenCodeBaseModel):
-    """Limit information for a model."""
-
-    context: float
-    output: float
-
-
 class ModelModalities(OpenCodeBaseModel):
     """Modalities supported by a model."""
 
     input: list[str] = Field(default_factory=lambda: ["text"])
     output: list[str] = Field(default_factory=lambda: ["text"])
+
+
+class ModelLimit(OpenCodeBaseModel):
+    """Limit information for a model."""
+
+    context: float
+    output: float
 
 
 class Model(OpenCodeBaseModel):

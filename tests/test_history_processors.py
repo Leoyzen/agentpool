@@ -16,6 +16,7 @@ def _validate_processor_signature(processor):
     """Validate processor signature using Agent's validation method."""
     # Create a minimal agent instance to access the method
     from agentpool.agents.native_agent.agent import Agent as NativeAgent
+
     # Access as unbound method and call with self=None (internal use only)
     return NativeAgent._validate_processor_signature(None, processor)
 
@@ -106,16 +107,17 @@ def test_config_resolution_invalid_signature_too_many():
         config.get_history_processors()
 
 
-def test_config_resolution_invalid_signature_wrong_name():
-    """Test resolution with invalid signature (wrong name)."""
+def test_config_resolution_second_param_name_allowed():
+    """Second parameter name is not restricted (see NativeAgentConfig.get_history_processors)."""
     config = NativeAgentConfig(
         model="test",
         session=MemoryConfig(
             history_processors=["tests.test_processors:invalid_processor_wrong_name"]
         ),
     )
-    with pytest.raises(ValueError, match="must be messages/msgs/history"):
-        config.get_history_processors()
+    processors = config.get_history_processors()
+    assert len(processors) == 1
+    assert processors[0].__name__ == "invalid_processor_wrong_name"
 
 
 def test_config_resolution_sync_no_ctx():

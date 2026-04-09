@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Final, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from platformdirs import user_data_dir
 from pydantic import ConfigDict, Field
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from agentpool_storage.base import StorageProvider
+
+from agentpool.sessions.store import MemorySessionStore
 
 
 FilterMode = Literal["and", "override"]
@@ -379,29 +381,14 @@ class StorageConfig(Schema):
             return [MemoryStorageConfig()] if is_pytest() else [SQLStorageConfig()]
         return self.providers
 
-    def get_session_store(self):
-        """Get a session store instance from the default provider.
-
-        Creates and returns a session store using the default storage provider.
-        For SQL storage, this creates a SQLSessionStore instance.
+    def get_session_store(self) -> Any | None:
+        """Get the session store from the first SQL provider.
 
         Returns:
-            SessionStore: A session store instance for saving/loading sessions.
+            Session store if available, MemorySessionStore as fallback, None otherwise.
         """
-        from agentpool.sessions.store import SessionStore
-
-        providers = self.effective_providers
-        if not providers:
-            raise ValueError("No storage providers configured")
-
-        # Use the first provider as default
-        provider_config = providers[0]
-
-        # Get the provider instance
-        provider = provider_config.get_provider()
-
-        # Create and return a session store from the provider
-        # For now, use memory-based session store as a simple implementation
-        # TODO: Implement proper SQLSessionStore when RFC-0011 is complete
-        from agentpool.sessions.store import MemorySessionStore
+        for provider in self.effective_providers:
+            if hasattr(provider, "get_session_store"):
+                return provider.get_session_store()
+        # Fallback to MemorySessionStore for compatibility
         return MemorySessionStore()

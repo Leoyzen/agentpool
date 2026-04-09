@@ -13,7 +13,6 @@ from pydantic_ai import TextPartDelta
 from pydantic_ai.usage import RequestUsage, RunUsage
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.codex_agent.codex_converters import (
     convert_codex_stream,
     mcp_config_to_codex,
@@ -36,10 +35,13 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
+    from codex_adapter.codex_types import McpServerConfig
+    from codex_adapter.events import CodexEvent
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
     from tokonomics.model_discovery.model_info import ModelInfo
 
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType, MCPServerStatus, StrPath
@@ -52,8 +54,6 @@ if TYPE_CHECKING:
     from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
     from codex_adapter import ApprovalPolicy, CodexClient, ReasoningEffort, SandboxMode
-    from codex_adapter.codex_types import McpServerConfig
-    from codex_adapter.events import CodexEvent
 
 
 logger = get_logger(__name__)
@@ -355,12 +355,13 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream events from Codex turn execution."""
-        from agentpool.agents.events import PlanUpdateEvent
-        from agentpool.messaging.messages import TokenCost
         from codex_adapter.events import (
             ThreadTokenUsageUpdatedEvent,
             TurnStartedEvent,
         )
+
+        from agentpool.agents.events import PlanUpdateEvent
+        from agentpool.messaging.messages import TokenCost
 
         if not self._client or not self._sdk_session_id:
             raise AgentNotInitializedError
@@ -401,7 +402,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 yield event
 
         try:
-            async with self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts):
+            agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
+            async with self._tool_bridge.set_run_context(agent_ctx, prompt=prompts):
                 raw_stream = self._client.turn_stream(
                     self._sdk_session_id,
                     input_items,

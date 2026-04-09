@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Sequence
+import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -23,7 +23,6 @@ from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
     FilePartInput,
-    LspUpdatedEvent,
     MessagePath,
     MessageRequest,
     MessageTime,
@@ -45,6 +44,7 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
@@ -226,7 +226,7 @@ async def list_messages(
     return messages[-limit:] if limit else messages
 
 
-async def _process_message(  # noqa: PLR0915
+async def _process_message(
     session_id: str,
     request: MessageRequest,
     state: StateDep,
@@ -399,9 +399,9 @@ async def _process_message_locked(  # noqa: PLR0915
                         f"Available model_variants: {list(state.pool.manifest.model_variants.keys())}"
                     )
         except Exception as e:  # noqa: BLE001
-            # Agent doesn't support model selection, ignore
+            # Broad catch: agents differ on how they signal unsupported/invalid model switching.
+            # Keep behavior stable for OpenCode (see PR #10 review iterations).
             logger.warning(f"Failed to switch model: {e}")
-            pass
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
@@ -413,7 +413,7 @@ async def _process_message_locked(  # noqa: PLR0915
         on_file_paths=lambda paths: _warmup_lsp_for_files(state, paths),
     )
 
-    async def run_with_model():
+    async def run_with_model() -> None:
         try:
             iterator = agent.run_stream(*user_prompt, session_id=session_id)
             async for oc_event in adapter.process_stream(iterator):

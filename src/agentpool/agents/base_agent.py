@@ -6,6 +6,7 @@ from abc import abstractmethod
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -17,7 +18,7 @@ from anyenv.signals import Signal
 import anyio
 from upathtools.filesystems import IsolatedMemoryFileSystem
 
-from agentpool.agents.context import AgentRunContext
+from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
 from agentpool.agents.modes import ModeInfo
 from agentpool.common_types import IndividualEventHandler
@@ -31,6 +32,7 @@ from agentpool.utils.time_utils import get_now
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
+    from contextvars import Token
     from datetime import datetime
 
     from evented_config import EventConfig
@@ -42,7 +44,6 @@ if TYPE_CHECKING:
     from upathtools.filesystems import OverlayFileSystem
 
     from acp.schema import AvailableCommandsUpdate
-    from agentpool.agents.context import AgentContext
     from agentpool.agents.events import (
         CommandCompleteEvent,
         CommandOutputEvent,
@@ -69,6 +70,13 @@ if TYPE_CHECKING:
 
     # Union type for state updates emitted via state_updated signal
     type StateUpdate = ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
+
+
+# ContextVar for per-execution isolation of _current_run_ctx (RFC-0021 compliance)
+_current_run_ctx_var: ContextVar[AgentRunContext | None] = ContextVar(
+    "_current_run_ctx_var",
+    default=None,
+)
 
 
 logger = get_logger(__name__)
@@ -195,7 +203,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         from exxec import ExecutionEnvironment, LocalExecutionEnvironment
         from slashed import CommandStore
 
-        from agentpool.agents.prompt_injection import PromptInjectionManager
         from agentpool.agents.staged_content import StagedContent
         from agentpool_commands import get_commands
 
@@ -230,7 +237,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
         self._background_run_ctx: AgentRunContext | None = None
-        self._current_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
         self._connect_pending: bool = False
@@ -240,6 +246,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Internal filesystem for tool/session state (can get written to via AgentContext)
         self._internal_fs = IsolatedMemoryFileSystem()
         self.staged_content = StagedContent()
+
+    @property
+    def _current_run_ctx(self) -> AgentRunContext | None:
+        """Get current run context (using ContextVar for concurrency safety)."""
+        return _current_run_ctx_var.get()
 
     def __repr__(self) -> str:
         typ = self.__class__.__name__
@@ -377,8 +388,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns:
             A new AgentContext instance
         """
-        from agentpool.agents.context import AgentContext
-
         return AgentContext(
             node=self,
             pool=self.agent_pool,
@@ -650,9 +659,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Queue the initial prompts
         run_ctx.injection_manager.insert_queued(prompts)
 
+        # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
+        # token is initialized so finally always has a bound name; reset only if set() succeeded.
+        token: Token[AgentRunContext | None] | None = None
         try:
-            # Set current run context for external access (e.g., tools calling queue_prompt)
-            self._current_run_ctx = run_ctx
+            token = _current_run_ctx_var.set(run_ctx)
             # Process queued prompts until queue is empty
             while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
                 current_prompts = run_ctx.injection_manager.pop_queued()
@@ -677,11 +688,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # After each iteration, flush unconsumed injections to queue
                 run_ctx.injection_manager.flush_pending_to_queue()
         finally:
-            # Clean up per-call injection manager (isolated from other concurrent calls)
-            # Only clear _current_run_ctx if it still points to this run (prevents
-            # affecting other concurrent calls that may have started after this one)
-            if self._current_run_ctx is run_ctx:
-                self._current_run_ctx = None
+            if token is not None:
+                _current_run_ctx_var.reset(token)
             run_ctx.injection_manager.clear()
 
     async def _run_stream_once(
@@ -705,6 +713,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Session initialization is handled by the caller.
 
         Args:
+            run_ctx: Per-run context for state isolation
             *prompts: Input prompts (various formats supported)
             store_history: Whether to store in history
             message_id: Optional message ID
@@ -753,6 +762,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Stream events from implementation
         final_message = None
         conversation = message_history if message_history is not None else self.conversation
+
+        # run_ctx is created by run_stream() (or future callers); do not replace it here or
+        # per-run isolation (event queue, injections, cancellation) breaks.
+
         await self.message_received.emit(user_msg)
 
         # Save user message to conversation history immediately
@@ -1034,7 +1047,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
 
     def is_cancelled(self) -> bool:
-        """Check if the agent has been cancelled.
+        """Check if agent has been cancelled.
 
         Returns:
             True if cancellation was requested

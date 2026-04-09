@@ -317,10 +317,13 @@ def resolve_config(  # noqa: PLR0915
         except ValueError:
             pass  # Fallback config errors are non-fatal
 
+    # Convert primary_path to absolute path if not already absolute
+    absolute_primary_path = os.path.abspath(primary_path) if primary_path else None
+
     return ResolvedConfig(
         data=merged_data,
         layers=layers,
-        primary_path=primary_path,
+        primary_path=absolute_primary_path,
     )
 
 

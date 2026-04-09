@@ -11,48 +11,19 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import FunctionToolCallEvent, RequestUsage
-from pydantic_ai.messages import (
-    PartDeltaEvent,
-    PartStartEvent,
-    TextPart as PydanticTextPart,
-    TextPartDelta,
-    ThinkingPart,
-    ThinkingPartDelta,
-    ToolCallPart as PydanticToolCallPart,
-)
+from pydantic_ai import RequestUsage
 
-from agentpool.agents.events import (
-    CompactionEvent,
-    FileContentItem,
-    LocationContentItem,
-    RunErrorEvent,
-    RunStartedEvent,
-    StreamCompleteEvent,
-    SubAgentEvent,
-    TextContentItem,
-    ToolCallCompleteEvent,
-    ToolCallProgressEvent,
-    ToolCallStartEvent,
-)
-from agentpool.agents.events.infer_info import derive_rich_tool_info
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
-from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.converters import _convert_params_for_ui
 from agentpool_server.opencode_server.event_processor import EventProcessor
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
 from agentpool_server.opencode_server.models import (
-    MessagePath,
-    MessageTime,
-    MessageUpdatedEvent,
     MessageWithParts,
     PartUpdatedEvent,
     SessionErrorEvent,
-    TimeCreated,
     TokenCache,
     Tokens,
 )
@@ -60,19 +31,15 @@ from agentpool_server.opencode_server.models.parts import (
     StepFinishPart,
     TextPart,
     TimeStartEndOptional,
-    ToolPart,
 )
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+    from collections.abc import AsyncIterator, Callable, Iterator
 
-    from agentpool.agents.events import ToolCallContentItem
     from agentpool.agents.events.events import RichAgentStreamEvent
-    from agentpool.messaging import ChatMessage
     from agentpool_server.opencode_server.models import MessageWithParts
     from agentpool_server.opencode_server.models.events import Event
-    from agentpool_server.opencode_server.models.parts import ToolState
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)

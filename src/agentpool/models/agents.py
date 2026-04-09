@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence  # noqa: TC003
 from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 from uuid import UUID
 
@@ -265,6 +265,7 @@ class NativeAgentConfig(BaseAgentConfig):
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         input_provider: InputProvider | None = None,
         pool: AgentPool[Any] | None = None,
+        # type: ignore[valid-type] - TDeps is a type variable, mypy doesn't recognize it as valid type
         deps_type: type[TDeps] | None = None,  # type: ignore[valid-type]
     ) -> Agent[TDeps, Any]:
         from agentpool.agents.native_agent import Agent
@@ -356,6 +357,54 @@ class NativeAgentConfig(BaseAgentConfig):
                 return MemoryConfig()
             case _ as unreachable:
                 assert_never(unreachable)
+
+    def get_history_processors(self) -> list[Callable[..., Any]]:
+        """Get resolved history processors from session config.
+
+        Returns:
+            List of processor callables
+
+        Raises:
+            ValueError: If processor resolution fails or signature is invalid
+        """
+        import inspect
+
+        from agentpool.utils.importing import import_callable
+
+        # Get session config
+        memory_cfg = self.get_session_config()
+
+        # Get processor paths from config
+        processor_paths = getattr(memory_cfg, "history_processors", None)
+        if not processor_paths:
+            return []
+
+        # Define constant for parameter validation
+        two_params = 2
+
+        # Resolve import paths to callables
+        resolved: list[Callable[..., Any]] = []
+        for path in processor_paths:
+            try:
+                processor = import_callable(path)
+
+                # Validate signature
+                sig = inspect.signature(processor)
+                params = list(sig.parameters.values())
+
+                # Check parameter count
+                if len(params) not in (1, two_params):
+                    msg = f"History processor must take 1 or {two_params} arguments, got {len(params)}"
+                    raise ValueError(msg)
+
+                # Parameter names are not restricted - users can use any valid Python names
+                # Removed restrictive check for 'messages', 'msgs', 'history' to improve flexibility
+                resolved.append(processor)
+            except Exception as e:
+                msg = f"Failed to resolve history processor '{path}': {e}"
+                raise ValueError(msg) from e
+
+        return resolved
 
     def get_system_prompts(self) -> list[BasePrompt]:
         """Get all system prompts as BasePrompts."""

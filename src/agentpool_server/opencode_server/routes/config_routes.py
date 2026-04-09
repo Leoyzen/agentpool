@@ -18,7 +18,6 @@ from agentpool_server.opencode_server.models import (
     Model,
     ModelCost,
     ModelLimit,
-    ModelModalities,
     Provider,
     ProviderListResponse,
     ProvidersResponse,
@@ -152,8 +151,7 @@ def _build_providers_from_configured(
         providers_by_name[provider_name].models[variant_name] = Model(
             id=variant_name,
             name=variant_name,
-            attachment=False,  # Disable attachment upload, use image paste instead
-            modalities=ModelModalities(input=["text", "image"], output=["text"]),
+            attachment=True,  # Enable multimodal support for manually configured models
             cost=ModelCost(
                 input=DEFAULT_MODEL_INPUT_COST,
                 output=DEFAULT_MODEL_OUTPUT_COST,
@@ -190,8 +188,7 @@ def _build_providers_from_variants(
                 name: Model(
                     id=name,
                     name=name,
-                    attachment=False,  # Disable attachment upload, use image paste instead
-                    modalities=ModelModalities(input=["text", "image"], output=["text"]),
+                    attachment=True,  # Enable multimodal support for agent modes
                     cost=ModelCost(
                         input=DEFAULT_MODEL_INPUT_COST,
                         output=DEFAULT_MODEL_OUTPUT_COST,

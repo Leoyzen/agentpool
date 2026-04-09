@@ -3,11 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.tools import ToolDefinition
-import pytest
 
 from agentpool.agents.native_agent.agent import Agent
 from agentpool.tools.base import Tool
-
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent as PydanticAgent

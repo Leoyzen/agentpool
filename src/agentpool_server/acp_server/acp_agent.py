@@ -574,7 +574,11 @@ class AgentPoolACPAgent(ACPAgent):
             # Try to get cwd from stored session data
             cwd = "."
             try:
-                stored = await self.session_manager.storage.load_session(params.session_id)
+                stored = (
+                    await self.session_manager.session_store.load(params.session_id)
+                    if self.session_manager.session_store
+                    else None
+                )
                 if stored and stored.cwd:
                     cwd = stored.cwd
             except Exception:  # noqa: BLE001
@@ -736,6 +740,13 @@ class AgentPoolACPAgent(ACPAgent):
             await session.agent.set_model(params.model_id)
             logger.info("Set model", model_id=params.model_id, session_id=params.session_id)
             return SetSessionModelResponse()
+        except (AttributeError, NotImplementedError) as e:
+            logger.warning(
+                "Agent does not support model switching",
+                error=str(e),
+                session_id=params.session_id,
+            )
+            return None
         except Exception:
             logger.exception("Failed to set session model", session_id=params.session_id)
             return None

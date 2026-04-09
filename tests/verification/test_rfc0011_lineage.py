@@ -149,6 +149,13 @@ async def test_subagent_event_lineage(test_pool):
         assert e.parent_session_id == parent_session_id
 
 
+def test_conversation_model_defines_parent_id() -> None:
+    """Regression: ORM must expose parent_id so log_session INSERT and DB schema stay aligned."""
+    from agentpool_storage.sql_provider.models import Conversation
+
+    assert "parent_id" in Conversation.model_fields
+
+
 @pytest.mark.asyncio
 async def test_sql_storage_parent_id(test_pool):
     """Test that SQL storage shows correct parent_id for child session."""

@@ -96,6 +96,7 @@ class StorageProvider:
         node_name: str,
         start_time: datetime | None = None,
         model: str | None = None,
+        agent_type: str | None = None,
         parent_session_id: str | None = None,
     ) -> None:
         """Log a conversation (if supported).
@@ -105,6 +106,7 @@ class StorageProvider:
             node_name: Name of the agent/node creating the session
             start_time: When the session started (defaults to now)
             model: Model identifier used in this session
+            agent_type: Type of agent backend (native, claude, codex, etc.)
             parent_session_id: Optional ID of the parent session (for subagent tracking)
         """
 
@@ -499,6 +501,20 @@ class StorageProvider:
 
         Returns:
             List of session IDs
+        """
+        msg = f"{self.__class__.__name__} does not support session storage"
+        raise NotImplementedError(msg)
+
+    async def update_sdk_session_id(
+        self,
+        session_id: str,
+        sdk_session_id: str,
+    ) -> None:
+        """Update the external SDK session ID for a session.
+
+        Args:
+            session_id: Internal session identifier
+            sdk_session_id: External SDK session ID (e.g. Claude JSONL stem, Codex thread ID)
         """
         msg = f"{self.__class__.__name__} does not support session storage"
         raise NotImplementedError(msg)

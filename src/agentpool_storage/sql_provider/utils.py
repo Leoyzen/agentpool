@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import RunUsage
+from pydantic_ai.usage import RunUsage
 from sqlalchemy import Column, and_
 from sqlmodel import select
 

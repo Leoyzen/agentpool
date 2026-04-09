@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 # Default model limits used when creating placeholder models
 DEFAULT_MODEL_CONTEXT_LIMIT: float = 128000.0
 DEFAULT_MODEL_OUTPUT_LIMIT: float = 4096.0

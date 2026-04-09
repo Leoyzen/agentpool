@@ -16,7 +16,6 @@ from agentpool.repomap import RepoMap, find_src_files
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.command_validation import validate_command
-from agentpool_storage.opencode_provider import helpers
 from agentpool_server.opencode_server.converters import (
     chat_message_to_opencode,
     opencode_to_session_data,
@@ -42,7 +41,6 @@ from agentpool_server.opencode_server.models import (
     Session,
     SessionCreatedEvent,
     SessionCreateRequest,
-    SessionUpdatedEvent,
     SessionDeletedEvent,
     SessionDiffEvent,
     SessionForkRequest,
@@ -51,6 +49,7 @@ from agentpool_server.opencode_server.models import (
     SessionShare,
     SessionStatus,
     SessionStatusEvent,
+    SessionUpdatedEvent,
     SessionUpdateRequest,
     ShellRequest,
     StepFinishPart,
@@ -64,6 +63,7 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+from agentpool_storage.opencode_provider import helpers
 
 
 if TYPE_CHECKING:
@@ -623,7 +623,8 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # Persist to storage
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    await state.storage.save_session(session_data)
+    if state.pool.sessions.store:
+        await state.pool.sessions.store.save(session_data)
     # Cache in memory
     state.sessions[session_id] = session
     state.messages[session_id] = []
@@ -754,7 +755,8 @@ async def update_session(
     state.sessions[session_id] = session  # Update cache
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    await state.storage.save_session(session_data)
+    if state.pool.sessions.store:
+        await state.pool.sessions.store.save(session_data)
     await state.broadcast_event(SessionUpdatedEvent.create(session))
     return session
 
@@ -777,19 +779,10 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     state.session_status.pop(session_id, None)
     state.todos.pop(session_id, None)
     # Delete from storage
-    await state.storage.delete_session(session_id)
+    if state.pool.sessions.store:
+        await state.pool.sessions.store.delete(session_id)
     await state.broadcast_event(SessionDeletedEvent.create(session_id))
     return True
-
-
-@router.get("/{session_id}/children")
-async def get_session_children(session_id: str, state: StateDep) -> list[Session]:
-    """Get all child sessions that were forked from the specified parent session."""
-    session = await get_or_load_session(state, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    # Search all cached sessions for children
-    return [sess for sess in state.sessions.values() if sess.parent_id == session_id]
 
 
 @router.post("/{session_id}/abort")
@@ -879,7 +872,8 @@ async def fork_session(  # noqa: D417
         agent_name=state.agent.name,
         pool_id=state.pool.manifest.config_file_path,
     )
-    await state.storage.save_session(session_data)
+    if state.pool.sessions.store:
+        await state.pool.sessions.store.save(session_data)
     # Cache in memory
     state.sessions[new_session_id] = forked_session
     state.session_status[new_session_id] = SessionStatus(type="idle")

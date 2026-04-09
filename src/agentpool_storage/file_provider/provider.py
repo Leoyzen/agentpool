@@ -6,7 +6,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from pydantic_ai import FinishReason, RunUsage  # noqa: TC002
+from pydantic_ai import FinishReason  # noqa: TC002
+from pydantic_ai.usage import RunUsage
 from upathtools import to_upath
 
 from agentpool.common_types import JsonValue, MessageRole  # noqa: TC001
@@ -232,6 +233,7 @@ class FileProvider(StorageProvider):
         conversation = ConversationData(
             id=session_id,
             agent_name=node_name,
+            parent_id=parent_session_id,
             title=None,
             start_time=(start_time or get_now()).isoformat(),
         )

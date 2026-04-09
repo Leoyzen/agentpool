@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
   "alembic>=1.16.5",
+  "ag-ui-protocol>=0.1.10",
   "anyenv[httpx]>=0.3.0",
   "clawd-code-sdk>=0.1.36",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
@@ -103,7 +104,6 @@ acp = "acp.filesystem:ACPPath"
 
 [project.optional-dependencies]
 a2a = ["fasta2a", "starlette"]  # A2A Server
-ag-ui = ["ag-ui-protocol>=0.1.10"]  # Ag-UI Agents
 bot = [
   "python-telegram-bot[socks]>=21.0",
   "slack-sdk>=3.26.0",

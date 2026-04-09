@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from agentpool.diagnostics.lsp_manager import LSPManager
+from agentpool.storage import StorageManager
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 from agentpool_storage.opencode_provider import helpers
@@ -113,19 +114,6 @@ class ServerState:
     def fs(self) -> AsyncFileSystem:
         """Get the fsspec filesystem from the agent's environment."""
         return self.agent.env.get_fs()
-
-    @property
-    def storage(self) -> Any:
-        """Get the storage manager from the agent's pool.
-
-        Returns:
-            StorageManager: The storage manager for session persistence.
-
-        Raises:
-            RuntimeError: If agent storage is not initialized.
-        """
-        assert self.agent.storage is not None, "Agent storage is not initialized"
-        return self.agent.storage
 
     @property
     def base_path(self) -> str:

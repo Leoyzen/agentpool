@@ -28,6 +28,15 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+SubagentDisplayMode = Literal["inline", "tool_box"]
+
+
+def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
+    """Normalize config strings to the ACP literal union."""
+    if value == "inline":
+        return "inline"
+    return "tool_box"
+
 
 class ACPServer(BaseServer):
     """ACP (Agent Client Protocol) server for agentpool using external library.
@@ -51,7 +60,7 @@ class ACPServer(BaseServer):
         load_skills: bool = True,
         config_path: str | None = None,
         transport: Transport = "stdio",
-        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
+        subagent_display_mode: SubagentDisplayMode = "tool_box",
     ) -> None:
         """Initialize ACP server with configuration.
 
@@ -75,7 +84,7 @@ class ACPServer(BaseServer):
         self.load_skills = load_skills
         self.config_path = config_path
         self.transport: Transport = transport
-        self.subagent_display_mode = subagent_display_mode
+        self.subagent_display_mode: SubagentDisplayMode = subagent_display_mode
 
     @classmethod
     def from_config(
@@ -88,7 +97,7 @@ class ACPServer(BaseServer):
         agent: str | None = None,
         load_skills: bool = True,
         transport: Transport = "stdio",
-        subagent_display_mode: Literal["inline", "tool_box"] | None = None,
+        subagent_display_mode: SubagentDisplayMode | None = None,
     ) -> Self:
         """Create ACP server from configuration path or manifest.
 
@@ -112,16 +121,13 @@ class ACPServer(BaseServer):
         config_path = config.config_file_path if isinstance(config, AgentsManifest) else str(config)
 
         # Resolve subagent_display_mode with priority: argument > config > default
-        resolved_display_mode: Literal["inline", "tool_box"]
+        resolved_display_mode: SubagentDisplayMode
         if subagent_display_mode is not None:
             resolved_display_mode = subagent_display_mode
         # Fall back to config value
         elif isinstance(config, AgentsManifest):
             config_mode: str = getattr(config.pool_server, "subagent_display_mode", "tool_box")
-            if config_mode in ("inline", "tool_box"):
-                resolved_display_mode = config_mode  # type: ignore[assignment]
-            else:
-                resolved_display_mode = "tool_box"
+            resolved_display_mode = _coerce_subagent_display_mode(config_mode)
         else:
             resolved_display_mode = "tool_box"
 

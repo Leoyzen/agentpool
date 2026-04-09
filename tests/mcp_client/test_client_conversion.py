@@ -10,7 +10,8 @@ from pathlib import Path
 
 import anyio
 from llmling_models import infer_model
-from pydantic_ai import BinaryContent, RunContext, RunUsage, ToolReturn
+from pydantic_ai import BinaryContent, RunContext, ToolReturn
+from pydantic_ai.usage import RunUsage
 import pytest
 
 from agentpool.mcp_server import MCPClient

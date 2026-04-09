@@ -928,6 +928,77 @@ async def test_prepare_with_schema_override() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_schema_override_parameters_non_dict_keeps_original_schema() -> None:
+    """PR #10: non-dict schema_override.parameters falls back; dict override still applies."""
+    from unittest.mock import MagicMock
+
+    from pydantic_ai import RunContext
+    from pydantic_ai.tools import ToolDefinition
+
+    original_schema = {"type": "object", "properties": {"x": {"type": "integer"}}}
+    tool_def = ToolDefinition(
+        name="orig",
+        description="desc",
+        parameters_json_schema=original_schema,
+    )
+
+    bad_override: OpenAIFunctionDefinition = {
+        "name": "bad_params_tool",
+        "parameters": "not-a-dict",
+    }
+
+    def tool_fn(x: int) -> str:
+        return str(x)
+
+    bad_tool = FunctionTool.from_callable(tool_fn, schema_override=bad_override)
+    prepare_bad = bad_tool._get_effective_prepare()
+    assert prepare_bad is not None
+    ctx = MagicMock(spec=RunContext)
+    out_bad = await prepare_bad(ctx, tool_def)
+    assert out_bad.parameters_json_schema == original_schema
+
+    good_override: OpenAIFunctionDefinition = {
+        "name": "good",
+        "parameters": {"type": "object", "properties": {"y": {"type": "string"}}},
+    }
+    good_tool = FunctionTool.from_callable(tool_fn, schema_override=good_override)
+    prepare_good = good_tool._get_effective_prepare()
+    assert prepare_good is not None
+    out_good = await prepare_good(ctx, tool_def)
+    assert out_good.parameters_json_schema == good_override["parameters"]
+
+
+def test_get_json_schema_no_toolresult_return_warning_with_schema_override() -> None:
+    """Dataclass ToolResult return + schema_override must not emit return-schema UserWarnings."""
+    import warnings
+
+    from agentpool.tools.base import FunctionTool, ToolResult
+
+    def returns_tool_result(x: int) -> ToolResult:
+        return ToolResult(content=str(x))
+
+    schema_override: OpenAIFunctionDefinition = {
+        "name": "tr_tool",
+        "description": "Uses ToolResult",
+        "parameters": {
+            "type": "object",
+            "properties": {"x": {"type": "integer"}},
+        },
+    }
+
+    tool = FunctionTool.from_callable(returns_tool_result, schema_override=schema_override)
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        js = tool._get_json_schema()
+
+    assert js is not None
+    assert "properties" in js
+    bad = [w for w in recorded if "Could not generate return schema" in str(w.message)]
+    assert not bad, [str(w.message) for w in bad]
+
+
 if __name__ == "__main__":
     import pytest
 

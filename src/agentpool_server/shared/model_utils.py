@@ -155,7 +155,6 @@ def _apply_configured_variants(
         Model,
         ModelCost,
         ModelLimit,
-        ModelModalities,
         Provider,
     )
 
@@ -183,16 +182,14 @@ def _apply_configured_variants(
             # Override existing (configured takes precedence)
             existing = provider.models[variant_name]
             existing.name = variant_name
-            existing.attachment = False  # Disable attachment upload, use image paste instead
-            existing.modalities = ModelModalities(input=["text", "image"], output=["text"])
+            existing.attachment = True  # Enable multimodal support
             # Note: variant-specific settings (temp, thinking) not exposed to client
         else:
             # Add new model - use a minimal Model creation
             provider.models[variant_name] = Model(
                 id=variant_name,
                 name=variant_name,
-                attachment=False,  # Disable attachment upload, use image paste instead
-                modalities=ModelModalities(input=["text", "image"], output=["text"]),
+                attachment=True,  # Enable multimodal support for manually configured models
                 cost=ModelCost(
                     input=DEFAULT_MODEL_INPUT_COST,
                     output=DEFAULT_MODEL_OUTPUT_COST,

@@ -151,7 +151,7 @@ async def merge_queue_into_iterator[T, V](  # noqa: PLR0915
                     ),
                     timeout=1.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Tasks didn't complete in time - cancel them as last resort
                 primary_task_obj.cancel()
                 secondary_task_obj.cancel()

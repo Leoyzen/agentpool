@@ -102,7 +102,7 @@ class TestExtractProvider:
         """Return openai for OpenAIModelConfig."""
         from llmling_models_config import OpenAIModelConfig
 
-        config = OpenAIModelConfig(identifier="gpt-5")
+        config = OpenAIModelConfig(identifier="gpt-5.1-chat-latest")
         result = _extract_provider(config)
         assert result == "openai"
 
@@ -290,13 +290,13 @@ class TestApplyConfiguredVariants:
     def test_add_model_to_existing_provider(self, sample_provider: Any) -> None:
         """Add new model to existing provider."""
         providers = [sample_provider]
-        variants = {"gpt-5": {"provider": "openai"}}
+        variants = {"gpt-5.1-chat-latest": {"provider": "openai"}}
 
         _apply_configured_variants(providers, variants)
 
         assert len(providers[0].models) == 2
         assert "gpt-4o" in providers[0].models
-        assert "gpt-5" in providers[0].models
+        assert "gpt-5.1-chat-latest" in providers[0].models
 
     def test_provider_name_case_insensitive(self, sample_provider: Any) -> None:
         """Treat provider names case-insensitively."""

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from pydantic_ai import RunUsage
+from pydantic_ai.usage import RunUsage
 import pytest
 
 from agentpool.messaging import ChatMessage, TokenCost

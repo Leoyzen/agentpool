@@ -67,8 +67,6 @@ AnyToolConfig = Annotated[
 ]
 __all__ = [
     "DEFAULT_SKILLS_PATHS",
-    "SkillSlashConfig",
-    "SkillCommandConfig",
     "AnyToolConfig",
     "BaseEventHandlerConfig",
     "BaseHookConfig",
@@ -89,6 +87,8 @@ __all__ = [
     "ResolvedConfig",
     "SSEMCPServerConfig",
     "SessionQuery",
+    "SkillCommandConfig",
+    "SkillSlashConfig",
     "SkillsConfig",
     "StdioMCPServerConfig",
     "StdoutEventHandlerConfig",

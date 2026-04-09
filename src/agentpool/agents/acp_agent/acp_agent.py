@@ -43,17 +43,15 @@ from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
-from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.acp_agent.session_state import ACPSessionState
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
     ToolResultMetadataEvent,
 )
-
+from agentpool.agents.events.processors import event_to_part
 from agentpool.agents.exceptions import (
     AgentNotInitializedError,
     UnknownCategoryError,
@@ -82,6 +80,7 @@ if TYPE_CHECKING:
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType
@@ -475,8 +474,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         tool_metadata: dict[str, dict[str, Any]] = {}
         try:
+            agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
-                self._tool_bridge.set_run_context(deps, input_provider, prompt=prompts),
+                self._tool_bridge.set_run_context(agent_ctx, prompt=prompts),
                 merge_queue_into_iterator(poll_acp_events(), run_ctx.event_queue) as merged_events,
             ):
                 async for event in merged_events:

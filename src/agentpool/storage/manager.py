@@ -17,10 +17,6 @@ from agentpool.utils.identifiers import generate_session_id
 from agentpool.utils.tasks import TaskManager
 from agentpool_config.session import SessionQuery
 from agentpool_config.storage import StorageConfig
-from agentpool.messaging import ChatMessage
-from agentpool.utils.tasks import TaskManager
-from agentpool_config.session import SessionQuery
-from agentpool_config.storage import StorageConfig
 
 
 if TYPE_CHECKING:
@@ -285,71 +281,6 @@ class StorageManager:
         )
 
     @method_spawner
-    async def save_session(self, data: SessionData) -> None:
-        """Save or update session data in the primary provider.
-
-        Args:
-            data: Session data to persist
-        """
-        provider = self.get_project_provider()  # Reuses first provider
-        await provider.save_session(data)
-        self._session_logged.add(data.session_id)
-
-    @method_spawner
-    async def load_session(self, session_id: str) -> SessionData | None:
-        """Load session data by ID.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            Session data if found, None otherwise
-        """
-        provider = self.get_project_provider()
-        return await provider.load_session(session_id)
-
-    @method_spawner
-    async def delete_session(self, session_id: str) -> bool:
-        """Delete a session from all providers.
-
-        Args:
-            session_id: Session identifier
-
-        Returns:
-            True if session was deleted from at least one provider
-        """
-        deleted = False
-        for provider in self.providers:
-            try:
-                if await provider.delete_session(session_id):
-                    deleted = True
-            except Exception:
-                logger.exception(
-                    "Error deleting session",
-                    provider=provider.__class__.__name__,
-                    session_id=session_id,
-                )
-        return deleted
-
-    @method_spawner
-    async def list_session_ids(
-        self,
-        pool_id: str | None = None,
-        agent_name: str | None = None,
-    ) -> list[str]:
-        """List session IDs, optionally filtered.
-
-        Args:
-            pool_id: Filter by pool/manifest ID
-            agent_name: Filter by agent name
-
-        Returns:
-            List of session IDs
-        """
-        provider = self.get_project_provider()
-        return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
-
-    @method_spawner
     async def log_command(
         self,
         *,
@@ -424,6 +355,80 @@ class StorageManager:
             limit=limit,
             current_session_only=current_session_only,
         )
+
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data in the primary provider.
+
+        Args:
+            data: Session data to persist
+        """
+        provider = self.get_project_provider()
+        await provider.save_session(data)
+        self._session_logged.add(data.session_id)
+
+    @method_spawner
+    async def load_session(self, session_id: str) -> SessionData | None:
+        """Load session data by ID.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            Session data if found, None otherwise
+        """
+        provider = self.get_project_provider()
+        return await provider.load_session(session_id)
+
+    @method_spawner
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session from all providers.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            True if session was deleted from at least one provider
+        """
+        deleted = False
+        for provider in self.providers:
+            try:
+                if await provider.delete_session(session_id):
+                    deleted = True
+            except Exception:
+                logger.exception(
+                    "Error deleting session",
+                    provider=provider.__class__.__name__,
+                    session_id=session_id,
+                )
+        return deleted
+
+    @method_spawner
+    async def list_session_ids(
+        self,
+        pool_id: str | None = None,
+        agent_name: str | None = None,
+    ) -> list[str]:
+        """List session IDs, optionally filtered.
+
+        Args:
+            pool_id: Filter by pool/manifest ID
+            agent_name: Filter by agent name
+
+        Returns:
+            List of session IDs
+        """
+        provider = self.get_project_provider()
+        return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
+
+    async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
+        """Update the external SDK session ID for a session.
+
+        Args:
+            session_id: Internal session identifier
+            sdk_session_id: External SDK session ID
+        """
+        for provider in self.providers:
+            await provider.update_sdk_session_id(session_id, sdk_session_id)
 
     async def update_session_title(self, session_id: str, title: str) -> None:
         """Update conversation title in all providers.
@@ -724,6 +729,8 @@ class StorageManager:
         """Generate title from initial prompt (internal, fire-and-forget).
 
         Called automatically by log_session when initial_prompt is provided.
+        Persisting the title to storage is handled inside `_generate_title_core`
+        (via ``update_session_title``), not by this wrapper.
 
         Args:
             session_id: ID of the conversation to title
@@ -741,8 +748,6 @@ class StorageManager:
         # Generate using core logic
         if metadata := await self._generate_title_core(session_id, f"user: {prompt[:500]}"):
             title = metadata.title
-            # Store the generated title
-            await self.update_session_title(session_id, title)
             if on_title_generated:
                 on_title_generated(title)
             return title

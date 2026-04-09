@@ -162,18 +162,19 @@ class SkillsInstructionProvider(ResourceProvider):
 
     def _format_skill_full(self, name: str, skill: Any, instructions: str) -> str:
         """Format full skill content in XML."""
-        # desc = escape(str(skill.description)) if hasattr(skill, "description") else ""
         path = str(skill.skill_path) if hasattr(skill, "skill_path") else ""
 
-        return f"""<skill_content id="{escape(name)}" name="{escape(name)}">
-<skill-instruction>
-Base directory for this skill: {path}/
-File references (@path) are relative to this directory.
+        return f"""  <skill_content id="{escape(name)}" name="{escape(name)}">
+    <instructions>
+      <skill-instruction>
+      Base directory for this skill: {path}/
+      File references (@path) are relative to this directory.
 
-{instructions}
-</skill-instruction>
+      {instructions}
+      </skill-instruction>
 
-<user-request>
-$ARGUMENTS
-</user-request>
-</skill>"""
+      <user-request>
+      $ARGUMENTS
+      </user-request>
+    </instructions>
+  </skill_content>"""

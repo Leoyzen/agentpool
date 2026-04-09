@@ -106,6 +106,7 @@ class MemoryStorageProvider(StorageProvider):
         self.conversations.append({
             "id": session_id,
             "agent_name": node_name,
+            "parent_id": parent_session_id,
             "title": None,
             "start_time": start_time or get_now(),
         })
