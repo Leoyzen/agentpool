@@ -127,12 +127,8 @@ class StorageManager:
                     error_type=type(e).__name__,
                 )
                 # Wrap error with context for better debugging
-                from contextlib import chained_exception as create_chained_exception
-
-                chained_error = create_chained_exception(
-                    error_msg,
-                    e,
-                )
+                chained_error = RuntimeError(error_msg)
+                chained_error.__cause__ = e
                 errors.append(chained_error)
 
         await self.task_manager.cleanup_tasks()

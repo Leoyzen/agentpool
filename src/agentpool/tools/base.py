@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+import ast
 from dataclasses import dataclass, field
 import inspect
 from typing import TYPE_CHECKING, Any, Literal
@@ -459,8 +460,6 @@ class Tool[TOutputType = Any]:
         description: str | None = None,
     ) -> FunctionTool[Any]:
         """Create a FunctionTool from a code string."""
-        import ast
-
         # Validate code before execution
         try:
             tree = ast.parse(code)
@@ -542,7 +541,7 @@ class Tool[TOutputType = Any]:
                     if node.func.attr in dangerous_methods:
                         msg = f"Method call to {node.func.attr} is not allowed"
                         raise ValueError(msg)
-                    # Allow method calls on built-in types
+                    # Allow method calls on built-in types and literals
                     if isinstance(node.func.value, ast.Name):
                         if node.func.value.id in {
                             "str",
@@ -554,6 +553,8 @@ class Tool[TOutputType = Any]:
                             "set",
                         }:
                             continue
+                    elif isinstance(node.func.value, ast.Constant):
+                        continue
                     # Disallow other method calls for safety
                     msg = f"Method call to {node.func.attr} is not allowed on this object type"
                     raise ValueError(msg)

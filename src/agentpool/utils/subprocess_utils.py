@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+import shlex
 from typing import TYPE_CHECKING
 
 import anyio
@@ -197,8 +198,6 @@ async def start_process(
     Raises:
         RuntimeError: If process exits during startup delay
     """
-    import shlex
-
     if use_shell:
         logger.warning(
             "Starting process with shell=True. This is a security risk if command contains untrusted input. "

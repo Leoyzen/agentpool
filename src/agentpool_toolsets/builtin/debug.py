@@ -16,6 +16,7 @@ from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
 
+
 logger = get_logger(__name__)
 
 
@@ -296,29 +297,45 @@ class DebugTools(StaticResourceProvider):
             # Disallow function calls that aren't attribute accesses on safe objects
             if isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name):
-                    # Block dangerous builtins
-                    dangerous_builtins = {
-                        "exec",
-                        "eval",
-                        "compile",
-                        "__import__",
-                        "open",
-                        "exit",
-                        "quit",
-                        "globals",
-                        "locals",
-                        "vars",
+                    # Basic builtins that are safe for introspection
+                    safe_builtins = {
+                        "print",
+                        "len",
+                        "str",
+                        "int",
+                        "float",
+                        "bool",
+                        "list",
+                        "dict",
+                        "tuple",
+                        "set",
+                        "range",
+                        "type",
+                        "isinstance",
+                        "repr",
                         "dir",
-                        "getattr",
-                        "setattr",
-                        "delattr",
+                        "vars",
                         "hasattr",
+                        "getattr",
+                        "id",
+                        "hash",
+                        "hex",
+                        "oct",
+                        "bin",
+                        "abs",
+                        "all",
+                        "any",
+                        "max",
+                        "min",
+                        "sum",
+                        "sorted",
+                        "enumerate",
+                        "zip",
+                        "reversed",
+                        "slice",
                     }
-                    if node.func.id in dangerous_builtins:
+                    if node.func.id not in safe_builtins:
                         return f"Error: Function call to {node.func.id} is not allowed"
-            # Disallow dangerous names
-            if isinstance(node, ast.Name) and node.id in {"exec", "eval", "compile", "__import__"}:
-                return f"Error: Use of {node.id} is not allowed"
 
         # Emit progress with code being executed
         await ctx.events.tool_call_progress(
@@ -359,7 +376,6 @@ class DebugTools(StaticResourceProvider):
             "zip": zip,
             "reversed": reversed,
             "slice": slice,
-            "isinstance": isinstance,
             "issubclass": issubclass,
         }
 
