@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Self, overload
 
-from upathtools import to_upath
+from upathtools import UPath, to_upath
 
 from agentpool.log import get_logger
 from agentpool.skills.registry import SkillsRegistry
 from agentpool_config.skills import SkillsConfig  # noqa: TC001
 
-
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
-    from upathtools import JoinablePathLike, UPath
+    from upathtools import JoinablePathLike
 
     from agentpool.skills.skill import Skill
 
@@ -117,9 +116,12 @@ class SkillsManager:
 
         Args:
             config: Optional skills configuration.
-            config_file_path: Optional path to the configuration file for resolving relative paths.
+            config_file_path: Optional path to configuration file for resolving relative paths.
         """
         from agentpool_config.skills import DEFAULT_SKILLS_PATHS
+
+        base_path = config_file_path.parent if config_file_path is not None else UPath.cwd()
+        logger.debug("Starting skills discovery", base_path=str(base_path))
 
         if config:
             paths = config.get_effective_paths(config_file_path)
@@ -128,6 +130,7 @@ class SkillsManager:
             paths = self.registry.skills_dirs
             default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
 
+        logger.debug("Skills discovery paths", paths=[str(p) for p in paths])
         for path in reversed(paths):
             upath = to_upath(path).expanduser()
             if not upath.exists():
@@ -136,7 +139,9 @@ class SkillsManager:
                 else:
                     logger.warning("Custom skills directory not found", path=upath)
                 continue
+            logger.debug("Processing skills directory", path=str(upath))
             await self.registry.register_skills_from_path(upath, replace=True)
+        logger.debug("Skills discovery completed", total_skills=len(self.registry.list_items()))
 
     async def refresh(self) -> None:
         """Force rediscovery of all skills."""
