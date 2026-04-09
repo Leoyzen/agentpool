@@ -98,16 +98,19 @@ class SkillsRegistry(BaseRegistry[str, Skill]):
             try:
                 await fs._cat_file(fs_skill_md_path)
             except FileNotFoundError:
+                logger.debug("SKILL.md not found in skill directory", path=entry_name)
                 continue
 
             try:
                 skill = self._parse_skill(skill_dir_path)
                 self.register(skill.name, skill, replace=replace)
+                logger.debug("Successfully loaded skill", name=skill.name, path=str(skill_dir_path))
             except Exception as e:  # noqa: BLE001
                 logger.warning(
                     "Failed to parse skill",
                     path=str(skill_dir_path),
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
 
     def _parse_skill(self, skill_dir_path: JoinablePathLike) -> Skill:
