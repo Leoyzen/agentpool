@@ -159,48 +159,53 @@ async def load_skill(  # noqa: PLR0911
         # Load reference content if specified
         if resolved.reference_path:
             try:
-                ref_content = await _load_reference_content(skill, resolved.reference_path)
+                ref_content = await _load_reference_content(
+                    skill, resolved.reference_path, pool=ctx.pool
+                )
                 instructions += ref_content
             except Exception as e:  # noqa: BLE001
                 return f"Failed to load reference {resolved.reference_path!r}: {e}"
     else:
-        # Bare skill name - check both pool.skills and pool.skill_provider
-        # (local filesystem skills and MCP-based skills)
-        skills = ctx.pool.skills.list_skills()
-        # Filter out skills that disable model invocation (for model visibility)
-        visible_skills = [s for s in skills if not getattr(s, "disable_model_invocation", False)]
-
-        # Also check skill_provider for MCP-based skills
-        provider_skills: list[Skill] = []
-        if ctx.pool.skill_provider is not None:
+        # Bare skill name - use skill_resolver to search across all providers
+        # This supports dynamic skill discovery from MCP servers with proper priority
+        resolver: SkillURIResolver | None = getattr(ctx.pool, "skill_resolver", None)
+        if resolver is not None:
             try:
-                provider_skills = await ctx.pool.skill_provider.get_skills()
-            except Exception:
-                pass
-
-        all_skills = visible_skills + provider_skills
-
-        if not all_skills:
-            return "No skills available."
-
-        found_skill: Skill | None = next(
-            (s for s in all_skills if s.name == resolved.skill_name), None
-        )
-        if found_skill is None:
-            available = ", ".join(s.name for s in all_skills)
-            return f"Skill {resolved.skill_name!r} not found. Available skills: {available}"
-        skill = found_skill
-
-        # Get instructions from appropriate source
-        try:
-            if skill in provider_skills:
-                # MCP-based skill
+                # Try to resolve via skill_resolver (searches all providers in priority order)
+                skill = await resolver.resolve(f"skill://{resolved.skill_name}")
                 instructions = skill.load_instructions()
-            else:
-                # Local filesystem skill
+            except Exception:
+                # Fallback: check local skills directly
+                skills = ctx.pool.skills.list_skills()
+                visible_skills = [
+                    s for s in skills if not getattr(s, "disable_model_invocation", False)
+                ]
+                found_skill: Skill | None = next(
+                    (s for s in visible_skills if s.name == resolved.skill_name), None
+                )
+                if found_skill is None:
+                    available = ", ".join(s.name for s in visible_skills)
+                    return f"Skill {resolved.skill_name!r} not found. Available skills: {available}"
+                skill = found_skill
+                try:
+                    instructions = ctx.pool.skills.get_skill_instructions(resolved.skill_name)
+                except Exception as e:  # noqa: BLE001
+                    return f"Failed to load skill {resolved.skill_name!r}: {e}"
+        else:
+            # Fallback when no resolver available - check local skills only
+            skills = ctx.pool.skills.list_skills()
+            visible_skills = [
+                s for s in skills if not getattr(s, "disable_model_invocation", False)
+            ]
+            found_skill = next((s for s in visible_skills if s.name == resolved.skill_name), None)
+            if found_skill is None:
+                available = ", ".join(s.name for s in visible_skills)
+                return f"Skill {resolved.skill_name!r} not found. Available skills: {available}"
+            skill = found_skill
+            try:
                 instructions = ctx.pool.skills.get_skill_instructions(resolved.skill_name)
-        except Exception as e:  # noqa: BLE001
-            return f"Failed to load skill {resolved.skill_name!r}: {e}"
+            except Exception as e:  # noqa: BLE001
+                return f"Failed to load skill {resolved.skill_name!r}: {e}"
 
     # Apply argument substitution
     instructions = _substitute_arguments(instructions, arguments)
