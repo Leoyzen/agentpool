@@ -182,8 +182,9 @@ async def load_skill(  # noqa: PLR0911
         resolver: SkillURIResolver | None = getattr(ctx.pool, "skill_resolver", None)
         if resolver is not None:
             try:
-                # Try to resolve via skill_resolver (searches all providers in priority order)
-                skill = await resolver.resolve(f"skill://{resolved.skill_name}")
+                # Try to resolve via skill_resolver using bare skill name
+                # (searches all providers in priority order)
+                skill = await resolver.resolve(resolved.skill_name)
                 # For virtual paths (PurePosixPath), fetch from provider
                 if isinstance(skill.skill_path, PurePosixPath):
                     if ctx.pool.skill_provider is not None:

@@ -312,12 +312,18 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         providers: list[ResourceProvider] = []
 
         # Add LocalResourceProvider for filesystem skills if SkillsManager exists
+        # Use the already-initialized resource_provider from SkillsManager
         if self.skills and self.skills.registry.skills_dirs:
-            local_provider = LocalResourceProvider(
-                name="local",
-                skills_dirs=list(self.skills.registry.skills_dirs),
-            )
-            providers.append(local_provider)
+            try:
+                local_provider = self.skills.resource_provider
+                providers.append(local_provider)
+            except RuntimeError:
+                # Fallback: create a new provider if resource_provider not available
+                local_provider = LocalResourceProvider(
+                    name="local",
+                    skills_dirs=list(self.skills.registry.skills_dirs),
+                )
+                providers.append(local_provider)
 
         # Add MCPResourceProvider for each MCP server
         for mcp_provider in self.mcp.providers:

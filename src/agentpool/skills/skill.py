@@ -97,9 +97,11 @@ class Skill(BaseModel):
                 For MCP-based skills, use provider.get_skill_instructions() instead.
         """
         if self.instructions is None:
-            # PurePosixPath represents virtual paths (e.g., skill:// URIs from MCP)
-            # These must have instructions pre-set or be fetched via provider
-            if isinstance(self.skill_path, PurePosixPath):
+            # Check for exact PurePosixPath type (virtual paths like skill:// URIs)
+            # Note: UPath is also a subclass of PurePosixPath, so we use `type is`
+            # to distinguish between virtual paths (exact PurePosixPath) and
+            # real filesystem paths (UPath or its subclasses)
+            if type(self.skill_path) is PurePosixPath:
                 raise ValueError(
                     f"Cannot load instructions for virtual skill '{self.name}'. "
                     "Instructions must be pre-set during skill creation or fetched "
@@ -131,8 +133,11 @@ class Skill(BaseModel):
             ValueError: If frontmatter is missing or invalid YAML.
             ValidationError: If fields fail Pydantic validation.
         """
-        # PurePosixPath represents virtual paths - can't load from filesystem
-        if isinstance(skill_dir, PurePosixPath):
+        # Check for exact PurePosixPath type (virtual paths like skill:// URIs)
+        # Note: UPath is also a subclass of PurePosixPath, so we use `type is`
+        # to distinguish between virtual paths (exact PurePosixPath) and
+        # real filesystem paths (UPath or its subclasses)
+        if type(skill_dir) is PurePosixPath:
             raise ValueError(
                 "Cannot load skill from virtual path using from_skill_dir. "
                 "Use provider.get_skill_instructions() for MCP-based skills."
@@ -142,8 +147,10 @@ class Skill(BaseModel):
         if skill_file is None:
             raise FileNotFoundError(f"SKILL.md not found in {skill_dir}")
 
-        # At this point skill_file is a UPath (we returned early for PurePosixPath)
-        if isinstance(skill_file, PurePosixPath):
+        # At this point skill_file should be a UPath
+        # (we returned early for exact PurePosixPath type)
+        # Use type() check since UPath is a subclass of PurePosixPath
+        if type(skill_file) is PurePosixPath:
             raise ValueError("Virtual paths cannot be read from filesystem")
         content = skill_file.read_text("utf-8")
         metadata, _body = parse_frontmatter(content)
@@ -159,8 +166,9 @@ def find_skill_md(skill_dir: SkillPathType) -> SkillPathType | None:
     Returns:
         Path to the SKILL.md file, or None if not found.
     """
-    # PurePosixPath represents virtual paths (e.g., skill:// URIs) - no filesystem check
-    if isinstance(skill_dir, PurePosixPath):
+    # Check for exact PurePosixPath type (virtual paths like skill:// URIs)
+    # Note: UPath is also a subclass of PurePosixPath, so we use `type is`
+    if type(skill_dir) is PurePosixPath:
         return skill_dir / "SKILL.md"
 
     # UPath represents actual filesystem paths
