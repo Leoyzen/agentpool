@@ -49,6 +49,20 @@ MCP server integration with git tools - demonstrates how to integrate MCP server
 
 MCP server with sampling tools - shows advanced MCP features including sampling and elicitation.
 
+### [MCP Skills](mcp_skills/)
+
+Using MCP-exposed skills via the skill:// URI scheme - demonstrates how to use both prompt-based and resource-based skills from MCP servers.
+
+## Skills
+
+### [Skill URI Loading](skill_uri_loading/)
+
+Loading skills using the skill:// URI scheme - demonstrates short name auto-routing and full URI loading.
+
+### [Skills with References](skill_with_references/)
+
+Creating skills with supporting reference files - demonstrates how to bundle templates, examples, and guides with skills.
+
 ## Structured Responses
 
 ### [Structured Responses](structured_response/)

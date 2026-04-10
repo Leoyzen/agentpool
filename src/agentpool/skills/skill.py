@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import html
+from pathlib import PurePosixPath
 from typing import Annotated, Any
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from upathtools import UPath
+
+# Type for skill paths - can be UPath (for local filesystem skills)
+# or PurePosixPath (for virtual skill:// URIs from MCP providers)
+SkillPathType = UPath | PurePosixPath
 
 
 # Last synced with https://github.com/agentskills/agentskills
@@ -29,7 +34,7 @@ class Skill(BaseModel):
 
     name: Annotated[str, Field(max_length=MAX_SKILL_NAME_LENGTH)]
     description: Annotated[str, Field(min_length=1, max_length=MAX_DESCRIPTION_LENGTH)]
-    skill_path: UPath
+    skill_path: SkillPathType
     license: str | None = None
     compatibility: Annotated[str | None, Field(max_length=MAX_COMPATIBILITY_LENGTH)] = None
     allowed_tools: str | None = Field(default=None, alias="allowed-tools")
@@ -63,10 +68,10 @@ class Skill(BaseModel):
             raise ValueError("Skill name cannot start or end with a hyphen")
         if "--" in name:
             raise ValueError("Skill name cannot contain consecutive hyphens")
-        if not all(c.isalnum() or c == "-" for c in name):
+        if not all(c.isalnum() or c in "-_" for c in name):
             msg = (
                 f"Skill name {name!r} contains invalid characters. "
-                "Only letters, digits, and hyphens are allowed."
+                "Only letters, digits, hyphens, and underscores are allowed."
             )
             raise ValueError(msg)
         return name
@@ -81,8 +86,20 @@ class Skill(BaseModel):
         return data
 
     def load_instructions(self) -> str:
-        """Lazy-load full instructions from SKILL.md."""
+        """Lazy-load full instructions from SKILL.md.
+
+        For local filesystem skills (UPath), loads from disk.
+        For virtual skills (PurePosixPath like skill:// URIs), returns the
+        pre-set instructions field (loaded from MCP provider during skill creation).
+        """
         if self.instructions is None:
+            # PurePosixPath represents virtual paths (e.g., skill:// URIs from MCP)
+            # These should have instructions pre-set during skill creation
+            if isinstance(self.skill_path, PurePosixPath):
+                self.instructions = ""
+                return self.instructions
+
+            # UPath represents actual filesystem paths
             skill_file = self.skill_path / "SKILL.md"
             if skill_file.exists():
                 content = skill_file.read_text(encoding="utf-8")
@@ -93,7 +110,7 @@ class Skill(BaseModel):
         return self.instructions
 
     @classmethod
-    def from_skill_dir(cls, skill_dir: UPath) -> Skill:
+    def from_skill_dir(cls, skill_dir: SkillPathType) -> Skill:
         """Parse a SKILL.md file from a directory and return a validated Skill.
 
         Args:
@@ -107,16 +124,26 @@ class Skill(BaseModel):
             ValueError: If frontmatter is missing or invalid YAML.
             ValidationError: If fields fail Pydantic validation.
         """
+        # PurePosixPath represents virtual paths - can't load from filesystem
+        if isinstance(skill_dir, PurePosixPath):
+            raise ValueError(
+                "Cannot load skill from virtual path using from_skill_dir. "
+                "Use provider.get_skill_instructions() for MCP-based skills."
+            )
+
         skill_file = find_skill_md(skill_dir)
         if skill_file is None:
             raise FileNotFoundError(f"SKILL.md not found in {skill_dir}")
 
+        # At this point skill_file is a UPath (we returned early for PurePosixPath)
+        if isinstance(skill_file, PurePosixPath):
+            raise ValueError("Virtual paths cannot be read from filesystem")
         content = skill_file.read_text("utf-8")
         metadata, _body = parse_frontmatter(content)
         return cls(skill_path=skill_dir, **metadata)
 
 
-def find_skill_md(skill_dir: UPath) -> UPath | None:
+def find_skill_md(skill_dir: SkillPathType) -> SkillPathType | None:
     """Find the SKILL.md file in a skill directory.
 
     Args:
@@ -125,6 +152,11 @@ def find_skill_md(skill_dir: UPath) -> UPath | None:
     Returns:
         Path to the SKILL.md file, or None if not found.
     """
+    # PurePosixPath represents virtual paths (e.g., skill:// URIs) - no filesystem check
+    if isinstance(skill_dir, PurePosixPath):
+        return skill_dir / "SKILL.md"
+
+    # UPath represents actual filesystem paths
     path = skill_dir / "SKILL.md"
     return path if path.exists() else None
 

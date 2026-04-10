@@ -109,6 +109,8 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     1. Local filesystem (via SkillsManager)
     2. MCP providers (via AggregatingResourceProvider)
     """
+    from pathlib import PurePosixPath
+
     # Access the pool via the agent's agent_pool reference
     pool = state.agent.agent_pool
     if pool is None:
@@ -137,12 +139,27 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
                 existing = next((s for s in skills if s.name == skill.name), None)
                 if existing:
                     skills.remove(existing)
+
+                # For MCP skills, get content via provider (load_instructions returns empty for PurePosixPath)
+                if isinstance(skill.skill_path, PurePosixPath):
+                    try:
+                        content = await pool.skill_provider.get_skill_instructions(skill.name)
+                    except Exception as e:
+                        logger.debug(
+                            "Failed to get skill instructions",
+                            skill=skill.name,
+                            error=str(e),
+                        )
+                        content = ""
+                else:
+                    content = skill.load_instructions()
+
                 skills.append(
                     SkillInfo(
                         name=skill.name,
                         description=skill.description,
                         location=str(skill.skill_path),
-                        content=skill.load_instructions(),
+                        content=content,
                     )
                 )
         except Exception as e:

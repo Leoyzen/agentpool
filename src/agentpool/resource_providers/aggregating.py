@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo
+    from agentpool.skills.skill import Skill
     from agentpool.tools.base import Tool
 
 ToolMode = Literal["codemode"]
@@ -126,6 +127,37 @@ class AggregatingResourceProvider(ResourceProvider):
     async def get_resources(self) -> list[ResourceInfo]:
         """Get resources from all providers."""
         return [r for provider in self.providers for r in await provider.get_resources()]
+
+    async def get_skills(self) -> list[Skill]:
+        """Get skills from all providers."""
+        return [s for provider in self.providers for s in await provider.get_skills()]
+
+    async def get_skill_instructions(self, skill_name: str) -> str:
+        """Get skill instructions from the first provider that has it.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            Skill instructions as string
+
+        Raises:
+            SkillNotFoundError: If skill not found in any provider
+        """
+        from agentpool.skills.exceptions import SkillNotFoundError
+
+        for provider in self.providers:
+            try:
+                # Check if provider has this skill
+                skills = await provider.get_skills()
+                if any(s.name == skill_name for s in skills):
+                    # Try to get instructions from this provider
+                    if hasattr(provider, "get_skill_instructions"):
+                        return await provider.get_skill_instructions(skill_name)
+            except Exception:  # noqa: BLE001
+                continue
+
+        raise SkillNotFoundError(skill_name)
 
     async def get_request_parts(
         self, name: str, arguments: dict[str, str] | None = None
