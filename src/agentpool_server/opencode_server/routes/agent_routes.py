@@ -167,10 +167,15 @@ async def list_commands(state: StateDep) -> list[Command]:
         commands.extend([
             Command(name=p.name, description=p.description or "", source="mcp") for p in prompts
         ])
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     # Add skill commands from skill_bridge if available
+    logger.debug(
+        "list_commands debug",
+        skill_bridge_exists=state.skill_bridge is not None,
+        skill_provider_exists=state.pool.skill_provider is not None,
+    )
     if state.skill_bridge is not None:
         for skill_cmd in state.skill_bridge.get_skill_commands():
             commands.append(
@@ -185,6 +190,10 @@ async def list_commands(state: StateDep) -> list[Command]:
     elif state.pool.skill_provider is not None:
         try:
             provider_skills = await state.pool.skill_provider.get_skills()
+            logger.debug(
+                "Got skills from skill_provider",
+                skill_count=len(provider_skills),
+            )
             for skill in provider_skills:
                 commands.append(
                     Command(
@@ -194,7 +203,7 @@ async def list_commands(state: StateDep) -> list[Command]:
                         template=skill.load_instructions(),
                     )
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     return commands
