@@ -237,11 +237,22 @@ async def list_skills(ctx: AgentContext) -> str:
     if ctx.pool is None:
         return "No agent pool available - skills require pool context"
 
+    # Get skills from both local registry and MCP provider
     skills = ctx.pool.skills.list_skills()
     # Filter out skills that disable model invocation (for model visibility)
     visible_skills = [s for s in skills if not getattr(s, "disable_model_invocation", False)]
 
-    if not visible_skills:
+    # Also get skills from skill_provider (MCP-based skills)
+    provider_skills: list[Skill] = []
+    if ctx.pool.skill_provider is not None:
+        try:
+            provider_skills = await ctx.pool.skill_provider.get_skills()
+        except Exception:
+            pass
+
+    all_skills = visible_skills + provider_skills
+
+    if not all_skills:
         return "No skills available"
 
     lines = ["Available skills:", ""]
@@ -250,7 +261,7 @@ async def list_skills(ctx: AgentContext) -> str:
     resolver: SkillURIResolver | None = getattr(ctx.pool, "skill_resolver", None)
     has_resolver = resolver is not None
 
-    for skill in visible_skills:
+    for skill in all_skills:
         lines.append(f"- **{skill.name}**: {skill.description}")
 
         # Add URI information if resolver is available
