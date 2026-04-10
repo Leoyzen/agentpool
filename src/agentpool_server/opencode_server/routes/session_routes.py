@@ -351,8 +351,22 @@ async def _execute_skill_command(
     if not skill_cmd:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
 
-    # Load skill instructions
-    instructions = skill_cmd.skill.load_instructions()
+    # Load skill instructions - use provider for virtual skills
+    instructions = ""
+    if state.pool.skill_provider is not None:
+        try:
+            instructions = await state.pool.skill_provider.get_skill_instructions(skill_name)
+        except Exception:  # noqa: BLE001
+            # Fall back to local load if provider fetch fails
+            try:
+                instructions = skill_cmd.skill.load_instructions()
+            except ValueError:
+                instructions = ""
+    else:
+        try:
+            instructions = skill_cmd.skill.load_instructions()
+        except ValueError:
+            instructions = ""
 
     # Build RFC-0008 compatible XML format prompt
     args = request.arguments or ""

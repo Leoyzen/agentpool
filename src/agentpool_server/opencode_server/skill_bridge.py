@@ -50,11 +50,15 @@ def _hash_args(args: list[str], kwargs: dict[str, str]) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-def create_skill_command(skill_cmd: SkillCommand) -> SlashedCommand:
+def create_skill_command(
+    skill_cmd: SkillCommand, skill_provider: Any | None = None
+) -> SlashedCommand:
     """Create a slashed Command from a SkillCommand.
 
     Args:
         skill_cmd: The skill command to wrap.
+        skill_provider: Optional skill provider for fetching instructions
+            from virtual/MCP-based skills.
 
     Returns:
         A slashed Command that loads and executes the skill.
@@ -87,8 +91,22 @@ def create_skill_command(skill_cmd: SkillCommand) -> SlashedCommand:
                 kwarg_count=len(kwargs),
             )
 
-            # Load skill instructions and pass to agent
-            instructions = skill_cmd.skill.load_instructions()
+            # Load skill instructions - use provider for virtual skills
+            instructions = ""
+            if skill_provider is not None:
+                try:
+                    instructions = await skill_provider.get_skill_instructions(skill_cmd.name)
+                except Exception:  # noqa: BLE001
+                    # Fall back to local load if provider fetch fails
+                    try:
+                        instructions = skill_cmd.skill.load_instructions()
+                    except ValueError:
+                        instructions = ""
+            else:
+                try:
+                    instructions = skill_cmd.skill.load_instructions()
+                except ValueError:
+                    instructions = ""
             duration_ms = (time.time() - start_time) * 1000
 
             if instructions:
@@ -122,10 +140,17 @@ def create_skill_command(skill_cmd: SkillCommand) -> SlashedCommand:
 class OpenCodeSkillBridge:
     """Bridge managing skill commands for OpenCode's slashed CommandStore."""
 
-    def __init__(self) -> None:
+    def __init__(self, skill_provider: Any | None = None) -> None:
+        """Initialize the skill bridge.
+
+        Args:
+            skill_provider: Optional skill provider for fetching instructions
+                from virtual/MCP-based skills.
+        """
         self._commands: dict[str, SlashedCommand] = {}
         self._skill_cmds: dict[str, SkillCommand] = {}
         self._on_change_callbacks: list[Callable[[], None]] = []
+        self._skill_provider = skill_provider
 
     def on_commands_changed(self, callback: Callable[[], None]) -> None:
         """Register a callback to be called when commands change.
@@ -162,7 +187,7 @@ class OpenCodeSkillBridge:
                 total_commands=len(self._commands),
             )
         else:
-            self._commands[name] = create_skill_command(command)
+            self._commands[name] = create_skill_command(command, self._skill_provider)
             self._skill_cmds[name] = command
             logger.info(
                 "Skill command wrapped for OpenCode",

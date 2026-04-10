@@ -197,12 +197,30 @@ async def list_commands(state: StateDep) -> list[Command]:
     )
     if state.skill_bridge is not None:
         for skill_cmd in state.skill_bridge.get_skill_commands():
+            # For virtual skills (from MCP), fetch instructions from provider
+            template = ""
+            if state.pool.skill_provider is not None:
+                try:
+                    template = await state.pool.skill_provider.get_skill_instructions(
+                        skill_cmd.name
+                    )
+                except Exception:  # noqa: BLE001
+                    # Fall back to local load if provider fetch fails
+                    try:
+                        template = skill_cmd.skill.load_instructions()
+                    except ValueError:
+                        template = ""
+            else:
+                try:
+                    template = skill_cmd.skill.load_instructions()
+                except ValueError:
+                    template = ""
             commands.append(
                 Command(
                     name=skill_cmd.name,
                     description=skill_cmd.description,
                     source="skill",
-                    template=skill_cmd.skill.load_instructions(),
+                    template=template,
                 )
             )
     # Fallback: get skills directly from pool.skill_provider if skill_bridge not available
@@ -214,12 +232,14 @@ async def list_commands(state: StateDep) -> list[Command]:
                 skill_count=len(provider_skills),
             )
             for skill in provider_skills:
+                # Use provider's get_skill_instructions for proper handling of virtual skills
+                template = await state.pool.skill_provider.get_skill_instructions(skill.name)
                 commands.append(
                     Command(
                         name=skill.name,
                         description=skill.description,
                         source="skill",
-                        template=skill.load_instructions(),
+                        template=template,
                     )
                 )
         except Exception:
