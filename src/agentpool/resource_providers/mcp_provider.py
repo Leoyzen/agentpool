@@ -535,11 +535,14 @@ class MCPResourceProvider(ResourceProvider):
             logger.debug("Failed to extract skill description", skill_name=skill_name)
         return f"MCP skill: {skill_name}"
 
-    async def get_skill_instructions(self, skill_name: str) -> str:
+    async def get_skill_instructions(
+        self, skill_name: str, arguments: dict[str, str] | None = None
+    ) -> str:
         """Get skill instructions for a specific skill.
 
         Args:
             skill_name: Name of the skill
+            arguments: Optional arguments for prompt-based skills
 
         Returns:
             Skill instructions as string
@@ -564,7 +567,8 @@ class MCPResourceProvider(ResourceProvider):
             prompt = next((p for p in prompts if p.name == skill_name), None)
             if prompt is None:
                 raise SkillNotFoundError(skill_name)
-            return await self._get_prompt_skill_instructions(prompt, {})
+            args = arguments or {}
+            return await self._get_prompt_skill_instructions(prompt, args)
 
         if skill_type == "resource":
             return await self._get_resource_skill_instructions(skill_name)
