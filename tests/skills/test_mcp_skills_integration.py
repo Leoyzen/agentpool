@@ -46,6 +46,9 @@ def mock_agent_context():
     # Mock skill_provider
     mock_provider = MagicMock()
     mock_provider.get_skills = AsyncMock(return_value=[mcp_skill_hyphen, mcp_skill_underscore])
+    mock_provider.get_skill_instructions = AsyncMock(
+        return_value="# Troubleshooting Guide\n\nFollow these steps..."
+    )
     ctx.pool.skill_provider = mock_provider
 
     # Mock skill_resolver
@@ -56,6 +59,16 @@ def mock_agent_context():
         return_value=[mcp_skill_hyphen, mcp_skill_underscore]
     )
     mock_resolver.get_provider.return_value = mock_provider_from_resolver
+
+    # Mock resolve method to return appropriate skill based on name
+    async def mock_resolve(uri: str):
+        if "systematic-troubleshooting" in uri:
+            return mcp_skill_hyphen
+        elif "systematic_troubleshooting" in uri:
+            return mcp_skill_underscore
+        raise Exception(f"Skill not found: {uri}")
+
+    mock_resolver.resolve = mock_resolve
     ctx.pool.skill_resolver = mock_resolver
 
     return ctx, mcp_skill_hyphen, mcp_skill_underscore
