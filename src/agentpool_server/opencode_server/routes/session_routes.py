@@ -187,10 +187,12 @@ async def _execute_slashed_command(
     if command is None:
         raise HTTPException(status_code=404, detail=f"Command not found: {request.command}")
 
-    # Check if this is a skill command
-    is_skill_cmd = request.command.startswith("skill:")
+    # Check if this is a skill command by looking it up in pool.skill_commands
+    skill_cmd = None
+    if state.pool.skill_commands:
+        skill_cmd = state.pool.skill_commands.get(request.command)
 
-    if is_skill_cmd:
+    if skill_cmd:
         return await _execute_skill_command(state, session_id, request)
 
     # Create assistant message (before execution)
@@ -383,7 +385,9 @@ async def _execute_skill_command(
     user_msg_with_parts = MessageWithParts(
         info=user_message,
         parts=[
-            TextPart(id=user_part_id, messageID=user_msg_id, sessionID=session_id, text=user_prompt)
+            TextPart(
+                id=user_part_id, message_id=user_msg_id, session_id=session_id, text=user_prompt
+            )
         ],
     )
 

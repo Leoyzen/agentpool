@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import logfire
@@ -23,9 +24,11 @@ class SkillCommandWrapper:
 
     def __init__(self, skill_cmd: SkillCommand) -> None:
         self._skill_cmd = skill_cmd
-        self.name = f"skill:{skill_cmd.name}"
+        self.name = skill_cmd.name  # No prefix - matches OpenCode protocol
         self.description = skill_cmd.description
         self.category = skill_cmd.category
+        self.skill_uri = skill_cmd.resolved_skill_uri
+        """The skill:// URI for this command."""
 
 
 def _hash_args(args: list[str], kwargs: dict[str, str]) -> str:
@@ -61,16 +64,19 @@ def create_skill_command(skill_cmd: SkillCommand) -> SlashedCommand:
         """Execute the skill command."""
         start_time = time.time()
         args_hash = _hash_args(args, kwargs)
+        skill_uri = skill_cmd.resolved_skill_uri
 
         with logfire.span(
             "skill_command_execute",
             skill_name=skill_cmd.name,
+            skill_uri=skill_uri,
             protocol="opencode",
             args_hash=args_hash,
         ):
             logger.info(
                 "Executing skill command",
                 skill_name=skill_cmd.name,
+                skill_uri=skill_uri,
                 args_hash=args_hash,
                 arg_count=len(args),
                 kwarg_count=len(kwargs),
@@ -81,25 +87,27 @@ def create_skill_command(skill_cmd: SkillCommand) -> SlashedCommand:
             duration_ms = (time.time() - start_time) * 1000
 
             if instructions:
-                await ctx.print(f"Loading skill: {skill_cmd.name}")
+                await ctx.print(f"Loading skill: {skill_cmd.name} ({skill_uri})")
                 logger.info(
                     "Skill command executed successfully",
                     skill_name=skill_cmd.name,
+                    skill_uri=skill_uri,
                     duration_ms=round(duration_ms, 2),
                     has_instructions=True,
                 )
                 # The actual skill loading happens via context injection
             else:
-                await ctx.print(f"Skill {skill_cmd.name} has no instructions")
+                await ctx.print(f"Skill {skill_cmd.name} has no instructions ({skill_uri})")
                 logger.warning(
                     "Skill command executed but no instructions found",
                     skill_name=skill_cmd.name,
+                    skill_uri=skill_uri,
                     duration_ms=round(duration_ms, 2),
                 )
 
     return SlashedCommand.from_raw(
         execute_skill,
-        name=f"skill:{skill_cmd.name}",
+        name=skill_cmd.name,  # No prefix - matches OpenCode protocol
         description=skill_cmd.description,
         category="skill",
         usage=skill_cmd.input_hint,
@@ -111,6 +119,23 @@ class OpenCodeSkillBridge:
 
     def __init__(self) -> None:
         self._commands: dict[str, SlashedCommand] = {}
+        self._on_change_callbacks: list[Callable[[], None]] = []
+
+    def on_commands_changed(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be called when commands change.
+
+        Args:
+            callback: Function to call when commands are added or removed.
+        """
+        self._on_change_callbacks.append(callback)
+
+    def _notify_change(self) -> None:
+        """Notify all registered callbacks of a command change."""
+        for callback in self._on_change_callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.exception("Error notifying command change callback")
 
     @logfire.instrument("opencode_skill_bridge_handle_change")
     def handle_change(self, name: str, command: SkillCommand | None) -> None:
@@ -134,8 +159,11 @@ class OpenCodeSkillBridge:
             logger.info(
                 "Skill command wrapped for OpenCode",
                 skill_name=name,
+                skill_uri=command.resolved_skill_uri,
                 total_commands=len(self._commands),
             )
+        # Notify registered callbacks of the change
+        self._notify_change()
 
     def get_commands(self) -> list[SlashedCommand]:
         """Return all commands as slashed Commands."""
