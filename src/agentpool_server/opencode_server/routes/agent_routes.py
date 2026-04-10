@@ -102,10 +102,22 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     """List all available skills.
 
     Skills are specialized capabilities available to agents.
-    Currently returns an empty list as AgentPool doesn't have a skills system.
+    Returns skills from the AgentPool skills manager.
     """
-    _ = state
-    return []
+    # Access the pool via the agent's agent_pool reference
+    pool = state.agent.agent_pool
+    if pool is None or pool.skills is None:
+        return []
+
+    return [
+        SkillInfo(
+            name=skill.name,
+            description=skill.description,
+            location=str(skill.skill_path),
+            content=skill.load_instructions(),
+        )
+        for skill in pool.skills.list_skills()
+    ]
 
 
 @router.get("/command")
