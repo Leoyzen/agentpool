@@ -118,28 +118,12 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
 
     skills: list[SkillInfo] = []
 
-    # 1. Get local filesystem skills from SkillsManager
-    if pool.skills is not None:
-        for skill in pool.skills.list_skills():
-            skills.append(
-                SkillInfo(
-                    name=skill.name,
-                    description=skill.description,
-                    location=str(skill.skill_path),
-                    content=skill.load_instructions(),
-                )
-            )
-
-    # 2. Get MCP provider skills from AggregatingResourceProvider
+    # 1. Get MCP provider skills from AggregatingResourceProvider first
+    # These will be overridden by local skills if names conflict
     if pool.skill_provider is not None:
         try:
             mcp_skills = await pool.skill_provider.get_skills()
             for skill in mcp_skills:
-                # Avoid duplicates - MCP skills take precedence
-                existing = next((s for s in skills if s.name == skill.name), None)
-                if existing:
-                    skills.remove(existing)
-
                 # For MCP skills, get content via provider (load_instructions returns empty for PurePosixPath)
                 if isinstance(skill.skill_path, PurePosixPath):
                     try:
@@ -164,6 +148,24 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
                 )
         except Exception as e:
             logger.warning("Failed to get MCP skills", error=str(e))
+
+    # 2. Get local filesystem skills from SkillsManager (takes priority)
+    # Local skills override MCP skills with the same name
+    if pool.skills is not None:
+        for skill in pool.skills.list_skills():
+            # Remove any existing MCP skill with the same name (local takes priority)
+            existing = next((s for s in skills if s.name == skill.name), None)
+            if existing:
+                skills.remove(existing)
+
+            skills.append(
+                SkillInfo(
+                    name=skill.name,
+                    description=skill.description,
+                    location=str(skill.skill_path),
+                    content=skill.load_instructions(),
+                )
+            )
 
     return skills
 

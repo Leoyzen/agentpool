@@ -237,42 +237,21 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
 
     @logfire.instrument("skill_commands_sync")
     async def _sync_commands(self) -> None:
-        """Sync existing SkillsRegistry and skill_provider commands to this registry."""
+        """Sync existing SkillsRegistry and skill_provider commands to this registry.
+
+        Local skills have priority over MCP skills - they are registered last
+        and will replace any MCP skills with the same name.
+        """
         from agentpool.skills.command import SkillCommand
 
         start_time = time.time()
         count = 0
 
-        # 1. Sync from SkillsRegistry (local filesystem skills)
-        if self._skills_registry is not None:
-            try:
-                for name in self._skills_registry.list_items():
-                    try:
-                        skill = self._skills_registry.get(name)
-                        command = SkillCommand(
-                            name=skill.name,
-                            description=skill.description,
-                            skill=skill,
-                        )
-                        self.register(name, command, replace=True)
-                        count += 1
-                    except Exception as e:
-                        logger.warning("Failed to register skill command", name=name, error=str(e))
-            except Exception as e:
-                logger.warning("Failed to sync from SkillsRegistry", error=str(e))
-
-        # 2. Sync from skill_provider (MCP-based skills)
-        logger.debug(
-            "_sync_commands checking skill_provider",
-            skill_provider_exists=self._skill_provider is not None,
-        )
+        # 1. Sync from skill_provider (MCP-based skills) first
+        # These will be overridden by local skills if names conflict
         if self._skill_provider is not None:
             try:
                 provider_skills = await self._skill_provider.get_skills()
-                logger.debug(
-                    "Got skills from skill_provider",
-                    skill_count=len(provider_skills),
-                )
                 for skill in provider_skills:
                     try:
                         command = SkillCommand(
@@ -290,6 +269,25 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
                         )
             except Exception as e:
                 logger.warning("Failed to sync from skill_provider", error=str(e))
+
+        # 2. Sync from SkillsRegistry (local filesystem skills) last
+        # These take priority and will override MCP skills with the same name
+        if self._skills_registry is not None:
+            try:
+                for name in self._skills_registry.list_items():
+                    try:
+                        skill = self._skills_registry.get(name)
+                        command = SkillCommand(
+                            name=skill.name,
+                            description=skill.description,
+                            skill=skill,
+                        )
+                        self.register(name, command, replace=True)
+                        count += 1
+                    except Exception as e:
+                        logger.warning("Failed to register skill command", name=name, error=str(e))
+            except Exception as e:
+                logger.warning("Failed to sync from SkillsRegistry", error=str(e))
 
         duration_ms = (time.time() - start_time) * 1000
         logger.info(
