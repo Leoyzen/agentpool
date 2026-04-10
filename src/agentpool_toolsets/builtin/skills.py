@@ -164,24 +164,41 @@ async def load_skill(  # noqa: PLR0911
             except Exception as e:  # noqa: BLE001
                 return f"Failed to load reference {resolved.reference_path!r}: {e}"
     else:
-        # Bare skill name - use existing pool.skills (backward compatibility)
+        # Bare skill name - check both pool.skills and pool.skill_provider
+        # (local filesystem skills and MCP-based skills)
         skills = ctx.pool.skills.list_skills()
         # Filter out skills that disable model invocation (for model visibility)
         visible_skills = [s for s in skills if not getattr(s, "disable_model_invocation", False)]
 
-        if not visible_skills:
+        # Also check skill_provider for MCP-based skills
+        provider_skills: list[Skill] = []
+        if ctx.pool.skill_provider is not None:
+            try:
+                provider_skills = await ctx.pool.skill_provider.get_skills()
+            except Exception:
+                pass
+
+        all_skills = visible_skills + provider_skills
+
+        if not all_skills:
             return "No skills available."
 
         found_skill: Skill | None = next(
-            (s for s in visible_skills if s.name == resolved.skill_name), None
+            (s for s in all_skills if s.name == resolved.skill_name), None
         )
         if found_skill is None:
-            available = ", ".join(s.name for s in visible_skills)
+            available = ", ".join(s.name for s in all_skills)
             return f"Skill {resolved.skill_name!r} not found. Available skills: {available}"
         skill = found_skill
 
+        # Get instructions from appropriate source
         try:
-            instructions = ctx.pool.skills.get_skill_instructions(resolved.skill_name)
+            if skill in provider_skills:
+                # MCP-based skill
+                instructions = skill.load_instructions()
+            else:
+                # Local filesystem skill
+                instructions = ctx.pool.skills.get_skill_instructions(resolved.skill_name)
         except Exception as e:  # noqa: BLE001
             return f"Failed to load skill {resolved.skill_name!r}: {e}"
 
