@@ -27,11 +27,11 @@ def mock_agent_context():
     ctx.pool.skills.list_skills.return_value = []
     ctx.pool.skills.get_skill_instructions.return_value = ""
 
-    # Mock MCP-based skills
+    # Mock MCP-based skills (using hyphens as per skill naming convention)
     mcp_skill = Skill(
-        name="systematic_troubleshooting",
+        name="systematic-troubleshooting",  # Use hyphens, not underscores
         description="Systematic troubleshooting guide",
-        skill_path=PurePosixPath("skill://mcp_provider/systematic_troubleshooting"),
+        skill_path=PurePosixPath("skill://mcp_provider/systematic-troubleshooting"),
         instructions="# Troubleshooting Guide\n\nFollow these steps...",
         metadata={"skill_type": "resource", "provider": "mcp_provider"},
     )
@@ -60,7 +60,7 @@ async def test_list_skills_includes_mcp_skills(mock_agent_context):
     result = await list_skills(ctx)
 
     # Should include the MCP-based skill
-    assert "systematic_troubleshooting" in result
+    assert "systematic-troubleshooting" in result
     assert "Systematic troubleshooting guide" in result
     print(f"list_skills output:\n{result}")
 
@@ -70,10 +70,10 @@ async def test_load_skill_finds_mcp_skills(mock_agent_context):
     """Test that load_skill can find and load MCP-based skills by name."""
     ctx, mcp_skill = mock_agent_context
 
-    result = await load_skill(ctx, "systematic_troubleshooting")
+    result = await load_skill(ctx, "systematic-troubleshooting")
 
     # Should successfully load the skill
-    assert "systematic_troubleshooting" in result
+    assert "systematic-troubleshooting" in result
     assert "Troubleshooting Guide" in result
     assert "Follow these steps" in result
     print(f"load_skill output:\n{result}")
@@ -84,7 +84,7 @@ async def test_load_skill_returns_error_for_missing_skill(mock_agent_context):
     """Test that load_skill returns error for non-existent skill."""
     ctx, _ = mock_agent_context
 
-    result = await load_skill(ctx, "nonexistent_skill")
+    result = await load_skill(ctx, "nonexistent-skill")
 
     # Should return error message
     assert "not found" in result.lower() or "No skills available" in result
@@ -112,8 +112,8 @@ async def test_load_skill_with_uri(mock_agent_context):
     # Mock the resolver to return the skill
     ctx.pool.skill_resolver.resolve = AsyncMock(return_value=mcp_skill)
 
-    result = await load_skill(ctx, "skill://mcp_provider/systematic_troubleshooting")
+    result = await load_skill(ctx, "skill://mcp_provider/systematic-troubleshooting")
 
     # Should successfully load via URI
-    assert "systematic_troubleshooting" in result
+    assert "systematic-troubleshooting" in result
     print(f"load_skill with URI output:\n{result}")
