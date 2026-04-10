@@ -30,6 +30,11 @@ class SkillCommandWrapper:
         self.skill_uri = skill_cmd.resolved_skill_uri
         """The skill:// URI for this command."""
 
+    @property
+    def skill(self) -> Any:
+        """Access the underlying Skill object for template/content."""
+        return self._skill_cmd.skill
+
 
 def _hash_args(args: list[str], kwargs: dict[str, str]) -> str:
     """Hash arguments for privacy in logging.
@@ -119,6 +124,7 @@ class OpenCodeSkillBridge:
 
     def __init__(self) -> None:
         self._commands: dict[str, SlashedCommand] = {}
+        self._skill_cmds: dict[str, SkillCommand] = {}
         self._on_change_callbacks: list[Callable[[], None]] = []
 
     def on_commands_changed(self, callback: Callable[[], None]) -> None:
@@ -149,6 +155,7 @@ class OpenCodeSkillBridge:
         """
         if command is None:
             self._commands.pop(name, None)
+            self._skill_cmds.pop(name, None)
             logger.info(
                 "Skill command removed from OpenCode bridge",
                 skill_name=name,
@@ -156,6 +163,7 @@ class OpenCodeSkillBridge:
             )
         else:
             self._commands[name] = create_skill_command(command)
+            self._skill_cmds[name] = command
             logger.info(
                 "Skill command wrapped for OpenCode",
                 skill_name=name,
@@ -174,6 +182,10 @@ class OpenCodeSkillBridge:
             command_names=[cmd.name for cmd in commands],
         )
         return commands
+
+    def get_skill_commands(self) -> list[SkillCommand]:
+        """Return all skill commands with full skill info (for template access)."""
+        return list(self._skill_cmds.values())
 
     @logfire.instrument("opencode_skill_bridge_get_command")
     def get_command(self, name: str) -> SlashedCommand | None:

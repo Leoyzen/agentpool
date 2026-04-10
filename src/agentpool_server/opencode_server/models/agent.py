@@ -49,6 +49,10 @@ class Command(OpenCodeBaseModel):
 
     name: str
     description: str = ""
+    source: Literal["command", "mcp", "skill"] = "command"
+    """Source of the command: built-in, MCP prompt, or skill."""
+    template: str = ""
+    """Template content for skill commands (SKILL.md body)."""
 
 
 class SkillInfo(OpenCodeBaseModel):

@@ -41,6 +41,9 @@ from agentpool_server.opencode_server.models import (
 
 router = APIRouter(tags=["agent"])
 
+# Module-level logger for route-level logging
+logger = get_logger(__name__)
+
 
 class AddMCPServerRequest(BaseModel):
     """Request to add an MCP server dynamically."""
@@ -102,44 +105,82 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     """List all available skills.
 
     Skills are specialized capabilities available to agents.
-    Returns skills from the AgentPool skills manager.
+    Returns skills from:
+    1. Local filesystem (via SkillsManager)
+    2. MCP providers (via AggregatingResourceProvider)
     """
     # Access the pool via the agent's agent_pool reference
     pool = state.agent.agent_pool
-    if pool is None or pool.skills is None:
+    if pool is None:
         return []
 
-    return [
-        SkillInfo(
-            name=skill.name,
-            description=skill.description,
-            location=str(skill.skill_path),
-            content=skill.load_instructions(),
-        )
-        for skill in pool.skills.list_skills()
-    ]
+    skills: list[SkillInfo] = []
+
+    # 1. Get local filesystem skills from SkillsManager
+    if pool.skills is not None:
+        for skill in pool.skills.list_skills():
+            skills.append(
+                SkillInfo(
+                    name=skill.name,
+                    description=skill.description,
+                    location=str(skill.skill_path),
+                    content=skill.load_instructions(),
+                )
+            )
+
+    # 2. Get MCP provider skills from AggregatingResourceProvider
+    if pool.skill_provider is not None:
+        try:
+            mcp_skills = await pool.skill_provider.get_skills()
+            for skill in mcp_skills:
+                # Avoid duplicates - MCP skills take precedence
+                existing = next((s for s in skills if s.name == skill.name), None)
+                if existing:
+                    skills.remove(existing)
+                skills.append(
+                    SkillInfo(
+                        name=skill.name,
+                        description=skill.description,
+                        location=str(skill.skill_path),
+                        content=skill.load_instructions(),
+                    )
+                )
+        except Exception as e:
+            logger.warning("Failed to get MCP skills", error=str(e))
+
+    return skills
 
 
 @router.get("/command")
 async def list_commands(state: StateDep) -> list[Command]:
     """List available slash commands.
 
-    Commands are derived from MCP prompts available to the agent,
-    plus skill commands from the skill bridge.
+    Commands include:
+    - MCP prompts as commands
+    - Skill commands from the skill bridge (with source="skill" and template)
     """
     commands: list[Command] = []
 
-    # Add MCP prompts as commands
+    # Add MCP prompts as commands (source="mcp")
     try:
         prompts = await state.agent.tools.list_prompts()
-        commands.extend([Command(name=p.name, description=p.description or "") for p in prompts])
+        commands.extend([
+            Command(name=p.name, description=p.description or "", source="mcp") for p in prompts
+        ])
     except Exception:  # noqa: BLE001
         pass
 
-    # Add skill commands from the bridge
+    # Add skill commands from the bridge (source="skill")
     if state.skill_bridge is not None:
-        for skill_cmd in state.skill_bridge.get_commands():
-            commands.append(Command(name=skill_cmd.name, description=skill_cmd.description))
+        for skill_cmd in state.skill_bridge.get_skill_commands():
+            commands.append(
+                Command(
+                    name=skill_cmd.name,
+                    description=skill_cmd.description,
+                    source="skill",
+                    template=skill_cmd.skill.load_instructions(),
+                )
+            )
 
     return commands
 
