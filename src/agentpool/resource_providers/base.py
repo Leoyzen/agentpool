@@ -141,11 +141,14 @@ class ResourceProvider:
         """Get available instruction functions. Override to provide instructions."""
         return []
 
-    async def get_skill_instructions(self, skill_name: str) -> str:
+    async def get_skill_instructions(
+        self, skill_name: str, arguments: dict[str, str] | None = None
+    ) -> str:
         """Get full instructions for a specific skill.
 
         Args:
             skill_name: Name of the skill to get instructions for
+            arguments: Optional arguments for prompt-based skills
 
         Returns:
             The full skill instructions for execution

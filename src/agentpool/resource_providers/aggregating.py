@@ -132,11 +132,14 @@ class AggregatingResourceProvider(ResourceProvider):
         """Get skills from all providers."""
         return [s for provider in self.providers for s in await provider.get_skills()]
 
-    async def get_skill_instructions(self, skill_name: str) -> str:
+    async def get_skill_instructions(
+        self, skill_name: str, arguments: dict[str, str] | None = None
+    ) -> str:
         """Get skill instructions from the first provider that has it.
 
         Args:
             skill_name: Name of the skill
+            arguments: Optional arguments for prompt-based skills
 
         Returns:
             Skill instructions as string
@@ -153,7 +156,7 @@ class AggregatingResourceProvider(ResourceProvider):
                 if any(s.name == skill_name for s in skills):
                     # Try to get instructions from this provider
                     if hasattr(provider, "get_skill_instructions"):
-                        return await provider.get_skill_instructions(skill_name)
+                        return await provider.get_skill_instructions(skill_name, arguments)
             except Exception:  # noqa: BLE001
                 continue
 
