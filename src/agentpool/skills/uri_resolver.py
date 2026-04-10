@@ -244,10 +244,10 @@ def _validate_skill_name(name: str) -> str:
         msg = "Skill name cannot contain consecutive hyphens"
         raise SecurityError(msg)
 
-    if not all(c.isalnum() or c == "-" for c in normalized):
+    if not all(c.isalnum() or c in "-_" for c in normalized):
         msg = (
             f"Skill name {normalized!r} contains invalid characters. "
-            "Only lowercase letters, digits, and hyphens are allowed."
+            "Only lowercase letters, digits, hyphens, and underscores are allowed."
         )
         raise SecurityError(msg)
 
