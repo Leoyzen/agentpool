@@ -443,13 +443,10 @@ class MCPResourceProvider(ResourceProvider):
                     if resource_path not in ("SKILL.md", "_manifest"):
                         continue
 
-                    # Get skill description and instructions from SKILL.md
-                    # This provides the actual skill content, not just manifest metadata
+                    # Get skill description from SKILL.md (lightweight - just frontmatter)
+                    # Instructions are lazy-loaded when load_instructions() is called
                     main_uri = f"skill://{skill_name}/SKILL.md"
                     description = await self._get_skill_description(skill_name, main_uri)
-                    # Use _get_resource_skill_instructions directly to avoid recursion
-                    # (get_skill_instructions calls get_skills which calls this method)
-                    instructions = await self._get_resource_skill_instructions(skill_name)
 
                     # Use PurePosixPath for skill:// URIs since UPath doesn't support
                     # the skill:// protocol. MCP skills are loaded via the provider's
@@ -460,7 +457,8 @@ class MCPResourceProvider(ResourceProvider):
                         name=skill_name,
                         description=description,
                         skill_path=PurePosixPath(f"skill://{self.name}/{skill_name}"),
-                        instructions=instructions,  # Set instructions so template is available
+                        # Instructions are lazy-loaded via get_skill_instructions
+                        # to avoid fetching full content during discovery
                         metadata={
                             "skill_type": "resource",
                             "provider": self.name,
