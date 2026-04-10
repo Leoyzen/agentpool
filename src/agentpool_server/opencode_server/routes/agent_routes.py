@@ -157,7 +157,7 @@ async def list_commands(state: StateDep) -> list[Command]:
 
     Commands include:
     - MCP prompts as commands
-    - Skill commands from the skill bridge (with source="skill" and template)
+    - Skill commands from skill_bridge (if available) or skill_provider
     """
     commands: list[Command] = []
 
@@ -170,7 +170,7 @@ async def list_commands(state: StateDep) -> list[Command]:
     except Exception:  # noqa: BLE001
         pass
 
-    # Add skill commands from the bridge (source="skill")
+    # Add skill commands from skill_bridge if available
     if state.skill_bridge is not None:
         for skill_cmd in state.skill_bridge.get_skill_commands():
             commands.append(
@@ -181,6 +181,21 @@ async def list_commands(state: StateDep) -> list[Command]:
                     template=skill_cmd.skill.load_instructions(),
                 )
             )
+    # Fallback: get skills directly from pool.skill_provider if skill_bridge not available
+    elif state.pool.skill_provider is not None:
+        try:
+            provider_skills = await state.pool.skill_provider.get_skills()
+            for skill in provider_skills:
+                commands.append(
+                    Command(
+                        name=skill.name,
+                        description=skill.description,
+                        source="skill",
+                        template=skill.load_instructions(),
+                    )
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     return commands
 
