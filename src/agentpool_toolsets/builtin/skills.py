@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
@@ -154,7 +155,17 @@ async def load_skill(  # noqa: PLR0911
             return f"Failed to resolve skill URI {skill_name!r}: {e}"
 
         # Get instructions from resolved skill
-        instructions = skill.load_instructions()
+        # For virtual paths (PurePosixPath), fetch from provider
+        if isinstance(skill.skill_path, PurePosixPath):
+            if ctx.pool.skill_provider is not None:
+                try:
+                    instructions = await ctx.pool.skill_provider.get_skill_instructions(skill.name)
+                except Exception as e:  # noqa: BLE001
+                    return f"Failed to load skill instructions for {skill.name!r}: {e}"
+            else:
+                instructions = ""
+        else:
+            instructions = skill.load_instructions()
 
         # Load reference content if specified
         if resolved.reference_path:
@@ -173,7 +184,19 @@ async def load_skill(  # noqa: PLR0911
             try:
                 # Try to resolve via skill_resolver (searches all providers in priority order)
                 skill = await resolver.resolve(f"skill://{resolved.skill_name}")
-                instructions = skill.load_instructions()
+                # For virtual paths (PurePosixPath), fetch from provider
+                if isinstance(skill.skill_path, PurePosixPath):
+                    if ctx.pool.skill_provider is not None:
+                        try:
+                            instructions = await ctx.pool.skill_provider.get_skill_instructions(
+                                skill.name
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            return f"Failed to load skill instructions for {skill.name!r}: {e}"
+                    else:
+                        instructions = ""
+                else:
+                    instructions = skill.load_instructions()
             except Exception:
                 # Fallback: check local skills directly
                 skills = ctx.pool.skills.list_skills()
