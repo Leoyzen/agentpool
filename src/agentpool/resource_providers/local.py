@@ -234,13 +234,31 @@ class LocalResourceProvider(ResourceProvider):
         and emit the skills_changed signal.
         """
 
-        def on_added(_name: str, _skill: Skill) -> None:
+        def on_added(name: str, skill: Skill) -> None:
             self._invalidate_cache()
-            # TODO: Emit signal - needs async context, handled via task group
+            # Emit signal asynchronously
+            import asyncio
 
-        def on_removed(_name: str, _skill: Skill | None) -> None:
+            event = self.create_change_event("skills")
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.skills_changed.emit(event))
+            except RuntimeError:
+                # No running loop - can't emit signal
+                pass
+
+        def on_removed(name: str, skill: Skill | None) -> None:
             self._invalidate_cache()
-            # TODO: Emit signal - needs async context, handled via task group
+            # Emit signal asynchronously
+            import asyncio
+
+            event = self.create_change_event("skills")
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.skills_changed.emit(event))
+            except RuntimeError:
+                # No running loop - can't emit signal
+                pass
 
         self._registry.on_skill_added(on_added)
         self._registry.on_skill_removed(on_removed)
