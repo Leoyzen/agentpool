@@ -137,6 +137,16 @@ await load_skill(ctx, "greeting", "Alice Company formal")
 # $3 → "formal"
 ```
 
+!!! note "Arguments containing spaces"
+    Arguments are split by whitespace, which means values containing spaces
+    (like `"Alice Smith"`) will be treated as separate arguments. For example,
+    the string `"Alice Smith formal"` becomes three arguments: `"Alice"`,
+    `"Smith"`, and `"formal"`.
+    
+    To pass multi-word values as a single argument, use underscores or hyphens
+    (e.g., `Alice-Smith`), or structure your skill to accept multiple arguments
+    that are joined in the template.
+
 ## Creating Skills with References
 
 To create a skill with supporting files:

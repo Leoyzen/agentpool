@@ -89,15 +89,22 @@ class Skill(BaseModel):
         """Lazy-load full instructions from SKILL.md.
 
         For local filesystem skills (UPath), loads from disk.
-        For virtual skills (PurePosixPath like skill:// URIs), returns the
-        pre-set instructions field (loaded from MCP provider during skill creation).
+        For virtual skills (PurePosixPath like skill:// URIs), the instructions
+        must be pre-set during skill creation or fetched via the provider.
+
+        Raises:
+            ValueError: If called on a virtual skill without pre-set instructions.
+                For MCP-based skills, use provider.get_skill_instructions() instead.
         """
         if self.instructions is None:
             # PurePosixPath represents virtual paths (e.g., skill:// URIs from MCP)
-            # These should have instructions pre-set during skill creation
+            # These must have instructions pre-set or be fetched via provider
             if isinstance(self.skill_path, PurePosixPath):
-                self.instructions = ""
-                return self.instructions
+                raise ValueError(
+                    f"Cannot load instructions for virtual skill '{self.name}'. "
+                    "Instructions must be pre-set during skill creation or fetched "
+                    "via provider.get_skill_instructions() for MCP-based skills."
+                )
 
             # UPath represents actual filesystem paths
             skill_file = self.skill_path / "SKILL.md"

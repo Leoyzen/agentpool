@@ -203,6 +203,7 @@ To expose skills via MCP using FastMCP:
 
 ```python
 from fastmcp import FastMCP
+import json
 
 mcp = FastMCP("my-skills")
 

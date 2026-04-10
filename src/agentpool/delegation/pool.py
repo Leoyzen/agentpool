@@ -340,18 +340,17 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     async def _on_skills_changed(self, event: Any) -> None:
         """Handle skills changed events from the skill provider.
 
-        Forwards skill changes to the SkillsManager if it has a resource_provider.
+        This method is called when the skill provider detects changes to skills
+        from any source (local filesystem or MCP servers). The event is already
+        handled by SkillCommandRegistry which listens to _skill_provider directly.
 
         Args:
             event: The resource change event from the provider.
         """
-        # Forward to SkillsManager if it has _resource_provider attribute
-        if (
-            self.skills
-            and hasattr(self.skills, "_resource_provider")
-            and self.skills._resource_provider is not None
-        ):
-            await self.skills._resource_provider.skills_changed.emit(event)
+        # Skill changes are handled by SkillCommandRegistry which subscribes
+        # directly to _skill_provider.skills_changed. No additional forwarding
+        # needed here to avoid potential event loops.
+        pass
 
     async def cleanup(self) -> None:
         """Clean up all agents."""
