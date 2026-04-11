@@ -143,12 +143,11 @@ class ResolvedSkillURI:
             reference_path = None
 
         # Validate reference path components if present
+        # Reject absolute paths (starting with /) for defense-in-depth
         if reference_path is not None:
-            ref_parts = reference_path.split("/")
-            for part in ref_parts:
-                if part == "..":
-                    msg = f"Path traversal detected in reference path: {uri!r}"
-                    raise SecurityError(msg)
+            if ".." in reference_path.split("/") or reference_path.startswith("/"):
+                msg = f"Path traversal detected in reference path: {uri!r}"
+                raise SecurityError(msg)
 
         return cls(provider=provider, skill_name=skill_name, reference_path=reference_path)
 

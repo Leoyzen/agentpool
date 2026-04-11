@@ -710,22 +710,10 @@ class MCPResourceProvider(ResourceProvider):
         if "\x00" in decoded_path:
             raise SecurityError("Null bytes not allowed in path")
 
-        # Check for path traversal attempts
-        if ".." in decoded_path.split("/"):
+        # Check for path traversal attempts and absolute paths
+        # Absolute paths (starting with /) are rejected for defense-in-depth
+        if ".." in decoded_path.split("/") or decoded_path.startswith("/"):
             raise SecurityError(f"Path traversal detected: {ref_path}")
-
-        # Normalize the path and ensure it's within references/
-        def _validate_path(path_str: str) -> Path:
-            """Validate path and return resolved path."""
-            try:
-                return Path(path_str).resolve()
-            except Exception as e:
-                raise SecurityError(f"Invalid path: {ref_path}") from e
-
-        safe_path = _validate_path(decoded_path)
-        # The resolved path should not escape the references directory
-        if safe_path.parts and safe_path.parts[0] == "..":
-            raise SecurityError(f"Path escapes references directory: {ref_path}")
 
         # Construct the full URI
         uri = f"skill://{skill_name}/references/{decoded_path}"
