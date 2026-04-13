@@ -165,11 +165,13 @@ class LocalResourceProvider(ResourceProvider):
         if not references_dir.exists():
             return []
 
-        # List all files in references directory
+        # List all files recursively in references directory
         refs = []
-        for item in references_dir.iterdir():
+        for item in references_dir.rglob("*"):
             if item.is_file():
-                refs.append(item.name)
+                # Get relative path from references directory
+                rel_path = item.relative_to(references_dir)
+                refs.append(str(rel_path))
 
         return sorted(refs)
 

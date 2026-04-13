@@ -239,3 +239,58 @@ class ResourceProvider:
                 open_world=open_world,
             ),
         )
+
+    # Skill-related methods - subclasses should override these
+
+    async def get_skills(self) -> list[Any]:
+        """Get all available skills from this provider.
+
+        Returns:
+            List of Skill objects
+        """
+        return []
+
+    async def get_skill(self, name: str) -> Any:
+        """Get a specific skill by name.
+
+        Args:
+            name: Name of the skill
+
+        Returns:
+            The Skill object
+
+        Raises:
+            SkillNotFoundError: If skill not found
+        """
+        from agentpool.skills.exceptions import SkillNotFoundError
+
+        raise SkillNotFoundError(name)
+
+    async def get_references(self, skill_name: str) -> list[str]:
+        """Get list of available reference files for a skill.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            List of reference file paths
+        """
+        return []
+
+    async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
+        """Read a reference file for a skill.
+
+        Args:
+            skill_name: Name of the skill
+            ref_path: Path to the reference file (relative to references/)
+
+        Returns:
+            Tuple of (content bytes, MIME type)
+
+        Raises:
+            SkillNotFoundError: If skill not found
+            ReferenceNotFoundError: If reference file not found
+        """
+        from agentpool.skills.exceptions import ReferenceNotFoundError, SkillNotFoundError
+
+        raise SkillNotFoundError(skill_name)
