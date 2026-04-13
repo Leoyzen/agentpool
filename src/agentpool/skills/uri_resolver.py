@@ -89,35 +89,33 @@ class ResolvedSkillURI:
             msg = "URI contains null bytes"
             raise SecurityError(msg)
 
-        # URL decode the entire URI first
-        decoded_uri = unquote(uri)
-
-        # Check for null bytes after decoding
-        if "\x00" in decoded_uri:
-            msg = "URI contains null bytes after decoding"
-            raise SecurityError(msg)
-
         # Check if it's a bare skill name (no scheme)
-        if "://" not in decoded_uri:
-            # Validate as bare skill name
-            skill_name = _validate_skill_name(decoded_uri)
+        # Note: We check the original URI before decoding to avoid misinterpreting
+        # URL-encoded characters as scheme separators
+        if "://" not in uri:
+            # URL decode the bare skill name for validation
+            decoded_name = unquote(uri)
+            if "\x00" in decoded_name:
+                msg = "URI contains null bytes after decoding"
+                raise SecurityError(msg)
+            skill_name = _validate_skill_name(decoded_name)
             return cls(provider=None, skill_name=skill_name, reference_path=None)
 
-        # Parse as full URI
-        parsed = urlparse(decoded_uri)
+        # Parse the URI first (before decoding) to correctly extract components
+        parsed = urlparse(uri)
 
         # Validate scheme
         if parsed.scheme != "skill":
             msg = f"Invalid URI scheme: {parsed.scheme!r}, expected 'skill'"
             raise ValueError(msg)
 
-        # Extract and validate provider from netloc
+        # Extract and decode provider from netloc
         provider = parsed.netloc if parsed.netloc else None
         if provider is not None:
-            provider = _validate_provider_name(provider)
+            provider = _validate_provider_name(unquote(provider))
 
-        # Parse the path component
-        path = parsed.path
+        # Parse and decode the path component
+        path = unquote(parsed.path)
         if path.startswith("/"):
             path = path[1:]  # Remove leading slash
 
