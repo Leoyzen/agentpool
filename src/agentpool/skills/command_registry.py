@@ -171,8 +171,8 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
                 "Skill provider change detected, refreshing commands",
                 provider=event.provider_name,
             )
-            # Re-sync all skills from the skill provider
-            await self._sync_from_skill_provider()
+            # Re-sync all skills respecting priority (local skills override MCP skills)
+            await self._sync_commands()
 
     async def _sync_from_skill_provider(self) -> None:
         """Sync skills from the skill provider.
@@ -190,8 +190,12 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
             skills = await self._skill_provider.get_skills()
             count = 0
             for skill in skills:
-                # Build skill URI based on provider name
-                skill_uri = f"skill://{self._skill_provider.name}/{skill.name}"
+                # Build skill URI using the actual provider name from skill metadata
+                # The provider name in metadata is the real source (e.g., "local" or MCP server name)
+                provider_name = skill.metadata.get("provider") if skill.metadata else None
+                if provider_name is None:
+                    provider_name = self._skill_provider.name
+                skill_uri = f"skill://{provider_name}/{skill.name}"
                 command = SkillCommand(
                     name=skill.name,
                     description=skill.description,
