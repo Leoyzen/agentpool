@@ -416,16 +416,9 @@ async def _process_message_locked(  # noqa: PLR0915
     response_time: int | None = None
     cancelled = False
     try:
-        try:
-            iterator = agent.run_stream(*user_prompt, session_id=session_id)
-            async for oc_event in adapter.process_stream(iterator):
-                await state.broadcast_event(oc_event)
-        finally:
-            # Restore original model if we changed it
-            if original_model is not None:
-                with contextlib.suppress(Exception):
-                    await agent.set_model(original_model)
-                    logger.info("Restored original model", model=original_model)
+        iterator = agent.run_stream(*user_prompt, session_id=session_id)
+        async for oc_event in adapter.process_stream(iterator):
+            await state.broadcast_event(oc_event)
 
         for oc_event in adapter.finalize():
             await state.broadcast_event(oc_event)
@@ -450,6 +443,12 @@ async def _process_message_locked(  # noqa: PLR0915
         if adapter.response_text:
             await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
     finally:
+        # Restore original model if we changed it
+        if original_model is not None:
+            with contextlib.suppress(Exception):
+                await agent.set_model(original_model)
+                logger.info("Restored original model", model=original_model)
+
         # --- Mark session idle ---
         # Always set session to idle, even if processing failed or was cancelled
         status = SessionStatus(type="idle")
