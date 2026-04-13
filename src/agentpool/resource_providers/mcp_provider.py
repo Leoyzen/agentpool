@@ -344,6 +344,27 @@ class MCPResourceProvider(ResourceProvider):
 
         return self._skills_cache
 
+    async def get_skill(self, name: str) -> Skill:
+        """Get a specific skill by name.
+
+        Args:
+            name: Name of the skill to retrieve
+
+        Returns:
+            The Skill object
+
+        Raises:
+            SkillNotFoundError: If skill not found
+        """
+        skills = await self.get_skills()
+        # Normalize skill name for comparison (treat hyphens and underscores as equivalent)
+        normalized_search_name = name.replace("-", "_")
+        for skill in skills:
+            normalized_skill_name = skill.name.replace("-", "_")
+            if normalized_skill_name == normalized_search_name:
+                return skill
+        raise SkillNotFoundError(name)
+
     async def _get_prompt_skills(self) -> list[Skill]:
         """Map MCP prompts to skills with argument_schema metadata.
 

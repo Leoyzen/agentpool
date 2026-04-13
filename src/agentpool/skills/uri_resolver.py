@@ -307,10 +307,12 @@ class SkillURIResolver:
 
         # If no provider specified, we need to search all providers
         if resolved.provider is None:
+            normalized_search_name = resolved.skill_name.replace("-", "_")
             for provider in self._providers.values():
                 skills = await provider.get_skills()
                 for skill in skills:
-                    if skill.name == resolved.skill_name:
+                    normalized_skill_name = skill.name.replace("-", "_")
+                    if normalized_skill_name == normalized_search_name:
                         return skill
             msg = f"Skill {resolved.skill_name!r} not found in any provider"
             raise SkillNotFoundError(msg)
@@ -323,8 +325,11 @@ class SkillURIResolver:
         provider = self._providers[resolved.provider]
         skills = await provider.get_skills()
 
+        # Normalize skill name for comparison (treat hyphens and underscores as equivalent)
+        normalized_search_name = resolved.skill_name.replace("-", "_")
         for skill in skills:
-            if skill.name == resolved.skill_name:
+            normalized_skill_name = skill.name.replace("-", "_")
+            if normalized_skill_name == normalized_search_name:
                 return skill
 
         msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
