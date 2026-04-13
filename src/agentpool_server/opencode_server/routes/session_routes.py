@@ -187,10 +187,12 @@ async def _execute_slashed_command(
     if command is None:
         raise HTTPException(status_code=404, detail=f"Command not found: {request.command}")
 
-    # Check if this is a skill command
-    is_skill_cmd = request.command.startswith("skill:")
+    # Check if this is a skill command by looking it up in pool.skill_commands
+    skill_cmd = None
+    if state.pool.skill_commands:
+        skill_cmd = state.pool.skill_commands.get(request.command)
 
-    if is_skill_cmd:
+    if skill_cmd:
         return await _execute_skill_command(state, session_id, request)
 
     # Create assistant message (before execution)
@@ -349,8 +351,22 @@ async def _execute_skill_command(
     if not skill_cmd:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
 
-    # Load skill instructions
-    instructions = skill_cmd.skill.load_instructions()
+    # Load skill instructions - use provider for virtual skills
+    instructions = ""
+    if state.pool.skill_provider is not None:
+        try:
+            instructions = await state.pool.skill_provider.get_skill_instructions(skill_name)
+        except Exception:  # noqa: BLE001
+            # Fall back to local load if provider fetch fails
+            try:
+                instructions = skill_cmd.skill.load_instructions()
+            except ValueError:
+                instructions = ""
+    else:
+        try:
+            instructions = skill_cmd.skill.load_instructions()
+        except ValueError:
+            instructions = ""
 
     # Build RFC-0008 compatible XML format prompt
     args = request.arguments or ""
@@ -383,7 +399,9 @@ async def _execute_skill_command(
     user_msg_with_parts = MessageWithParts(
         info=user_message,
         parts=[
-            TextPart(id=user_part_id, messageID=user_msg_id, sessionID=session_id, text=user_prompt)
+            TextPart(
+                id=user_part_id, message_id=user_msg_id, session_id=session_id, text=user_prompt
+            )
         ],
     )
 

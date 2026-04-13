@@ -121,11 +121,20 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
 
     # Setup skill command bridge if pool has skill commands configured
     if state.pool.skill_commands is not None:
-        state.skill_bridge = OpenCodeSkillBridge()
+        state.skill_bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
         state.pool.skill_commands.on_command_change(state.skill_bridge.handle_change)
 
         # Initialize CommandStore with skill commands
         state.command_store = CommandStore(commands=state.skill_bridge.get_commands())
+
+        # Register callback to update CommandStore when skills change dynamically
+        def update_command_store() -> None:
+            """Update the CommandStore when skills change."""
+            if state.command_store is not None:
+                # Refresh commands in the store
+                state.command_store.add_commands(state.skill_bridge.get_commands())
+
+        state.skill_bridge.on_commands_changed(update_command_store)
 
         logger.debug(
             "OpenCode skill bridge setup complete",

@@ -33,18 +33,26 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
 
     This registry maintains a mapping of skill names to their command
     representations, automatically syncing with SkillsRegistry when
-    skills are added or removed.
+    skills are added or removed. Also connects to skill_provider for
+    dynamic skill discovery from MCP servers and other sources.
     """
 
-    def __init__(self, skills_registry: SkillsRegistry | None = None) -> None:
+    def __init__(
+        self,
+        skills_registry: SkillsRegistry | None = None,
+        skill_provider: Any | None = None,
+    ) -> None:
         """Initialize registry.
 
         Args:
             skills_registry: Optional SkillsRegistry to watch for changes.
                 If None, registry works in standalone mode.
+            skill_provider: Optional skill provider (e.g., AggregatingResourceProvider)
+                to watch for skill changes from MCP servers and other sources.
         """
         super().__init__()
         self._skills_registry = skills_registry
+        self._skill_provider = skill_provider
         self._command_change_handlers: list[CommandChangeHandler] = []
         logger.debug("Initializing skill command registry")
 
@@ -115,15 +123,21 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
         """Initialize by syncing with SkillsRegistry and subscribing to events.
 
         This method:
-        1. Syncs existing skills from SkillsRegistry
-        2. Subscribes to future skill change events
+        1. Syncs existing skills from SkillsRegistry and/or skill_provider
+        2. Subscribes to future skill change events from SkillsRegistry
+        3. Subscribes to skill provider changes if skill_provider is set
 
         Should be called after SkillsRegistry has loaded its initial skills.
         """
-        if self._skills_registry is None:
-            return
+        # Always sync commands (from both registry and provider)
         await self._sync_commands()
-        self._subscribe_to_registry()
+
+        if self._skills_registry is not None:
+            self._subscribe_to_registry()
+
+        # Subscribe to skill provider changes for dynamic skill discovery
+        if self._skill_provider is not None:
+            self._subscribe_to_skill_provider()
 
     def _subscribe_to_registry(self) -> None:
         """Subscribe to SkillsRegistry change events."""
@@ -131,6 +145,80 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
             return
         self._skills_registry.on_skill_added(self._on_skill_added)
         self._skills_registry.on_skill_removed(self._on_skill_removed)
+
+    def _subscribe_to_skill_provider(self) -> None:
+        """Subscribe to skill provider change events.
+
+        Connects to the skills_changed signal on the skill provider
+        to receive updates when skills are added/removed from MCP servers
+        or other dynamic sources.
+        """
+        if self._skill_provider is None:
+            return
+        self._skill_provider.skills_changed.connect(self._on_skill_provider_changed)
+        logger.debug("Subscribed to skill provider changes")
+
+    async def _on_skill_provider_changed(self, event: Any) -> None:
+        """Handle skill provider change events.
+
+        Args:
+            event: The resource change event from the provider.
+        """
+        from agentpool.resource_providers.base import ResourceChangeEvent
+
+        if isinstance(event, ResourceChangeEvent) and event.resource_type == "skills":
+            logger.debug(
+                "Skill provider change detected, refreshing commands",
+                provider=event.provider_name,
+            )
+            # Re-sync all skills respecting priority (local skills override MCP skills)
+            await self._sync_commands()
+
+    async def _sync_from_skill_provider(self) -> None:
+        """Sync skills from the skill provider.
+
+        Fetches all skills from the aggregating skill provider and
+        updates the command registry accordingly.
+        """
+        from agentpool.skills.command import SkillCommand
+
+        if self._skill_provider is None:
+            return
+
+        start_time = time.time()
+        try:
+            skills = await self._skill_provider.get_skills()
+            count = 0
+            for skill in skills:
+                # Build skill URI using the actual provider name from skill metadata
+                # The provider name in metadata is the real source (e.g., "local" or MCP server name)
+                provider_name = skill.metadata.get("provider") if skill.metadata else None
+                if provider_name is None:
+                    provider_name = self._skill_provider.name
+                skill_uri = f"skill://{provider_name}/{skill.name}"
+                command = SkillCommand(
+                    name=skill.name,
+                    description=skill.description,
+                    skill=skill,
+                    skill_uri=skill_uri,
+                )
+                self.register(skill.name, command, replace=True)
+                count += 1
+
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(
+                "Synced commands from skill provider",
+                count=count,
+                duration_ms=round(duration_ms, 2),
+                total_commands=len(self._items),
+            )
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            logger.warning(
+                "Failed to sync commands from skill provider",
+                error=str(e),
+                duration_ms=round(duration_ms, 2),
+            )
 
     def _on_skill_added(self, name: str, skill: Skill) -> None:
         """Handle skill added from SkillsRegistry.
@@ -153,35 +241,62 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
 
     @logfire.instrument("skill_commands_sync")
     async def _sync_commands(self) -> None:
-        """Sync existing SkillsRegistry commands to this registry."""
+        """Sync existing SkillsRegistry and skill_provider commands to this registry.
+
+        Local skills have priority over MCP skills - they are registered last
+        and will replace any MCP skills with the same name.
+        """
         from agentpool.skills.command import SkillCommand
 
-        if self._skills_registry is None:
-            return
         start_time = time.time()
-        try:
-            count = 0
-            for name in self._skills_registry.list_items():
-                skill = self._skills_registry.get(name)
-                command = SkillCommand(
-                    name=skill.name,
-                    description=skill.description,
-                    skill=skill,
-                )
-                self.register(name, command, replace=True)
-                count += 1
-            duration_ms = (time.time() - start_time) * 1000
-            logger.info(
-                "Synced commands from SkillsRegistry",
-                count=count,
-                duration_ms=round(duration_ms, 2),
-                total_commands=len(self._items),
-            )
-            logger.debug("Synced %d initial commands from SkillsRegistry", count)
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            logger.warning(
-                "Failed to sync commands from registry",
-                error=str(e),
-                duration_ms=round(duration_ms, 2),
-            )
+        count = 0
+
+        # 1. Sync from skill_provider (MCP-based skills) first
+        # These will be overridden by local skills if names conflict
+        if self._skill_provider is not None:
+            try:
+                provider_skills = await self._skill_provider.get_skills()
+                for skill in provider_skills:
+                    try:
+                        command = SkillCommand(
+                            name=skill.name,
+                            description=skill.description,
+                            skill=skill,
+                        )
+                        self.register(skill.name, command, replace=True)
+                        count += 1
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to register provider skill command",
+                            name=skill.name,
+                            error=str(e),
+                        )
+            except Exception as e:
+                logger.warning("Failed to sync from skill_provider", error=str(e))
+
+        # 2. Sync from SkillsRegistry (local filesystem skills) last
+        # These take priority and will override MCP skills with the same name
+        if self._skills_registry is not None:
+            try:
+                for name in self._skills_registry.list_items():
+                    try:
+                        skill = self._skills_registry.get(name)
+                        command = SkillCommand(
+                            name=skill.name,
+                            description=skill.description,
+                            skill=skill,
+                        )
+                        self.register(name, command, replace=True)
+                        count += 1
+                    except Exception as e:
+                        logger.warning("Failed to register skill command", name=name, error=str(e))
+            except Exception as e:
+                logger.warning("Failed to sync from SkillsRegistry", error=str(e))
+
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(
+            "Synced commands from SkillsRegistry and skill_provider",
+            count=count,
+            duration_ms=round(duration_ms, 2),
+            total_commands=len(self._items),
+        )

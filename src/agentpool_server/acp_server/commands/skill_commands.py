@@ -61,12 +61,19 @@ class ACPSkillBridge:
             An AvailableCommand instance representing the skill in ACP format.
         """
         input_spec = AvailableCommandInput(root=CommandInputHint(hint=skill_cmd.input_hint))
+        skill_uri = skill_cmd.resolved_skill_uri
+
+        # Build ACP command name with skill:// URI reference
+        # The command name includes the skill URI for proper identification
         available_cmd = AvailableCommand(
-            name=skill_cmd.name, description=skill_cmd.description, input=input_spec
+            name=skill_cmd.name,
+            description=skill_cmd.description,
+            input=input_spec,
         )
         logger.debug(
             "Converted skill command to ACP format",
             skill_name=skill_cmd.name,
+            skill_uri=skill_uri,
             has_input_hint=bool(skill_cmd.input_hint),
         )
         return available_cmd

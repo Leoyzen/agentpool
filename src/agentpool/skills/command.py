@@ -23,6 +23,7 @@ class SkillCommand:
         skill: The underlying Skill instance containing full skill metadata.
         input_hint: Hint text shown to users about command arguments.
         category: Command category for grouping (default "skill").
+        skill_uri: Optional skill:// URI for the skill (e.g., skill://local/my-skill).
     """
 
     name: str
@@ -39,6 +40,18 @@ class SkillCommand:
 
     category: str = "skill"
     """Command category for grouping (default "skill")."""
+
+    skill_uri: str | None = None
+    """Optional skill:// URI for the skill (e.g., skill://local/my-skill)."""
+
+    @property
+    def resolved_skill_uri(self) -> str:
+        """Get the skill URI, generating from name if not explicitly set.
+
+        Returns:
+            The skill:// URI for this command.
+        """
+        return self.skill_uri or f"skill://local/{self.name}"
 
     def is_valid_input(self, input_text: str) -> tuple[bool, str | None]:
         """Validate input text for this command.

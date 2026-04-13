@@ -107,7 +107,7 @@ class SQLSessionStore:
             version=row.version,
             cwd=row.cwd,
             created_at=row.start_time,  # start_time in DB is created_at in SessionData
-            last_active=row.last_active,
+            last_active=row.last_active or get_now(),
             metadata=metadata,
         )
 

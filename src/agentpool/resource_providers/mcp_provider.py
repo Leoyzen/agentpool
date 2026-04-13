@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Self, assert_never
+from urllib.parse import unquote
+
+from upathtools import UPath
 
 from agentpool.common_types import MCPServerStatus
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
 from agentpool.resource_providers.resource_info import ResourceInfo
+from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
+from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
@@ -57,6 +63,7 @@ class MCPResourceProvider(ResourceProvider):
         self._tools_cache: list[FunctionTool] | None = None
         self._prompts_cache: list[MCPClientPrompt] | None = None
         self._resources_cache: list[ResourceInfo] | None = None
+        self._skills_cache: list[Skill] | None = None
         self.client = MCPClient(
             config=self.server,
             sampling_callback=self._sampling_callback,
@@ -305,6 +312,432 @@ class MCPResourceProvider(ResourceProvider):
                 display_name=self.server.display_name,
                 server_type=self.transport_type,
             )
+
+    async def get_skills(self) -> list[Skill]:
+        """Get all skills from this MCP provider.
+
+        Combines both prompt-based skills (MCP prompts mapped to skills)
+        and resource-based skills (FastMCP Skills Provider via skill:// URI).
+
+        Returns:
+            List of Skill objects from both sources
+        """
+        if self._skills_cache is None:
+            # Get both prompt-based and resource-based skills
+            prompt_skills = await self._get_prompt_skills()
+            resource_skills = await self._get_resource_skills()
+
+            # Combine and deduplicate by name (resource skills take precedence)
+            skill_map: dict[str, Skill] = {}
+            for skill in prompt_skills:
+                skill_map[skill.name] = skill
+            for skill in resource_skills:
+                skill_map[skill.name] = skill
+
+            self._skills_cache = list(skill_map.values())
+            logger.debug(
+                "Refreshed MCP skills cache",
+                num_skills=len(self._skills_cache),
+                prompt_skills=len(prompt_skills),
+                resource_skills=len(resource_skills),
+            )
+
+        return self._skills_cache
+
+    async def _get_prompt_skills(self) -> list[Skill]:
+        """Map MCP prompts to skills with argument_schema metadata.
+
+        Returns:
+            List of Skill objects created from MCP prompts
+        """
+        import json
+
+        skills: list[Skill] = []
+        try:
+            prompts = await self.get_prompts()
+            for prompt in prompts:
+                try:
+                    # Build argument schema from prompt arguments
+                    argument_schema: dict[str, Any] = {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    }
+
+                    if hasattr(prompt, "arguments") and prompt.arguments:
+                        for arg in prompt.arguments:
+                            arg_name = (
+                                arg.get("name", "")
+                                if isinstance(arg, dict)
+                                else getattr(arg, "name", "")
+                            )
+                            arg_desc = (
+                                arg.get("description", "")
+                                if isinstance(arg, dict)
+                                else getattr(arg, "description", "")
+                            )
+                            arg_required = (
+                                arg.get("required", False)
+                                if isinstance(arg, dict)
+                                else getattr(arg, "required", False)
+                            )
+
+                            if arg_name:
+                                argument_schema["properties"][arg_name] = {
+                                    "type": "string",
+                                    "description": arg_desc or "",
+                                }
+                                if arg_required:
+                                    argument_schema["required"].append(arg_name)
+
+                    skill = Skill(
+                        name=prompt.name or "unknown",
+                        description=prompt.description or f"MCP prompt: {prompt.name}",
+                        skill_path=PurePosixPath(f"mcp://{self.name}/prompts/{prompt.name}"),
+                        metadata={
+                            "skill_type": "prompt",
+                            "provider": self.name,
+                            "argument_schema": json.dumps(argument_schema),
+                        },
+                    )
+                    skills.append(skill)
+                except Exception:
+                    logger.exception(
+                        "Failed to convert prompt to skill", name=getattr(prompt, "name", "unknown")
+                    )
+                    continue
+        except Exception:
+            logger.exception("Failed to get prompt-based skills")
+
+        return skills
+
+    async def _get_resource_skills(self) -> list[Skill]:
+        """Discover skills via skill:// URI scheme (FastMCP Skills Provider).
+
+        Detects resources matching skill://{name}/SKILL.md pattern.
+
+        Returns:
+            List of Skill objects from skill:// resources
+        """
+        skills: list[Skill] = []
+        try:
+            resources = await self.get_resources()
+            for resource in resources:
+                try:
+                    # Check if this is a skill:// resource
+                    uri = resource.uri
+                    if not uri.startswith("skill://"):
+                        continue
+
+                    # Parse skill://skill-name/SKILL.md pattern
+                    # Format: skill://{skill-name}/SKILL.md or skill://{skill-name}/_manifest
+                    uri_path = uri[8:]  # Remove "skill://" prefix
+                    parts = uri_path.split("/", 1)
+                    if not parts:
+                        continue
+
+                    skill_name = parts[0]
+                    resource_path = parts[1] if len(parts) > 1 else ""
+
+                    # Only process SKILL.md or _manifest resources
+                    if resource_path not in ("SKILL.md", "_manifest"):
+                        continue
+
+                    # Get skill description from SKILL.md (lightweight - just frontmatter)
+                    # Instructions are lazy-loaded when load_instructions() is called
+                    main_uri = f"skill://{skill_name}/SKILL.md"
+                    description = await self._get_skill_description(skill_name, main_uri)
+
+                    # Use PurePosixPath for skill:// URIs since UPath doesn't support
+                    # the skill:// protocol. MCP skills are loaded via the provider's
+                    # get_skill_instructions method, not via filesystem access.
+                    from pathlib import PurePosixPath
+
+                    skill = Skill(
+                        name=skill_name,
+                        description=description,
+                        skill_path=PurePosixPath(f"skill://{self.name}/{skill_name}"),
+                        # Instructions are lazy-loaded via get_skill_instructions
+                        # to avoid fetching full content during discovery
+                        metadata={
+                            "skill_type": "resource",
+                            "provider": self.name,
+                            "main_uri": uri,
+                            "resource_name": resource.name,
+                        },
+                    )
+                    skills.append(skill)
+                except Exception:
+                    logger.exception(
+                        "Failed to convert resource to skill",
+                        uri=getattr(resource, "uri", "unknown"),
+                    )
+                    continue
+        except Exception:
+            logger.exception("Failed to get resource-based skills")
+
+        return skills
+
+    async def _get_skill_manifest(self, skill_name: str) -> dict[str, Any] | None:
+        """Read _manifest resource for a skill.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            Manifest dict if found, None otherwise
+        """
+        manifest_uri = f"skill://{skill_name}/_manifest"
+        try:
+            content = await self.read_resource(manifest_uri)
+            if content:
+                import yamling
+
+                result = yamling.load_yaml(content[0])
+                if isinstance(result, dict):
+                    return result
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to read skill manifest", skill_name=skill_name)
+        return None
+
+    async def _get_skill_description(self, skill_name: str, main_uri: str) -> str:
+        """Extract skill description from SKILL.md content.
+
+        Args:
+            skill_name: Name of the skill
+            main_uri: URI to the SKILL.md resource
+
+        Returns:
+            Extracted description or default description
+        """
+        try:
+            content = await self.read_resource(main_uri)
+            if content:
+                # Parse frontmatter if present
+                text = content[0]
+                if text.startswith("---"):
+                    parts = text.split("---", 2)
+                    frontmatter_parts = 3  # ---, frontmatter, body
+                    if len(parts) >= frontmatter_parts:
+                        import yamling
+
+                        metadata = yamling.load_yaml(parts[1])
+                        if isinstance(metadata, dict) and "description" in metadata:
+                            desc = metadata["description"]
+                            if isinstance(desc, str):
+                                return desc
+                # Return first non-empty line as description
+                for line in text.split("\n"):
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        return stripped[:200]
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to extract skill description", skill_name=skill_name)
+        return f"MCP skill: {skill_name}"
+
+    async def get_skill_instructions(
+        self, skill_name: str, arguments: dict[str, str] | None = None
+    ) -> str:
+        """Get skill instructions for a specific skill.
+
+        Args:
+            skill_name: Name of the skill
+            arguments: Optional arguments for prompt-based skills
+
+        Returns:
+            Skill instructions as string
+
+        Raises:
+            SkillNotFoundError: If skill not found
+        """
+        # First, find the skill to determine its type
+        skills = await self.get_skills()
+        skill = next((s for s in skills if s.name == skill_name), None)
+
+        if skill is None:
+            available = [s.name for s in skills]
+            raise SkillNotFoundError(skill_name, available)
+
+        # Handle based on skill type
+        skill_type = skill.metadata.get("skill_type")
+
+        if skill_type == "prompt":
+            # Find the corresponding prompt
+            prompts = await self.get_prompts()
+            prompt = next((p for p in prompts if p.name == skill_name), None)
+            if prompt is None:
+                raise SkillNotFoundError(skill_name)
+            args = arguments or {}
+            return await self._get_prompt_skill_instructions(prompt, args)
+
+        if skill_type == "resource":
+            return await self._get_resource_skill_instructions(skill_name)
+
+        # Unknown skill type
+        raise SkillNotFoundError(skill_name)
+
+    async def _get_prompt_skill_instructions(
+        self, prompt: MCPClientPrompt, arguments: dict[str, str]
+    ) -> str:
+        """Render prompt-based skill with arguments.
+
+        Args:
+            prompt: The MCP prompt to render
+            arguments: Arguments for the prompt
+
+        Returns:
+            Rendered prompt content as string
+        """
+        try:
+            components = await prompt.get_components(arguments)
+            # Combine all components into a single instruction string
+            parts = [
+                str(component.content) for component in components if hasattr(component, "content")
+            ]
+            return "\n\n".join(parts)
+        except Exception as e:
+            # If arguments are missing, return a template
+            if hasattr(prompt, "arguments") and prompt.arguments:
+                return self._format_prompt_skill_template(prompt, arguments)
+            raise SkillNotFoundError(prompt.name or "unknown") from e
+
+    async def _get_resource_skill_instructions(self, skill_name: str) -> str:
+        """Read resource-based skill content.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            SKILL.md content as string
+        """
+        skill_uri = f"skill://{skill_name}/SKILL.md"
+        try:
+            content = await self.read_resource(skill_uri)
+            if content:
+                return content[0]
+        except Exception as e:
+            raise SkillNotFoundError(skill_name) from e
+        raise SkillNotFoundError(skill_name)
+
+    def _format_prompt_skill_template(
+        self, prompt: MCPClientPrompt, missing_args: dict[str, str]
+    ) -> str:
+        """Format a template for prompts with required args.
+
+        Args:
+            prompt: The MCP prompt
+            missing_args: Provided arguments (may be incomplete)
+
+        Returns:
+            Formatted template string
+        """
+        lines: list[str] = []
+        lines.append(f"# {prompt.name}")
+        lines.append("")
+        if prompt.description:
+            lines.append(prompt.description)
+            lines.append("")
+
+        if hasattr(prompt, "arguments") and prompt.arguments:
+            lines.append("## Arguments")
+            for arg in prompt.arguments:
+                if isinstance(arg, dict):
+                    arg_name = arg.get("name", "")
+                    arg_desc = arg.get("description", "")
+                    arg_required = arg.get("required", False)
+                else:
+                    arg_name = getattr(arg, "name", "")
+                    arg_desc = getattr(arg, "description", "")
+                    arg_required = getattr(arg, "required", False)
+
+                provided = missing_args.get(arg_name, "")
+                req_marker = " (required)" if arg_required else ""
+                lines.append(f"- **{arg_name}**{req_marker}: {arg_desc or 'No description'}")
+                if provided:
+                    lines.append(f"  - Provided: {provided}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    async def get_references(self, skill_name: str) -> list[dict[str, Any]]:
+        """List references for a skill.
+
+        Args:
+            skill_name: Name of the skill
+
+        Returns:
+            List of reference file information
+        """
+        references: list[dict[str, Any]] = []
+
+        # For resource-based skills, look for resources under skill://skill-name/references/
+        try:
+            resources = await self.get_resources()
+            prefix = f"skill://{skill_name}/references/"
+            for resource in resources:
+                if resource.uri.startswith(prefix):
+                    ref_path = resource.uri[len(prefix) :]
+                    references.append({
+                        "name": resource.name,
+                        "path": ref_path,
+                        "uri": resource.uri,
+                        "description": resource.description,
+                    })
+        except Exception:
+            logger.exception("Failed to get references", skill_name=skill_name)
+
+        return references
+
+    async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
+        """Read reference content with path traversal protection.
+
+        Args:
+            skill_name: Name of the skill
+            ref_path: Path to the reference file (relative to references/)
+
+        Returns:
+            Tuple of (content bytes, MIME type)
+
+        Raises:
+            SecurityError: If path traversal is detected
+            SkillNotFoundError: If reference not found
+        """
+        # Path traversal protection
+        # Decode URL-encoded characters first
+        decoded_path = unquote(ref_path)
+
+        # Check for null bytes
+        if "\x00" in decoded_path:
+            raise SecurityError("Null bytes not allowed in path")
+
+        # Check for path traversal attempts and absolute paths
+        # Absolute paths (starting with /) are rejected for defense-in-depth
+        if ".." in decoded_path.split("/") or decoded_path.startswith("/"):
+            raise SecurityError(f"Path traversal detected: {ref_path}")
+
+        # Construct the full URI
+        uri = f"skill://{skill_name}/references/{decoded_path}"
+
+        try:
+            content = await self.read_resource(uri)
+            if content:
+                # Return content as bytes with text/markdown MIME type
+                return content[0].encode("utf-8"), "text/markdown"
+        except Exception as e:
+            raise SkillNotFoundError(f"Reference not found: {ref_path}") from e
+
+        raise SkillNotFoundError(f"Reference not found: {ref_path}")
+
+    async def _on_skills_changed(self) -> None:
+        """Callback when skills change on the MCP server.
+
+        Derives from prompt and resource changes. Invalidates the skills cache
+        and emits the skills_changed signal.
+        """
+        logger.info("MCP skill list changed, refreshing provider cache")
+        self._skills_cache = None
+        # Notify subscribers via signal
+        await self.skills_changed.emit(self.create_change_event("skills"))
 
 
 if __name__ == "__main__":

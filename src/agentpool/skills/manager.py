@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Self, overload
+from types import TracebackType
+from typing import TYPE_CHECKING, Self, cast, overload
 
-from upathtools import UPath, to_upath
+from upathtools import JoinablePathLike, UPath, to_upath
 
 from agentpool.log import get_logger
+from agentpool.resource_providers.local import LocalResourceProvider
 from agentpool.skills.registry import SkillsRegistry
 from agentpool_config.skills import SkillsConfig  # noqa: TC001
 
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
-    from upathtools import JoinablePathLike
 
+    from agentpool.resource_providers.base import ResourceProvider
     from agentpool.skills.skill import Skill
 
 
@@ -51,6 +53,7 @@ class SkillsManager:
         self._initialized = False
         self._config = config
         self._config_file_path = config_file_path
+        self._resource_provider: LocalResourceProvider | None = None
 
     def __repr__(self) -> str:
         skill_count = len(self.registry.list_items()) if self._initialized else "?"
@@ -63,15 +66,49 @@ class SkillsManager:
             self._initialized = True
             count = len(self.registry.list_items())
             logger.info("Skills manager initialized", name=self.name, skill_count=count)
+
+            # Create and enter LocalResourceProvider
+            self._resource_provider = LocalResourceProvider(
+                name=self.name,
+                skills_dirs=cast(list[JoinablePathLike], self.registry.skills_dirs),
+                owner=self.owner,
+            )
+            await self._resource_provider.__aenter__()
+            logger.debug("Resource provider initialized", name=self.name)
         except Exception as e:
             msg = "Failed to initialize skills manager"
             logger.exception(msg, name=self.name, error=e)
             raise
         return self
 
-    async def __aexit__(self, *args: object) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Clean up the skills manager."""
-        # Skills are file-based, no persistent connections to clean up
+        # Clean up resource provider if initialized
+        if self._resource_provider is not None:
+            await self._resource_provider.__aexit__(exc_type, exc_val, exc_tb)
+            self._resource_provider = None
+
+    @property
+    def resource_provider(self) -> ResourceProvider:
+        """Get the resource provider for accessing skills.
+
+        Returns:
+            The LocalResourceProvider instance
+
+        Raises:
+            RuntimeError: If the manager has not been initialized
+        """
+        if self._resource_provider is None:
+            raise RuntimeError(
+                "Resource provider not available. "
+                "Ensure the manager is used as an async context manager."
+            )
+        return self._resource_provider
 
     @overload
     async def add_skills_directory(self, path: JoinablePathLike) -> None: ...

@@ -145,6 +145,11 @@ class SkillsInstructionProvider(ResourceProvider):
 
         attr_str = " " + " ".join(attrs) if attrs else ""
 
+        # Get skill URI/path for reference
+        skill_uri = ""
+        if hasattr(skill, "skill_path"):
+            skill_uri = str(skill.skill_path)
+
         # Build inner content
         lines: list[str] = [
             f"<skill{attr_str}>",
@@ -152,6 +157,10 @@ class SkillsInstructionProvider(ResourceProvider):
             f"<name>{escape(name)}</name>",
             f"<description>{desc}</description>",
         ]
+
+        # Add skill URI if available (helps agents reference skills correctly)
+        if skill_uri:
+            lines.append(f"<uri>{escape(skill_uri)}</uri>")
 
         # Add argument hint if present
         if arg_hint := getattr(skill, "argument_hint", None):

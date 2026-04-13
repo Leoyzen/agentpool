@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo
+    from agentpool.skills.skill import Skill
     from agentpool.tools.base import Tool
 
 ToolMode = Literal["codemode"]
@@ -127,6 +128,40 @@ class AggregatingResourceProvider(ResourceProvider):
         """Get resources from all providers."""
         return [r for provider in self.providers for r in await provider.get_resources()]
 
+    async def get_skills(self) -> list[Skill]:
+        """Get skills from all providers."""
+        return [s for provider in self.providers for s in await provider.get_skills()]
+
+    async def get_skill_instructions(
+        self, skill_name: str, arguments: dict[str, str] | None = None
+    ) -> str:
+        """Get skill instructions from the first provider that has it.
+
+        Args:
+            skill_name: Name of the skill
+            arguments: Optional arguments for prompt-based skills
+
+        Returns:
+            Skill instructions as string
+
+        Raises:
+            SkillNotFoundError: If skill not found in any provider
+        """
+        from agentpool.skills.exceptions import SkillNotFoundError
+
+        for provider in self.providers:
+            try:
+                # Check if provider has this skill
+                skills = await provider.get_skills()
+                if any(s.name == skill_name for s in skills):
+                    # Try to get instructions from this provider
+                    if hasattr(provider, "get_skill_instructions"):
+                        return await provider.get_skill_instructions(skill_name, arguments)
+            except Exception:  # noqa: BLE001
+                continue
+
+        raise SkillNotFoundError(skill_name)
+
     async def get_request_parts(
         self, name: str, arguments: dict[str, str] | None = None
     ) -> list[ModelRequestPart]:
@@ -138,3 +173,34 @@ class AggregatingResourceProvider(ResourceProvider):
                 continue
 
         raise KeyError(f"Prompt {name!r} not found in any provider")
+
+    async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
+        """Read reference content from the first provider that has the skill.
+
+        Args:
+            skill_name: Name of the skill
+            ref_path: Path to the reference file (relative to references/)
+
+        Returns:
+            Tuple of (content bytes, MIME type)
+
+        Raises:
+            SkillNotFoundError: If skill not found in any provider
+        """
+        from agentpool.skills.exceptions import SkillNotFoundError
+
+        from collections.abc import Callable
+
+        for provider in self.providers:
+            try:
+                # Check if provider has this skill
+                skills = await provider.get_skills()
+                if any(s.name == skill_name for s in skills):
+                    # Try to read reference from this provider
+                    read_ref = getattr(provider, "read_reference", None)
+                    if read_ref is not None and isinstance(read_ref, Callable):
+                        return await read_ref(skill_name, ref_path)
+            except Exception:  # noqa: BLE001
+                continue
+
+        raise SkillNotFoundError(f"Reference {ref_path!r} not found for skill {skill_name!r}")

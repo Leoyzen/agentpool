@@ -41,6 +41,9 @@ from agentpool_server.opencode_server.models import (
 
 router = APIRouter(tags=["agent"])
 
+# Module-level logger for route-level logging
+logger = get_logger(__name__)
+
 
 class AddMCPServerRequest(BaseModel):
     """Request to add an MCP server dynamically."""
@@ -102,44 +105,145 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
     """List all available skills.
 
     Skills are specialized capabilities available to agents.
-    Returns skills from the AgentPool skills manager.
+    Returns skills from:
+    1. Local filesystem (via SkillsManager)
+    2. MCP providers (via AggregatingResourceProvider)
     """
+    from pathlib import PurePosixPath
+
     # Access the pool via the agent's agent_pool reference
     pool = state.agent.agent_pool
-    if pool is None or pool.skills is None:
+    if pool is None:
         return []
 
-    return [
-        SkillInfo(
-            name=skill.name,
-            description=skill.description,
-            location=str(skill.skill_path),
-            content=skill.load_instructions(),
-        )
-        for skill in pool.skills.list_skills()
-    ]
+    skills: list[SkillInfo] = []
+
+    # 1. Get MCP provider skills from AggregatingResourceProvider first
+    # These will be overridden by local skills if names conflict
+    if pool.skill_provider is not None:
+        try:
+            mcp_skills = await pool.skill_provider.get_skills()
+            for skill in mcp_skills:
+                # For MCP skills, get content via provider (load_instructions returns empty for PurePosixPath)
+                if isinstance(skill.skill_path, PurePosixPath):
+                    try:
+                        content = await pool.skill_provider.get_skill_instructions(skill.name)
+                    except Exception as e:
+                        logger.debug(
+                            "Failed to get skill instructions",
+                            skill=skill.name,
+                            error=str(e),
+                        )
+                        content = ""
+                else:
+                    content = skill.load_instructions()
+
+                skills.append(
+                    SkillInfo(
+                        name=skill.name,
+                        description=skill.description,
+                        location=str(skill.skill_path),
+                        content=content,
+                    )
+                )
+        except Exception as e:
+            logger.warning("Failed to get MCP skills", error=str(e))
+
+    # 2. Get local filesystem skills from SkillsManager (takes priority)
+    # Local skills override MCP skills with the same name
+    if pool.skills is not None:
+        for skill in pool.skills.list_skills():
+            # Remove any existing MCP skill with the same name (local takes priority)
+            existing = next((s for s in skills if s.name == skill.name), None)
+            if existing:
+                skills.remove(existing)
+
+            skills.append(
+                SkillInfo(
+                    name=skill.name,
+                    description=skill.description,
+                    location=str(skill.skill_path),
+                    content=skill.load_instructions(),
+                )
+            )
+
+    return skills
 
 
 @router.get("/command")
 async def list_commands(state: StateDep) -> list[Command]:
     """List available slash commands.
 
-    Commands are derived from MCP prompts available to the agent,
-    plus skill commands from the skill bridge.
+    Commands include:
+    - MCP prompts as commands
+    - Skill commands from skill_bridge (if available) or skill_provider
     """
     commands: list[Command] = []
 
-    # Add MCP prompts as commands
+    # Add MCP prompts as commands (source="mcp")
     try:
         prompts = await state.agent.tools.list_prompts()
-        commands.extend([Command(name=p.name, description=p.description or "") for p in prompts])
-    except Exception:  # noqa: BLE001
+        commands.extend([
+            Command(name=p.name, description=p.description or "", source="mcp") for p in prompts
+        ])
+    except Exception:
         pass
 
-    # Add skill commands from the bridge
+    # Add skill commands from skill_bridge if available
+    logger.debug(
+        "list_commands debug",
+        skill_bridge_exists=state.skill_bridge is not None,
+        skill_provider_exists=state.pool.skill_provider is not None,
+    )
     if state.skill_bridge is not None:
-        for skill_cmd in state.skill_bridge.get_commands():
-            commands.append(Command(name=skill_cmd.name, description=skill_cmd.description))
+        for skill_cmd in state.skill_bridge.get_skill_commands():
+            # For virtual skills (from MCP), fetch instructions from provider
+            template = ""
+            if state.pool.skill_provider is not None:
+                try:
+                    template = await state.pool.skill_provider.get_skill_instructions(
+                        skill_cmd.name
+                    )
+                except Exception:  # noqa: BLE001
+                    # Fall back to local load if provider fetch fails
+                    try:
+                        template = skill_cmd.skill.load_instructions()
+                    except ValueError:
+                        template = ""
+            else:
+                try:
+                    template = skill_cmd.skill.load_instructions()
+                except ValueError:
+                    template = ""
+            commands.append(
+                Command(
+                    name=skill_cmd.name,
+                    description=skill_cmd.description,
+                    source="skill",
+                    template=template,
+                )
+            )
+    # Fallback: get skills directly from pool.skill_provider if skill_bridge not available
+    elif state.pool.skill_provider is not None:
+        try:
+            provider_skills = await state.pool.skill_provider.get_skills()
+            logger.debug(
+                "Got skills from skill_provider",
+                skill_count=len(provider_skills),
+            )
+            for skill in provider_skills:
+                # Use provider's get_skill_instructions for proper handling of virtual skills
+                template = await state.pool.skill_provider.get_skill_instructions(skill.name)
+                commands.append(
+                    Command(
+                        name=skill.name,
+                        description=skill.description,
+                        source="skill",
+                        template=template,
+                    )
+                )
+        except Exception:
+            pass
 
     return commands
 

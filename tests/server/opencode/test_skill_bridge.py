@@ -366,7 +366,9 @@ class TestCreateSkillCommand:
 
         await cmd.execute(mock_ctx, [], {})
 
-        mock_ctx.print.assert_called_once_with("Loading skill: skill-with-instructions")
+        mock_ctx.print.assert_called_once_with(
+            "Loading skill: skill-with-instructions (skill://local/skill-with-instructions)"
+        )
 
     @pytest.mark.asyncio
     async def test_command_execution_shows_no_instructions_message(
@@ -383,7 +385,9 @@ class TestCreateSkillCommand:
 
         await cmd.execute(mock_ctx, [], {})
 
-        mock_ctx.print.assert_called_once_with("Skill test-skill has no instructions")
+        mock_ctx.print.assert_called_once_with(
+            "Skill test-skill has no instructions (skill://local/test-skill)"
+        )
 
 
 # =============================================================================

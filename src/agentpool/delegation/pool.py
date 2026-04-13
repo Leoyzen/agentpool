@@ -16,7 +16,10 @@ from agentpool.common_types import NodeName, SupportsStructuredOutput
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
 from agentpool.messaging import MessageNode
+from agentpool.resource_providers.aggregating import AggregatingResourceProvider
+from agentpool.resource_providers.local import LocalResourceProvider
 from agentpool.skills.command_registry import SkillCommandRegistry
+from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool.talk import TeamTalk
 from agentpool.talk.registry import ConnectionRegistry
 from agentpool.tasks import TaskRegistry
@@ -28,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from contextlib import AbstractAsyncContextManager
     from types import TracebackType
+    from typing import Any
 
     from upathtools import JoinablePathLike, UPath
 
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
     from agentpool.delegation.teamrun import TeamRun
     from agentpool.messaging.compaction import CompactionPipeline
     from agentpool.models.manifest import AgentsManifest
+    from agentpool.resource_providers.base import ResourceProvider
     from agentpool.ui.base import InputProvider
     from agentpool_config.task import Job
 
@@ -159,6 +164,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             )
             self._tasks = TaskRegistry()
             self._skill_commands: SkillCommandRegistry | None = None
+            self._skill_resolver: SkillURIResolver | None = None
+            self._skill_provider: AggregatingResourceProvider | None = None
             self.prompt_manager = PromptManager(self.manifest.prompts)
             # Main agent name: explicit param > manifest.default_agent > None (will use first)
             self._main_agent_name = main_agent_name or self.manifest.default_agent
@@ -197,8 +204,14 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 # Initialize MCP manager first, then add aggregating provider
                 await self.exit_stack.enter_async_context(self.mcp)
                 await self.exit_stack.enter_async_context(self.skills)
-                # Initialize skill command registry after skills are loaded
-                self._skill_commands = SkillCommandRegistry(self.skills.registry)
+                # Initialize skill provider and resolver BEFORE skill command registry
+                # so that skill_provider is available when syncing commands
+                await self._setup_skills_provider()
+                # Initialize skill command registry after skill provider is set up
+                self._skill_commands = SkillCommandRegistry(
+                    skills_registry=self.skills.registry,
+                    skill_provider=self._skill_provider,
+                )
                 await self._skill_commands.initialize()
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 agents = list(self.all_agents.values())
@@ -247,6 +260,11 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                     agent.tools.remove_provider(aggregating_provider.name)
                     if self.skills_instruction_provider:
                         agent.tools.remove_provider(self.skills_instruction_provider.name)
+                # Clean up skill provider and resolver
+                if self._skill_provider is not None:
+                    self._skill_provider.skills_changed.disconnect(self._on_skills_changed)
+                    self._skill_provider = None
+                self._skill_resolver = None
                 await self.cleanup()
 
     @property
@@ -262,6 +280,84 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         or None if no skills are available.
         """
         return self._skill_commands
+
+    @property
+    def skill_resolver(self) -> SkillURIResolver | None:
+        """Get the skill URI resolver.
+
+        Returns the SkillURIResolver for resolving skill:// URIs,
+        or None if skills provider is not initialized.
+        """
+        return self._skill_resolver
+
+    @property
+    def skill_provider(self) -> AggregatingResourceProvider | None:
+        """Get the aggregating skill resource provider.
+
+        Returns the AggregatingResourceProvider that combines all skill sources
+        (local filesystem and MCP servers), or None if not initialized.
+        """
+        return self._skill_provider
+
+    async def _setup_skills_provider(self) -> None:
+        """Initialize the skill provider and resolver.
+
+        Creates an AggregatingResourceProvider that combines:
+        - LocalResourceProvider for filesystem skills (from SkillsManager)
+        - MCPResourceProvider for each MCP server in the pool
+
+        Also creates a SkillURIResolver and registers all providers.
+        Connects the skills_changed signal to _on_skills_changed callback.
+        """
+        providers: list[ResourceProvider] = []
+
+        # Add LocalResourceProvider for filesystem skills if SkillsManager exists
+        # Use the already-initialized resource_provider from SkillsManager
+        if self.skills and self.skills.registry.skills_dirs:
+            try:
+                local_provider = self.skills.resource_provider
+                providers.append(local_provider)
+            except RuntimeError:
+                # Fallback: create and initialize a new provider if resource_provider not available
+                local_provider = LocalResourceProvider(
+                    name="local",
+                    skills_dirs=list(self.skills.registry.skills_dirs),
+                )
+                await local_provider.__aenter__()
+                providers.append(local_provider)
+
+        # Add MCPResourceProvider for each MCP server
+        for mcp_provider in self.mcp.providers:
+            providers.append(mcp_provider)
+
+        # Create aggregating provider
+        self._skill_provider = AggregatingResourceProvider(
+            providers=providers,
+            name="skills",
+        )
+
+        # Create skill URI resolver and register providers
+        self._skill_resolver = SkillURIResolver()
+        for provider in providers:
+            self._skill_resolver.register_provider(provider.name, provider)
+
+        # Connect skills_changed signal to callback
+        self._skill_provider.skills_changed.connect(self._on_skills_changed)
+
+    async def _on_skills_changed(self, event: Any) -> None:
+        """Handle skills changed events from the skill provider.
+
+        This method is called when the skill provider detects changes to skills
+        from any source (local filesystem or MCP servers). The event is already
+        handled by SkillCommandRegistry which listens to _skill_provider directly.
+
+        Args:
+            event: The resource change event from the provider.
+        """
+        # Skill changes are handled by SkillCommandRegistry which subscribes
+        # directly to _skill_provider.skills_changed. No additional forwarding
+        # needed here to avoid potential event loops.
+        pass
 
     async def cleanup(self) -> None:
         """Clean up all agents."""
