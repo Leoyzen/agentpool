@@ -585,9 +585,10 @@ async def test_read_reference(mcp_provider):
     """Test reading a reference file."""
     mcp_provider.read_resource = AsyncMock(return_value=["# Guide\n\nGuide content"])
 
-    content = await mcp_provider.read_reference("test-skill", "guide.md")
+    content_bytes, mime_type = await mcp_provider.read_reference("test-skill", "guide.md")
 
-    assert "Guide" in content
+    assert b"Guide" in content_bytes
+    assert mime_type == "text/markdown"
 
 
 @pytest.mark.asyncio

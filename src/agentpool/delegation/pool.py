@@ -206,7 +206,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 await self.exit_stack.enter_async_context(self.skills)
                 # Initialize skill provider and resolver BEFORE skill command registry
                 # so that skill_provider is available when syncing commands
-                self._setup_skills_provider()
+                await self._setup_skills_provider()
                 # Initialize skill command registry after skill provider is set up
                 self._skill_commands = SkillCommandRegistry(
                     skills_registry=self.skills.registry,
@@ -299,7 +299,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         return self._skill_provider
 
-    def _setup_skills_provider(self) -> None:
+    async def _setup_skills_provider(self) -> None:
         """Initialize the skill provider and resolver.
 
         Creates an AggregatingResourceProvider that combines:
@@ -318,11 +318,12 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 local_provider = self.skills.resource_provider
                 providers.append(local_provider)
             except RuntimeError:
-                # Fallback: create a new provider if resource_provider not available
+                # Fallback: create and initialize a new provider if resource_provider not available
                 local_provider = LocalResourceProvider(
                     name="local",
                     skills_dirs=list(self.skills.registry.skills_dirs),
                 )
+                await local_provider.__aenter__()
                 providers.append(local_provider)
 
         # Add MCPResourceProvider for each MCP server

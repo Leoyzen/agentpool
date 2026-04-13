@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.resource_providers import StaticResourceProvider
@@ -109,7 +109,36 @@ async def _load_reference_content(
         )
 
     # For filesystem paths (UPath), load from disk
-    ref_file = skill.skill_path / reference_path
+    # This branch should only be reached for actual filesystem paths (UPath),
+    # not virtual paths (PurePosixPath like skill:// URIs)
+    if type(skill.skill_path) is PurePosixPath:
+        raise ReferenceNotFoundError(
+            f"Cannot load reference {reference_path}: virtual paths require a skill provider"
+        )
+
+    # After the check above, skill_path is definitely a UPath
+    from upathtools import UPath
+
+    skill_path = cast(UPath, skill.skill_path)
+
+    # Validate reference_path to prevent path traversal attacks
+    from agentpool.skills.exceptions import SecurityError
+
+    decoded_path = reference_path
+    # Check for path traversal attempts and absolute paths
+    if ".." in decoded_path.split("/") or decoded_path.startswith("/"):
+        raise SecurityError(f"Path traversal detected in reference path: {reference_path}")
+
+    ref_file = skill_path / reference_path
+    # Resolve and verify the path is within the skill directory
+    try:
+        resolved_path = ref_file.resolve()
+        resolved_skill_path = skill_path.resolve()
+        if not str(resolved_path).startswith(str(resolved_skill_path)):
+            raise SecurityError(f"Reference path escapes skill directory: {reference_path}")
+    except (OSError, ValueError) as e:
+        raise ReferenceNotFoundError(f"Invalid reference path: {reference_path}") from e
+
     if not ref_file.exists():
         raise ReferenceNotFoundError(str(ref_file))
 

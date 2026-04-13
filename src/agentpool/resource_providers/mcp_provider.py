@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Self, assert_never
 from urllib.parse import unquote
 
@@ -393,7 +393,7 @@ class MCPResourceProvider(ResourceProvider):
                     skill = Skill(
                         name=prompt.name or "unknown",
                         description=prompt.description or f"MCP prompt: {prompt.name}",
-                        skill_path=UPath(f"mcp://{self.name}/prompts/{prompt.name}"),
+                        skill_path=PurePosixPath(f"mcp://{self.name}/prompts/{prompt.name}"),
                         metadata={
                             "skill_type": "prompt",
                             "provider": self.name,
@@ -688,7 +688,7 @@ class MCPResourceProvider(ResourceProvider):
 
         return references
 
-    async def read_reference(self, skill_name: str, ref_path: str) -> str:
+    async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
         """Read reference content with path traversal protection.
 
         Args:
@@ -696,7 +696,7 @@ class MCPResourceProvider(ResourceProvider):
             ref_path: Path to the reference file (relative to references/)
 
         Returns:
-            Reference content as string
+            Tuple of (content bytes, MIME type)
 
         Raises:
             SecurityError: If path traversal is detected
@@ -721,7 +721,8 @@ class MCPResourceProvider(ResourceProvider):
         try:
             content = await self.read_resource(uri)
             if content:
-                return content[0]
+                # Return content as bytes with text/markdown MIME type
+                return content[0].encode("utf-8"), "text/markdown"
         except Exception as e:
             raise SkillNotFoundError(f"Reference not found: {ref_path}") from e
 

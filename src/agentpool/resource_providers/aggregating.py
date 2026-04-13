@@ -173,3 +173,34 @@ class AggregatingResourceProvider(ResourceProvider):
                 continue
 
         raise KeyError(f"Prompt {name!r} not found in any provider")
+
+    async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
+        """Read reference content from the first provider that has the skill.
+
+        Args:
+            skill_name: Name of the skill
+            ref_path: Path to the reference file (relative to references/)
+
+        Returns:
+            Tuple of (content bytes, MIME type)
+
+        Raises:
+            SkillNotFoundError: If skill not found in any provider
+        """
+        from agentpool.skills.exceptions import SkillNotFoundError
+
+        from collections.abc import Callable
+
+        for provider in self.providers:
+            try:
+                # Check if provider has this skill
+                skills = await provider.get_skills()
+                if any(s.name == skill_name for s in skills):
+                    # Try to read reference from this provider
+                    read_ref = getattr(provider, "read_reference", None)
+                    if read_ref is not None and isinstance(read_ref, Callable):
+                        return await read_ref(skill_name, ref_path)
+            except Exception:  # noqa: BLE001
+                continue
+
+        raise SkillNotFoundError(f"Reference {ref_path!r} not found for skill {skill_name!r}")
