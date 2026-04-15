@@ -88,7 +88,12 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
             path = UPath(config_path)
             # If path points to a file, use its parent directory
             # Otherwise use the path itself as config directory
-            self._config_dir = path.parent if path.suffix else path
+            config_dir = path.parent if path.suffix else path
+            # Always resolve to absolute path to ensure consistent behavior
+            # regardless of CWD at the time of resolution
+            self._config_dir = (
+                config_dir.resolve() if hasattr(config_dir, "resolve") else config_dir
+            )
 
     def __enter__(self) -> Self:
         """Enter the context and set CONFIG_DIR."""

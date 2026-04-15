@@ -161,7 +161,16 @@ class SkillsManager:
         logger.debug("Starting skills discovery", base_path=str(base_path))
 
         if config:
-            paths = config.get_effective_paths(config_file_path)
+            # Use config.paths directly (already resolved by ConfigPath validator)
+            # instead of deprecated get_effective_paths()
+            paths: list[UPath] = list(config.paths)
+            if config.include_default:
+                # Resolve default paths: expand ~ and resolve relative paths against base_path
+                for dp in DEFAULT_SKILLS_PATHS:
+                    resolved_dp = dp.expanduser()
+                    if not resolved_dp.is_absolute():
+                        resolved_dp = base_path / resolved_dp
+                    paths.append(resolved_dp)
             default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
         else:
             paths = self.registry.skills_dirs
