@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -71,10 +71,7 @@ from agentpool_server.opencode_server.routes.global_routes import (
     _extract_session_id,
     _serialize_event,
 )
-
-
-if TYPE_CHECKING:
-    from agentpool_server.opencode_server.state import ServerState
+from agentpool_server.opencode_server.state import ServerState
 
 
 # =============================================================================
@@ -1169,3 +1166,107 @@ async def test_concurrent_all_get_server_connected() -> None:
         assert "directory" not in data
         assert "project" not in data
         assert "payload" not in data
+
+
+# =============================================================================
+# ServerState.broadcast_event direct tests
+# =============================================================================
+
+
+def _make_broadcast_state() -> ServerState:
+    """Create a ServerState with a minimal mock agent for broadcast_event tests."""
+    from unittest.mock import Mock
+
+    mock_env = Mock()
+    mock_env.get_fs = Mock(return_value=Mock())
+    mock_agent = Mock()
+    mock_agent.env = mock_env
+    return ServerState(working_dir="/test", agent=mock_agent)
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_single_subscriber() -> None:
+    """Broadcast delivers event to one subscriber queue."""
+    state = _make_broadcast_state()
+    queue: asyncio.Queue[Event] = asyncio.Queue()
+    state.event_subscribers.append(queue)
+
+    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
+    await state.broadcast_event(event)
+
+    received = queue.get_nowait()
+    assert received is event
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_multiple_subscribers() -> None:
+    """Broadcast delivers event to all subscriber queues."""
+    state = _make_broadcast_state()
+    queue1: asyncio.Queue[Event] = asyncio.Queue()
+    queue2: asyncio.Queue[Event] = asyncio.Queue()
+    queue3: asyncio.Queue[Event] = asyncio.Queue()
+    state.event_subscribers.extend([queue1, queue2, queue3])
+
+    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
+    await state.broadcast_event(event)
+
+    assert queue1.get_nowait() is event
+    assert queue2.get_nowait() is event
+    assert queue3.get_nowait() is event
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_no_subscribers() -> None:
+    """Broadcast with no subscribers does not raise."""
+    state = _make_broadcast_state()
+    assert state.event_subscribers == []
+
+    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
+    await state.broadcast_event(event)  # Should not raise
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_exception_isolation() -> None:
+    """Subscriber whose queue raises is removed; other subscribers still receive."""
+    state = _make_broadcast_state()
+
+    good_queue: asyncio.Queue[Event] = asyncio.Queue()
+    state.event_subscribers.append(good_queue)
+
+    # Create a mock queue that raises on put_nowait
+    bad_queue = MagicMock(spec=asyncio.Queue)
+    bad_queue.put_nowait.side_effect = RuntimeError("queue broken")
+    state.event_subscribers.append(bad_queue)
+
+    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
+    await state.broadcast_event(event)
+
+    # Good queue should still have received the event
+    assert good_queue.get_nowait() is event
+    # Bad queue should have been removed from subscribers
+    assert bad_queue not in state.event_subscribers
+    assert good_queue in state.event_subscribers
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_queue_full_dropped() -> None:
+    """Full queue has event dropped; other subscribers still receive."""
+    state = _make_broadcast_state()
+
+    # Queue with maxsize=1, already full
+    full_queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=1)
+    full_queue.put_nowait(ServerHeartbeatEvent())  # Fill the queue
+    state.event_subscribers.append(full_queue)
+
+    good_queue: asyncio.Queue[Event] = asyncio.Queue()
+    state.event_subscribers.append(good_queue)
+
+    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
+    await state.broadcast_event(event)
+
+    # Full queue should still have only the original item (event dropped)
+    assert full_queue.qsize() == 1
+    assert not isinstance(full_queue.get_nowait(), SessionStatusEvent)
+
+    # Good queue should have received the event
+    assert good_queue.get_nowait() is event
