@@ -1050,3 +1050,25 @@ Event = (
     | TuiToastShowEvent
     | TuiSessionSelectEvent
 )
+
+
+class GlobalEvent(OpenCodeBaseModel):
+    """SSE envelope for OpenCode v1.4.4+ global event routing.
+
+    Not an event type itself — wraps Event instances with routing metadata.
+    """
+
+    directory: str
+    """Working directory used for event routing in multi-directory servers."""
+
+    project: str | None = None
+    """Project identifier for event routing (git root commit SHA or 'global')."""
+
+    workspace: str | None = None
+    """Workspace identifier for event routing.
+
+    Omitted for single-directory servers.
+    """
+
+    payload: dict[str, Any]
+    """The wrapped event data."""

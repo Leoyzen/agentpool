@@ -22,6 +22,7 @@ from agentpool_server.opencode_server.models.events import (
     QuestionRejectedEvent,
     QuestionRepliedEvent,
     ServerConnectedEvent,
+    ServerHeartbeatEvent,
     SessionCompactedEvent,
     SessionCreatedEvent,
     SessionDeletedEvent,
@@ -95,6 +96,38 @@ def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
         # Events without session_id return None
         case _:
             return None
+
+
+class GlobalEventFactory:
+    """Creates GlobalEvent envelope JSON from Event instances.
+
+    Stored on ServerState since directory/project don't change during
+    the server's lifetime. Created lazily on first access.
+    """
+
+    def __init__(self, directory: str, project: str) -> None:
+        self._directory = directory
+        self._project = project
+
+    def wrap(self, event: Event) -> str:
+        """Wrap an Event in a GlobalEvent envelope JSON string.
+
+        Returns:
+            JSON string with directory, project, and payload keys.
+        """
+        payload_json = _serialize_event(event, wrap_payload=False)
+        payload = json.loads(payload_json)
+        envelope: dict[str, Any] = {
+            "directory": self._directory,
+            "project": self._project,
+            "payload": payload,
+        }
+        return json.dumps(envelope, ensure_ascii=False)
+
+    @staticmethod
+    def is_global_only_event(event: Event) -> bool:
+        """Check if event is server-scoped (no session routing needed)."""
+        return isinstance(event, (ServerConnectedEvent, ServerHeartbeatEvent))
 
 
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:

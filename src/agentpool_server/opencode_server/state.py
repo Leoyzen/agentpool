@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         Todo,
     )
     from agentpool_server.opencode_server.models.question import QuestionToolInfo
+    from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
 # Type alias for async callback
 OnFirstSubscriberCallback = Callable[[], Coroutine[Any, Any, None]]
@@ -91,6 +92,7 @@ class ServerState:
     pending_questions: dict[str, PendingQuestion] = field(default_factory=dict)
     # SSE event subscribers
     event_subscribers: list[asyncio.Queue[Event]] = field(default_factory=list)
+    _event_factory: GlobalEventFactory | None = field(default=None, repr=False)
     # Callback for first subscriber connection (e.g., for update check)
     on_first_subscriber: OnFirstSubscriberCallback | None = None
     _first_subscriber_triggered: bool = field(default=False, repr=False)
@@ -109,6 +111,17 @@ class ServerState:
         """Initialize derived state."""
         self.lsp_manager = LSPManager(env=self.agent.env)
         self.lsp_manager.register_defaults()
+
+    def get_event_factory(self) -> GlobalEventFactory:
+        """Get or create the GlobalEventFactory for event wrapping."""
+        from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
+
+        if self._event_factory is None:
+            self._event_factory = GlobalEventFactory(
+                directory=self.working_dir,
+                project=helpers.compute_project_id(self.working_dir),
+            )
+        return self._event_factory
 
     @property
     def fs(self) -> AsyncFileSystem:
