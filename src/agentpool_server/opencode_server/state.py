@@ -117,7 +117,12 @@ class ServerState:
         self.lsp_manager.register_defaults()
 
     def get_event_factory(self) -> GlobalEventFactory:
-        """Get or create the GlobalEventFactory for event wrapping."""
+        """Get or lazily create the GlobalEventFactory for event wrapping.
+
+        The factory is created on first access using the working directory
+        and computed project ID, then cached for the server's lifetime.
+        Imports GlobalEventFactory locally to avoid circular imports.
+        """
         from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
         if self._event_factory is None:

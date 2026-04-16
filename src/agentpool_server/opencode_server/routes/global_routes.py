@@ -54,7 +54,17 @@ async def get_health() -> HealthResponse:
 
 
 def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
-    """Extract session_id from various event types."""
+    """Extract session ID from various event types.
+
+    Uses pattern matching to access session_id from three different
+    property structures:
+    - properties.session_id (most events)
+    - properties.info.id (SessionCreated/Updated events)
+    - properties.part.session_id (PartUpdatedEvent)
+
+    Unrecognized event types trigger a warning log and return None,
+    since some events genuinely have no session association.
+    """
     match event:
         # Events with properties.session_id directly
         case SessionDeletedEvent(properties=props):
@@ -108,11 +118,20 @@ class GlobalEventFactory:
     """
 
     def __init__(self, directory: str, project: str) -> None:
+        """Initialize with directory and project routing metadata.
+
+        Args:
+            directory: Working directory for event routing
+            project: Project identifier for event routing
+        """
         self._directory = directory
         self._project = project
 
     def wrap(self, event: Event) -> str:
         """Wrap an Event in a GlobalEvent envelope JSON string.
+
+        Args:
+            event: The event to wrap
 
         Returns:
             JSON string with directory, project, and payload keys.
@@ -135,8 +154,19 @@ class GlobalEventFactory:
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
     r"""Serialize event, optionally wrapping in payload structure.
 
+    Injects sessionId at the top level of the serialized data (lowercase 'd')
+    for subagent session tracking, separate from the alias-converted
+    sessionID that appears inside properties.
+
     Uses ensure_ascii=False to preserve Unicode characters (Chinese, emoji, etc.)
     in the JSON output instead of escaping them as \uXXXX sequences.
+
+    Args:
+        event: The event to serialize
+        wrap_payload: Whether to wrap in a {"payload": ...} structure
+
+    Returns:
+        JSON string of the serialized event data.
     """
     event_data = event.model_dump(by_alias=True, exclude_none=True)
 
@@ -153,7 +183,27 @@ def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
 async def _event_generator(
     state: ServerState, *, wrap_payload: bool = False
 ) -> AsyncGenerator[dict[str, Any]]:
-    """Generate SSE events."""
+    """Generate SSE events for connected clients.
+
+    Registers a subscriber queue, sends an initial connected event,
+    then streams subsequent events from the broadcast system.
+
+    When wrap_payload is True, non-global events are wrapped in a
+    GlobalEvent envelope via the factory; global events (connected,
+    heartbeat) are always sent bare.
+
+    Subscriber lifecycle:
+    1. Queue appended to state.event_subscribers
+    2. If this is the first subscriber, triggers on_first_subscriber
+       callback (e.g., for update check)
+    3. Streams events until client disconnects
+    4. Finally block removes queue from subscribers (suppresses
+       ValueError if already removed by broadcast_event error handler)
+
+    Args:
+        state: The server state holding subscribers and event factory
+        wrap_payload: Whether to wrap events in GlobalEvent envelopes
+    """
     factory = state.get_event_factory() if wrap_payload else None
     queue: asyncio.Queue[Event] = asyncio.Queue()
     state.event_subscribers.append(queue)
