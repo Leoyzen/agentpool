@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -468,3 +469,97 @@ async def test_global_event_integration_unicode_preserved(
     received = results[1]
     payload = received["payload"]
     assert payload["sessionId"] == "会话测试"
+
+
+# =============================================================================
+# on_first_subscriber callback tests
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_on_first_subscriber_fires_once() -> None:
+    """Callback fires exactly once on first subscriber."""
+    state = _MockState()
+    callback = AsyncMock()
+    state.on_first_subscriber = callback
+
+    gen = _event_generator(state, wrap_payload=False)
+    await gen.__anext__()  # consume connected event
+
+    assert state._first_subscriber_triggered is True
+    await asyncio.sleep(0.05)
+    callback.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_on_first_subscriber_does_not_fire_on_second_subscriber() -> None:
+    """Callback does not fire again on second subscriber."""
+    state = _MockState()
+    callback = AsyncMock()
+    state.on_first_subscriber = callback
+
+    gen1 = _event_generator(state, wrap_payload=False)
+    await gen1.__anext__()  # consume connected event
+
+    await asyncio.sleep(0.05)
+    assert callback.call_count == 1
+
+    gen2 = _event_generator(state, wrap_payload=False)
+    await gen2.__anext__()  # consume connected event
+
+    await asyncio.sleep(0.05)
+    # Callback should still have been called only once
+    callback.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_on_first_subscriber_flag_set_and_stays_true() -> None:
+    """First subscriber flag is set to True after first subscriber and stays True."""
+    state = _MockState()
+    callback = AsyncMock()
+    state.on_first_subscriber = callback
+
+    assert state._first_subscriber_triggered is False
+
+    gen1 = _event_generator(state, wrap_payload=False)
+    await gen1.__anext__()  # consume connected event
+
+    assert state._first_subscriber_triggered is True
+
+    gen2 = _event_generator(state, wrap_payload=False)
+    await gen2.__anext__()  # consume connected event
+
+    # Flag must remain True, never reset
+    assert state._first_subscriber_triggered is True
+
+
+@pytest.mark.anyio
+async def test_on_first_subscriber_fires_before_events_delivered() -> None:
+    """Callback fires before the generator yields any events beyond connected."""
+    state = _MockState()
+    callback = AsyncMock()
+    state.on_first_subscriber = callback
+
+    gen = _event_generator(state, wrap_payload=False)
+    # Consuming the connected event should have already triggered the callback
+    await gen.__anext__()
+
+    # The flag is set synchronously before yielding the connected event
+    assert state._first_subscriber_triggered is True
+    await asyncio.sleep(0.05)
+    # The background task created by the callback should have been scheduled
+    callback.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_on_first_subscriber_no_callback_set() -> None:
+    """No callback invocation when on_first_subscriber is None."""
+    state = _MockState()
+    # on_first_subscriber is None by default
+    assert state.on_first_subscriber is None
+
+    gen = _event_generator(state, wrap_payload=False)
+    await gen.__anext__()  # consume connected event
+
+    # Flag should not be set because there is no callback
+    assert state._first_subscriber_triggered is False
