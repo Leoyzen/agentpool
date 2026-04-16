@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any
 
+from agentpool import log
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 from agentpool_storage.opencode_provider import helpers
 
+
+logger = log.get_logger(__name__)
 
 if TYPE_CHECKING:
     from fsspec.asyn import AsyncFileSystem
@@ -195,10 +199,26 @@ class ServerState:
         self.background_tasks.clear()
 
     async def broadcast_event(self, event: Event) -> None:
-        """Broadcast an event to all SSE subscribers."""
-        # print(f"Broadcasting event: {event.type} to {len(self.event_subscribers)} subscribers")
-        for queue in self.event_subscribers:
-            await queue.put(event)
+        """Broadcast an event to all SSE subscribers.
+
+        Isolates failures: if one subscriber's queue raises,
+        other subscribers still receive the event.
+
+        Uses put_nowait() instead of await queue.put() to avoid blocking
+        the broadcaster when a subscriber's queue is full. Iterates over
+        a copy of event_subscribers to avoid mutation during iteration
+        (subscribers can be removed by the _event_generator finally block
+        or by error handling below).
+        """
+        for queue in list(self.event_subscribers):  # iterate copy to avoid mutation
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning("SSE subscriber queue full, dropping event")
+            except Exception:  # noqa: BLE001
+                logger.warning("SSE subscriber queue error, removing subscriber")
+                with contextlib.suppress(ValueError):
+                    self.event_subscribers.remove(queue)
 
     async def ensure_session(
         self,

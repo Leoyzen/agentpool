@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -159,7 +160,12 @@ async def _event_generator(
     subscriber_count = len(state.event_subscribers)
     logger.info("SSE: New client connected (total subscribers: %s)", subscriber_count)
 
-    # Trigger first subscriber callback if this is the first connection
+    # Trigger first subscriber callback if this is the first connection.
+    # Race condition analysis: This is safe because:
+    # 1. The append (line above) and len check happen in the same async frame
+    #    (no await between them), so no other coroutine can interleave.
+    # 2. The _first_subscriber_triggered flag prevents double-firing even if
+    #    a subscriber disconnects and reconnects rapidly.
     if (
         subscriber_count == 1
         and not state._first_subscriber_triggered
@@ -184,7 +190,10 @@ async def _event_generator(
             logger.info("SSE: Sending event", event_type=event.type)
             yield {"data": data}
     finally:
-        state.event_subscribers.remove(queue)
+        # Use safe removal: broadcast_event may have already removed this queue
+        # due to error handling. Using discard-style pattern to avoid ValueError.
+        with contextlib.suppress(ValueError):
+            state.event_subscribers.remove(queue)
         logger.info("SSE: Client disconnected", remaining_subscribers=len(state.event_subscribers))
 
 

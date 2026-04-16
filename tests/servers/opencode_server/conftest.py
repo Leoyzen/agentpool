@@ -11,6 +11,8 @@ Provides fixtures for testing the OpenCode server API, including:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 from pathlib import Path
 import tempfile
 from typing import TYPE_CHECKING, Any
@@ -270,6 +272,79 @@ def event_capture(server_state: ServerState) -> EventCapture:
 
     server_state.broadcast_event = capturing_broadcast  # type: ignore[method-assign]
     return capture
+
+
+# =============================================================================
+# SSE Stream Fixtures
+# =============================================================================
+
+
+class SSEStream:
+    r"""Async helper for consuming SSE events from the /global/event endpoint.
+
+    Connects via httpx streaming, parses ``data: {json}\n\n`` lines,
+    and exposes parsed events through an async queue.
+    """
+
+    def __init__(self, client: AsyncClient) -> None:
+        self._client = client
+        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._task: asyncio.Task[None] | None = None
+
+    async def connect(self) -> None:
+        """Connect to SSE endpoint and start consuming events."""
+        self._task = asyncio.create_task(self._consume())
+
+    async def _consume(self) -> None:
+        """Background task that reads SSE events and puts them in queue."""
+        async with self._client.stream("GET", "/global/event") as response:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    event_data = json.loads(line[6:])
+                    await self._queue.put(event_data)
+                elif line.startswith(": "):
+                    continue  # SSE comment / keepalive
+
+    async def next_event(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Get next parsed SSE event with timeout."""
+        return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+
+    async def aclose(self) -> None:
+        """Close the SSE stream."""
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+
+@pytest.fixture
+async def global_event_stream(async_client: AsyncClient) -> AsyncIterator[SSEStream]:
+    """Create an SSE stream consumer for /global/event endpoint.
+
+    Automatically connects and consumes the initial ``server.connected``
+    event before yielding.
+    """
+    stream = SSEStream(async_client)
+    await stream.connect()
+    # Consume the initial server.connected event
+    connected = await stream.next_event(timeout=5.0)
+    assert connected.get("type") == "server.connected"
+    yield stream
+    await stream.aclose()
+
+
+def parse_sse_event(line: str) -> dict[str, Any]:
+    """Parse a single SSE data line into a dict.
+
+    Args:
+        line: Raw SSE line, e.g. ``data: {"type": "server.connected"}``
+
+    Returns:
+        Parsed JSON dict from the data payload.
+    """
+    if line.startswith("data: "):
+        return json.loads(line[6:])
+    return json.loads(line)
 
 
 # =============================================================================
