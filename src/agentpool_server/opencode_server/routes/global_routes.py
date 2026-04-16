@@ -131,10 +131,10 @@ class GlobalEventFactory:
 
 
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
-    """Serialize event, optionally wrapping in payload structure.
+    r"""Serialize event, optionally wrapping in payload structure.
 
     Uses ensure_ascii=False to preserve Unicode characters (Chinese, emoji, etc.)
-    in the JSON output instead of escaping them as \\uXXXX sequences.
+    in the JSON output instead of escaping them as \uXXXX sequences.
     """
     event_data = event.model_dump(by_alias=True, exclude_none=True)
 

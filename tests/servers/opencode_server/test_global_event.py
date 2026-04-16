@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from agentpool_server.opencode_server.models import GlobalEvent
-from agentpool_server.opencode_server.models.events import (
+from agentpool_server.opencode_server.models.events import (  # noqa: TC001
     Event,
     ServerConnectedEvent,
     ServerHeartbeatEvent,
@@ -28,7 +28,7 @@ from agentpool_server.opencode_server.routes.global_routes import (
 
 
 def test_serialize_event_session_id_injection() -> None:
-    """sessionId is injected at top level when event has a session."""
+    """SessionId is injected at top level when event has a session."""
     event = SessionStatusEvent.create(session_id="abc", status_type="busy")
     result = _serialize_event(event, wrap_payload=False)
     data = json.loads(result)
@@ -53,7 +53,7 @@ def test_serialize_event_wrap_payload_true() -> None:
 
 
 def test_serialize_event_unicode_preserved() -> None:
-    """Unicode characters are preserved (not \\uXXXX escaped)."""
+    r"""Unicode characters are preserved (not \uXXXX escaped)."""
     event = SessionStatusEvent.create(session_id="你好", status_type="idle")
     result = _serialize_event(event, wrap_payload=False)
     assert "你好" in result
@@ -86,7 +86,7 @@ def test_global_event_model_construction() -> None:
 
 
 def test_global_event_workspace_omitted_when_none() -> None:
-    """workspace is excluded from output when not provided."""
+    """Workspace is excluded from output when not provided."""
     event = GlobalEvent(directory="/tmp/test", project="abc123", payload={})
     dumped = event.model_dump(by_alias=True, exclude_none=True)
     assert "workspace" not in dumped
@@ -104,7 +104,7 @@ def test_global_event_factory_wrap() -> None:
 
 
 def test_global_event_factory_session_id_in_payload() -> None:
-    """sessionId is injected inside payload by _serialize_event."""
+    """SessionId is injected inside payload by _serialize_event."""
     factory = GlobalEventFactory(directory="/tmp", project="abc")
     event = SessionStatusEvent.create(session_id="sid1", status_type="idle")
     result = factory.wrap(event)
@@ -335,7 +335,7 @@ async def test_event_endpoint_no_payload_wrapper() -> None:
 
 @pytest.mark.anyio
 async def test_event_endpoint_session_id_at_top_level() -> None:
-    """sessionId present at top level for session events."""
+    """SessionId present at top level for session events."""
     state = _MockState()
     session_evt = SessionStatusEvent.create(session_id="bc3", status_type="busy")
     events = await _collect_events(state, wrap_payload=False, events_to_send=[session_evt])
@@ -345,7 +345,7 @@ async def test_event_endpoint_session_id_at_top_level() -> None:
 
 @pytest.mark.anyio
 async def test_event_endpoint_unicode_preserved() -> None:
-    """Unicode characters not escaped as \\uXXXX in /event output."""
+    r"""Unicode characters not escaped as \uXXXX in /event output."""
     state = _MockState()
     session_evt = SessionStatusEvent.create(session_id="会话测试", status_type="idle")
     gen = _event_generator(state, wrap_payload=False)
