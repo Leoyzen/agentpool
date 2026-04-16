@@ -152,6 +152,7 @@ async def _event_generator(
     state: ServerState, *, wrap_payload: bool = False
 ) -> AsyncGenerator[dict[str, Any]]:
     """Generate SSE events."""
+    factory = state.get_event_factory() if wrap_payload else None
     queue: asyncio.Queue[Event] = asyncio.Queue()
     state.event_subscribers.append(queue)
     subscriber_count = len(state.event_subscribers)
@@ -167,15 +168,18 @@ async def _event_generator(
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
     try:
-        # Send initial connected event
+        # Send initial connected event (always bare, no GlobalEvent wrapper)
         connected = ServerConnectedEvent()
-        data = _serialize_event(connected, wrap_payload=wrap_payload)
+        data = _serialize_event(connected, wrap_payload=False)
         logger.info("SSE: Sending connected event", data=data)
         yield {"data": data}
         # Stream events
         while True:
             event = await queue.get()
-            data = _serialize_event(event, wrap_payload=wrap_payload)
+            if factory and not GlobalEventFactory.is_global_only_event(event):
+                data = factory.wrap(event)
+            else:
+                data = _serialize_event(event, wrap_payload=False)
             logger.info("SSE: Sending event", event_type=event.type)
             yield {"data": data}
     finally:
