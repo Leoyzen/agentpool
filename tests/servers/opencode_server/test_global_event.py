@@ -46,6 +46,7 @@ from agentpool_server.opencode_server.models.events import (
     SessionIdleEvent,
     SessionStatusEvent,
     SessionUpdatedEvent,
+    Todo,
     TodoUpdatedEvent,
     TuiCommandExecuteEvent,
     TuiPromptAppendEvent,
@@ -1300,3 +1301,118 @@ async def test_global_health_endpoint_fields(async_client: AsyncClient) -> None:
     data = response.json()
     assert data["healthy"] is True
     assert data["version"] == VERSION
+
+
+# =============================================================================
+# GlobalEvent edge case tests
+# =============================================================================
+
+
+def test_global_event_large_payload() -> None:
+    r"""Large payload (100KB+) serializes and deserializes correctly.
+
+    Uses a TodoUpdatedEvent with a very long todo content string to produce
+    a payload exceeding 100KB. Verifies round-trip correctness via json.loads.
+    """
+    large_text = "A" * 100_000  # 100KB string
+    todo = Todo(id="t1", content=large_text, status="pending", priority="high")
+    event = TodoUpdatedEvent.create(session_id="large-sid", todos=[todo])
+    factory = GlobalEventFactory(directory="/tmp", project="abc")
+    result = factory.wrap(event)
+    data = json.loads(result)
+    # Payload contains the full large text
+    assert data["payload"]["properties"]["todos"][0]["content"] == large_text
+    # Round-trip: re-serialize and re-parse
+    round_tripped = json.loads(json.dumps(data, ensure_ascii=False))
+    assert round_tripped["payload"]["properties"]["todos"][0]["content"] == large_text
+
+
+def test_global_event_special_characters() -> None:
+    r"""Special characters (quotes, backslashes, control chars, emojis) preserved.
+
+    Verifies that characters like '"', '\\', '\n', '\t', and emoji are correctly
+    serialized and deserialized through _serialize_event and GlobalEventFactory.
+    """
+    special_sid = 'sid-with-"quotes"-and-\\backslash\\'
+    event = SessionStatusEvent.create(session_id=special_sid, status_type="busy")
+    result = _serialize_event(event, wrap_payload=False)
+    data = json.loads(result)
+    # sessionId at top level
+    assert data["sessionId"] == special_sid
+    # sessionID inside properties (alias-converted)
+    assert data["properties"]["sessionID"] == special_sid
+
+    # Also test via factory.wrap with emoji and control chars in Todo content
+    emoji_text = "Hello 🔥🚀 world!\n\ttabbed line"
+    todo = Todo(id="t2", content=emoji_text, status="in_progress", priority="medium")
+    event2 = TodoUpdatedEvent.create(session_id="emoji-sid", todos=[todo])
+    factory = GlobalEventFactory(directory="/tmp", project="abc")
+    result2 = factory.wrap(event2)
+    data2 = json.loads(result2)
+    assert data2["payload"]["properties"]["todos"][0]["content"] == emoji_text
+
+
+def test_global_event_workspace_none_omitted() -> None:
+    """Workspace=None is excluded from GlobalEvent via exclude_none=True."""
+    event = GlobalEvent(directory="/tmp/test", project="abc123", payload={"type": "test"})
+    dumped = event.model_dump(by_alias=True, exclude_none=True)
+    assert "workspace" not in dumped
+    assert dumped["directory"] == "/tmp/test"
+    assert dumped["project"] == "abc123"
+
+    # Also verify JSON serialization round-trip
+    json_str = json.dumps(dumped, ensure_ascii=False)
+    parsed = json.loads(json_str)
+    assert "workspace" not in parsed
+
+
+def test_global_event_empty_string_fields() -> None:
+    r"""Empty string sessionId is preserved (not treated as None).
+
+    An empty string is a valid value and should not be excluded by
+    exclude_none=True (which only drops None, not empty strings).
+    """
+    event = SessionStatusEvent.create(session_id="", status_type="idle")
+    result = _serialize_event(event, wrap_payload=False)
+    data = json.loads(result)
+    # sessionId injected at top level
+    assert data["sessionId"] == ""
+    # sessionID inside properties
+    assert data["properties"]["sessionID"] == ""
+
+    # Via factory.wrap
+    factory = GlobalEventFactory(directory="/tmp", project="abc")
+    wrapped = factory.wrap(event)
+    wrapped_data = json.loads(wrapped)
+    assert wrapped_data["payload"]["sessionId"] == ""
+
+
+def test_global_event_unicode_multibyte() -> None:
+    r"""CJK characters and multi-byte emoji sequences are preserved.
+
+    Verifies that characters like 日本語 (Japanese) and complex emoji
+    sequences like 👨‍👩‍👧‍👦 (family emoji, ZWJ sequence) survive
+    serialization round-trip without \uXXXX escaping.
+    """
+    cjk_sid = "会話-日本語-テスト"
+    event = SessionStatusEvent.create(session_id=cjk_sid, status_type="busy")
+    result = _serialize_event(event, wrap_payload=False)
+    # Raw string must contain CJK chars, not \uXXXX escapes
+    assert "日本語" in result
+    assert "テスト" in result
+    assert "\\u" not in result
+
+    # Round-trip via json.loads
+    data = json.loads(result)
+    assert data["sessionId"] == cjk_sid
+
+    # ZWJ emoji in todo content
+    family_emoji = "👨‍👩‍👧‍👦"
+    todo = Todo(id="t3", content=f"Family: {family_emoji}", status="completed", priority="low")
+    event2 = TodoUpdatedEvent.create(session_id=cjk_sid, todos=[todo])
+    factory = GlobalEventFactory(directory="/tmp", project="abc")
+    wrapped = factory.wrap(event2)
+    assert family_emoji in wrapped
+    assert "\\u" not in wrapped
+    wrapped_data = json.loads(wrapped)
+    assert wrapped_data["payload"]["properties"]["todos"][0]["content"] == f"Family: {family_emoji}"
