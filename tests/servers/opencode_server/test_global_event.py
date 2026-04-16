@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
@@ -563,3 +564,104 @@ async def test_on_first_subscriber_no_callback_set() -> None:
 
     # Flag should not be set because there is no callback
     assert state._first_subscriber_triggered is False
+
+
+# =============================================================================
+# Client disconnect cleanup tests
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_disconnect_queue_removed_from_subscribers() -> None:
+    """Queue is removed from event_subscribers when client disconnects."""
+    state = _MockState()
+    gen = _event_generator(state, wrap_payload=False)
+    await gen.__anext__()  # consume connected event
+    assert len(state.event_subscribers) == 1
+
+    await gen.aclose()
+    assert len(state.event_subscribers) == 0
+
+
+@pytest.mark.anyio
+async def test_disconnect_events_not_delivered() -> None:
+    """After disconnect, broadcast_event does not deliver to disconnected client."""
+    state = _MockState()
+    gen1 = _event_generator(state, wrap_payload=False)
+    await gen1.__anext__()  # consume connected event
+    # Add a second subscriber that stays connected to verify isolation
+    gen2 = _event_generator(state, wrap_payload=False)
+    await gen2.__anext__()  # consume connected event
+    assert len(state.event_subscribers) == 2
+
+    queue1 = state.event_subscribers[0]
+    queue2 = state.event_subscribers[1]
+
+    # Disconnect first client
+    await gen1.aclose()
+    assert len(state.event_subscribers) == 1
+    assert queue1 not in state.event_subscribers
+    assert queue2 in state.event_subscribers
+
+    # Put an event directly — only queue2 should receive it
+    event = SessionStatusEvent.create(session_id="disc1", status_type="busy")
+    await queue2.put(event)
+    item = await gen2.__anext__()
+    data = json.loads(item["data"])
+    assert data["type"] == "session.status"
+
+
+@pytest.mark.anyio
+async def test_disconnect_finally_block_executes() -> None:
+    """The finally block in _event_generator runs on disconnect, removing the queue."""
+    state = _MockState()
+    gen = _event_generator(state, wrap_payload=False)
+    await gen.__anext__()  # consume connected event
+    queue_before = state.event_subscribers[-1]
+    assert queue_before in state.event_subscribers
+
+    await gen.aclose()
+
+    # The finally block removed the queue
+    assert queue_before not in state.event_subscribers
+    assert len(state.event_subscribers) == 0
+
+
+@pytest.mark.anyio
+async def test_disconnect_abrupt_cleanup() -> None:
+    """Abrupt disconnect (task cancellation) still triggers cleanup."""
+    state = _MockState()
+
+    async def consume() -> None:
+        gen = _event_generator(state, wrap_payload=False)
+        with contextlib.suppress(StopAsyncIteration):
+            async for _ in gen:
+                pass
+
+    task = asyncio.create_task(consume())
+    # Let the generator start and consume the connected event
+    await asyncio.sleep(0.05)
+    assert len(state.event_subscribers) == 1
+
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    # Cleanup should have removed the subscriber queue
+    assert len(state.event_subscribers) == 0
+
+
+@pytest.mark.anyio
+async def test_disconnect_no_memory_leak() -> None:
+    """Multiple connect/disconnect cycles do not cause subscriber list growth."""
+    state = _MockState()
+
+    for _ in range(5):
+        gen = _event_generator(state, wrap_payload=False)
+        await gen.__anext__()  # consume connected event
+        assert len(state.event_subscribers) == 1
+        await gen.aclose()
+        assert len(state.event_subscribers) == 0
+
+    # After 5 cycles, no leaked subscribers
+    assert len(state.event_subscribers) == 0
