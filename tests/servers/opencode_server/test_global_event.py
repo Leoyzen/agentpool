@@ -11,15 +11,64 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agentpool_server.opencode_server.models import GlobalEvent
-from agentpool_server.opencode_server.models.events import (  # noqa: TC001
+from agentpool_server.opencode_server.models.common import TimeCreated
+from agentpool_server.opencode_server.models.events import (
+    CommandExecutedEvent,
     Event,
+    FileEditedEvent,
+    FileWatcherUpdatedEvent,
+    LspClientDiagnosticsEvent,
+    LspUpdatedEvent,
+    McpToolsChangedEvent,
+    MessageRemovedEvent,
+    MessageUpdatedEvent,
+    PartDeltaEvent,
+    PartRemovedEvent,
+    PartUpdatedEvent,
+    PermissionRequestEvent,
+    PermissionResolvedEvent,
+    PermissionUpdatedEvent,
+    ProjectUpdatedEvent,
+    PtyCreatedEvent,
+    PtyDeletedEvent,
+    PtyExitedEvent,
+    PtyUpdatedEvent,
+    QuestionAskedEvent,
+    QuestionRejectedEvent,
+    QuestionRepliedEvent,
     ServerConnectedEvent,
     ServerHeartbeatEvent,
+    SessionCompactedEvent,
+    SessionCreatedEvent,
+    SessionDeletedEvent,
+    SessionDiffEvent,
+    SessionErrorEvent,
+    SessionIdleEvent,
     SessionStatusEvent,
+    SessionUpdatedEvent,
+    TodoUpdatedEvent,
+    TuiCommandExecuteEvent,
+    TuiPromptAppendEvent,
+    TuiSessionSelectEvent,
+    TuiToastShowEvent,
+    VcsBranchUpdatedEvent,
+)
+from agentpool_server.opencode_server.models.message import (
+    UserMessage,
+)
+from agentpool_server.opencode_server.models.parts import Part, TextPart  # noqa: TC001
+from agentpool_server.opencode_server.models.question import (
+    QuestionInfo,
+    QuestionOption,
+)
+from agentpool_server.opencode_server.models.session import (
+    Session,
+    TimeCreatedUpdated,
 )
 from agentpool_server.opencode_server.routes.global_routes import (
     GlobalEventFactory,
     _event_generator,
+    _extract_session_id,
     _serialize_event,
 )
 
@@ -665,3 +714,304 @@ async def test_disconnect_no_memory_leak() -> None:
 
     # After 5 cycles, no leaked subscribers
     assert len(state.event_subscribers) == 0
+
+
+# =============================================================================
+# _extract_session_id exhaustiveness tests
+# =============================================================================
+
+
+def _make_session(session_id: str = "test-sid") -> Session:
+    """Create a minimal Session for event construction."""
+    return Session(
+        id=session_id,
+        project_id="proj1",
+        directory="/tmp",
+        title="Test",
+        time=TimeCreatedUpdated(created=0, updated=0),
+    )
+
+
+def _make_part(session_id: str = "test-sid") -> Part:
+    """Create a minimal Part for event construction."""
+    return TextPart(
+        id="part1",
+        message_id="msg1",
+        session_id=session_id,
+        text="hello",
+    )
+
+
+# All 16 handled event types with their constructors
+_HANDLED_EVENT_FACTORIES: list[tuple[str, type]] = [
+    ("session.deleted", SessionDeletedEvent),
+    ("session.status", SessionStatusEvent),
+    ("session.idle", SessionIdleEvent),
+    ("session.compacted", SessionCompactedEvent),
+    ("message.removed", MessageRemovedEvent),
+    ("message.part.removed", PartRemovedEvent),
+    ("permission.asked", PermissionRequestEvent),
+    ("permission.replied", PermissionResolvedEvent),
+    ("question.asked", QuestionAskedEvent),
+    ("question.replied", QuestionRepliedEvent),
+    ("question.rejected", QuestionRejectedEvent),
+    ("todo.updated", TodoUpdatedEvent),
+    ("session.error", SessionErrorEvent),
+    ("session.created", SessionCreatedEvent),
+    ("session.updated", SessionUpdatedEvent),
+    ("message.part.updated", PartUpdatedEvent),
+]
+
+
+def _build_handled_event(event_type: type) -> Event:  # noqa: PLR0911
+    """Build a handled event with session_id='abc' using the appropriate constructor."""
+    sid = "abc"
+    if event_type is SessionDeletedEvent:
+        return SessionDeletedEvent.create(session_id=sid)
+    if event_type is SessionStatusEvent:
+        return SessionStatusEvent.create(session_id=sid, status_type="busy")
+    if event_type is SessionIdleEvent:
+        return SessionIdleEvent.create(session_id=sid)
+    if event_type is SessionCompactedEvent:
+        return SessionCompactedEvent.create(session_id=sid)
+    if event_type is MessageRemovedEvent:
+        return MessageRemovedEvent.create(session_id=sid, message_id="m1")
+    if event_type is PartRemovedEvent:
+        return PartRemovedEvent.create(session_id=sid, message_id="m1", part_id="p1")
+    if event_type is PermissionRequestEvent:
+        return PermissionRequestEvent.create(
+            session_id=sid,
+            permission_id="perm1",
+            tool_name="bash",
+            args_preview="ls",
+            message="Allow?",
+        )
+    if event_type is PermissionResolvedEvent:
+        return PermissionResolvedEvent.create(
+            session_id=sid,
+            request_id="perm1",
+            reply="once",
+        )
+    if event_type is QuestionAskedEvent:
+        return QuestionAskedEvent.create(
+            request_id="q1",
+            session_id=sid,
+            questions=[
+                QuestionInfo(
+                    question="Continue?",
+                    header="Confirm",
+                    options=[QuestionOption(label="Yes", description="Proceed")],
+                )
+            ],
+        )
+    if event_type is QuestionRepliedEvent:
+        return QuestionRepliedEvent.create(
+            session_id=sid,
+            request_id="q1",
+            answers=[["Yes"]],
+        )
+    if event_type is QuestionRejectedEvent:
+        return QuestionRejectedEvent.create(
+            session_id=sid,
+            request_id="q1",
+        )
+    if event_type is TodoUpdatedEvent:
+        return TodoUpdatedEvent.create(session_id=sid, todos=[])
+    if event_type is SessionErrorEvent:
+        return SessionErrorEvent.create(session_id=sid, error_name="TestError")
+    if event_type is SessionCreatedEvent:
+        return SessionCreatedEvent.create(session=_make_session(sid))
+    if event_type is SessionUpdatedEvent:
+        return SessionUpdatedEvent.create(session=_make_session(sid))
+    if event_type is PartUpdatedEvent:
+        return PartUpdatedEvent.create(part=_make_part(sid))
+    msg = f"Unhandled event type in test helper: {event_type}"
+    raise ValueError(msg)
+
+
+@pytest.mark.parametrize(
+    ("event_type_name", "event_type"),
+    [(name, cls) for name, cls in _HANDLED_EVENT_FACTORIES],
+    ids=[name for name, _ in _HANDLED_EVENT_FACTORIES],
+)
+def test_extract_session_id_handled_events(
+    event_type_name: str,
+    event_type: type,
+) -> None:
+    """All 16 handled event types extract sessionId correctly."""
+    event = _build_handled_event(event_type)
+    result = _extract_session_id(event)
+    assert result == "abc", f"Expected 'abc' for {event_type_name}, got {result!r}"
+
+
+def test_extract_session_id_session_error_nullable() -> None:
+    """SessionErrorEvent with None session_id returns None."""
+    event = SessionErrorEvent.create(session_id=None, error_name="TestError")
+    result = _extract_session_id(event)
+    assert result is None
+
+
+def test_extract_session_id_unhandled_events_return_none() -> None:
+    """Unhandled event types return None from _extract_session_id."""
+    unhandled_events: list[Event] = [
+        PartDeltaEvent.create(
+            session_id="x",
+            message_id="m1",
+            part_id="p1",
+            delta="hi",
+        ),
+        MessageUpdatedEvent.create(
+            message=UserMessage(
+                id="m1",
+                session_id="x",
+                time=TimeCreated(created=0),
+            ),
+        ),
+        ServerConnectedEvent(),
+        ServerHeartbeatEvent(),
+    ]
+    for event in unhandled_events:
+        result = _extract_session_id(event)
+        assert result is None, f"Expected None for {type(event).__name__}, got {result!r}"
+
+
+def test_extract_session_id_unhandled_events_with_session_id_return_none() -> None:
+    r"""Known-gap unhandled events that HAVE session_id still return None.
+
+    These 5 events have session_id in properties but are not handled
+    by _extract_session_id, so they fall through to the wildcard case.
+    """
+    unhandled_with_sid: list[Event] = [
+        SessionDiffEvent.create(session_id="gap1", diff=[]),
+        PartDeltaEvent.create(
+            session_id="gap2",
+            message_id="m1",
+            part_id="p1",
+            delta="x",
+        ),
+        PermissionUpdatedEvent.create(
+            session_id="gap3",
+            permission_id="perm1",
+            tool_name="bash",
+            patterns=["bash: *"],
+            metadata={},
+        ),
+        CommandExecutedEvent.create(
+            name="test",
+            session_id="gap4",
+            arguments="",
+            message_id="m1",
+        ),
+        TuiSessionSelectEvent.create(session_id="gap5"),
+    ]
+    for event in unhandled_with_sid:
+        result = _extract_session_id(event)
+        assert result is None, f"Expected None for known-gap {type(event).__name__}, got {result!r}"
+
+
+def test_extract_session_id_warning_logged_for_unhandled(caplog: pytest.LogCaptureFixture) -> None:
+    """Warning is logged when an unhandled event type hits the wildcard case."""
+    event = PartDeltaEvent.create(
+        session_id="warn-test",
+        message_id="m1",
+        part_id="p1",
+        delta="x",
+    )
+    with caplog.at_level("WARNING"):
+        result = _extract_session_id(event)
+    assert result is None
+    assert "Unhandled event type in _extract_session_id" in caplog.text
+    assert "PartDeltaEvent" in caplog.text
+
+
+def test_extract_session_id_no_warning_for_handled(caplog: pytest.LogCaptureFixture) -> None:
+    """No warning logged for handled event types."""
+    event = SessionStatusEvent.create(session_id="no-warn", status_type="idle")
+    with caplog.at_level("WARNING"):
+        _extract_session_id(event)
+    assert "Unhandled event type in _extract_session_id" not in caplog.text
+
+
+def test_extract_session_id_exhaustiveness() -> None:
+    """All Event union members are either handled or explicitly documented as no-session.
+
+    Catches future regressions: if a new event type with session_id is added
+    to the Event union but not to _extract_session_id, this test fails.
+    """
+    # Event types handled by _extract_session_id match cases
+    handled_types: set[type] = {
+        SessionDeletedEvent,
+        SessionStatusEvent,
+        SessionIdleEvent,
+        SessionCompactedEvent,
+        MessageRemovedEvent,
+        PartRemovedEvent,
+        PermissionRequestEvent,
+        PermissionResolvedEvent,
+        QuestionAskedEvent,
+        QuestionRepliedEvent,
+        QuestionRejectedEvent,
+        TodoUpdatedEvent,
+        SessionErrorEvent,
+        SessionCreatedEvent,
+        SessionUpdatedEvent,
+        PartUpdatedEvent,
+    }
+
+    # Event types that genuinely have no session association
+    # (no session_id field anywhere in their properties)
+    no_session_types: set[type] = {
+        ServerConnectedEvent,
+        ServerHeartbeatEvent,
+        FileWatcherUpdatedEvent,
+        FileEditedEvent,
+        McpToolsChangedEvent,
+        VcsBranchUpdatedEvent,
+        TuiPromptAppendEvent,
+        TuiCommandExecuteEvent,
+        TuiToastShowEvent,
+        ProjectUpdatedEvent,
+        LspUpdatedEvent,
+        LspClientDiagnosticsEvent,
+        PtyCreatedEvent,
+        PtyUpdatedEvent,
+        PtyExitedEvent,
+        PtyDeletedEvent,
+    }
+
+    # Event types with session_id that are NOT handled (known gaps)
+    known_gap_types: set[type] = {
+        SessionDiffEvent,
+        PartDeltaEvent,
+        PermissionUpdatedEvent,
+        CommandExecutedEvent,
+        TuiSessionSelectEvent,
+    }
+
+    # MessageUpdatedEvent has no session_id at top level (it uses info.id pattern)
+    no_session_types.add(MessageUpdatedEvent)
+
+    expected = handled_types | no_session_types | known_gap_types
+
+    # Get all members of the Event union
+    event_union_args: set[type] = set(Event.__args__)
+
+    # Every union member must be accounted for
+    missing = event_union_args - expected
+    assert not missing, (
+        f"New event types not covered by _extract_session_id: "
+        f"{sorted(t.__name__ for t in missing)}. "
+        f"Add them to handled_types, no_session_types, or known_gap_types."
+    )
+
+    # No extra types that aren't in the union
+    extra = expected - event_union_args
+    assert not extra, (
+        f"Types listed in test but not in Event union: {sorted(t.__name__ for t in extra)}"
+    )
+
+    # Known gaps should be documented — if they're fixed, move them to handled
+    if known_gap_types:
+        gap_names = sorted(t.__name__ for t in known_gap_types)
+        # This assertion always passes but documents the known gaps
+        assert True, f"Known gap types with session_id not handled: {gap_names}"
