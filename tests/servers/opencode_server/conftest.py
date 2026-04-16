@@ -30,8 +30,8 @@ from agentpool_server.opencode_server.dependencies import get_state
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.routes import agent_router, file_router, session_router
+from agentpool_server.opencode_server.routes.global_routes import router as global_router
 from agentpool_server.opencode_server.state import ServerState
-from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 if TYPE_CHECKING:
@@ -212,6 +212,7 @@ def app(server_state: ServerState) -> FastAPI:
     app.include_router(session_router)
     app.include_router(file_router)
     app.include_router(agent_router)
+    app.include_router(global_router)
     app.dependency_overrides[get_state] = lambda: server_state
     return app
 

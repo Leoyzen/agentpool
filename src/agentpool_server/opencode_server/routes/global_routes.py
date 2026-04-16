@@ -95,6 +95,7 @@ def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
 
         # Events without session_id return None
         case _:
+            logger.warning("Unhandled event type in _extract_session_id: %s", type(event).__name__)
             return None
 
 
