@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from typing import Any
 
 import pytest
 
 from agentpool_server.opencode_server.models import GlobalEvent
 from agentpool_server.opencode_server.models.events import (
+    Event,
     ServerConnectedEvent,
     ServerHeartbeatEvent,
     SessionStatusEvent,
 )
 from agentpool_server.opencode_server.routes.global_routes import (
     GlobalEventFactory,
+    _event_generator,
     _serialize_event,
 )
 
@@ -139,3 +143,218 @@ def test_global_event_factory_wrap_returns_string() -> None:
     event = ServerHeartbeatEvent()
     result = factory.wrap(event)
     assert isinstance(result, str)
+
+
+# =============================================================================
+# _event_generator integration tests
+# =============================================================================
+
+
+class _MockState:
+    """Minimal ServerState-like object for _event_generator tests."""
+
+    def __init__(self, working_dir: str = "/tmp/test_wd") -> None:
+        self.working_dir = working_dir
+        self.event_subscribers: list[asyncio.Queue[Event]] = []
+        self._event_factory: GlobalEventFactory | None = None
+        self._first_subscriber_triggered = False
+        self.on_first_subscriber: Any = None
+
+    def get_event_factory(self) -> GlobalEventFactory:
+        if self._event_factory is None:
+            from agentpool_storage.opencode_provider import helpers
+
+            self._event_factory = GlobalEventFactory(
+                directory=self.working_dir,
+                project=helpers.compute_project_id(self.working_dir),
+            )
+        return self._event_factory
+
+    def create_background_task(self, coro: Any, name: str = "") -> asyncio.Task[Any]:
+        return asyncio.ensure_future(coro)
+
+
+async def _collect_events(
+    state: _MockState,
+    wrap_payload: bool,
+    events_to_send: list[Event],
+) -> list[dict[str, Any]]:
+    """Collect SSE items from _event_generator with given events."""
+    results: list[dict[str, Any]] = []
+    gen = _event_generator(state, wrap_payload=wrap_payload)
+    # Get the initial connected event
+    item = await gen.__anext__()
+    results.append(json.loads(item["data"]))
+    # Send additional events through the queue
+    queue = state.event_subscribers[-1]
+    for event in events_to_send:
+        await queue.put(event)
+        item = await gen.__anext__()
+        results.append(json.loads(item["data"]))
+    return results
+
+
+@pytest.mark.anyio
+async def test_global_event_server_connected_is_bare() -> None:
+    """First event from /global/event is bare server.connected (no wrapper)."""
+    state = _MockState()
+    events = await _collect_events(state, wrap_payload=True, events_to_send=[])
+    # Only the connected event
+    assert len(events) == 1
+    connected = events[0]
+    assert connected["type"] == "server.connected"
+    # Bare: no directory/project/payload keys
+    assert "directory" not in connected
+    assert "project" not in connected
+    assert "payload" not in connected
+
+
+@pytest.mark.anyio
+async def test_global_event_wraps_regular_events_in_envelope() -> None:
+    """/global/event wraps SessionStatusEvent in GlobalEvent envelope."""
+    state = _MockState()
+    session_evt = SessionStatusEvent.create(session_id="s1", status_type="busy")
+    events = await _collect_events(state, wrap_payload=True, events_to_send=[session_evt])
+    assert len(events) == 2
+    wrapped = events[1]
+    assert "directory" in wrapped
+    assert "project" in wrapped
+    assert "payload" in wrapped
+    assert wrapped["payload"]["type"] == "session.status"
+
+
+@pytest.mark.anyio
+async def test_global_event_heartbeat_is_bare() -> None:
+    """/global/event sends ServerHeartbeatEvent as bare JSON (no wrapper)."""
+    state = _MockState()
+    hb = ServerHeartbeatEvent()
+    events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
+    assert len(events) == 2
+    heartbeat = events[1]
+    assert heartbeat["type"] == "server.heartbeat"
+    # Bare: no envelope keys
+    assert "directory" not in heartbeat
+    assert "project" not in heartbeat
+    assert "payload" not in heartbeat
+
+
+@pytest.mark.anyio
+async def test_event_endpoint_all_events_are_bare() -> None:
+    """/event sends connected, heartbeat, and session events all as bare."""
+    state = _MockState()
+    hb = ServerHeartbeatEvent()
+    session_evt = SessionStatusEvent.create(session_id="s2", status_type="idle")
+    events = await _collect_events(state, wrap_payload=False, events_to_send=[hb, session_evt])
+    assert len(events) == 3
+    for evt in events:
+        # None should have envelope wrapper keys
+        assert "directory" not in evt
+        assert "project" not in evt
+        assert "payload" not in evt
+    assert events[0]["type"] == "server.connected"
+    assert events[1]["type"] == "server.heartbeat"
+    assert events[2]["type"] == "session.status"
+
+
+@pytest.mark.anyio
+async def test_global_events_have_no_session_id() -> None:
+    """ServerConnectedEvent and ServerHeartbeatEvent lack sessionId."""
+    state = _MockState()
+    hb = ServerHeartbeatEvent()
+    events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
+    assert "sessionId" not in events[0]  # server.connected
+    assert "sessionId" not in events[1]  # server.heartbeat
+
+
+@pytest.mark.anyio
+async def test_global_event_directory_matches_working_dir() -> None:
+    """Envelope directory field matches state.working_dir."""
+    wd = "/custom/working/dir"
+    state = _MockState(working_dir=wd)
+    session_evt = SessionStatusEvent.create(session_id="s3", status_type="retry")
+    events = await _collect_events(state, wrap_payload=True, events_to_send=[session_evt])
+    wrapped = events[1]
+    assert wrapped["directory"] == wd
+
+
+@pytest.mark.anyio
+async def test_multiple_events_maintain_correct_wrapping() -> None:
+    """Sequence of wrapped/bare/wrapped events all have correct format."""
+    state = _MockState()
+    session_evt = SessionStatusEvent.create(session_id="s4", status_type="busy")
+    hb = ServerHeartbeatEvent()
+    session_evt2 = SessionStatusEvent.create(session_id="s5", status_type="idle")
+    events = await _collect_events(
+        state,
+        wrap_payload=True,
+        events_to_send=[session_evt, hb, session_evt2],
+    )
+    assert len(events) == 4
+    # [0] connected — bare
+    assert events[0]["type"] == "server.connected"
+    assert "payload" not in events[0]
+    # [1] session status — wrapped
+    assert "payload" in events[1]
+    assert events[1]["payload"]["type"] == "session.status"
+    # [2] heartbeat — bare
+    assert events[2]["type"] == "server.heartbeat"
+    assert "payload" not in events[2]
+    # [3] session status — wrapped
+    assert "payload" in events[3]
+    assert events[3]["payload"]["type"] == "session.status"
+
+
+# =============================================================================
+# /event endpoint backward compatibility tests
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_event_endpoint_no_global_event_fields() -> None:
+    """wrap_payload=False events have no directory/project/workspace."""
+    state = _MockState()
+    session_evt = SessionStatusEvent.create(session_id="bc1", status_type="busy")
+    events = await _collect_events(state, wrap_payload=False, events_to_send=[session_evt])
+    for evt in events:
+        assert "directory" not in evt
+        assert "project" not in evt
+        assert "workspace" not in evt
+
+
+@pytest.mark.anyio
+async def test_event_endpoint_no_payload_wrapper() -> None:
+    """No payload wrapper key; event data is at top level."""
+    state = _MockState()
+    session_evt = SessionStatusEvent.create(session_id="bc2", status_type="idle")
+    events = await _collect_events(state, wrap_payload=False, events_to_send=[session_evt])
+    session_data = events[1]
+    assert "payload" not in session_data
+    # Event fields directly at top level
+    assert session_data["type"] == "session.status"
+
+
+@pytest.mark.anyio
+async def test_event_endpoint_session_id_at_top_level() -> None:
+    """sessionId present at top level for session events."""
+    state = _MockState()
+    session_evt = SessionStatusEvent.create(session_id="bc3", status_type="busy")
+    events = await _collect_events(state, wrap_payload=False, events_to_send=[session_evt])
+    session_data = events[1]
+    assert session_data["sessionId"] == "bc3"
+
+
+@pytest.mark.anyio
+async def test_event_endpoint_unicode_preserved() -> None:
+    """Unicode characters not escaped as \\uXXXX in /event output."""
+    state = _MockState()
+    session_evt = SessionStatusEvent.create(session_id="会话测试", status_type="idle")
+    gen = _event_generator(state, wrap_payload=False)
+    # Consume connected event
+    await gen.__anext__()
+    # Send unicode session event
+    queue = state.event_subscribers[-1]
+    await queue.put(session_evt)
+    item = await gen.__anext__()
+    raw_data = item["data"]
+    assert "会话测试" in raw_data
+    assert "\\u" not in raw_data
