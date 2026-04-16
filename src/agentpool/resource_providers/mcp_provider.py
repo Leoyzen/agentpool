@@ -443,8 +443,12 @@ class MCPResourceProvider(ResourceProvider):
                     if resource_path not in ("SKILL.md", "_manifest"):
                         continue
 
-                    # Get skill description from SKILL.md (lightweight - just frontmatter)
-                    # Instructions are lazy-loaded when load_instructions() is called
+                    # Preserve original skill name from MCP resource URI.
+                    # FastMCP uses directory names as-is for skill identifiers,
+                    # which may contain underscores. The Skill model's field_validator
+                    # normalizes name to kebab-case (replacing _ with -), so we store
+                    # the original name in metadata for constructing read_resource URIs
+                    # that match what the MCP server recognizes.
                     main_uri = f"skill://{skill_name}/SKILL.md"
                     description = await self._get_skill_description(skill_name, main_uri)
 
@@ -462,7 +466,7 @@ class MCPResourceProvider(ResourceProvider):
                         metadata={
                             "skill_type": "resource",
                             "provider": self.name,
-                            "main_uri": uri,
+                            "original_name": skill_name,
                             "resource_name": resource.name,
                         },
                     )
@@ -571,7 +575,8 @@ class MCPResourceProvider(ResourceProvider):
             return await self._get_prompt_skill_instructions(prompt, args)
 
         if skill_type == "resource":
-            return await self._get_resource_skill_instructions(skill_name)
+            original_name = skill.metadata.get("original_name", skill_name)
+            return await self._get_resource_skill_instructions(original_name)
 
         # Unknown skill type
         raise SkillNotFoundError(skill_name)
@@ -605,7 +610,9 @@ class MCPResourceProvider(ResourceProvider):
         """Read resource-based skill content.
 
         Args:
-            skill_name: Name of the skill
+            skill_name: Name of the skill (must match the MCP server's
+                resource URI, i.e., the original directory name with
+                underscores preserved)
 
         Returns:
             SKILL.md content as string
@@ -715,8 +722,9 @@ class MCPResourceProvider(ResourceProvider):
         if ".." in decoded_path.split("/") or decoded_path.startswith("/"):
             raise SecurityError(f"Path traversal detected: {ref_path}")
 
-        # Construct the full URI
-        uri = f"skill://{skill_name}/references/{decoded_path}"
+        # Construct the full URI with provider name
+        # Format: skill://{provider}/{skill_name}/references/{path}
+        uri = f"skill://{self.name}/{skill_name}/references/{decoded_path}"
 
         try:
             content = await self.read_resource(uri)

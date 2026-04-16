@@ -204,26 +204,37 @@ def _validate_provider_name(name: str) -> str:
 
 
 def _validate_skill_name(name: str) -> str:
-    """Validate a skill name following Skill model rules.
+    """Validate a skill name following Agent Skills Spec.
 
     Skill names must:
     - Be lowercase
-    - Be alphanumeric with hyphens only
+    - Be alphanumeric with hyphens only (kebab-case)
     - Not start or end with hyphen
     - Not contain consecutive hyphens
     - Be non-empty
+
+    Underscores are automatically normalized to hyphens per spec.
 
     Args:
         name: Skill name to validate
 
     Returns:
-        Normalized skill name
+        Normalized skill name (underscores replaced with hyphens)
 
     Raises:
         SecurityError: If skill name is invalid
     """
     # Normalize unicode
     normalized = unicodedata.normalize("NFKC", name.strip())
+
+    # Check for null bytes BEFORE normalization (security-sensitive check)
+    if "\x00" in normalized:
+        msg = "Skill name contains null bytes"
+        raise SecurityError(msg)
+
+    # Normalize underscores to hyphens per Agent Skills Spec (kebab-case).
+    # The spec mandates "lowercase letters, numbers, and hyphens only".
+    normalized = normalized.replace("_", "-")
 
     if not normalized:
         msg = "Skill name must be non-empty"
@@ -241,14 +252,36 @@ def _validate_skill_name(name: str) -> str:
         msg = "Skill name cannot contain consecutive hyphens"
         raise SecurityError(msg)
 
-    if not all(c.isalnum() or c in "-_" for c in normalized):
+    if not all(c.isalnum() or c == "-" for c in normalized):
         msg = (
             f"Skill name {normalized!r} contains invalid characters. "
-            "Only lowercase letters, digits, hyphens, and underscores are allowed."
+            "Only lowercase letters, digits, and hyphens are allowed."
         )
         raise SecurityError(msg)
 
     return normalized
+
+
+def _name_alternatives(name: str) -> list[str]:
+    """Generate alternative skill names by swapping - and _.
+
+    MCP servers (e.g., FastMCP) use directory names as-is for skill
+    identifiers, which may contain underscores. Models calling load_skill
+    often use kebab-case by convention. This function generates the
+    alternative form so the resolver can find the skill regardless of
+    which convention the caller uses.
+
+    Args:
+        name: The original skill name
+
+    Returns:
+        List of alternative names (empty if name has no - or _)
+    """
+    if "_" in name:
+        return [name.replace("_", "-")]
+    if "-" in name:
+        return [name.replace("-", "_")]
+    return []
 
 
 class SkillURIResolver:
@@ -292,6 +325,11 @@ class SkillURIResolver:
     async def resolve(self, uri: str) -> Skill:
         """Resolve a skill URI to a Skill instance.
 
+        Supports both full URIs with provider and provider-less URIs:
+        - skill://provider/skill-name - Full URI with explicit provider
+        - skill://provider/skill-name/references/file.md - Full URI with reference
+        - skill://skill-name/references/file.md - Provider-less URI (searches all providers)
+
         Args:
             uri: The skill URI to resolve
 
@@ -312,11 +350,61 @@ class SkillURIResolver:
                 for skill in skills:
                     if skill.name == resolved.skill_name:
                         return skill
+            # Fuzzy match: try swapping - and _ in the skill name
+            for alt_name in _name_alternatives(resolved.skill_name):
+                for provider in self._providers.values():
+                    skills = await provider.get_skills()
+                    for skill in skills:
+                        if skill.name == alt_name:
+                            return skill
             msg = f"Skill {resolved.skill_name!r} not found in any provider"
             raise SkillNotFoundError(msg)
 
         # Look up specific provider
         if resolved.provider not in self._providers:
+            # Provider not found - try fallback for provider-less URIs
+            # This handles URIs like: skill://skill-name/references/file.md
+            # where user omitted the provider
+            potential_skill_name = resolved.provider
+            potential_ref_path = (
+                f"{resolved.skill_name}/{resolved.reference_path}"
+                if resolved.reference_path
+                else resolved.skill_name
+            )
+
+            # Search all providers for this skill
+            for provider in self._providers.values():
+                skills = await provider.get_skills()
+                for skill in skills:
+                    if skill.name == potential_skill_name:
+                        # Found the skill - return it with adjusted reference path
+                        # Store the resolved reference path in the skill's metadata
+                        # for later use by _load_reference_content
+                        skill._resolved_reference_path = potential_ref_path  # type: ignore[attr-defined]
+                        return skill
+
+            # Fallback: maybe the skill_name is actually the skill and reference is combined
+            # This handles: skill://skill-name/subdir/file.md (no "references" prefix)
+            potential_skill_name2 = resolved.provider
+            potential_ref_path2 = (
+                (
+                    f"{resolved.skill_name}/{resolved.reference_path}"
+                    if resolved.reference_path
+                    else resolved.skill_name
+                )
+                if resolved.skill_name
+                else None
+            )
+
+            if potential_ref_path2:
+                for provider in self._providers.values():
+                    skills = await provider.get_skills()
+                    for skill in skills:
+                        if skill.name == potential_skill_name2:
+                            skill._resolved_reference_path = potential_ref_path2  # type: ignore[attr-defined]
+                            return skill
+                            return skill
+
             msg = f"Provider {resolved.provider!r} not registered"
             raise ValueError(msg)
 
@@ -326,6 +414,12 @@ class SkillURIResolver:
         for skill in skills:
             if skill.name == resolved.skill_name:
                 return skill
+
+        # Fuzzy match: try swapping - and _ in the skill name
+        for alt_name in _name_alternatives(resolved.skill_name):
+            for skill in skills:
+                if skill.name == alt_name:
+                    return skill
 
         msg = f"Skill {resolved.skill_name!r} not found in provider {resolved.provider!r}"
         raise SkillNotFoundError(msg)
