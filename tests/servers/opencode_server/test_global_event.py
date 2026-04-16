@@ -1015,3 +1015,157 @@ def test_extract_session_id_exhaustiveness() -> None:
         gap_names = sorted(t.__name__ for t in known_gap_types)
         # This assertion always passes but documents the known gaps
         assert True, f"Known gap types with session_id not handled: {gap_names}"
+
+
+# =============================================================================
+# Concurrent subscriber tests
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_concurrent_two_subscribers_both_receive_events() -> None:
+    """Two SSE clients both receive a broadcast event."""
+    state = _MockState()
+
+    gen1 = _event_generator(state, wrap_payload=True)
+    gen2 = _event_generator(state, wrap_payload=True)
+
+    # Consume initial connected events
+    await gen1.__anext__()
+    await gen2.__anext__()
+
+    assert len(state.event_subscribers) == 2
+
+    # Broadcast event to both subscribers via their queues
+    event = SessionStatusEvent.create(session_id="s_concurrent", status_type="busy")
+    queue1 = state.event_subscribers[0]
+    queue2 = state.event_subscribers[1]
+    await queue1.put(event)
+    await queue2.put(event)
+
+    item1 = await gen1.__anext__()
+    item2 = await gen2.__anext__()
+
+    data1 = json.loads(item1["data"])
+    data2 = json.loads(item2["data"])
+
+    assert data1["payload"]["type"] == "session.status"
+    assert data2["payload"]["type"] == "session.status"
+    assert data1["payload"]["sessionId"] == "s_concurrent"
+    assert data2["payload"]["sessionId"] == "s_concurrent"
+
+
+@pytest.mark.anyio
+async def test_concurrent_subscribers_receive_same_content() -> None:
+    """Both subscribers get identical GlobalEvent envelopes."""
+    state = _MockState()
+
+    gen1 = _event_generator(state, wrap_payload=True)
+    gen2 = _event_generator(state, wrap_payload=True)
+
+    await gen1.__anext__()
+    await gen2.__anext__()
+
+    event = SessionStatusEvent.create(session_id="s_same", status_type="idle")
+    queue1 = state.event_subscribers[0]
+    queue2 = state.event_subscribers[1]
+    await queue1.put(event)
+    await queue2.put(event)
+
+    item1 = await gen1.__anext__()
+    item2 = await gen2.__anext__()
+
+    # Both envelopes must have identical directory, project, and payload
+    data1 = json.loads(item1["data"])
+    data2 = json.loads(item2["data"])
+
+    assert data1["directory"] == data2["directory"]
+    assert data1["project"] == data2["project"]
+    assert data1["payload"] == data2["payload"]
+
+
+@pytest.mark.anyio
+async def test_concurrent_event_ordering_preserved() -> None:
+    """Broadcast 3 events; each subscriber receives them in order."""
+    state = _MockState()
+
+    gen1 = _event_generator(state, wrap_payload=True)
+    gen2 = _event_generator(state, wrap_payload=True)
+
+    await gen1.__anext__()
+    await gen2.__anext__()
+
+    queue1 = state.event_subscribers[0]
+    queue2 = state.event_subscribers[1]
+
+    events = [
+        SessionStatusEvent.create(session_id="ord1", status_type="busy"),
+        SessionStatusEvent.create(session_id="ord2", status_type="idle"),
+        SessionStatusEvent.create(session_id="ord3", status_type="retry"),
+    ]
+
+    for ev in events:
+        await queue1.put(ev)
+        await queue2.put(ev)
+
+    # Collect all 3 events from each subscriber
+    received1 = [json.loads((await gen1.__anext__())["data"]) for _ in range(3)]
+    received2 = [json.loads((await gen2.__anext__())["data"]) for _ in range(3)]
+
+    expected_order = ["ord1", "ord2", "ord3"]
+    ids1 = [r["payload"]["sessionId"] for r in received1]
+    ids2 = [r["payload"]["sessionId"] for r in received2]
+
+    assert ids1 == expected_order
+    assert ids2 == expected_order
+
+
+@pytest.mark.anyio
+async def test_concurrent_subscriber_receives_after_another_disconnects() -> None:
+    """Subscriber B still receives events after subscriber A disconnects."""
+    state = _MockState()
+
+    gen_a = _event_generator(state, wrap_payload=True)
+    gen_b = _event_generator(state, wrap_payload=True)
+
+    await gen_a.__anext__()
+    await gen_b.__anext__()
+
+    assert len(state.event_subscribers) == 2
+
+    # Disconnect subscriber A
+    await gen_a.aclose()
+    assert len(state.event_subscribers) == 1
+
+    # Send event only to remaining subscriber B's queue
+    event = SessionStatusEvent.create(session_id="s_survive", status_type="busy")
+    queue_b = state.event_subscribers[0]
+    await queue_b.put(event)
+
+    item_b = await gen_b.__anext__()
+    data_b = json.loads(item_b["data"])
+
+    assert data_b["payload"]["type"] == "session.status"
+    assert data_b["payload"]["sessionId"] == "s_survive"
+
+
+@pytest.mark.anyio
+async def test_concurrent_all_get_server_connected() -> None:
+    """Each subscriber gets the initial bare server.connected event."""
+    state = _MockState()
+
+    gen1 = _event_generator(state, wrap_payload=True)
+    gen2 = _event_generator(state, wrap_payload=True)
+    gen3 = _event_generator(state, wrap_payload=True)
+
+    item1 = await gen1.__anext__()
+    item2 = await gen2.__anext__()
+    item3 = await gen3.__anext__()
+
+    for item in [item1, item2, item3]:
+        data = json.loads(item["data"])
+        assert data["type"] == "server.connected"
+        # Bare event: no GlobalEvent wrapper keys
+        assert "directory" not in data
+        assert "project" not in data
+        assert "payload" not in data
