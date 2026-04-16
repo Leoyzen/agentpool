@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -72,6 +72,10 @@ from agentpool_server.opencode_server.routes.global_routes import (
     _serialize_event,
 )
 from agentpool_server.opencode_server.state import ServerState
+
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 
 # =============================================================================
@@ -1270,3 +1274,29 @@ async def test_broadcast_event_queue_full_dropped() -> None:
 
     # Good queue should have received the event
     assert good_queue.get_nowait() is event
+
+
+# =============================================================================
+# /global/health endpoint tests
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_global_health_endpoint(async_client: AsyncClient) -> None:
+    """GET /global/health returns 200 with HealthResponse body."""
+    response = await async_client.get("/global/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["healthy"] is True
+    assert "version" in data
+
+
+@pytest.mark.anyio
+async def test_global_health_endpoint_fields(async_client: AsyncClient) -> None:
+    """GET /global/health returns correct healthy and version fields."""
+    from agentpool_server.opencode_server.routes.global_routes import VERSION
+
+    response = await async_client.get("/global/health")
+    data = response.json()
+    assert data["healthy"] is True
+    assert data["version"] == VERSION
