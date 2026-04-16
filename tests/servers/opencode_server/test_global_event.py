@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -20,6 +20,10 @@ from agentpool_server.opencode_server.routes.global_routes import (
     _event_generator,
     _serialize_event,
 )
+
+
+if TYPE_CHECKING:
+    from agentpool_server.opencode_server.state import ServerState
 
 
 # =============================================================================
@@ -358,3 +362,109 @@ async def test_event_endpoint_unicode_preserved() -> None:
     raw_data = item["data"]
     assert "会话测试" in raw_data
     assert "\\u" not in raw_data
+
+
+# =============================================================================
+# SSE integration tests for /global/event
+# =============================================================================
+
+
+async def _collect_real_events(
+    state: ServerState,
+    wrap_payload: bool,
+    events_to_send: list[Event],
+) -> list[dict[str, Any]]:
+    """Collect SSE items from _event_generator with real ServerState."""
+    results: list[dict[str, Any]] = []
+    gen = _event_generator(state, wrap_payload=wrap_payload)
+    # Get the initial connected event
+    item = await gen.__anext__()
+    results.append(json.loads(item["data"]))
+    # Send additional events through the real broadcast system
+    for event in events_to_send:
+        await state.broadcast_event(event)
+        # Yield control so the event can propagate through subscriber queues
+        await asyncio.sleep(0.01)
+        item = await gen.__anext__()
+        results.append(json.loads(item["data"]))
+    return results
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_integration_envelope_fields(
+    server_state: ServerState,
+) -> None:
+    """Test /global/event returns SSE with GlobalEvent envelope."""
+    event = SessionStatusEvent.create(session_id="s1", status_type="busy")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    assert len(results) == 2
+    received = results[1]
+    assert "directory" in received
+    assert "project" in received
+    assert "payload" in received
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_integration_directory_matches_working_dir(
+    server_state: ServerState,
+) -> None:
+    """Test directory field matches server_state working_dir."""
+    event = SessionStatusEvent.create(session_id="s2", status_type="idle")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    received = results[1]
+    assert received["directory"] == server_state.working_dir
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_integration_project_computed(
+    server_state: ServerState,
+) -> None:
+    """Test project field is computed via compute_project_id."""
+    from agentpool_storage.opencode_provider.helpers import compute_project_id
+
+    event = SessionStatusEvent.create(session_id="s3", status_type="busy")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    received = results[1]
+    expected_project = compute_project_id(server_state.working_dir)
+    assert received["project"] == expected_project
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_integration_workspace_absent(
+    server_state: ServerState,
+) -> None:
+    """Test workspace field is absent from GlobalEvent."""
+    event = SessionStatusEvent.create(session_id="s4", status_type="retry")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    received = results[1]
+    assert "workspace" not in received
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_integration_session_id_in_payload(
+    server_state: ServerState,
+) -> None:
+    """Test sessionId injection at top level of GlobalEvent payload."""
+    event = SessionStatusEvent.create(session_id="injected-sid", status_type="busy")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    received = results[1]
+    payload = received["payload"]
+    assert payload["sessionId"] == "injected-sid"
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_integration_unicode_preserved(
+    server_state: ServerState,
+) -> None:
+    r"""Test unicode characters preserved in SSE output (not \uXXXX escaped)."""
+    event = SessionStatusEvent.create(session_id="会话测试", status_type="idle")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    received = results[1]
+    payload = received["payload"]
+    assert payload["sessionId"] == "会话测试"
