@@ -198,6 +198,17 @@ class OpenCodeInputProvider(InputProvider):
         )
         return True
 
+    def has_pending_permission(self, permission_id: str) -> bool:
+        """Check whether a specific permission request is pending.
+
+        Args:
+            permission_id: The permission request ID to look up
+
+        Returns:
+            True if the permission is pending, False otherwise
+        """
+        return permission_id in self._pending_permissions
+
     def get_pending_permissions(self) -> list[PermissionAskedProperties]:
         """Get all pending permission requests.
 
