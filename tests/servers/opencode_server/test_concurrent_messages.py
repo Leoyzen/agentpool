@@ -14,20 +14,15 @@ import pytest
 
 from agentpool_server.opencode_server.models import (
     MessageRequest,
-    Session,
-    SessionStatus,
     TextPartInput,
 )
-from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.models.message import UserMessage
 from agentpool_server.opencode_server.routes.message_routes import _process_message
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.utils.time_utils import now_ms
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from agentpool.agents.base_agent import BaseAgent
 
 
 class SlowAgentMock:
@@ -52,7 +47,7 @@ class SlowAgentMock:
 
     async def set_mode(self, mode: str, category_id: str | None = None) -> None:
         """Mock set_mode method."""
-        pass
+        return
 
     async def get_available_models(self):
         """Mock get_available_models method."""
@@ -86,7 +81,7 @@ class SlowAgentMock:
                 await asyncio.sleep(self.delay)
 
                 # Yield a simple text event
-                from agentpool.agents.events import TextContentItem, StreamCompleteEvent
+                from agentpool.agents.events import StreamCompleteEvent, TextContentItem
                 from agentpool.messaging import ChatMessage
 
                 yield TextContentItem(text=f"Response for {session_id}")
@@ -101,6 +96,7 @@ class SlowAgentMock:
 def slow_mock_agent():
     """Create a slow mock agent for testing concurrency."""
     agent = SlowAgentMock(delay=0.3)
+    saved_sessions: dict[str, Any] = {}
 
     # Set up pool mock with async storage methods
     pool = Mock()
@@ -110,7 +106,12 @@ def slow_mock_agent():
 
     # Storage needs to be properly mocked with async methods
     storage = Mock()
-    storage.save_session = AsyncMock()
+
+    async def save_session(session_data: Any) -> None:
+        saved_sessions[session_data.session_id] = session_data
+
+    storage.save_session = AsyncMock(side_effect=save_session)
+    storage.log_session = AsyncMock()
     storage.log_message = AsyncMock()
     pool.storage = storage
 
@@ -133,6 +134,15 @@ def slow_mock_agent():
 
     # Set up storage
     agent.storage = storage
+
+    conversation = Mock()
+    conversation.chat_messages = []
+    agent.conversation = conversation
+
+    async def load_session(session_id: str) -> Any:
+        return saved_sessions.get(session_id)
+
+    agent.load_session = AsyncMock(side_effect=load_session)
 
     return agent
 
