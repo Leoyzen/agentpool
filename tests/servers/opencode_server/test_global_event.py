@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -463,11 +464,11 @@ async def test_global_event_integration_envelope_fields(
 async def test_global_event_integration_directory_matches_working_dir(
     server_state: ServerState,
 ) -> None:
-    """Test directory field matches server_state working_dir."""
+    """Test directory field matches normalized server_state base_path."""
     event = SessionStatusEvent.create(session_id="s2", status_type="idle")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert received["directory"] == server_state.working_dir
+    assert received["directory"] == server_state.base_path
 
 
 @pytest.mark.integration
@@ -481,7 +482,7 @@ async def test_global_event_integration_project_computed(
     event = SessionStatusEvent.create(session_id="s3", status_type="busy")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    expected_project = compute_project_id(server_state.working_dir)
+    expected_project = compute_project_id(server_state.base_path)
     assert received["project"] == expected_project
 
 
@@ -490,11 +491,29 @@ async def test_global_event_integration_project_computed(
 async def test_global_event_integration_workspace_absent(
     server_state: ServerState,
 ) -> None:
-    """Test workspace field is absent from GlobalEvent."""
+    """Test workspace field matches normalized server_state base_path."""
     event = SessionStatusEvent.create(session_id="s4", status_type="retry")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert "workspace" not in received
+    assert received["workspace"] == server_state.base_path
+
+
+@pytest.mark.integration
+@pytest.mark.anyio
+async def test_global_event_routing_ignores_agent_execution_cwd(
+    server_state: ServerState,
+) -> None:
+    """Routing metadata stays anchored to server working_dir, not agent env.cwd."""
+    server_state.agent.env.cwd = "/tmp/non-exists-dir"
+
+    event = SessionStatusEvent.create(session_id="s5", status_type="busy")
+    results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
+    received = results[1]
+
+    expected_base_path = str(Path(server_state.working_dir).resolve())
+    assert server_state.base_path == expected_base_path
+    assert received["directory"] == expected_base_path
+    assert received["workspace"] == expected_base_path
 
 
 @pytest.mark.integration
@@ -744,7 +763,7 @@ def _make_part(session_id: str = "test-sid") -> Part:
     )
 
 
-# All 16 handled event types with their constructors
+# All 22 handled event types with their constructors
 _HANDLED_EVENT_FACTORIES: list[tuple[str, type]] = [
     ("session.deleted", SessionDeletedEvent),
     ("session.status", SessionStatusEvent),
@@ -762,6 +781,12 @@ _HANDLED_EVENT_FACTORIES: list[tuple[str, type]] = [
     ("session.created", SessionCreatedEvent),
     ("session.updated", SessionUpdatedEvent),
     ("message.part.updated", PartUpdatedEvent),
+    ("session.diff", SessionDiffEvent),
+    ("message.part.delta", PartDeltaEvent),
+    ("permission.updated", PermissionUpdatedEvent),
+    ("command.executed", CommandExecutedEvent),
+    ("tui.session.select", TuiSessionSelectEvent),
+    ("message.updated", MessageUpdatedEvent),
 ]
 
 
@@ -827,6 +852,35 @@ def _build_handled_event(event_type: type) -> Event:  # noqa: PLR0911
         return SessionUpdatedEvent.create(session=_make_session(sid))
     if event_type is PartUpdatedEvent:
         return PartUpdatedEvent.create(part=_make_part(sid))
+    if event_type is SessionDiffEvent:
+        return SessionDiffEvent.create(session_id=sid, diff=[])
+    if event_type is PartDeltaEvent:
+        return PartDeltaEvent.create(session_id=sid, message_id="m1", part_id="p1", delta="hi")
+    if event_type is PermissionUpdatedEvent:
+        return PermissionUpdatedEvent.create(
+            session_id=sid,
+            permission_id="perm1",
+            tool_name="bash",
+            patterns=["bash: *"],
+            metadata={},
+        )
+    if event_type is CommandExecutedEvent:
+        return CommandExecutedEvent.create(
+            name="test",
+            session_id=sid,
+            arguments="",
+            message_id="m1",
+        )
+    if event_type is TuiSessionSelectEvent:
+        return TuiSessionSelectEvent.create(session_id=sid)
+    if event_type is MessageUpdatedEvent:
+        return MessageUpdatedEvent.create(
+            message=UserMessage(
+                id="m1",
+                session_id=sid,
+                time=TimeCreated(created=0),
+            ),
+        )
     msg = f"Unhandled event type in test helper: {event_type}"
     raise ValueError(msg)
 
@@ -840,7 +894,7 @@ def test_extract_session_id_handled_events(
     event_type_name: str,
     event_type: type,
 ) -> None:
-    """All 16 handled event types extract sessionId correctly."""
+    """All 22 handled event types extract sessionId correctly."""
     event = _build_handled_event(event_type)
     result = _extract_session_id(event)
     assert result == "abc", f"Expected 'abc' for {event_type_name}, got {result!r}"
@@ -856,19 +910,6 @@ def test_extract_session_id_session_error_nullable() -> None:
 def test_extract_session_id_unhandled_events_return_none() -> None:
     """Unhandled event types return None from _extract_session_id."""
     unhandled_events: list[Event] = [
-        PartDeltaEvent.create(
-            session_id="x",
-            message_id="m1",
-            part_id="p1",
-            delta="hi",
-        ),
-        MessageUpdatedEvent.create(
-            message=UserMessage(
-                id="m1",
-                session_id="x",
-                time=TimeCreated(created=0),
-            ),
-        ),
         ServerConnectedEvent(),
         ServerHeartbeatEvent(),
     ]
@@ -877,53 +918,14 @@ def test_extract_session_id_unhandled_events_return_none() -> None:
         assert result is None, f"Expected None for {type(event).__name__}, got {result!r}"
 
 
-def test_extract_session_id_unhandled_events_with_session_id_return_none() -> None:
-    r"""Known-gap unhandled events that HAVE session_id still return None.
-
-    These 5 events have session_id in properties but are not handled
-    by _extract_session_id, so they fall through to the wildcard case.
-    """
-    unhandled_with_sid: list[Event] = [
-        SessionDiffEvent.create(session_id="gap1", diff=[]),
-        PartDeltaEvent.create(
-            session_id="gap2",
-            message_id="m1",
-            part_id="p1",
-            delta="x",
-        ),
-        PermissionUpdatedEvent.create(
-            session_id="gap3",
-            permission_id="perm1",
-            tool_name="bash",
-            patterns=["bash: *"],
-            metadata={},
-        ),
-        CommandExecutedEvent.create(
-            name="test",
-            session_id="gap4",
-            arguments="",
-            message_id="m1",
-        ),
-        TuiSessionSelectEvent.create(session_id="gap5"),
-    ]
-    for event in unhandled_with_sid:
-        result = _extract_session_id(event)
-        assert result is None, f"Expected None for known-gap {type(event).__name__}, got {result!r}"
-
-
 def test_extract_session_id_warning_logged_for_unhandled(caplog: pytest.LogCaptureFixture) -> None:
     """Warning is logged when an unhandled event type hits the wildcard case."""
-    event = PartDeltaEvent.create(
-        session_id="warn-test",
-        message_id="m1",
-        part_id="p1",
-        delta="x",
-    )
+    event = FileEditedEvent.create(file="/tmp/test.py")
     with caplog.at_level("WARNING"):
         result = _extract_session_id(event)
     assert result is None
     assert "Unhandled event type in _extract_session_id" in caplog.text
-    assert "PartDeltaEvent" in caplog.text
+    assert "FileEditedEvent" in caplog.text
 
 
 def test_extract_session_id_no_warning_for_handled(caplog: pytest.LogCaptureFixture) -> None:
@@ -958,6 +960,12 @@ def test_extract_session_id_exhaustiveness() -> None:
         SessionCreatedEvent,
         SessionUpdatedEvent,
         PartUpdatedEvent,
+        SessionDiffEvent,
+        PartDeltaEvent,
+        PermissionUpdatedEvent,
+        CommandExecutedEvent,
+        TuiSessionSelectEvent,
+        MessageUpdatedEvent,
     }
 
     # Event types that genuinely have no session association
@@ -982,16 +990,7 @@ def test_extract_session_id_exhaustiveness() -> None:
     }
 
     # Event types with session_id that are NOT handled (known gaps)
-    known_gap_types: set[type] = {
-        SessionDiffEvent,
-        PartDeltaEvent,
-        PermissionUpdatedEvent,
-        CommandExecutedEvent,
-        TuiSessionSelectEvent,
-    }
-
-    # MessageUpdatedEvent has no session_id at top level (it uses info.id pattern)
-    no_session_types.add(MessageUpdatedEvent)
+    known_gap_types: set[type] = set()
 
     expected = handled_types | no_session_types | known_gap_types
 

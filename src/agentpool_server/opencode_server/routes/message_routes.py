@@ -256,7 +256,6 @@ async def _process_message(
         time=TimeCreated.now(),
         agent=request.agent or "default",
         model=request.model,
-        variant=request.variant,
     )
 
     user_msg_with_parts = MessageWithParts(info=user_message)
@@ -356,9 +355,14 @@ async def _process_message_locked(  # noqa: PLR0915
     agent = state.agent
     if request.agent and state.agent.agent_pool is not None:
         agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-    if request.variant:
-        with contextlib.suppress(Exception):
-            await agent.set_mode(request.variant, category_id="thought_level")
+    request_variant = request.model.variant if request.model else None
+    if request_variant:
+        # set_mode raises ValueError (or its subclasses UnknownModeError/
+        # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
+        try:
+            await agent.set_mode(request_variant, category_id="thought_level")
+        except ValueError:
+            logger.debug("Variant mode not applicable", variant=request_variant)
 
     # Handle model selection if requested
     original_model: str | None = None
@@ -543,7 +547,6 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         time=TimeCreated.now(),
         agent=request.agent or "default",
         model=request.model,
-        variant=request.variant,
     )
 
     user_msg_with_parts = MessageWithParts(info=user_message)

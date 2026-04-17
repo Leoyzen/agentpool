@@ -12,13 +12,22 @@ from sse_starlette.sse import EventSourceResponse
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import Event, HealthResponse  # noqa: TC001
+from agentpool_server.opencode_server.models import Event, GlobalEvent, HealthResponse  # noqa: TC001
+from agentpool_server.opencode_server.models.app import DiagnosticResponse  # noqa: TC001
+from agentpool_server.opencode_server.routes.routing import (  # noqa: TC001
+    RoutingCheckResponse,
+    tui_event_filter,
+)
 from agentpool_server.opencode_server.models.events import (
+    CommandExecutedEvent,
     MessageRemovedEvent,
+    MessageUpdatedEvent,
+    PartDeltaEvent,
     PartRemovedEvent,
     PartUpdatedEvent,
     PermissionRequestEvent,
     PermissionResolvedEvent,
+    PermissionUpdatedEvent,
     QuestionAskedEvent,
     QuestionRejectedEvent,
     QuestionRepliedEvent,
@@ -27,11 +36,13 @@ from agentpool_server.opencode_server.models.events import (
     SessionCompactedEvent,
     SessionCreatedEvent,
     SessionDeletedEvent,
+    SessionDiffEvent,
     SessionErrorEvent,
     SessionIdleEvent,
     SessionStatusEvent,
     SessionUpdatedEvent,
     TodoUpdatedEvent,
+    TuiSessionSelectEvent,
 )
 
 
@@ -53,13 +64,29 @@ async def get_health() -> HealthResponse:
     return HealthResponse(healthy=True, version=VERSION)
 
 
+@router.get("/global/diagnostic")
+async def get_diagnostic(state: StateDep) -> DiagnosticResponse:
+    """Get server diagnostic information.
+
+    Returns directory, project, subscriber count, and server version.
+    """
+    factory = state.get_event_factory()
+    return DiagnosticResponse(
+        directory=state.working_dir,
+        project=factory._project,
+        subscribers=len(state.event_subscribers),
+        server_version=VERSION,
+    )
+
+
 def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
     """Extract session ID from various event types.
 
-    Uses pattern matching to access session_id from three different
+    Uses pattern matching to access session_id from four different
     property structures:
     - properties.session_id (most events)
     - properties.info.id (SessionCreated/Updated events)
+    - properties.info.session_id (MessageUpdatedEvent)
     - properties.part.session_id (PartUpdatedEvent)
 
     Unrecognized event types trigger a warning log and return None,
@@ -93,12 +120,26 @@ def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
             return props.session_id
         case SessionErrorEvent(properties=props):
             return props.session_id
+        case SessionDiffEvent(properties=props):
+            return props.session_id
+        case PartDeltaEvent(properties=props):
+            return props.session_id
+        case PermissionUpdatedEvent(properties=props):
+            return props.session_id
+        case CommandExecutedEvent(properties=props):
+            return props.session_id
+        case TuiSessionSelectEvent(properties=props):
+            return props.session_id
 
         # Events with properties.info.id (Session has id field)
         case SessionCreatedEvent(properties=props):
             return props.info.id
         case SessionUpdatedEvent(properties=props):
             return props.info.id
+
+        # Events with properties.info.session_id (MessageInfo has session_id field)
+        case MessageUpdatedEvent(properties=props):
+            return props.info.session_id
 
         # Events with properties.part.session_id (Part has session_id field)
         case PartUpdatedEvent(properties=props):
@@ -117,15 +158,17 @@ class GlobalEventFactory:
     the server's lifetime. Created lazily on first access.
     """
 
-    def __init__(self, directory: str, project: str) -> None:
+    def __init__(self, directory: str, project: str, workspace: str | None = None) -> None:
         """Initialize with directory and project routing metadata.
 
         Args:
             directory: Working directory for event routing
             project: Project identifier for event routing
+            workspace: Workspace identifier for TUI workspace routing
         """
         self._directory = directory
         self._project = project
+        self._workspace = workspace
 
     def wrap(self, event: Event) -> str:
         """Wrap an Event in a GlobalEvent envelope JSON string.
@@ -134,7 +177,7 @@ class GlobalEventFactory:
             event: The event to wrap
 
         Returns:
-            JSON string with directory, project, and payload keys.
+            JSON string with directory, project, workspace, and payload keys.
         """
         payload_json = _serialize_event(event, wrap_payload=False)
         payload = json.loads(payload_json)
@@ -143,6 +186,8 @@ class GlobalEventFactory:
             "project": self._project,
             "payload": payload,
         }
+        if self._workspace is not None:
+            envelope["workspace"] = self._workspace
         return json.dumps(envelope, ensure_ascii=False)
 
     @staticmethod
@@ -257,3 +302,38 @@ async def get_global_events(state: StateDep) -> EventSourceResponse:
 async def get_events(state: StateDep) -> EventSourceResponse:
     """Get events as SSE stream (no payload wrapper)."""
     return EventSourceResponse(_event_generator(state, wrap_payload=False), sep="\n")
+
+
+@router.get("/global/routing-check", response_model=RoutingCheckResponse)
+async def get_routing_check(
+    state: StateDep,
+    directory: str,
+    workspace: str | None = None,
+    current_workspace: str | None = None,
+    project_directory: str | None = None,
+) -> RoutingCheckResponse:
+    """Check whether an event would pass the OpenCode TUI routing filter.
+
+    Diagnostic endpoint that constructs a synthetic GlobalEvent with the
+    given directory/workspace and runs it through the 4-rule TUI event
+    routing filter. Returns whether the event would pass and why.
+
+    Args:
+        state: Server state (injected dependency).
+        directory: The event's directory field.
+        workspace: The event's workspace field (optional).
+        current_workspace: The TUI's active workspace for rule 3 filtering.
+        project_directory: The project directory to match against
+            (defaults to state.working_dir).
+
+    Returns:
+        RoutingCheckResponse with would_pass and reason fields.
+    """
+    effective_project_dir = (
+        project_directory if project_directory is not None else state.working_dir
+    )
+    event = GlobalEvent(directory=directory, workspace=workspace, payload={})
+    would_pass, reason = tui_event_filter(
+        event, effective_project_dir, current_workspace=current_workspace
+    )
+    return RoutingCheckResponse(would_pass=would_pass, reason=reason)

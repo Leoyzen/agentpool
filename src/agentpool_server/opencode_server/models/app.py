@@ -27,6 +27,22 @@ class HealthResponse(OpenCodeBaseModel):
     version: str
 
 
+class DiagnosticResponse(OpenCodeBaseModel):
+    """Response for /global/diagnostic endpoint."""
+
+    directory: str | None = None
+    """Working directory of the server."""
+
+    project: str
+    """Project identifier computed from the working directory."""
+
+    subscribers: int
+    """Current number of SSE event subscribers."""
+
+    server_version: str
+    """Server version string."""
+
+
 class PathInfo(OpenCodeBaseModel):
     """Path information for the OpenCode instance.
 

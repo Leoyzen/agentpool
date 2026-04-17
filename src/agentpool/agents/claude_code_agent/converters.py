@@ -284,8 +284,7 @@ def _convert_edit_result(result: EditOutput) -> EditMetadata:
     additions, deletions = _count_diff_changes(structured_patch)
     filediff = FileDiff(
         file=file_path,
-        before=original_file or "",
-        after=after_content or "",
+        patch=diff,
         additions=additions,
         deletions=deletions,
     )

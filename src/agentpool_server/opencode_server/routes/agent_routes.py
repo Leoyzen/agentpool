@@ -33,11 +33,14 @@ from agentpool_server.opencode_server.models import (
     ProviderAuthMethod,
     Session,
     SkillInfo,
+    WorkspaceConnectionStatus,
+    WorkspaceInfo,
     WorktreeCreateRequest,
     WorktreeInfo,
     WorktreeRemoveRequest,
     WorktreeResetRequest,
 )
+from agentpool_storage.opencode_provider import helpers
 
 
 router = APIRouter(tags=["agent"])
@@ -532,6 +535,33 @@ async def list_sessions_global(
         lower_search = search.lower()
         sessions = [s for s in sessions if lower_search in s.title.lower()]
     return sessions
+
+
+@router.get("/experimental/workspace")
+async def list_workspaces(
+    state: StateDep,
+    directory: str | None = None,
+    workspace: str | None = None,
+) -> list[WorkspaceInfo]:
+    """List workspaces for the current project.
+
+    AgentPool currently exposes a single local workspace rooted at the attached
+    server working directory. Query parameters are accepted for OpenCode SDK
+    compatibility but do not alter the singleton response.
+    """
+    _ = directory, workspace
+    return [_build_workspace_info(state)]
+
+
+@router.get("/experimental/workspace/status")
+async def get_workspace_status(
+    state: StateDep,
+    directory: str | None = None,
+    workspace: str | None = None,
+) -> list[WorkspaceConnectionStatus]:
+    """Return connection status for the singleton local workspace."""
+    _ = directory, workspace
+    return [_build_workspace_status(state)]
 
 
 @router.get("/experimental/tool/ids")

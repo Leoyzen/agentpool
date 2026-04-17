@@ -139,6 +139,47 @@ class WorktreeResetRequest(OpenCodeBaseModel):
     """Worktree directory path to reset."""
 
 
+WorkspaceConnectionState = Literal["connected", "connecting", "disconnected", "error"]
+
+
+class WorkspaceInfo(OpenCodeBaseModel):
+    """Workspace information matching OpenCode's experimental workspace API."""
+
+    id: str
+    """Stable workspace identifier used by the TUI."""
+
+    type: str = "local"
+    """Workspace adaptor type."""
+
+    name: str
+    """Human-readable workspace name."""
+
+    branch: str | None = None
+    """Active VCS branch if known."""
+
+    directory: str | None = None
+    """Absolute workspace directory path."""
+
+    extra: object | None = None
+    """Adaptor-specific metadata."""
+
+    project_id: str
+    """Project identifier owning this workspace."""
+
+
+class WorkspaceConnectionStatus(OpenCodeBaseModel):
+    """Workspace connection status for OpenCode TUI bootstrap."""
+
+    workspace_id: str
+    """Workspace identifier corresponding to ``WorkspaceInfo.id``."""
+
+    status: WorkspaceConnectionState = "connected"
+    """Current connectivity status."""
+
+    error: str | None = None
+    """Optional connection error message."""
+
+
 class AuthInfo(OpenCodeBaseModel):
     """Authentication credential info."""
 

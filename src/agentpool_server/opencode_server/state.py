@@ -126,9 +126,11 @@ class ServerState:
         from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
         if self._event_factory is None:
+            directory = self.base_path
             self._event_factory = GlobalEventFactory(
-                directory=self.working_dir,
-                project=helpers.compute_project_id(self.working_dir),
+                directory=directory,
+                project=helpers.compute_project_id(directory),
+                workspace=directory,
             )
         return self._event_factory
 
@@ -139,9 +141,14 @@ class ServerState:
 
     @property
     def base_path(self) -> str:
-        """Get the resolved root directory for file operations."""
-        raw_path = self.agent.env.cwd or self.working_dir
-        return str(Path(raw_path).resolve())
+        """Get the resolved OpenCode project root for routing and file operations.
+
+        OpenCode routes SSE events against the server/project directory the client
+        attached to, not an agent-specific execution sandbox. Agent execution
+        environments may override `env.cwd` for tool isolation, but routing
+        metadata must remain anchored to the server's configured `working_dir`.
+        """
+        return str(Path(self.working_dir).resolve())
 
     @property
     def is_local_fs(self) -> bool:
