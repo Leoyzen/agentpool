@@ -54,6 +54,9 @@ from agentpool_server.opencode_server.models.events import (
     TuiToastShowEvent,
     VcsBranchUpdatedEvent,
 )
+from agentpool_server.opencode_server.models.app import ProjectTime
+from agentpool_server.opencode_server.models.events import Project
+from agentpool_server.opencode_server.models.pty import PtyInfo
 from agentpool_server.opencode_server.models.message import (
     UserMessage,
 )
@@ -161,7 +164,7 @@ def test_global_event_factory_wrap() -> None:
 
 
 def test_global_event_factory_session_id_in_payload() -> None:
-    """SessionId is injected inside payload by _serialize_event."""
+    """SessionId is injected inside payload by GlobalEventFactory.wrap."""
     factory = GlobalEventFactory(directory="/tmp", project="abc")
     event = SessionStatusEvent.create(session_id="sid1", status_type="idle")
     result = factory.wrap(event)
@@ -891,25 +894,83 @@ def test_extract_session_id_session_error_nullable() -> None:
     assert result is None
 
 
-def test_extract_session_id_unhandled_events_return_none() -> None:
-    """Unhandled event types return None from _extract_session_id."""
-    unhandled_events: list[Event] = [
+def test_extract_session_id_no_session_events_return_none() -> None:
+    """Explicitly-listed no-session event types return None without warnings."""
+    no_session_events: list[Event] = [
         ServerConnectedEvent(),
         ServerHeartbeatEvent(),
+        FileEditedEvent.create(file="/tmp/test.py"),
+        FileWatcherUpdatedEvent.create(file="/tmp/test.py", event="change"),
+        McpToolsChangedEvent.create(server="test_server"),
+        PtyCreatedEvent.create(
+            info=PtyInfo(
+                id="p1",
+                title="test",
+                command="echo",
+                args=[],
+                cwd="/tmp",
+                status="running",
+                pid=1234,
+            ),
+        ),
+        PtyUpdatedEvent.create(
+            info=PtyInfo(
+                id="p1",
+                title="test",
+                command="echo",
+                args=[],
+                cwd="/tmp",
+                status="running",
+                pid=1234,
+            ),
+        ),
+        PtyExitedEvent.create(pty_id="p1", exit_code=0),
+        PtyDeletedEvent.create(pty_id="p1"),
+        LspUpdatedEvent(),
+        LspClientDiagnosticsEvent.create(server_id="s1", path="/tmp"),
+        ProjectUpdatedEvent.create(
+            project=Project(id="test", worktree="/tmp", time=ProjectTime(created=0)),
+        ),
+        VcsBranchUpdatedEvent.create(branch="main"),
+        TuiPromptAppendEvent.create(text="hello"),
+        TuiCommandExecuteEvent.create(command="test"),
+        TuiToastShowEvent.create(message="hi"),
     ]
-    for event in unhandled_events:
+    for event in no_session_events:
         result = _extract_session_id(event)
         assert result is None, f"Expected None for {type(event).__name__}, got {result!r}"
 
 
-def test_extract_session_id_warning_logged_for_unhandled(caplog: pytest.LogCaptureFixture) -> None:
-    """Warning is logged when an unhandled event type hits the wildcard case."""
+def test_extract_session_id_no_warning_for_no_session_events(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No warning logged for explicitly-listed no-session event types."""
     event = FileEditedEvent.create(file="/tmp/test.py")
     with caplog.at_level("WARNING"):
         result = _extract_session_id(event)
     assert result is None
+    assert "Unhandled event type in _extract_session_id" not in caplog.text
+
+
+def test_extract_session_id_warning_for_unknown_event_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Warning is logged when an unknown event type hits the wildcard case.
+
+    Simulates a future event type being added to the Event union but not
+    yet covered in _extract_session_id. The exhaustiveness test catches
+    this at the type level; this test verifies the runtime warning.
+    """
+    # Use a plain MagicMock (no spec) to simulate an unrecognized event.
+    # A spec-less mock won't match any of the pattern-matching cases
+    # and will fall through to the `case _:` wildcard.
+    mock_event = MagicMock()
+    mock_event.__class__.__name__ = "FutureUnknownEvent"
+    with caplog.at_level("WARNING"):
+        result = _extract_session_id(mock_event)  # type: ignore[arg-type]
+    assert result is None
     assert "Unhandled event type in _extract_session_id" in caplog.text
-    assert "FileEditedEvent" in caplog.text
+    assert "FutureUnknownEvent" in caplog.text
 
 
 def test_extract_session_id_no_warning_for_handled(caplog: pytest.LogCaptureFixture) -> None:
