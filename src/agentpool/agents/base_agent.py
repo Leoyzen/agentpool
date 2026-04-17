@@ -235,6 +235,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
         self._cancelled = False
+        self._current_stream_task: asyncio.Task[Any] | None = None
         self._active_run_ctx: AgentRunContext | None = None
         self._background_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
@@ -657,6 +658,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
+        # Track the stream task so interrupt() can cancel it even without run_ctx
+        self._current_stream_task = run_ctx.current_task
         # Store run_ctx as instance variable so interrupt() can find it
         # from a different task (ContextVar is task-scoped and returns None
         # when read from outside the run_stream task).
@@ -704,6 +707,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if token is not None:
                 _current_run_ctx_var.reset(token)
             run_ctx.injection_manager.clear()
+            self._current_stream_task = None
             self._active_run_ctx = None
 
     async def _run_stream_once(

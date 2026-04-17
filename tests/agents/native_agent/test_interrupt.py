@@ -176,15 +176,20 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
     # Wait for stream to start
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    # The agent should track its current stream task via _active_run_ctx
-    # Before fix: _active_run_ctx was not stored, so interrupt() couldn't find the task
-    # After fix: run_stream() sets self._active_run_ctx with current_task
+    # The agent should track its current stream task via _active_run_ctx and _current_stream_task
+    # Before fix: _active_run_ctx was not stored and _current_stream_task was always None,
+    # so interrupt() couldn't find the task to cancel
+    # After fix: run_stream() sets both self._active_run_ctx and self._current_stream_task
     assert slow_agent._active_run_ctx is not None, (
         "_active_run_ctx should be set during run_stream — "
         "this is how interrupt() finds the task to cancel"
     )
     assert slow_agent._active_run_ctx.current_task is not None, (
         "_active_run_ctx.current_task should be set during run_stream"
+    )
+    assert slow_agent._current_stream_task is not None, (
+        "_current_stream_task should be set during run_stream — "
+        "this is how _interrupt() finds the task to cancel"
     )
 
     # Call interrupt with NO run_ctx
