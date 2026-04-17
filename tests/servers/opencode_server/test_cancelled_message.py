@@ -1,0 +1,464 @@
+"""Tests for CancelledError handling in message processing.
+
+When a user cancels/aborts a running agent (e.g., presses ESC in the TUI),
+the server must properly finalize the assistant message so that the TUI's
+`pending` memo can move past it. Specifically:
+
+1. `assistant_msg.time.completed` must be set (so TUI finds no "pending" msg)
+2. `assistant_msg.error` must be set to `MessageAbortedError`
+3. A `MessageUpdatedEvent` must be broadcast with the finalized state
+4. The message must be persisted to storage
+
+Without these, the TUI's `pending` memo permanently finds the stale
+assistant message (which lacks `time.completed`), causing ALL subsequent
+user messages to display "QUEUED" indefinitely.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from agentpool_server.opencode_server.models import (
+    AssistantMessage,
+    MessagePath,
+    MessageRequest,
+    MessageTime,
+    MessageUpdatedEvent,
+    SessionStatus,
+    TextPartInput,
+    TimeCreated,
+    UserMessage,
+)
+from agentpool_server.opencode_server.models.message import (
+    MessageAbortedError,
+    MessageAbortedErrorData,
+    MessageWithParts,
+)
+from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
+from agentpool_server.opencode_server.state import ServerState
+from agentpool.utils import identifiers as identifier
+from agentpool.utils.time_utils import now_ms
+
+
+class CancellableAgentMock:
+    """Mock agent that raises CancelledError during run_stream.
+
+    Simulates what happens when a user presses ESC in the TUI — the SSE
+    stream is closed and the asyncio task gets cancelled.
+    """
+
+    def __init__(self) -> None:
+        self.name = "test-agent"
+        self.run_stream_call_count = 0
+        self.agent_pool: Mock | None = None
+        self.env: Mock | None = None
+        self.storage: Any = None
+        self.tools: list[Any] = []
+        self._input_provider = None
+        self.model_name = "test-model"
+        self.session_id: str | None = None
+        # Real MessageHistory so conversation state is testable
+        from agentpool.messaging.message_history import MessageHistory
+
+        self.conversation = MessageHistory()
+
+    async def set_model(self, model: str) -> None:
+        """Mock set_model method."""
+        self.model_name = model
+
+    async def set_mode(self, mode: str, category_id: str | None = None) -> None:
+        """Mock set_mode method."""
+        pass
+
+    async def get_available_models(self):
+        """Mock get_available_models method."""
+        return []
+
+    async def load_session(self, session_id: str) -> None:
+        """Mock load_session method."""
+        return None
+
+    def run_stream(self, *args: Any, **kwargs: Any):
+        """Raise CancelledError immediately to simulate user abort."""
+        self.run_stream_call_count += 1
+
+        async def stream():
+            # Simulate: agent starts, then gets cancelled mid-stream.
+            # The yield makes this an async generator (which is what
+            # OpenCodeStreamAdapter.process_stream expects).
+            raise asyncio.CancelledError()
+            yield  # noqa: unreachable — makes this an async generator
+
+        return stream()
+
+
+@pytest.fixture
+def cancellable_mock_agent():
+    """Create a cancellable mock agent."""
+    agent = CancellableAgentMock()
+
+    # Set up pool mock
+    pool = Mock()
+    pool.manifest = Mock()
+    pool.manifest.config_file_path = "/tmp/test"
+    pool.manifest.model_variants = {}
+
+    storage = Mock()
+    storage.save_session = AsyncMock()
+    storage.log_message = AsyncMock()
+    pool.storage = storage
+
+    pool.todos = Mock()
+    pool.todos.on_change = None
+    pool.skill_commands = None
+    pool.all_agents = {agent.name: agent}
+
+    agent.agent_pool = pool
+
+    # Set up env mock
+    env = Mock()
+    fs = Mock()
+    fs.read_file = AsyncMock(return_value="file content")
+    env.get_fs = Mock(return_value=fs)
+    env.cwd = "/tmp"
+    agent.env = env
+
+    agent.storage = storage
+
+    return agent
+
+
+@pytest.fixture
+def cancelled_test_state(tmp_project_dir, cancellable_mock_agent):
+    """Create a server state with cancellable agent."""
+    return ServerState(
+        working_dir=str(tmp_project_dir),
+        agent=cancellable_mock_agent,
+    )
+
+
+@pytest.fixture
+def sample_message_request():
+    """Create a sample message request."""
+    return MessageRequest(
+        parts=[TextPartInput(text="Hello, test!")],
+        agent="default",
+    )
+
+
+def _setup_session(state: ServerState, session_id: str) -> None:
+    """Set up session state manually (bypassing ensure_session which needs pool.storage)."""
+    from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
+
+    from agentpool_server.opencode_server.models import Session
+
+    now = now_ms()
+    session = Session(
+        id=session_id,
+        project_id="default",
+        directory=state.working_dir,
+        title="Test Session",
+        version="1",
+        time=TimeCreatedUpdated(created=now, updated=now),
+    )
+    state.sessions[session_id] = session
+    state.messages[session_id] = []
+    state.session_status[session_id] = SessionStatus(type="idle")
+    state.agent.session_id = session_id
+
+
+def _create_user_message(
+    session_id: str,
+    request: MessageRequest,
+) -> tuple[str, MessageWithParts]:
+    """Create user message and parts (mimics _process_message logic)."""
+    user_msg_id = identifier.ascending("message", request.message_id)
+    user_message = UserMessage(
+        id=user_msg_id,
+        session_id=session_id,
+        time=TimeCreated.now(),
+        agent=request.agent or "default",
+        model=request.model,
+        variant=request.variant,
+    )
+    user_msg_with_parts = MessageWithParts(info=user_message)
+    # Add text parts from request
+    for part_input in request.parts:
+        if isinstance(part_input, TextPartInput):
+            user_msg_with_parts.add_text_part(part_input.text)
+    return user_msg_id, user_msg_with_parts
+
+
+class TestCancelledMessageHandling:
+    """Tests for CancelledError handling during message processing."""
+
+    @pytest.mark.asyncio
+    async def test_cancelled_message_sets_time_completed(
+        self,
+        cancelled_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Cancelled assistant message must have time.completed set.
+
+        The TUI's `pending` memo finds the last assistant message without
+        `time.completed`. If a cancelled message never gets `time.completed`,
+        all subsequent user messages show as "QUEUED".
+        """
+        state = cancelled_test_state
+        session_id = "test-session-cancel"
+
+        _setup_session(state, session_id)
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        # Process message — agent will raise CancelledError
+        await _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+        )
+
+        # Find the assistant message
+        assistant_msgs = [
+            msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+        ]
+        assert len(assistant_msgs) == 1, "Should have one assistant message"
+
+        assistant = assistant_msgs[0].info
+        assert isinstance(assistant, AssistantMessage)
+        assert assistant.time.completed is not None, (
+            "Cancelled assistant message MUST have time.completed set — "
+            "otherwise TUI marks all subsequent messages as QUEUED"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_message_sets_aborted_error(
+        self,
+        cancelled_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Cancelled assistant message must have MessageAbortedError set.
+
+        The TUI checks `message.error` to display the appropriate status
+        indicator (e.g., "Aborted" label instead of a spinner).
+        """
+        state = cancelled_test_state
+        session_id = "test-session-cancel-error"
+
+        _setup_session(state, session_id)
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        await _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+        )
+
+        assistant_msgs = [
+            msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+        ]
+        assert len(assistant_msgs) == 1
+
+        assistant = assistant_msgs[0].info
+        assert isinstance(assistant, AssistantMessage)
+        assert assistant.error is not None, "Cancelled assistant message MUST have error set"
+        assert isinstance(assistant.error, MessageAbortedError), (
+            f"Error should be MessageAbortedError, got {type(assistant.error).__name__}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_message_broadcasts_update_event(
+        self,
+        cancelled_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Cancelled assistant message must broadcast MessageUpdatedEvent.
+
+        The TUI listens for `message.updated` events to update its local state.
+        Without this broadcast, the TUI never learns the message was finalized.
+        """
+        state = cancelled_test_state
+        session_id = "test-session-cancel-event"
+
+        _setup_session(state, session_id)
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        # Capture broadcast events
+        all_events: list[Any] = []
+        original_broadcast = state.broadcast_event
+
+        async def tracking_broadcast(event: Any) -> None:
+            all_events.append(event)
+            await original_broadcast(event)
+
+        state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
+
+        await _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+        )
+
+        # Find the assistant message ID
+        assistant_msgs = [
+            msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+        ]
+        assert len(assistant_msgs) == 1
+        assistant_id = assistant_msgs[0].info.id
+
+        # Find MessageUpdatedEvents for this assistant with time.completed set
+        update_events: list[MessageUpdatedEvent] = []
+        for e in all_events:
+            if not isinstance(e, MessageUpdatedEvent):
+                continue
+            info = e.properties.info
+            if not isinstance(info, AssistantMessage):
+                continue
+            if info.id == assistant_id and info.time.completed is not None:
+                update_events.append(e)
+
+        assert len(update_events) >= 1, (
+            "Must broadcast at least one MessageUpdatedEvent with the assistant message "
+            "that has time.completed set — TUI relies on this to update its pending state"
+        )
+
+        # Verify the broadcast event carries the aborted error
+        final_info = update_events[-1].properties.info
+        assert isinstance(final_info, AssistantMessage)
+        assert final_info.error is not None, (
+            "The final MessageUpdatedEvent for a cancelled message must carry the error"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_message_session_returns_to_idle(
+        self,
+        cancelled_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """After cancellation, session status must return to idle.
+
+        This is already working (the finally block handles it), but we verify
+        it stays that way.
+        """
+        state = cancelled_test_state
+        session_id = "test-session-cancel-idle"
+
+        _setup_session(state, session_id)
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        await _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+        )
+
+        assert state.session_status[session_id].type == "idle", (
+            "Session must be idle after cancellation"
+        )
+
+    @pytest.mark.asyncio
+    async def test_message_after_cancel_is_not_queued(
+        self,
+        cancelled_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """After a cancelled message, a new message should NOT appear as QUEUED.
+
+        This is the user-facing bug: after cancelling, all subsequent user
+        messages show "QUEUED" because the stale assistant message has no
+        `time.completed`. This test verifies the TUI's pending logic would
+        work correctly after the fix.
+
+        The TUI's pending memo:
+          pending = messages().findLast(x => x.role === "assistant" && !x.time.completed)?.id
+          queued = props.pending && props.message.id > props.pending
+        """
+        state = cancelled_test_state
+        session_id = "test-session-not-queued"
+
+        _setup_session(state, session_id)
+
+        # First message: gets cancelled
+        user_msg_id_1, user_msg_1 = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_1)
+        await _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id_1, user_msg_1
+        )
+
+        # Second message: should NOT be queued
+        second_request = MessageRequest(
+            parts=[TextPartInput(text="Second message after cancel")],
+            agent="default",
+            message_id="msg-after-cancel",
+        )
+        user_msg_id_2, user_msg_2 = _create_user_message(session_id, second_request)
+        state.messages[session_id].append(user_msg_2)
+        await _process_message_locked(session_id, second_request, state, user_msg_id_2, user_msg_2)
+
+        # Simulate the TUI's pending memo logic
+        all_messages = state.messages[session_id]
+        pending_id = None
+        for msg in all_messages:
+            if isinstance(msg.info, AssistantMessage) and msg.info.time.completed is None:
+                pending_id = msg.info.id
+
+        assert pending_id is None, (
+            f"No assistant message should be 'pending' (without time.completed), "
+            f"but found pending message {pending_id}. This causes the TUI to "
+            f"display subsequent user messages as QUEUED."
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_message_preserves_conversation_history(
+        self,
+        cancelled_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """After cancellation, the agent's in-memory conversation must include the aborted response.
+
+        The agent's `conversation.chat_messages` is what gets sent to the LLM as
+        conversation history. When a run is cancelled, `_run_stream_once` adds the
+        user message but never adds the assistant response (the post-processing
+        code at base_agent.py:857-858 is skipped due to the exception).
+
+        Without adding the aborted assistant message to the conversation, the next
+        `run_stream()` call sends incomplete history — the LLM doesn't know it
+        already (partially) responded, causing "conversation history lost" symptoms.
+        """
+        state = cancelled_test_state
+        session_id = "test-session-history"
+
+        _setup_session(state, session_id)
+
+        # Record initial conversation length
+        initial_count = len(state.agent.conversation.chat_messages)
+
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        # Process message — agent will raise CancelledError
+        await _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+        )
+
+        # In the real flow, _run_stream_once adds the user message to conversation
+        # (base_agent.py:784), and our CancelledError handler adds the aborted
+        # assistant message. Since CancellableAgentMock doesn't run _run_stream_once,
+        # only our handler's addition is reflected. What matters is that the
+        # aborted assistant message IS present in the conversation.
+        final_count = len(state.agent.conversation.chat_messages)
+
+        # The aborted assistant message must have been added to the conversation
+        assert final_count >= initial_count + 1, (
+            f"Agent conversation should have at least {initial_count + 1} messages "
+            f"(original + aborted assistant), but has {final_count}. "
+            f"Without the aborted assistant message in conversation.chat_messages, "
+            f"the LLM receives incomplete history on the next run."
+        )
+
+        # Verify the last message in conversation is the aborted assistant
+        last_msg = state.agent.conversation.chat_messages[-1]
+        assert last_msg.role == "assistant", (
+            f"The last message in agent conversation should be an assistant message, "
+            f"but got role='{last_msg.role}'. The aborted assistant response must be "
+            f"added to conversation so the LLM knows about it."
+        )

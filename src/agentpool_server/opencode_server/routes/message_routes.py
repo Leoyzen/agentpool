@@ -23,6 +23,8 @@ from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
     FilePartInput,
+    MessageAbortedError,
+    MessageAbortedErrorData,
     MessagePath,
     MessageRequest,
     MessageTime,
@@ -439,9 +441,32 @@ async def _process_message_locked(  # noqa: PLR0915
         # User cancelled the request (e.g., pressed ESC)
         logger.info("Request cancelled by user", session_id=session_id)
         cancelled = True
-        # Persist partial message if there's any content
-        if adapter.response_text:
-            await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+
+        # Finalize the assistant message with aborted state.
+        # This mirrors upstream OpenCode's cleanup() in processor.ts:518
+        # and prompt.ts:637-638, 853-854. Without setting time.completed
+        # and error, the TUI's `pending` memo permanently finds this
+        # stale assistant message, causing all subsequent user messages
+        # to display as "QUEUED".
+        response_time = now_ms()
+        aborted_error = MessageAbortedError(
+            data=MessageAbortedErrorData(message="Request cancelled by user")
+        )
+        msg_time = MessageTime(created=now, completed=response_time)
+        update = {"time": msg_time, "error": aborted_error}
+        updated_assistant = assistant_msg.model_copy(update=update)
+        assistant_msg_with_parts.info = updated_assistant
+        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+
+        # Add the aborted assistant message to the agent's in-memory conversation.
+        # Without this, the agent's conversation.chat_messages only has the user
+        # message (added by _run_stream_once at base_agent.py:784) but not the
+        # assistant response. On the next message, get_or_load_session() skips
+        # reloading because agent.session_id matches, so the LLM receives
+        # incomplete history — it doesn't know it already (partially) responded.
+        chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
+        agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
         # Restore original model if we changed it
         if original_model is not None:
