@@ -154,9 +154,7 @@ class AggregatingResourceProvider(ResourceProvider):
                 # Check if provider has this skill
                 skills = await provider.get_skills()
                 if any(s.name == skill_name for s in skills):
-                    # Try to get instructions from this provider
-                    if hasattr(provider, "get_skill_instructions"):
-                        return await provider.get_skill_instructions(skill_name, arguments)
+                    return await provider.get_skill_instructions(skill_name, arguments)
             except Exception:  # noqa: BLE001
                 continue
 
@@ -174,11 +172,40 @@ class AggregatingResourceProvider(ResourceProvider):
 
         raise KeyError(f"Prompt {name!r} not found in any provider")
 
+    async def get_references(self, skill_name: str) -> list[str]:
+        """Get list of available reference files for a skill from all providers.
+
+        Aggregates results from child providers that have the skill.
+
+        Args:
+            skill_name: Name of the skill (kebab-case, matches Skill.name)
+
+        Returns:
+            List of reference file paths
+        """
+        references: list[str] = []
+        for provider in self.providers:
+            try:
+                skills = await provider.get_skills()
+                if any(s.name == skill_name for s in skills):
+                    provider_refs = await provider.get_references(skill_name)
+                    # Normalize: providers may return list[str] or list[dict]
+                    for ref in provider_refs:
+                        if isinstance(ref, dict):
+                            path = ref.get("path", ref.get("name", ""))
+                            if path:
+                                references.append(path)
+                        else:
+                            references.append(ref)
+            except Exception:  # noqa: BLE001
+                continue
+        return references
+
     async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
         """Read reference content from the first provider that has the skill.
 
         Args:
-            skill_name: Name of the skill
+            skill_name: Name of the skill (kebab-case, matches Skill.name)
             ref_path: Path to the reference file (relative to references/)
 
         Returns:
@@ -189,17 +216,12 @@ class AggregatingResourceProvider(ResourceProvider):
         """
         from agentpool.skills.exceptions import SkillNotFoundError
 
-        from collections.abc import Callable
-
         for provider in self.providers:
             try:
                 # Check if provider has this skill
                 skills = await provider.get_skills()
                 if any(s.name == skill_name for s in skills):
-                    # Try to read reference from this provider
-                    read_ref = getattr(provider, "read_reference", None)
-                    if read_ref is not None and isinstance(read_ref, Callable):
-                        return await read_ref(skill_name, ref_path)
+                    return await provider.read_reference(skill_name, ref_path)
             except Exception:  # noqa: BLE001
                 continue
 

@@ -871,3 +871,80 @@ async def test_read_reference_handles_resource_error(mcp_provider):
 
     with pytest.raises(SkillNotFoundError):
         await mcp_provider.read_reference("test-skill", "guide.md")
+
+
+# =============================================================================
+# read_reference() Double references/ Prefix Tests (Bug #2 Fix)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_read_reference_without_references_prefix(mcp_provider):
+    """Test that read_reference constructs URI with references/ prefix when ref_path lacks it."""
+    mcp_provider.read_resource = AsyncMock(return_value=["# Guide\n\nGuide content"])
+
+    content_bytes, mime_type = await mcp_provider.read_reference("test-skill", "guide.md")
+
+    # Verify the URI constructed includes references/ prefix
+    # URI format: skill://{skill_name}/references/{path} (no provider prefix)
+    call_args = mcp_provider.read_resource.call_args
+    uri = call_args[0][0]
+    assert uri == "skill://test-skill/references/guide.md"
+    assert "test-mcp" not in uri  # Provider name should NOT be in URI
+    assert b"Guide" in content_bytes
+
+
+@pytest.mark.asyncio
+async def test_read_reference_with_references_prefix(mcp_provider):
+    """Test that read_reference avoids double references/ prefix when ref_path already has it."""
+    mcp_provider.read_resource = AsyncMock(return_value=["# Phase 3\n\nExecution content"])
+
+    content_bytes, mime_type = await mcp_provider.read_reference(
+        "test-skill", "references/phase_3_execution.md"
+    )
+
+    # Verify the URI does NOT have double references/
+    # URI format: skill://{skill_name}/references/{path} (no provider prefix)
+    call_args = mcp_provider.read_resource.call_args
+    uri = call_args[0][0]
+    assert uri == "skill://test-skill/references/phase_3_execution.md"
+    assert "references/references" not in uri
+    assert "test-mcp" not in uri  # Provider name should NOT be in URI
+    assert b"Phase 3" in content_bytes
+
+
+@pytest.mark.asyncio
+async def test_read_reference_url_encoded_with_references_prefix(mcp_provider):
+    """Test that URL-encoded path with references/ prefix avoids double prefix."""
+    mcp_provider.read_resource = AsyncMock(return_value=["# Doc\n\nContent"])
+
+    # URL-encoded "references/file.md"
+    content_bytes, mime_type = await mcp_provider.read_reference(
+        "test-skill", "references%2Ffile.md"
+    )
+
+    call_args = mcp_provider.read_resource.call_args
+    uri = call_args[0][0]
+    assert "references/references" not in uri
+    assert "test-mcp" not in uri  # Provider name should NOT be in URI
+
+
+@pytest.mark.asyncio
+async def test_read_reference_underscore_skill_name(mcp_provider):
+    """Test that read_reference preserves underscore skill names in URI.
+
+    MCP server skill directories use directory names as-is (e.g., systematic_troubleshooting).
+    The URI must use the original name with underscores, NOT the kebab-case normalized form.
+    """
+    mcp_provider.read_resource = AsyncMock(return_value=["# Diagnostic Phases\n\nPhase content"])
+
+    content_bytes, mime_type = await mcp_provider.read_reference(
+        "systematic_troubleshooting", "references/diagnostic-phases.md"
+    )
+
+    # Verify the URI uses the original underscore name
+    call_args = mcp_provider.read_resource.call_args
+    uri = call_args[0][0]
+    assert uri == "skill://systematic_troubleshooting/references/diagnostic-phases.md"
+    assert "test-mcp" not in uri
+    assert b"Diagnostic Phases" in content_bytes

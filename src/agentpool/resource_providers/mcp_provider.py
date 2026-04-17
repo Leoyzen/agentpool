@@ -669,37 +669,89 @@ class MCPResourceProvider(ResourceProvider):
     async def get_references(self, skill_name: str) -> list[dict[str, Any]]:
         """List references for a skill.
 
+        Uses two discovery strategies:
+        1. Resource listing: checks listed resources for skill:// URIs with references/
+        2. Manifest fallback: reads the skill's _manifest to find reference files
+           that aren't listed (e.g., when supporting_files="template")
+
         Args:
-            skill_name: Name of the skill
+            skill_name: Name of the skill (kebab-case or underscore form).
+                The MCP server may list resources using either convention
+                depending on the directory name, so both forms are tried.
 
         Returns:
             List of reference file information
         """
         references: list[dict[str, Any]] = []
 
-        # For resource-based skills, look for resources under skill://skill-name/references/
+        # Strategy 1: Look for resources under skill://skill-name/references/
+        # Try both kebab-case (normalized) and underscore (original directory name) forms,
+        # since the MCP server uses directory names as-is for skill identifiers.
         try:
             resources = await self.get_resources()
-            prefix = f"skill://{skill_name}/references/"
+            prefixes = [f"skill://{skill_name}/references/"]
+            # Add underscore/kebab alternative
+            if "_" in skill_name:
+                prefixes.append(f"skill://{skill_name.replace('_', '-')}/references/")
+            elif "-" in skill_name:
+                prefixes.append(f"skill://{skill_name.replace('-', '_')}/references/")
+
             for resource in resources:
-                if resource.uri.startswith(prefix):
-                    ref_path = resource.uri[len(prefix) :]
-                    references.append({
-                        "name": resource.name,
-                        "path": ref_path,
-                        "uri": resource.uri,
-                        "description": resource.description,
-                    })
+                for prefix in prefixes:
+                    if resource.uri.startswith(prefix):
+                        ref_path = resource.uri[len(prefix) :]
+                        references.append({
+                            "name": resource.name,
+                            "path": ref_path,
+                            "uri": resource.uri,
+                            "description": resource.description,
+                        })
+                        break  # Avoid duplicates if both prefixes match
         except Exception:
-            logger.exception("Failed to get references", skill_name=skill_name)
+            logger.exception(
+                "Failed to get references from resource listing", skill_name=skill_name
+            )
+
+        # Strategy 2: Use manifest as fallback when resource listing returns nothing.
+        # The _manifest file lists all files in the skill directory, including
+        # reference files that aren't exposed as listed resources (e.g., when
+        # supporting_files="template" config on the MCP server).
+        if not references:
+            try:
+                # Determine the original_name for manifest lookup.
+                # The manifest is stored using the MCP server's directory name (underscores).
+                manifest_name = skill_name
+                if "-" in skill_name:
+                    manifest_name = skill_name.replace("-", "_")
+
+                manifest = await self._get_skill_manifest(manifest_name)
+                if manifest and "files" in manifest:
+                    for file_info in manifest["files"]:
+                        file_path = file_info.get("path", "")
+                        if file_path.startswith("references/"):
+                            # Use the manifest_name (underscore) for URI construction
+                            # since that matches the MCP server's skill identifier
+                            references.append({
+                                "name": file_path,
+                                "path": file_path,
+                                "uri": f"skill://{manifest_name}/{file_path}",
+                                "description": None,
+                            })
+            except Exception:
+                logger.exception("Failed to get references from manifest", skill_name=skill_name)
 
         return references
 
     async def read_reference(self, skill_name: str, ref_path: str) -> tuple[bytes, str]:
         """Read reference content with path traversal protection.
 
+        The skill_name should be the canonical kebab-case name (as stored in
+        Skill.name). This method looks up the original_name from its skill cache
+        (which preserves the MCP server's directory name with underscores) to
+        construct the correct URI for the MCP server.
+
         Args:
-            skill_name: Name of the skill
+            skill_name: Name of the skill (kebab-case, matches Skill.name)
             ref_path: Path to the reference file (relative to references/)
 
         Returns:
@@ -722,9 +774,25 @@ class MCPResourceProvider(ResourceProvider):
         if ".." in decoded_path.split("/") or decoded_path.startswith("/"):
             raise SecurityError(f"Path traversal detected: {ref_path}")
 
-        # Construct the full URI with provider name
-        # Format: skill://{provider}/{skill_name}/references/{path}
-        uri = f"skill://{self.name}/{skill_name}/references/{decoded_path}"
+        # Look up the original_name from the skill cache.
+        # The MCP server uses directory names as-is (may contain underscores),
+        # while Skill.name normalizes to kebab-case. We need the original name
+        # to construct the correct skill:// URI for the MCP server.
+        original_name = skill_name
+        skills = await self.get_skills()
+        skill = next((s for s in skills if s.name == skill_name), None)
+        if skill is not None:
+            original_name = skill.metadata.get("original_name", skill_name)
+
+        # Construct the full URI for the MCP server's SkillsProvider
+        # Format: skill://{original_name}/references/{path}
+        # The MCP server's SkillsProvider expects skill://skill-name/file-path,
+        # NOT skill://provider/skill-name/file-path (self.name is NOT part of URI).
+        # Avoid double "references/" prefix when decoded_path already contains it
+        if decoded_path.startswith("references/"):
+            uri = f"skill://{original_name}/{decoded_path}"
+        else:
+            uri = f"skill://{original_name}/references/{decoded_path}"
 
         try:
             content = await self.read_resource(uri)

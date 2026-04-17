@@ -96,6 +96,10 @@ async def _load_reference_content(
     # For virtual paths (PurePosixPath like skill:// URIs), use the provider
     if isinstance(skill.skill_path, PurePosixPath) and pool is not None:
         if pool.skill_provider is not None:
+            # Always pass the canonical kebab-case skill.name to the aggregating
+            # provider, which matches against Skill.name (always kebab-case).
+            # The MCP provider's read_reference() internally looks up
+            # original_name from its skill cache for URI construction.
             try:
                 content_bytes, _ = await pool.skill_provider.read_reference(
                     skill.name, reference_path
@@ -155,7 +159,9 @@ async def load_skill(  # noqa: PLR0911
 
     Args:
         ctx: Agent context providing access to pool and skills
-        skill_name: Name of the skill to load, or a skill:// URI
+        skill_name: Name of the skill to load, or a skill:// URI.
+            Use skill:// URI to load a specific reference file:
+            skill://provider/skill-name/references/file.md
         arguments: Optional space-separated arguments for substitution
 
     Returns:
