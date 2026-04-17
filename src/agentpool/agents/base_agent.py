@@ -236,6 +236,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self.hooks = hooks
         self._cancelled = False
         self._current_stream_task: asyncio.Task[Any] | None = None
+        self._active_run_ctx: AgentRunContext | None = None
         self._background_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
@@ -656,6 +657,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Reset cancellation state and track current task
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()
+        # Track the stream task so interrupt() can cancel it even without run_ctx
+        self._current_stream_task = run_ctx.current_task
+        # Store run_ctx as instance variable so interrupt() can find it
+        # from a different task (ContextVar is task-scoped and returns None
+        # when read from outside the run_stream task)
+        self._active_run_ctx = run_ctx
         # Queue the initial prompts
         run_ctx.injection_manager.insert_queued(prompts)
 
@@ -691,6 +698,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if token is not None:
                 _current_run_ctx_var.reset(token)
             run_ctx.injection_manager.clear()
+            self._current_stream_task = None
+            self._active_run_ctx = None
 
     async def _run_stream_once(
         self,
@@ -1064,15 +1073,24 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Sets the cancelled flag, calls subclass-specific _interrupt(),
         and emits the interrupted signal.
 
+        When run_ctx is not provided (e.g., from OpenCode abort_session),
+        falls back to the active run_ctx stored by run_stream() so that
+        run_ctx.cancelled is set and the streaming loop can exit.
+
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
         """
         self._cancelled = True
-        if run_ctx:
-            run_ctx.cancelled = True
+        # When no run_ctx is provided, try the active per-run context
+        # stored by run_stream() as _active_run_ctx. We can't use
+        # _current_run_ctx (ContextVar) because it's task-scoped —
+        # interrupt() is called from a different task than run_stream().
+        effective_run_ctx = run_ctx or self._active_run_ctx
+        if effective_run_ctx:
+            effective_run_ctx.cancelled = True
         if self._background_run_ctx:
             self._background_run_ctx.cancelled = True
-        await self._interrupt(run_ctx)
+        await self._interrupt(effective_run_ctx)
         await self.interrupted.emit(self.InterruptEvent(agent_name=self.name))
         logger.info("Agent interrupted", agent=self.name)
 

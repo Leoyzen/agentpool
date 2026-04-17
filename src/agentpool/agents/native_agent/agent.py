@@ -304,6 +304,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._end_strategy: EndStrategy = end_strategy
         self._output_retries = output_retries
         self.parallel_init = parallel_init
+        self._iteration_task: asyncio.Task[Any] | None = None
         self.talk = Interactions(self)
         # Set up system prompts
         all_prompts: list[AnyPromptType] = []
@@ -932,6 +933,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         # Start the agent iteration task
         iteration_task = asyncio.create_task(agent_iteration_task())
+        self._iteration_task = iteration_task
 
         try:
             # Yield events from the queue
@@ -967,6 +969,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     )
                 except (TimeoutError, asyncio.CancelledError):
                     pass  # Cleanup will happen in background
+            # Clear the iteration task reference
+            self._iteration_task = None
 
         # Send additional enriched completion event
         yield StreamCompleteEvent(message=response_msg)
@@ -997,7 +1001,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self._model = model
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
-        """Cancel the current stream task.
+        """Cancel the current stream task and iteration task.
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
@@ -1005,6 +1009,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         task = run_ctx.current_task if run_ctx else None
         if task and not task.done():
             task.cancel()
+        # Also directly cancel the iteration_task running the LLM API call.
+        # Before this fix, iteration_task was a local variable and only cancelled
+        # indirectly through the consumer's finally block. If consumer cleanup
+        # timed out, the LLM call kept running in the background.
+        iteration_task = self._iteration_task
+        if iteration_task is not None and not iteration_task.done():
+            iteration_task.cancel()
 
     @asynccontextmanager
     async def temporary_state[T](
