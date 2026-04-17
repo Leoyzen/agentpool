@@ -140,6 +140,9 @@ def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
         case TuiSessionSelectEvent(properties=props):
             return props.session_id
 
+        case ServerHeartbeatEvent() | ServerConnectedEvent():
+            return None
+
         # Events with properties.info.id (Session has id field)
         case SessionCreatedEvent(properties=props):
             return props.info.id
@@ -154,7 +157,6 @@ def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
         case PartUpdatedEvent(properties=props):
             return props.part.session_id
 
-        # Events without session_id return None
         case _:
             logger.warning("Unhandled event type in _extract_session_id: %s", type(event).__name__)
             return None
@@ -198,11 +200,6 @@ class GlobalEventFactory:
         if self._workspace is not None:
             envelope["workspace"] = self._workspace
         return json.dumps(envelope, ensure_ascii=False)
-
-    @staticmethod
-    def is_global_only_event(event: Event) -> bool:
-        """Check if event is server-scoped (no session routing needed)."""
-        return isinstance(event, ServerHeartbeatEvent)
 
 
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
@@ -294,13 +291,18 @@ async def _event_generator(
             except TimeoutError:
                 # No events for 10s — send heartbeat to keep connection alive
                 heartbeat = ServerHeartbeatEvent()
-                data = _serialize_event(heartbeat, wrap_payload=False)
+                data = (
+                    factory.wrap(heartbeat)
+                    if factory is not None
+                    else _serialize_event(heartbeat, wrap_payload=False)
+                )
                 yield {"data": data}
                 continue
-            if factory and not GlobalEventFactory.is_global_only_event(event):
-                data = factory.wrap(event)
-            else:
-                data = _serialize_event(event, wrap_payload=False)
+            data = (
+                factory.wrap(event)
+                if factory is not None
+                else _serialize_event(event, wrap_payload=False)
+            )
             logger.info("SSE: Sending event", event_type=event.type)
             yield {"data": data}
     finally:

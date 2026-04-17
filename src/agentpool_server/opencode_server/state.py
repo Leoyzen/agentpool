@@ -126,7 +126,7 @@ class ServerState:
         from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
         if self._event_factory is None:
-            directory = self.working_dir
+            directory = self.base_path
             self._event_factory = GlobalEventFactory(
                 directory=directory,
                 project=helpers.compute_project_id(directory),

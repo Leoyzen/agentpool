@@ -169,14 +169,6 @@ def test_global_event_factory_session_id_in_payload() -> None:
     assert data["payload"]["sessionId"] == "sid1"
 
 
-def test_global_event_factory_is_global_only_event() -> None:
-    """Server events are global-only; session events are not."""
-    assert GlobalEventFactory.is_global_only_event(ServerHeartbeatEvent())
-    assert not GlobalEventFactory.is_global_only_event(
-        SessionStatusEvent.create(session_id="a", status_type="busy")
-    )
-
-
 def test_global_event_factory_unicode_preserved() -> None:
     """Factory.wrap() preserves Unicode characters in output."""
     factory = GlobalEventFactory(directory="/tmp", project="abc")
@@ -278,18 +270,16 @@ async def test_global_event_wraps_regular_events_in_envelope() -> None:
 
 
 @pytest.mark.anyio
-async def test_global_event_heartbeat_is_bare() -> None:
-    """/global/event sends ServerHeartbeatEvent as bare JSON (no wrapper)."""
+async def test_global_event_heartbeat_is_wrapped() -> None:
+    """/global/event wraps ServerHeartbeatEvent in the GlobalEvent envelope."""
     state = _MockState()
     hb = ServerHeartbeatEvent()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
     assert len(events) == 2
     heartbeat = events[1]
-    assert heartbeat["type"] == "server.heartbeat"
-    # Bare: no envelope keys
-    assert "directory" not in heartbeat
-    assert "project" not in heartbeat
-    assert "payload" not in heartbeat
+    assert heartbeat["payload"]["type"] == "server.heartbeat"
+    assert heartbeat["directory"] == state.working_dir
+    assert heartbeat["project"]
 
 
 @pytest.mark.anyio
@@ -333,7 +323,7 @@ async def test_global_event_directory_matches_working_dir() -> None:
 
 @pytest.mark.anyio
 async def test_multiple_events_maintain_correct_wrapping() -> None:
-    """Sequence of wrapped/bare/wrapped events all have correct format."""
+    """Sequence of wrapped events all have correct format."""
     state = _MockState()
     session_evt = SessionStatusEvent.create(session_id="s4", status_type="busy")
     hb = ServerHeartbeatEvent()
@@ -350,9 +340,9 @@ async def test_multiple_events_maintain_correct_wrapping() -> None:
     # [1] session status — wrapped
     assert "payload" in events[1]
     assert events[1]["payload"]["type"] == "session.status"
-    # [2] heartbeat — bare
-    assert events[2]["type"] == "server.heartbeat"
-    assert "payload" not in events[2]
+    # [2] heartbeat — wrapped
+    assert events[2]["payload"]["type"] == "server.heartbeat"
+    assert events[2]["directory"] == state.working_dir
     # [3] session status — wrapped
     assert "payload" in events[3]
     assert events[3]["payload"]["type"] == "session.status"
@@ -464,7 +454,7 @@ async def test_global_event_integration_directory_matches_working_dir(
     event = SessionStatusEvent.create(session_id="s2", status_type="idle")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert received["directory"] == server_state.working_dir
+    assert received["directory"] == server_state.base_path
 
 
 @pytest.mark.integration
@@ -506,7 +496,7 @@ async def test_global_event_routing_ignores_agent_execution_cwd(
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
 
-    assert received["directory"] == server_state.working_dir
+    assert received["directory"] == server_state.base_path
     assert "workspace" not in received
 
 
