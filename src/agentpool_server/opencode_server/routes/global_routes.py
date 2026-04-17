@@ -16,6 +16,11 @@ from agentpool_server.opencode_server.models import GlobalEvent, HealthResponse
 from agentpool_server.opencode_server.models.app import DiagnosticResponse
 from agentpool_server.opencode_server.models.events import (
     CommandExecutedEvent,
+    FileEditedEvent,
+    FileWatcherUpdatedEvent,
+    LspClientDiagnosticsEvent,
+    LspUpdatedEvent,
+    McpToolsChangedEvent,
     MessageRemovedEvent,
     MessageUpdatedEvent,
     PartDeltaEvent,
@@ -24,6 +29,11 @@ from agentpool_server.opencode_server.models.events import (
     PermissionRequestEvent,
     PermissionResolvedEvent,
     PermissionUpdatedEvent,
+    ProjectUpdatedEvent,
+    PtyCreatedEvent,
+    PtyDeletedEvent,
+    PtyExitedEvent,
+    PtyUpdatedEvent,
     QuestionAskedEvent,
     QuestionRejectedEvent,
     QuestionRepliedEvent,
@@ -37,8 +47,12 @@ from agentpool_server.opencode_server.models.events import (
     SessionIdleEvent,
     SessionStatusEvent,
     SessionUpdatedEvent,
-    TodoUpdatedEvent,
+    TuiCommandExecuteEvent,
+    TuiPromptAppendEvent,
     TuiSessionSelectEvent,
+    TuiToastShowEvent,
+    TodoUpdatedEvent,
+    VcsBranchUpdatedEvent,
 )
 from agentpool_server.opencode_server.routes.routing import (
     RoutingCheckResponse,
@@ -140,7 +154,27 @@ def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
         case TuiSessionSelectEvent(properties=props):
             return props.session_id
 
-        case ServerHeartbeatEvent() | ServerConnectedEvent():
+        # Events with no session association (explicitly listed to avoid
+        # spurious warnings; these events are broadcast globally and are
+        # not tied to any particular session).
+        case (
+            ServerHeartbeatEvent()
+            | ServerConnectedEvent()
+            | FileWatcherUpdatedEvent()
+            | FileEditedEvent()
+            | McpToolsChangedEvent()
+            | PtyCreatedEvent()
+            | PtyUpdatedEvent()
+            | PtyExitedEvent()
+            | PtyDeletedEvent()
+            | LspUpdatedEvent()
+            | LspClientDiagnosticsEvent()
+            | ProjectUpdatedEvent()
+            | VcsBranchUpdatedEvent()
+            | TuiPromptAppendEvent()
+            | TuiCommandExecuteEvent()
+            | TuiToastShowEvent()
+        ):
             return None
 
         # Events with properties.info.id (Session has id field)
@@ -190,8 +224,10 @@ class GlobalEventFactory:
         Returns:
             JSON string with directory, project, workspace, and payload keys.
         """
-        payload_json = _serialize_event(event, wrap_payload=False)
-        payload = json.loads(payload_json)
+        payload = event.model_dump(by_alias=True, exclude_none=True)
+        session_id = _extract_session_id(event)
+        if session_id is not None:
+            payload["sessionId"] = session_id
         envelope: dict[str, Any] = {
             "directory": self._directory,
             "project": self._project,
