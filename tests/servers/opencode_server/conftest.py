@@ -33,6 +33,7 @@ from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.routes import agent_router, file_router, session_router
 from agentpool_server.opencode_server.routes.global_routes import router as global_router
+from agentpool_server.opencode_server.routes.message_routes import router as message_router
 from agentpool_server.opencode_server.state import ServerState
 
 
@@ -215,6 +216,7 @@ def app(server_state: ServerState) -> FastAPI:
     """Create a FastAPI app with all routes for testing."""
     app = FastAPI()
     app.include_router(session_router)
+    app.include_router(message_router)
     app.include_router(file_router)
     app.include_router(agent_router)
     app.include_router(global_router)

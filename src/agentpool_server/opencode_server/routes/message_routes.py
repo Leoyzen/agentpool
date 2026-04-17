@@ -308,6 +308,8 @@ async def _process_message_locked(  # noqa: PLR0915
     state: StateDep,
     user_msg_id: str,
     user_msg_with_parts: MessageWithParts,
+    *,
+    mark_busy: bool = True,
 ) -> MessageWithParts:
     """Actual agent processing logic (called within lock).
 
@@ -316,9 +318,10 @@ async def _process_message_locked(  # noqa: PLR0915
         user_msg_with_parts: The user message with parts (already broadcast)
     """
     # --- Mark session busy ---
-    busy = SessionStatus(type="busy")
-    state.session_status[session_id] = busy
-    await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
+    if mark_busy:
+        busy = SessionStatus(type="busy")
+        state.session_status[session_id] = busy
+        await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
     # --- Extract user prompt ---
     user_prompt = await extract_user_prompt_from_parts(
         request.parts,
@@ -593,26 +596,41 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
         tools=state.agent.tools,
     )
 
-    # 3. Check if session is busy
-    current_status = state.session_status.get(session_id)
-    is_busy = current_status is not None and current_status.type == "busy"
+    # 3. Atomically inspect busy state, then start or queue processing
+    lock = state.get_session_lock(session_id)
+    async with lock:
+        current_status = state.session_status.get(session_id)
+        if current_status is not None and current_status.type == "busy":
+            logger.info(
+                "Session became busy before async dispatch, queuing prompt",
+                session_id=session_id,
+            )
+            agent = state.agent
+            if request.agent and state.agent.agent_pool is not None:
+                agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
+            agent.queue_prompt(user_prompt)
+            return
 
-    if is_busy:
-        # Session is busy → queue the prompt using agent.queue_prompt()
-        # The agent will automatically process queued prompts after current run
-        logger.info("Session busy, queuing prompt via agent.queue_prompt()", session_id=session_id)
-        agent = state.agent
-        if request.agent and state.agent.agent_pool is not None:
-            agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-        agent.queue_prompt(user_prompt)
-        return
+        logger.info("Session idle, starting background task", session_id=session_id)
+        busy = SessionStatus(type="busy")
+        state.session_status[session_id] = busy
+        await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
 
-    # 4. Session is idle → start background task to process
-    logger.info("Session idle, starting background task", session_id=session_id)
-    state.create_background_task(
-        _process_message_locked(session_id, request, state, user_msg_id, user_msg_with_parts),
-        name=f"process_message_{session_id}",
-    )
+        async def process_message() -> MessageWithParts:
+            async with lock:
+                return await _process_message_locked(
+                    session_id,
+                    request,
+                    state,
+                    user_msg_id,
+                    user_msg_with_parts,
+                    mark_busy=False,
+                )
+
+        state.create_background_task(
+            process_message(),
+            name=f"process_message_{session_id}",
+        )
 
 
 @router.get("/message/{message_id}")

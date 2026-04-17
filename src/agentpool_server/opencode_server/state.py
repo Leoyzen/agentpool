@@ -298,6 +298,8 @@ class ServerState:
         # Create input provider for this session
         input_provider = OpenCodeInputProvider(self, session_id)
         self.input_providers[session_id] = input_provider
+        self.agent._input_provider = input_provider
+        self.agent.session_id = session_id
 
         await self.broadcast_event(SessionCreatedEvent.create(session))
 
