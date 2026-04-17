@@ -224,10 +224,7 @@ class GlobalEventFactory:
         Returns:
             JSON string with directory, project, workspace, and payload keys.
         """
-        payload = event.model_dump(by_alias=True, exclude_none=True)
-        session_id = _extract_session_id(event)
-        if session_id is not None:
-            payload["sessionId"] = session_id
+        payload = _event_to_dict(event)
         envelope: dict[str, Any] = {
             "directory": self._directory,
             "project": self._project,
@@ -238,13 +235,33 @@ class GlobalEventFactory:
         return json.dumps(envelope, ensure_ascii=False)
 
 
+def _event_to_dict(event: Event) -> dict[str, Any]:
+    """Convert an Event to a dict with sessionId injected at top level.
+
+    This is the dict-building half of serialization; the caller decides
+    whether to wrap it in a payload envelope and when to call json.dumps.
+
+    Injects sessionId (lowercase 'd') at the top level for subagent
+    session tracking, separate from the alias-converted sessionID that
+    appears inside properties.
+
+    Args:
+        event: The event to convert
+
+    Returns:
+        Dict with the event data and optional sessionId field.
+    """
+    event_data = event.model_dump(by_alias=True, exclude_none=True)
+    session_id = _extract_session_id(event)
+    if session_id is not None:
+        event_data["sessionId"] = session_id
+    return event_data
+
+
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
     r"""Serialize event, optionally wrapping in payload structure.
 
-    Injects sessionId at the top level of the serialized data (lowercase 'd')
-    for subagent session tracking, separate from the alias-converted
-    sessionID that appears inside properties.
-
+    Thin convenience wrapper around _event_to_dict + json.dumps.
     Uses ensure_ascii=False to preserve Unicode characters (Chinese, emoji, etc.)
     in the JSON output instead of escaping them as \uXXXX sequences.
 
@@ -255,13 +272,7 @@ def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
     Returns:
         JSON string of the serialized event data.
     """
-    event_data = event.model_dump(by_alias=True, exclude_none=True)
-
-    # Add sessionId at top level if available (for subagent session tracking)
-    session_id = _extract_session_id(event)
-    if session_id is not None:
-        event_data["sessionId"] = session_id
-
+    event_data = _event_to_dict(event)
     if wrap_payload:
         return json.dumps({"payload": event_data}, ensure_ascii=False)
     return json.dumps(event_data, ensure_ascii=False)
@@ -313,11 +324,7 @@ async def _event_generator(
     try:
         # Send initial connected event (wrapped when payload wrapping is enabled)
         connected = ServerConnectedEvent()
-        data = (
-            factory.wrap(connected)
-            if factory is not None
-            else _serialize_event(connected, wrap_payload=False)
-        )
+        data = factory.wrap(connected) if factory is not None else _serialize_event(connected)
         logger.info("SSE: Sending connected event", data=data)
         yield {"data": data}
         # Stream events
@@ -328,17 +335,11 @@ async def _event_generator(
                 # No events for 10s — send heartbeat to keep connection alive
                 heartbeat = ServerHeartbeatEvent()
                 data = (
-                    factory.wrap(heartbeat)
-                    if factory is not None
-                    else _serialize_event(heartbeat, wrap_payload=False)
+                    factory.wrap(heartbeat) if factory is not None else _serialize_event(heartbeat)
                 )
                 yield {"data": data}
                 continue
-            data = (
-                factory.wrap(event)
-                if factory is not None
-                else _serialize_event(event, wrap_payload=False)
-            )
+            data = factory.wrap(event) if factory is not None else _serialize_event(event)
             logger.info("SSE: Sending event", event_type=event.type)
             yield {"data": data}
     finally:

@@ -576,9 +576,14 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     if session_id not in state.input_providers:
         input_provider = OpenCodeInputProvider(state, session_id)
         state.input_providers[session_id] = input_provider
-    # Set input provider on agent to ensure correct session routing
+    # Set input provider on agent to ensure correct session routing.
+    # NOTE: The agent singleton is shared across sessions. Setting _input_provider
+    # and session_id here is safe for single-session use but creates a race if
+    # two sessions run concurrently — the later session overwrites the earlier.
+    # Per-session locks (session_locks) prevent message-processing races, but a
+    # full fix would pass session context through the execution path instead of
+    # mutating the shared agent instance.
     state.agent._input_provider = state.input_providers[session_id]
-    # Update agent's session_id to track which session is loaded
     state.agent.session_id = session_id
     return session
 
@@ -661,7 +666,8 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # Create input provider for this session
     input_provider = OpenCodeInputProvider(state, session_id)
     state.input_providers[session_id] = input_provider
-    # Set input provider on agent
+    # Set input provider on agent.
+    # NOTE: See load_session for the shared-agent race-condition caveat.
     state.agent._input_provider = input_provider
     # Clear agent's conversation for the new session
     # Agent is shared across sessions, so we need to clear its conversation state
