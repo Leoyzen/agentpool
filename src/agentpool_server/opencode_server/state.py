@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from agentpool import log
 from agentpool.diagnostics.lsp_manager import LSPManager
 from agentpool.utils.time_utils import now_ms
+from agentpool_server.opencode_server.models import SessionStatus
 from agentpool_server.opencode_server.provider_auth import create_default_auth_service
 from agentpool_storage.opencode_provider import helpers
 
@@ -33,7 +34,6 @@ if TYPE_CHECKING:
         MessageWithParts,
         QuestionInfo,
         Session,
-        SessionStatus,
         Todo,
     )
     from agentpool_server.opencode_server.models.question import QuestionToolInfo
@@ -126,11 +126,11 @@ class ServerState:
         from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
         if self._event_factory is None:
-            directory = self.base_path
+            directory = self.working_dir
             self._event_factory = GlobalEventFactory(
                 directory=directory,
                 project=helpers.compute_project_id(directory),
-                workspace=directory,
+                workspace=None,
             )
         return self._event_factory
 
@@ -232,6 +232,15 @@ class ServerState:
                 with contextlib.suppress(ValueError):
                     self.event_subscribers.remove(queue)
 
+    async def mark_session_idle(self, session_id: str) -> None:
+        """Mark a session idle and broadcast the matching status events."""
+        from agentpool_server.opencode_server.models import SessionIdleEvent, SessionStatusEvent
+
+        status = SessionStatus(type="idle")
+        self.session_status[session_id] = status
+        await self.broadcast_event(SessionStatusEvent.create(session_id, status))
+        await self.broadcast_event(SessionIdleEvent.create(session_id))
+
     async def ensure_session(
         self,
         session_id: str,
@@ -260,7 +269,6 @@ class ServerState:
         from agentpool_server.opencode_server.models import (
             Session,
             SessionCreatedEvent,
-            SessionStatus,
             TimeCreatedUpdated,
         )
 
@@ -284,7 +292,7 @@ class ServerState:
         # Cache in memory
         self.sessions[session_id] = session
         self.messages[session_id] = []
-        self.session_status[session_id] = SessionStatus(type="idle")
+        await self.mark_session_idle(session_id)
         self.todos[session_id] = []
 
         # Create input provider for this session

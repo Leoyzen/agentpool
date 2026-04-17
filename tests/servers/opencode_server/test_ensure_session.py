@@ -9,6 +9,8 @@ import pytest
 from agentpool.agents.base_agent import BaseAgent
 from agentpool_server.opencode_server.models import (
     Session,
+    SessionIdleEvent,
+    SessionStatusEvent,
     TimeCreatedUpdated,
 )
 from agentpool_server.opencode_server.state import ServerState
@@ -146,6 +148,34 @@ async def test_ensure_session_caches_in_memory(mock_state: ServerState) -> None:
 
     assert session_id in mock_state.input_providers
     assert mock_state.input_providers[session_id] is mock_provider
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_broadcasts_idle_events(mock_state: ServerState) -> None:
+    """Test that ensure_session broadcasts both status and idle events."""
+    session_id = "test_session_idle_event"
+
+    with (
+        patch("agentpool_server.opencode_server.converters.opencode_to_session_data"),
+        patch("agentpool_server.opencode_server.input_provider.OpenCodeInputProvider"),
+        patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast,
+    ):
+        await mock_state.ensure_session(session_id)
+
+    status_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionStatusEvent)
+    ]
+    idle_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionIdleEvent)
+    ]
+    assert len(status_events) == 1
+    assert len(idle_events) == 1
+    assert status_events[0].properties.status.type == "idle"
+    assert idle_events[0].properties.session_id == session_id
 
 
 @pytest.mark.asyncio

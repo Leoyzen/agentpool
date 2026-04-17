@@ -8,7 +8,13 @@ including permission checking and dangerous command detection.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from agentpool_server.opencode_server.models import ShellRequest
+from agentpool_server.opencode_server.routes.session_routes import run_shell_command
 
 
 class TestShellBasic:
@@ -237,6 +243,30 @@ class TestShellSessionStatus:
 
         # Check final session status
         assert server_state.session_status[session_id].type == "idle"
+
+    async def test_cancelled_shell_command_still_unlocks_session(
+        self,
+        async_client,
+        server_state,
+        event_capture,
+    ):
+        """A cancelled shell command should still broadcast idle state."""
+        response = await async_client.post("/session", json={"title": "Cancel Shell"})
+        session_id = response.json()["id"]
+        server_state.agent.env.execute_command = AsyncMock(side_effect=asyncio.CancelledError)
+
+        with pytest.raises(asyncio.CancelledError):
+            await run_shell_command(
+                session_id,
+                ShellRequest(agent="test", command="echo test"),
+                server_state,
+            )
+
+        assert server_state.session_status[session_id].type == "idle"
+        status_events = event_capture.get_events_by_type("session.status")
+        idle_events = event_capture.get_events_by_type("session.idle")
+        assert status_events[-1].properties.status.type == "idle"
+        assert idle_events[-1].properties.session_id == session_id
 
 
 class TestShellMessageStructure:

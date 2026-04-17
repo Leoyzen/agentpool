@@ -80,6 +80,8 @@ class OpenCodeStreamAdapter:
     processor: EventProcessor = field(default_factory=EventProcessor, init=False)
     main_context: EventProcessorContext = field(init=False)
     _cost_info: Any = field(default=None, init=False)
+    _step_finish_emitted: bool = field(default=False, init=False)
+    """Tracks whether StepFinishPart was already emitted by _process_stream_complete."""
 
     def __post_init__(self) -> None:
         self.main_context = EventProcessorContext(
@@ -147,6 +149,11 @@ class OpenCodeStreamAdapter:
         try:
             async for event in stream:
                 async for oc_event in self.processor.process(event, self.main_context):
+                    # Track if StepFinishPart was emitted by _process_stream_complete
+                    if isinstance(oc_event, PartUpdatedEvent) and isinstance(
+                        oc_event.properties.part, StepFinishPart
+                    ):
+                        self._step_finish_emitted = True
                     yield oc_event
         except asyncio.CancelledError:
             # Stream was cancelled by user - this is expected behavior
@@ -176,7 +183,8 @@ class OpenCodeStreamAdapter:
         """Yield final events after the stream has ended.
 
         Produces the final text part update (or creates one if text was never
-        streamed), the step-finish part, and the final text timing update.
+        streamed), the step-finish part (if not already emitted by
+        _process_stream_complete), and the final text timing update.
         """
         response_time = now_ms()
         start = self.main_context.stream_start_ms
@@ -204,7 +212,11 @@ class OpenCodeStreamAdapter:
             )
             self.assistant_msg.update_part(final_text_part)
 
-        # Step finish
+        # Step finish — skip if already emitted by _process_stream_complete
+        # (StreamCompleteEvent handler in EventProcessor also emits StepFinishPart)
+        if self._step_finish_emitted:
+            return
+
         cache = TokenCache(read=0, write=0)
         tokens = Tokens(
             cache=cache,

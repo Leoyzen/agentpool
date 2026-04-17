@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -172,7 +171,6 @@ def test_global_event_factory_session_id_in_payload() -> None:
 
 def test_global_event_factory_is_global_only_event() -> None:
     """Server events are global-only; session events are not."""
-    assert GlobalEventFactory.is_global_only_event(ServerConnectedEvent())
     assert GlobalEventFactory.is_global_only_event(ServerHeartbeatEvent())
     assert not GlobalEventFactory.is_global_only_event(
         SessionStatusEvent.create(session_id="a", status_type="busy")
@@ -253,18 +251,16 @@ async def _collect_events(
 
 
 @pytest.mark.anyio
-async def test_global_event_server_connected_is_bare() -> None:
-    """First event from /global/event is bare server.connected (no wrapper)."""
+async def test_global_event_server_connected_is_wrapped() -> None:
+    """First event from /global/event is wrapped server.connected."""
     state = _MockState()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[])
     # Only the connected event
     assert len(events) == 1
     connected = events[0]
-    assert connected["type"] == "server.connected"
-    # Bare: no directory/project/payload keys
-    assert "directory" not in connected
-    assert "project" not in connected
-    assert "payload" not in connected
+    assert connected["payload"]["type"] == "server.connected"
+    assert connected["directory"] == state.working_dir
+    assert connected["project"]
 
 
 @pytest.mark.anyio
@@ -326,7 +322,7 @@ async def test_global_events_have_no_session_id() -> None:
 
 @pytest.mark.anyio
 async def test_global_event_directory_matches_working_dir() -> None:
-    """Envelope directory field matches state.working_dir."""
+    """Envelope directory field matches the server working directory."""
     wd = "/custom/working/dir"
     state = _MockState(working_dir=wd)
     session_evt = SessionStatusEvent.create(session_id="s3", status_type="retry")
@@ -348,9 +344,9 @@ async def test_multiple_events_maintain_correct_wrapping() -> None:
         events_to_send=[session_evt, hb, session_evt2],
     )
     assert len(events) == 4
-    # [0] connected — bare
-    assert events[0]["type"] == "server.connected"
-    assert "payload" not in events[0]
+    # [0] connected — wrapped
+    assert events[0]["payload"]["type"] == "server.connected"
+    assert events[0]["directory"] == state.working_dir
     # [1] session status — wrapped
     assert "payload" in events[1]
     assert events[1]["payload"]["type"] == "session.status"
@@ -464,11 +460,11 @@ async def test_global_event_integration_envelope_fields(
 async def test_global_event_integration_directory_matches_working_dir(
     server_state: ServerState,
 ) -> None:
-    """Test directory field matches normalized server_state base_path."""
+    """Test directory field matches the server working directory."""
     event = SessionStatusEvent.create(session_id="s2", status_type="idle")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert received["directory"] == server_state.base_path
+    assert received["directory"] == server_state.working_dir
 
 
 @pytest.mark.integration
@@ -491,11 +487,11 @@ async def test_global_event_integration_project_computed(
 async def test_global_event_integration_workspace_absent(
     server_state: ServerState,
 ) -> None:
-    """Test workspace field matches normalized server_state base_path."""
+    """Test workspace field is omitted for single-directory routing."""
     event = SessionStatusEvent.create(session_id="s4", status_type="retry")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert received["workspace"] == server_state.base_path
+    assert "workspace" not in received
 
 
 @pytest.mark.integration
@@ -510,10 +506,8 @@ async def test_global_event_routing_ignores_agent_execution_cwd(
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
 
-    expected_base_path = str(Path(server_state.working_dir).resolve())
-    assert server_state.base_path == expected_base_path
-    assert received["directory"] == expected_base_path
-    assert received["workspace"] == expected_base_path
+    assert received["directory"] == server_state.working_dir
+    assert "workspace" not in received
 
 
 @pytest.mark.integration
@@ -1165,11 +1159,10 @@ async def test_concurrent_all_get_server_connected() -> None:
 
     for item in [item1, item2, item3]:
         data = json.loads(item["data"])
-        assert data["type"] == "server.connected"
-        # Bare event: no GlobalEvent wrapper keys
-        assert "directory" not in data
-        assert "project" not in data
-        assert "payload" not in data
+        assert data["payload"]["type"] == "server.connected"
+        assert "directory" in data
+        assert "project" in data
+        assert "payload" in data
 
 
 # =============================================================================

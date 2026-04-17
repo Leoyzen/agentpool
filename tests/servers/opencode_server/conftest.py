@@ -147,6 +147,9 @@ def mock_pool(
     # Sessions store must use AsyncMock for awaitable save/delete operations
     pool.sessions = Mock()
     pool.sessions.store = AsyncMock()
+    pool.sessions.store.save = AsyncMock()
+    pool.sessions.store.delete = AsyncMock()
+    pool.sessions.store.list_sessions = AsyncMock(return_value=[])
     return pool
 
 

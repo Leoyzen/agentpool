@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING
 
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.models import SessionStatus
-from agentpool_server.opencode_server.models.events import SessionCreatedEvent
+from agentpool_server.opencode_server.models.events import (
+    SessionCreatedEvent,
+    SessionIdleEvent,
+    SessionStatusEvent,
+)
 
 
 if TYPE_CHECKING:
@@ -57,6 +61,13 @@ class TestSessionCreatedEvent:
         assert event.properties.info.id == session_data["id"]
         assert event.properties.info.title == session_data["title"]
         assert event.properties.info.project_id == "global"  # Non-git directory returns "global"
+        status_events = event_capture.get_events_by_type("session.status")
+        idle_events = event_capture.get_events_by_type("session.idle")
+        assert len(status_events) == 1
+        assert len(idle_events) == 1
+        assert isinstance(status_events[0], SessionStatusEvent)
+        assert isinstance(idle_events[0], SessionIdleEvent)
+        assert status_events[0].properties.status.type == "idle"
 
     async def test_session_created_event_should_be_emitted_before_session_updated(
         self,
@@ -99,6 +110,7 @@ class TestSessionCRUD:
         self,
         async_client: AsyncClient,
         tmp_project_dir: Path,
+        event_capture: EventCapture,
     ):
         """Creating a session should return a valid session object."""
         response = await async_client.post("/session", json={"title": "My Session"})
@@ -114,6 +126,10 @@ class TestSessionCRUD:
         assert "time" in session
         assert "created" in session["time"]
         assert "updated" in session["time"]
+        status_events = event_capture.get_events_by_type("session.status")
+        idle_events = event_capture.get_events_by_type("session.idle")
+        assert len(status_events) == 1
+        assert len(idle_events) == 1
 
     async def test_create_session_with_parent_id(self, async_client: AsyncClient):
         """Creating a session with parent_id should set the parent."""
@@ -342,6 +358,10 @@ class TestSessionFork:
         fork_event = created_events[-1]
         assert fork_event.properties.info.id == forked["id"]
         assert fork_event.properties.info.parent_id == original_id  # Python attr
+        status_events = event_capture.get_events_by_type("session.status")
+        idle_events = event_capture.get_events_by_type("session.idle")
+        assert status_events[-1].properties.session_id == forked["id"]
+        assert idle_events[-1].properties.session_id == forked["id"]
 
     async def test_fork_nonexistent_session_returns_404(self, async_client: AsyncClient):
         """Forking a non-existent session should return 404."""

@@ -33,6 +33,7 @@ from agentpool_server.opencode_server.models import (
     Part,
     PartRemovedEvent,
     PartUpdatedEvent,
+    SessionErrorEvent,
     SessionIdleEvent,
     SessionStatus,
     SessionStatusEvent,
@@ -53,6 +54,11 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+# Maximum time (in seconds) to wait for a single agent stream response.
+# If the model API hangs without producing any events, this timeout ensures
+# the session transitions from "busy" to "idle" instead of getting stuck.
+STREAM_TIMEOUT_SECONDS = 600  # 10 minutes
 
 
 def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
@@ -429,8 +435,9 @@ async def _process_message_locked(  # noqa: PLR0915
     cancelled = False
     try:
         iterator = agent.run_stream(*user_prompt, session_id=session_id)
-        async for oc_event in adapter.process_stream(iterator):
-            await state.broadcast_event(oc_event)
+        async with asyncio.timeout(STREAM_TIMEOUT_SECONDS):
+            async for oc_event in adapter.process_stream(iterator):
+                await state.broadcast_event(oc_event)
 
         for oc_event in adapter.finalize():
             await state.broadcast_event(oc_event)

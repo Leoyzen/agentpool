@@ -12,12 +12,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import Event, GlobalEvent, HealthResponse  # noqa: TC001
-from agentpool_server.opencode_server.models.app import DiagnosticResponse  # noqa: TC001
-from agentpool_server.opencode_server.routes.routing import (  # noqa: TC001
-    RoutingCheckResponse,
-    tui_event_filter,
-)
+from agentpool_server.opencode_server.models import GlobalEvent, HealthResponse
+from agentpool_server.opencode_server.models.app import DiagnosticResponse
 from agentpool_server.opencode_server.models.events import (
     CommandExecutedEvent,
     MessageRemovedEvent,
@@ -44,11 +40,16 @@ from agentpool_server.opencode_server.models.events import (
     TodoUpdatedEvent,
     TuiSessionSelectEvent,
 )
+from agentpool_server.opencode_server.routes.routing import (
+    RoutingCheckResponse,
+    tui_event_filter,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from agentpool_server.opencode_server.models import Event
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -70,6 +71,14 @@ async def get_diagnostic(state: StateDep) -> DiagnosticResponse:
 
     Returns directory, project, subscriber count, and server version.
     """
+    if state.working_dir is None:
+        return DiagnosticResponse(
+            directory=None,
+            project="",
+            subscribers=len(state.event_subscribers),
+            server_version=VERSION,
+        )
+
     factory = state.get_event_factory()
     return DiagnosticResponse(
         directory=state.working_dir,
@@ -193,7 +202,7 @@ class GlobalEventFactory:
     @staticmethod
     def is_global_only_event(event: Event) -> bool:
         """Check if event is server-scoped (no session routing needed)."""
-        return isinstance(event, (ServerConnectedEvent, ServerHeartbeatEvent))
+        return isinstance(event, ServerHeartbeatEvent)
 
 
 def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
@@ -233,9 +242,8 @@ async def _event_generator(
     Registers a subscriber queue, sends an initial connected event,
     then streams subsequent events from the broadcast system.
 
-    When wrap_payload is True, non-global events are wrapped in a
-    GlobalEvent envelope via the factory; global events (connected,
-    heartbeat) are always sent bare.
+    When wrap_payload is True, events are wrapped in a GlobalEvent envelope
+    via the factory; heartbeat events are always sent bare.
 
     Subscriber lifecycle:
     1. Queue appended to state.event_subscribers
@@ -270,14 +278,25 @@ async def _event_generator(
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
     try:
-        # Send initial connected event (always bare, no GlobalEvent wrapper)
+        # Send initial connected event (wrapped when payload wrapping is enabled)
         connected = ServerConnectedEvent()
-        data = _serialize_event(connected, wrap_payload=False)
+        data = (
+            factory.wrap(connected)
+            if factory is not None
+            else _serialize_event(connected, wrap_payload=False)
+        )
         logger.info("SSE: Sending connected event", data=data)
         yield {"data": data}
         # Stream events
         while True:
-            event = await queue.get()
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=10.0)
+            except TimeoutError:
+                # No events for 10s — send heartbeat to keep connection alive
+                heartbeat = ServerHeartbeatEvent()
+                data = _serialize_event(heartbeat, wrap_payload=False)
+                yield {"data": data}
+                continue
             if factory and not GlobalEventFactory.is_global_only_event(event):
                 data = factory.wrap(event)
             else:

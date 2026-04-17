@@ -85,12 +85,11 @@ class _MockState:
         if self._event_factory is None:
             from agentpool_storage.opencode_provider import helpers
 
-            directory = self.base_path
-            self._event_factory = GlobalEventFactory(
-                directory=directory,
-                project=helpers.compute_project_id(directory),
-                workspace=directory,
-            )
+        directory = self.base_path
+        self._event_factory = GlobalEventFactory(
+            directory=directory,
+            project=helpers.compute_project_id(directory),
+        )
         return self._event_factory
 
     @property
@@ -218,8 +217,8 @@ async def test_tui_filter_all_session_events_pass() -> None:
 
 
 @pytest.mark.anyio
-async def test_envelope_directory_matches_normalized_base_path() -> None:
-    """Envelope directory field uses normalized server base path."""
+async def test_envelope_directory_matches_working_dir() -> None:
+    """Envelope directory field matches the server working directory."""
     wd = "/custom/exact/working/dir/../dir"
     state = _MockState(working_dir=wd)
     event = SessionStatusEvent.create(session_id="dir1", status_type="busy")
@@ -230,8 +229,8 @@ async def test_envelope_directory_matches_normalized_base_path() -> None:
 
 
 @pytest.mark.anyio
-async def test_envelope_directory_exact_string_no_trailing_slash() -> None:
-    """Normalized directory still emits without a trailing slash."""
+async def test_envelope_directory_has_no_trailing_slash() -> None:
+    """Directory emits without a trailing slash."""
     wd = "/tmp/no_trailing_slash"
     state = _MockState(working_dir=wd)
     event = PartDeltaEvent.create(session_id="dir2", message_id="m1", part_id="p1", delta="hi")
@@ -243,15 +242,15 @@ async def test_envelope_directory_exact_string_no_trailing_slash() -> None:
 
 
 @pytest.mark.anyio
-async def test_envelope_workspace_matches_normalized_base_path() -> None:
-    """Envelope workspace mirrors normalized base path for workspace-mode routing."""
+async def test_envelope_workspace_is_omitted() -> None:
+    """Envelope omits workspace for single-directory routing."""
     wd = "/tmp/workspace_meta/../workspace_meta"
     state = _MockState(working_dir=wd)
     event = SessionStatusEvent.create(session_id="dir3", status_type="busy")
     events = await _collect_events(state, wrap_payload=True, events_to_send=[event])
 
     wrapped = events[1]
-    assert wrapped["workspace"] == state.base_path
+    assert "workspace" not in wrapped
 
 
 @pytest.mark.anyio
@@ -284,16 +283,16 @@ async def test_envelope_directory_different_from_mismatched_path() -> None:
 
 
 @pytest.mark.anyio
-async def test_server_connected_is_bare() -> None:
-    """Initial server.connected event has no GlobalEvent envelope keys."""
+async def test_server_connected_is_wrapped() -> None:
+    """Initial server.connected event is wrapped for the global stream."""
     state = _MockState()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[])
     assert len(events) == 1
     connected = events[0]
-    assert connected["type"] == "server.connected"
-    assert "directory" not in connected
-    assert "project" not in connected
-    assert "payload" not in connected
+    assert connected["payload"]["type"] == "server.connected"
+    assert connected["directory"] == state.base_path
+    assert connected["project"]
+    assert connected["payload"]["type"] == "server.connected"
 
 
 @pytest.mark.anyio
@@ -335,10 +334,9 @@ async def test_session_created_is_wrapped() -> None:
     wrapped = events[1]
     assert "directory" in wrapped
     assert "project" in wrapped
-    assert "workspace" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.base_path
-    assert wrapped["workspace"] == state.base_path
+    assert "workspace" not in wrapped
     assert wrapped["payload"]["type"] == "session.created"
 
 
@@ -351,10 +349,9 @@ async def test_session_status_is_wrapped() -> None:
 
     wrapped = events[1]
     assert "directory" in wrapped
-    assert "workspace" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.base_path
-    assert wrapped["workspace"] == state.base_path
+    assert "workspace" not in wrapped
 
 
 @pytest.mark.anyio
@@ -366,10 +363,9 @@ async def test_session_compacted_is_wrapped() -> None:
 
     wrapped = events[1]
     assert "directory" in wrapped
-    assert "workspace" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.base_path
-    assert wrapped["workspace"] == state.base_path
+    assert "workspace" not in wrapped
 
 
 @pytest.mark.anyio
@@ -381,10 +377,9 @@ async def test_tui_session_select_is_wrapped() -> None:
 
     wrapped = events[1]
     assert "directory" in wrapped
-    assert "workspace" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.base_path
-    assert wrapped["workspace"] == state.base_path
+    assert "workspace" not in wrapped
 
 
 # =============================================================================
@@ -823,16 +818,16 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     ]
     events = await _collect_events(state, wrap_payload=True, events_to_send=events_to_send)
 
-    # [0] server.connected — bare
-    assert events[0]["type"] == "server.connected"
-    assert "payload" not in events[0]
+    # [0] server.connected — wrapped
+    assert events[0]["payload"]["type"] == "server.connected"
+    assert events[0]["directory"] == state.base_path
 
     # [1] session.status — wrapped
     assert "payload" in events[1]
     assert events[1]["payload"]["type"] == "session.status"
     assert events[1]["payload"]["sessionId"] == "mix1"
     assert events[1]["directory"] == state.base_path
-    assert events[1]["workspace"] == state.base_path
+    assert "workspace" not in events[1]
 
     # [2] server.heartbeat — bare
     assert events[2]["type"] == "server.heartbeat"
@@ -843,7 +838,7 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     assert events[3]["payload"]["type"] == "message.part.delta"
     assert events[3]["payload"]["sessionId"] == "mix2"
     assert events[3]["directory"] == state.base_path
-    assert events[3]["workspace"] == state.base_path
+    assert "workspace" not in events[3]
 
     # [4] server.heartbeat — bare
     assert events[4]["type"] == "server.heartbeat"
@@ -854,12 +849,12 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     assert events[5]["payload"]["type"] == "session.compacted"
     assert events[5]["payload"]["sessionId"] == "mix3"
     assert events[5]["directory"] == state.base_path
-    assert events[5]["workspace"] == state.base_path
+    assert "workspace" not in events[5]
 
 
 @pytest.mark.anyio
-async def test_workspace_mode_routing_passes_with_emitted_workspace() -> None:
-    """Wrapped events pass workspace-mode TUI filtering when workspace is emitted."""
+async def test_workspace_mode_routing_falls_back_to_directory() -> None:
+    """Wrapped events fall back to directory routing when workspace is omitted."""
     wd = "/workspace/mode/test"
     state = _MockState(working_dir=wd)
     event = PartDeltaEvent.create(session_id="ws1", message_id="m1", part_id="p1", delta="x")
@@ -874,10 +869,9 @@ async def test_workspace_mode_routing_passes_with_emitted_workspace() -> None:
     )
     passes, reason = tui_event_filter(
         ge,
-        "/wrong/project/dir",
-        current_workspace=state.base_path,
+        wd,
     )
-    assert passes, f"Workspace-routed event should pass, got reason={reason}"
+    assert passes, f"Directory-routed event should pass, got reason={reason}"
 
 
 # =============================================================================
