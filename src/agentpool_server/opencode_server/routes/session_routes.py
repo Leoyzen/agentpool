@@ -820,6 +820,9 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Stop any in-flight prompt worker for this session before interrupting the agent.
+    await state.cancel_session_background_tasks(session_id)
+
     # Interrupt the agent to cancel any ongoing stream
     try:
         await state.agent.interrupt()

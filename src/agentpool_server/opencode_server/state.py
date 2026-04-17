@@ -202,6 +202,15 @@ class ServerState:
         task.add_done_callback(self.background_tasks.discard)
         return task
 
+    async def cancel_session_background_tasks(self, session_id: str) -> None:
+        """Cancel background tasks associated with a session."""
+        task_name = f"process_message_{session_id}"
+        tasks = [task for task in self.background_tasks if task.get_name() == task_name]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def cleanup_tasks(self) -> None:
         """Cancel and wait for all background tasks."""
         for task in self.background_tasks:

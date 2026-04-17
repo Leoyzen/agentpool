@@ -12,9 +12,11 @@ Note: The OpenCode API uses camelCase field names with "ID" suffix:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.models import SessionStatus
@@ -325,6 +327,36 @@ class TestSessionStatus:
         assert abort_response.status_code == 200
         assert abort_response.json() is True
         assert server_state.session_status[session_id].type == "idle"
+
+    async def test_abort_session_cancels_prompt_background_task(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ):
+        """Aborting should cancel the in-flight prompt worker for the session."""
+        response = await async_client.post("/session", json={"title": "Abort Session"})
+        session_id = response.json()["id"]
+        server_state.agent.interrupt = AsyncMock()
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def background_worker() -> None:
+            started.set()
+            await release.wait()
+
+        task_name = f"process_message_{session_id}"
+        background_task = server_state.create_background_task(background_worker(), name=task_name)
+        await started.wait()
+
+        abort_response = await async_client.post(f"/session/{session_id}/abort")
+        assert abort_response.status_code == 200
+        assert abort_response.json() is True
+
+        assert background_task.cancelled()
+        assert task_name not in {task.get_name() for task in server_state.background_tasks}
+        assert server_state.session_status[session_id].type == "idle"
+        server_state.agent.interrupt.assert_awaited_once()
 
     async def test_abort_nonexistent_session_returns_404(self, async_client: AsyncClient):
         """Aborting a non-existent session should return 404."""
