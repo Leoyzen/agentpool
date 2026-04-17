@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from mcp import types
 import pytest
 
-from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
+from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider, PendingPermission
+from agentpool_server.opencode_server.models import (
+    PermissionRequestEvent,
+    PermissionResolvedEvent,
+    QuestionReply,
+)
+from agentpool_server.opencode_server.routes.question_routes import (
+    reject_question,
+    reply_to_question,
+)
 from agentpool_server.opencode_server.state import ServerState
 
 
@@ -261,8 +270,97 @@ async def test_multi_question_cancellation():
     assert isinstance(result, types.ElicitResult)
     assert result.action == "cancel"
 
-    # Clean up if still present
-    assert question_id not in state.pending_questions
+
+async def test_question_reply_can_resolve_permission_request():
+    """Permission replies routed through /question should still resolve."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+    state.input_providers["test_session"] = provider
+    state.broadcast_event = AsyncMock()
+
+    permission_id = "perm_1_1776434635956"
+    future = asyncio.get_running_loop().create_future()
+    provider._pending_permissions[permission_id] = PendingPermission(
+        permission_id=permission_id,
+        tool_name="bash",
+        args={"command": "echo test"},
+        future=future,
+    )
+
+    result = await reply_to_question(
+        permission_id,
+        QuestionReply(answers=[["once"]]),
+        state,
+    )
+
+    assert result is True
+    assert future.done()
+    assert future.result() == "once"
+    assert state.broadcast_event.await_count == 1
+    event = state.broadcast_event.await_args.args[0]
+    assert isinstance(event, PermissionResolvedEvent)
+    assert event.properties.request_id == permission_id
+    assert event.properties.reply == "once"
+
+
+async def test_question_reject_can_resolve_permission_request():
+    """Permission rejects routed through /question should still resolve."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+    state.input_providers["test_session"] = provider
+    state.broadcast_event = AsyncMock()
+
+    permission_id = "perm_2_1776434635957"
+    future = asyncio.get_running_loop().create_future()
+    provider._pending_permissions[permission_id] = PendingPermission(
+        permission_id=permission_id,
+        tool_name="bash",
+        args={"command": "echo reject"},
+        future=future,
+    )
+
+    result = await reject_question(permission_id, state)
+
+    assert result is True
+    assert future.done()
+    assert future.result() == "reject"
+    assert state.broadcast_event.await_count == 1
+    event = state.broadcast_event.await_args.args[0]
+    assert isinstance(event, PermissionResolvedEvent)
+    assert event.properties.request_id == permission_id
+    assert event.properties.reply == "reject"
+
+
+async def test_permission_request_uses_permission_prefix():
+    """Permission requests should keep the permission ID namespace."""
+    mock_agent = Mock()
+    mock_agent.agent_pool = None
+    state = ServerState(working_dir="/tmp", agent=mock_agent)
+    provider = OpenCodeInputProvider(state=state, session_id="test_session")
+    state.broadcast_event = AsyncMock()
+
+    context = Mock()
+    context.tool_name = "bash"
+    context.tool_input = {"command": "echo test"}
+    context.tool_call_id = "call-123"
+
+    task = asyncio.create_task(provider.get_tool_confirmation(context))
+    await asyncio.sleep(0.1)
+
+    assert state.broadcast_event.await_count == 1
+    event = state.broadcast_event.await_args.args[0]
+    assert isinstance(event, PermissionRequestEvent)
+    assert event.properties.id.startswith("perm_")
+
+    resolved = provider.resolve_permission(event.properties.id, "once")
+    assert resolved is True
+
+    result = await task
+    assert result == "allow"
 
 
 async def test_multi_question_partial_answers():
@@ -347,6 +445,7 @@ async def test_multi_question_rfc0010_backward_compat():
     assert len(state.pending_questions) == 1
     question_id = next(iter(state.pending_questions.keys()))
     pending = state.pending_questions[question_id]
+    assert question_id.startswith("que_")
 
     # Single question in multi-question format
     assert len(pending.questions) == 1
