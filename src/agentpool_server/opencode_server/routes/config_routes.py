@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import timedelta
-import logging
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +33,9 @@ from agentpool_server.shared.model_utils import (
 )
 
 
-logger = logging.getLogger(__name__)
+from agentpool.log import get_logger
+
+logger = get_logger(__name__)
 
 
 if TYPE_CHECKING:
