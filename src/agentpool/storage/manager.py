@@ -766,8 +766,20 @@ class StorageManager:
             if on_title_generated:
                 on_title_generated(existing)
             return existing
-        # Generate using core logic
-        if metadata := await self._generate_title_core(session_id, f"user: {prompt[:500]}"):
+        # Generate using core logic, with timeout to prevent zombie tasks.
+        # 15 seconds is generous for a short title-generation prompt.
+        try:
+            metadata = await asyncio.wait_for(
+                self._generate_title_core(session_id, f"user: {prompt[:500]}"),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Title generation timed out (15s)",
+                session_id=session_id,
+            )
+            return None
+        if metadata:
             title = metadata.title
             if on_title_generated:
                 on_title_generated(title)
