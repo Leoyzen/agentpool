@@ -9,7 +9,7 @@ agent task is never cancelled because:
 2. iteration_task (LLM API call) is a local variable and never directly cancelled
 
 Fix approach:
-- Layer 1: interrupt() falls back to _current_run_ctx from ContextVar
+- Layer 1: interrupt() falls back to _active_run_ctx stored by run_stream()
 - Layer 2: iteration_task is stored as instance var so _interrupt() can cancel it
 """
 
@@ -99,14 +99,6 @@ async def fast_agent() -> Agent[None]:
     yield agent
 
 
-@pytest.fixture
-async def fast_agent() -> Agent[None]:
-    """Agent with instant TestModel for basic tests."""
-    model = TestModel(custom_output_text="Fast response")
-    agent = Agent(name="fast-test-agent", model=model)
-    yield agent
-
-
 # ---------------------------------------------------------------------------
 # Layer 1 Tests: interrupt() without run_ctx must still cancel the stream
 # ---------------------------------------------------------------------------
@@ -170,7 +162,7 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
 
     Before the fix: interrupt() passes run_ctx=None to _interrupt(),
     which checks `run_ctx.current_task if run_ctx else None` → None → no task cancelled.
-    After the fix: _interrupt() falls back to _current_stream_task or _current_run_ctx.
+    After the fix: _interrupt() falls back to _active_run_ctx.current_task.
     """
     stream_started = asyncio.Event()
 
@@ -184,12 +176,15 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
     # Wait for stream to start
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    # The agent should track its current stream task
-    # Before fix: _current_stream_task is declared but never set (always None)
-    # After fix: run_stream() sets self._current_stream_task = asyncio.current_task()
-    assert slow_agent._current_stream_task is not None, (
-        "_current_stream_task should be set during run_stream — "
-        "this is how _interrupt() finds the task to cancel"
+    # The agent should track its current stream task via _active_run_ctx
+    # Before fix: _active_run_ctx was not stored, so interrupt() couldn't find the task
+    # After fix: run_stream() sets self._active_run_ctx with current_task
+    assert slow_agent._active_run_ctx is not None, (
+        "_active_run_ctx should be set during run_stream — "
+        "this is how interrupt() finds the task to cancel"
+    )
+    assert slow_agent._active_run_ctx.current_task is not None, (
+        "_active_run_ctx.current_task should be set during run_stream"
     )
 
     # Call interrupt with NO run_ctx
