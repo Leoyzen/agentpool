@@ -386,6 +386,7 @@ class ServerState:
             version="1",
             time=TimeCreatedUpdated(created=now, updated=now),
             parent_id=parent_id,
+            workspace_id=f"wrk_{project_id[:12]}",
         )
 
         # Persist to storage
