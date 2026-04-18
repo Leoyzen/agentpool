@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -40,6 +41,7 @@ from agentpool_server.opencode_server.models import (
     WorktreeRemoveRequest,
     WorktreeResetRequest,
 )
+from agentpool_server.opencode_server.state import ServerState
 from agentpool_storage.opencode_provider import helpers
 
 
@@ -535,6 +537,36 @@ async def list_sessions_global(
         lower_search = search.lower()
         sessions = [s for s in sessions if lower_search in s.title.lower()]
     return sessions
+
+
+def _build_workspace_info(state: ServerState) -> WorkspaceInfo:
+    """Build the singleton local workspace info from server state.
+
+    AgentPool exposes a single local workspace rooted at the server's
+    working directory. The workspace ID is derived from the project ID
+    to give the TUI a stable identifier across restarts.
+    """
+    directory = state.base_path
+    project_id = helpers.compute_project_id(directory)
+    return WorkspaceInfo(
+        id=f"wrk_{project_id[:12]}",
+        type="local",
+        name=Path(directory).name,
+        branch=None,
+        directory=directory,
+        extra=None,
+        project_id=project_id,
+    )
+
+
+def _build_workspace_status(state: ServerState) -> WorkspaceConnectionStatus:
+    """Build connection status for the singleton local workspace."""
+    info = _build_workspace_info(state)
+    return WorkspaceConnectionStatus(
+        workspace_id=info.id,
+        status="connected",
+        error=None,
+    )
 
 
 @router.get("/experimental/workspace")
