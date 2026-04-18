@@ -61,7 +61,7 @@ def _extract_hints(template: str) -> list[str]:
     hints: list[str] = []
     numbered = re.findall(r"\$\d+", template)
     if numbered:
-        for match in sorted(set(numbered)):
+        for match in sorted(set(numbered), key=lambda x: int(x[1:])):
             hints.append(match)
     if "$ARGUMENTS" in template:
         hints.append("$ARGUMENTS")
