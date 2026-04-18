@@ -45,14 +45,22 @@ class Agent(OpenCodeBaseModel):
 
 
 class Command(OpenCodeBaseModel):
-    """Slash command."""
+    """Slash command matching OpenCode SDK Command.Info type."""
 
     name: str
-    description: str = ""
-    source: Literal["command", "mcp", "skill"] = "command"
+    description: str | None = None
+    agent: str | None = None
+    """Target agent name for this command."""
+    model: str | None = None
+    """Model identifier override for this command."""
+    source: Literal["command", "mcp", "skill"] | None = "command"
     """Source of the command: built-in, MCP prompt, or skill."""
     template: str = ""
     """Template content for skill commands (SKILL.md body)."""
+    subtask: bool = False
+    """Whether this command runs as a subtask."""
+    hints: list[str] = Field(default_factory=list)
+    """Input hints extracted from template (e.g. $1, $2, $ARGUMENTS)."""
 
 
 class SkillInfo(OpenCodeBaseModel):

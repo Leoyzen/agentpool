@@ -131,8 +131,9 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         def update_command_store() -> None:
             """Update the CommandStore when skills change."""
             if state.command_store is not None:
-                # Refresh commands in the store
-                state.command_store.add_commands(state.skill_bridge.get_commands())
+                # Re-register all skill commands (replace=True to handle updates)
+                for cmd in state.skill_bridge.get_commands():
+                    state.command_store.register_command(cmd, replace=True)
 
         state.skill_bridge.on_commands_changed(update_command_store)
 

@@ -1621,6 +1621,16 @@ async def execute_command(  # noqa: PLR0915
             )
         return await _execute_slashed_command(state, session_id, request)
 
+    # Fallback: check pool.skill_commands directly when CommandStore misses
+    # This handles cases where skills were registered after CommandStore init
+    # or where the CommandStore sync callback hasn't fired yet
+    if state.pool.skill_commands and request.command in state.pool.skill_commands:
+        logger.debug(
+            "Command '%s' found in skill_commands but not CommandStore, executing as skill",
+            request.command,
+        )
+        return await _execute_skill_command(state, session_id, request)
+
     # Fall back to MCP prompts (existing code remains unchanged)
     prompts = await state.agent.tools.list_prompts()
     # Find matching prompt by name

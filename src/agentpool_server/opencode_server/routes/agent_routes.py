@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -43,6 +44,28 @@ router = APIRouter(tags=["agent"])
 
 # Module-level logger for route-level logging
 logger = get_logger(__name__)
+
+
+def _extract_hints(template: str) -> list[str]:
+    """Extract input hints from a command template.
+
+    Matches the native OpenCode Command.hints() utility which finds
+    $N placeholders (e.g. $1, $2) and $ARGUMENTS.
+
+    Args:
+        template: The command template string.
+
+    Returns:
+        Sorted list of unique hint strings found in the template.
+    """
+    hints: list[str] = []
+    numbered = re.findall(r"\$\d+", template)
+    if numbered:
+        for match in sorted(set(numbered)):
+            hints.append(match)
+    if "$ARGUMENTS" in template:
+        hints.append("$ARGUMENTS")
+    return hints
 
 
 class AddMCPServerRequest(BaseModel):
@@ -184,7 +207,7 @@ async def list_commands(state: StateDep) -> list[Command]:
     try:
         prompts = await state.agent.tools.list_prompts()
         commands.extend([
-            Command(name=p.name, description=p.description or "", source="mcp") for p in prompts
+            Command(name=p.name, description=p.description, source="mcp", hints=[]) for p in prompts
         ])
     except Exception:
         pass
@@ -219,8 +242,9 @@ async def list_commands(state: StateDep) -> list[Command]:
                 Command(
                     name=skill_cmd.name,
                     description=skill_cmd.description,
-                    source="skill",
+                    source="command",
                     template=template,
+                    hints=_extract_hints(template),
                 )
             )
     # Fallback: get skills directly from pool.skill_provider if skill_bridge not available
@@ -238,8 +262,9 @@ async def list_commands(state: StateDep) -> list[Command]:
                     Command(
                         name=skill.name,
                         description=skill.description,
-                        source="skill",
+                        source="command",
                         template=template,
+                        hints=_extract_hints(template),
                     )
                 )
         except Exception:
