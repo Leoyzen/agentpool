@@ -321,8 +321,14 @@ async def _process_message_locked(  # noqa: PLR0915
         tools=state.agent.tools,
     )
 
-    # --- Trigger title generation on first message ---
-    await _maybe_generate_title(state, session_id, user_prompt)
+    # --- Trigger title generation on first message (fire-and-forget) ---
+    # Title generation is non-blocking: the title arrives asynchronously via
+    # the ``metadata_generated`` signal / ``SessionUpdatedEvent`` SSE event.
+    # This prevents slow title-model responses from delaying the agent reply.
+    state.create_background_task(
+        _maybe_generate_title(state, session_id, user_prompt),
+        name=f"title_gen_{session_id}",
+    )
 
     # --- Create assistant message ---
     assistant_msg_id = identifier.ascending("message")
