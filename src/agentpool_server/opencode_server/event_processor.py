@@ -983,7 +983,7 @@ class EventProcessor:
                     "subagent_type": event.source_type,
                     "prompt": subagent_prompt,
                 },
-                metadata={"sessionId": event.child_session_id},
+                metadata={"sessionId": event.child_session_id, "title": tool_title},
                 title=tool_title,
             )
             tool_part = ToolPart(

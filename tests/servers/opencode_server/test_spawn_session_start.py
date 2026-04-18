@@ -507,3 +507,67 @@ async def test_backward_compatibility_fallback(server_state: ServerState) -> Non
         f"Should have at least 2 MessageUpdatedEvents, got {len(message_events)}"
     )
     assert len(part_events) >= 1, f"Should have at least 1 PartUpdatedEvent, got {len(part_events)}"
+
+
+@pytest.mark.asyncio
+async def test_spawn_start_toolpart_metadata_has_title(server_state: ServerState) -> None:
+    """SpawnSessionStart creates ToolPart with metadata containing sessionId AND title.
+
+    Regression test: _process_spawn_start was setting metadata={"sessionId": id}
+    while _process_subagent_event set metadata={"sessionId": id, "title": name}.
+    The TUI relies on metadata.title for subagent display, so the initial ToolPart
+    must include it. Both code paths must produce consistent metadata shape.
+    """
+    processor = EventProcessor()
+    parent_session_id = "parent-session-meta-001"
+    child_session_id = "child-session-meta-001"
+
+    parent_assistant_msg = MessageWithParts.assistant(
+        message_id="msg-parent-meta-001",
+        session_id=parent_session_id,
+        time=MessageTime(created=1000),
+        agent_name="parent-agent",
+        model_id="test-model",
+        parent_id="user-msg-meta-001",
+        provider_id="test-provider",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+    )
+    parent_ctx = EventProcessorContext(
+        session_id=parent_session_id,
+        assistant_msg_id="msg-parent-meta-001",
+        assistant_msg=parent_assistant_msg,
+        state=server_state,
+        working_dir="/tmp",
+    )
+
+    spawn_event = SpawnSessionStart(
+        child_session_id=child_session_id,
+        parent_session_id=parent_session_id,
+        tool_call_id="call-meta-001",
+        spawn_mechanism="task",
+        source_name="meta_test_agent",
+        source_type="agent",
+        depth=1,
+        description="Metadata consistency test",
+    )
+
+    async for _ in processor.process(spawn_event, parent_ctx):
+        pass  # consume events
+
+    # Retrieve the ToolPart from parent context
+    subagent_key = f"1:meta_test_agent:{child_session_id}"
+    tool_part = parent_ctx.get_subagent_tool_part(subagent_key)
+    assert tool_part is not None, "ToolPart should exist after SpawnSessionStart"
+
+    # Verify metadata has BOTH sessionId and title
+    from agentpool_server.opencode_server.models.parts import ToolStateRunning
+
+    assert isinstance(tool_part.state, ToolStateRunning), (
+        f"ToolPart should be in running state, got {type(tool_part.state)}"
+    )
+    metadata = tool_part.state.metadata
+    assert metadata is not None, "metadata should not be None for running ToolPart"
+    assert "sessionId" in metadata, f"metadata should contain 'sessionId', got {metadata}"
+    assert metadata["sessionId"] == child_session_id
+    assert "title" in metadata, f"metadata should contain 'title', got {metadata}"
+    assert metadata["title"] == "Metadata consistency test"
