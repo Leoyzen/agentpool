@@ -88,6 +88,20 @@ def detect_project_root(cwd: str) -> tuple[str, str | None]:
 def generate_project_id(worktree: str) -> str:
     """Generate stable hash of canonical worktree path.
 
+    This is the **AgentPool internal contract** for project identification.
+    The ID is a SHA1 hash of the resolved (canonical) worktree path, used by
+    AgentPool to identify projects in storage (``ProjectData.project_id``).
+    Because it is derived from the filesystem path, it is machine-specific —
+    the same project cloned to different locations will have different IDs.
+
+    !!! note "Dual ID scheme"
+        This is DIFFERENT from ``compute_project_id()`` in
+        ``agentpool_storage.opencode_provider.helpers``, which derives the ID
+        from the git root commit SHA1 for OpenCode session directory layout.
+        The two IDs serve distinct purposes and are not interchangeable:
+        - ``generate_project_id`` — path SHA1 (AgentPool project registry)
+        - ``compute_project_id`` — git root commit SHA1 (OpenCode session layout)
+
     Args:
         worktree: Absolute path to project root
 

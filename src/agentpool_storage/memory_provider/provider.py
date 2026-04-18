@@ -25,6 +25,7 @@ class MemoryStorageProvider(StorageProvider):
     """In-memory storage provider for testing."""
 
     can_load_history = True
+    can_store_projects = True
 
     def __init__(self, config: MemoryStorageConfig | None = None) -> None:
         super().__init__(config or MemoryStorageConfig())

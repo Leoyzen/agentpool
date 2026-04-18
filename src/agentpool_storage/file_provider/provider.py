@@ -99,6 +99,7 @@ class FileProvider(StorageProvider):
     """
 
     can_load_history = True
+    can_store_projects = True
 
     def __init__(self, config: FileStorageConfig | None = None) -> None:
         """Initialize file provider.

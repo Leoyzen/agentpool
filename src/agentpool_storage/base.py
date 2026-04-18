@@ -53,6 +53,9 @@ class StorageProvider:
     can_load_history: bool = False
     """Whether this provider supports loading history."""
 
+    can_store_projects: bool = False
+    """Whether this provider supports project storage."""
+
     def __init__(self, config: BaseStorageProviderConfig) -> None:
         super().__init__()
         self.config = config

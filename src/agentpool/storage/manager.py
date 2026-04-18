@@ -827,10 +827,11 @@ class StorageManager:
         Raises:
             RuntimeError: If no capable provider found.
         """
-        if self.providers:
-            return self.providers[0]
+        for provider in self.providers:
+            if provider.can_store_projects:
+                return provider
 
-        raise RuntimeError("No provider found that supports project storage")
+        raise RuntimeError("No storage provider supports project storage")
 
     @method_spawner
     async def save_project(self, project: ProjectData) -> None:

@@ -64,6 +64,7 @@ class SQLModelProvider(StorageProvider):
     """
 
     can_load_history = True
+    can_store_projects = True
 
     def __init__(self, config: SQLStorageConfig | None = None) -> None:
         """Initialize provider with async database engine.

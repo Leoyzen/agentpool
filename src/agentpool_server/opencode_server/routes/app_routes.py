@@ -21,6 +21,7 @@ from agentpool_server.opencode_server.models import (
     ProjectUpdateRequest,
     VcsInfo,
 )
+from agentpool_storage.opencode_provider.helpers import compute_project_id
 from agentpool_storage.project_store import ProjectStore
 
 
@@ -62,9 +63,24 @@ def _project_data_to_response(data: ProjectData) -> Project:
 
 
 async def _get_current_project(state: StateDep) -> ProjectData:
-    """Get or create the current project from storage."""
+    """Get or create the current project from storage.
+
+    The returned ``ProjectData`` carries ``project_id`` from
+    ``generate_project_id()`` (a SHA1 of the worktree path — AgentPool's
+    internal identifier).  The companion ``compute_project_id()`` (the git
+    root-commit SHA1 used by OpenCode for session directory layout) is also
+    computed here so both ID schemes are available at the same call-site.
+    They are NOT interchangeable — see the docstrings of each function for
+    details on the dual-ID-scheme.
+    """
     project_store = ProjectStore(state.storage)
-    return await project_store.get_or_create(state.working_dir)
+    project = await project_store.get_or_create(state.working_dir)
+    # Bridge: compute the OpenCode session-layout ID alongside the
+    # AgentPool-internal project ID.  Both are derived here for
+    # discoverability; they use different algorithms and serve different
+    # purposes.
+    _opencode_project_id = compute_project_id(state.working_dir)
+    return project
 
 
 @router.get("/project")

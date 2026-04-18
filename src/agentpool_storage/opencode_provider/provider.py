@@ -33,6 +33,7 @@ from pydantic_ai.messages import (
 )
 
 from agentpool.log import get_logger
+from agentpool.sessions.models import ProjectData, SessionData
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime
 from agentpool_config.storage import OpenCodeStorageConfig
@@ -51,7 +52,6 @@ from agentpool_storage.opencode_provider import helpers
 
 if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage, TokenCost
-    from agentpool.sessions.models import SessionData
     from agentpool_config.session import SessionQuery
     from agentpool_storage.models import QueryFilters, StatsFilters
 
@@ -127,6 +127,7 @@ class OpenCodeStorageProvider(StorageProvider):
     """
 
     can_load_history = True
+    can_store_projects = True
 
     def __init__(self, config: OpenCodeStorageConfig | None = None) -> None:
         """Initialize OpenCode storage provider."""
@@ -142,6 +143,8 @@ class OpenCodeStorageProvider(StorageProvider):
         self.sessions_path = self.base_path / "session"
         self.messages_path = self.base_path / "message"
         self.parts_path = self.base_path / "part"
+        self.projects_path = self.base_path / "project"
+        self.projects_path.mkdir(parents=True, exist_ok=True)
 
     def _list_sessions(self, project_id: str | None = None) -> list[tuple[str, Path]]:
         """List all sessions, optionally filtered by project."""
@@ -259,8 +262,8 @@ class OpenCodeStorageProvider(StorageProvider):
                 session_id=session_id,
                 parent_id=parent_id or "",
                 model_id=model or "",
-                provider_id="",  # TODO: get from somewhere
-                path=MessagePath(cwd="", root=""),  # TODO: get real paths
+                provider_id=model.split(":")[0] if model else "agentpool",
+                path=MessagePath(cwd=str(Path.cwd()), root=str(Path.cwd())),
                 time=MessageTime(created=now_ms),
                 tokens=Tokens(
                     input=cost_info.token_usage.input_tokens if cost_info else 0,
@@ -797,6 +800,139 @@ class OpenCodeStorageProvider(StorageProvider):
         (self.parts_path / new_session_id).mkdir(parents=True, exist_ok=True)
         return fork_point_id
 
+    # Project storage methods
+
+    async def save_project(self, project: ProjectData) -> None:
+        """Save or update a project.
+
+        Writes project data as a JSON file at projects_path/{project_id}.json.
+
+        Args:
+            project: Project data to persist
+        """
+        project_file = self.projects_path / f"{project.project_id}.json"
+        data = project.model_dump(mode="json")
+        project_file.write_text(anyenv.dump_json(data, indent=True), encoding="utf-8")
+        logger.debug("Saved project", project_id=project.project_id)
+
+    async def get_project(self, project_id: str) -> ProjectData | None:
+        """Get a project by ID.
+
+        Args:
+            project_id: Project identifier
+
+        Returns:
+            Project data if found, None otherwise
+        """
+        project_file = self.projects_path / f"{project_id}.json"
+        if not project_file.exists():
+            return None
+        try:
+            content = project_file.read_text(encoding="utf-8")
+            data = anyenv.load_json(content, return_type=dict)
+            return ProjectData.model_validate(data)
+        except (anyenv.JsonLoadError, Exception) as e:  # noqa: BLE001
+            logger.warning("Failed to read project file", path=str(project_file), error=str(e))
+            return None
+
+    async def get_project_by_worktree(self, worktree: str) -> ProjectData | None:
+        """Get a project by worktree path.
+
+        Resolves the worktree path before comparing to handle symlink differences.
+
+        Args:
+            worktree: Absolute path to the project worktree
+
+        Returns:
+            Project data if found, None otherwise
+        """
+        resolved_worktree = str(Path(worktree).resolve())
+        for project_file in self.projects_path.glob("*.json"):
+            try:
+                content = project_file.read_text(encoding="utf-8")
+                data = anyenv.load_json(content, return_type=dict)
+                project = ProjectData.model_validate(data)
+                if project.worktree and str(Path(project.worktree).resolve()) == resolved_worktree:
+                    return project
+            except (anyenv.JsonLoadError, Exception):  # noqa: BLE001
+                continue
+        return None
+
+    async def get_project_by_name(self, name: str) -> ProjectData | None:
+        """Get a project by friendly name.
+
+        Args:
+            name: Project name
+
+        Returns:
+            Project data if found, None otherwise
+        """
+        for project_file in self.projects_path.glob("*.json"):
+            try:
+                content = project_file.read_text(encoding="utf-8")
+                data = anyenv.load_json(content, return_type=dict)
+                project = ProjectData.model_validate(data)
+                if project.name == name:
+                    return project
+            except (anyenv.JsonLoadError, Exception):  # noqa: BLE001
+                continue
+        return None
+
+    async def list_projects(self, limit: int | None = None) -> list[ProjectData]:
+        """List all projects, ordered by last_active descending.
+
+        Args:
+            limit: Maximum number of projects to return
+
+        Returns:
+            List of project data objects sorted by last_active descending
+        """
+        projects: list[ProjectData] = []
+        for project_file in self.projects_path.glob("*.json"):
+            try:
+                content = project_file.read_text(encoding="utf-8")
+                data = anyenv.load_json(content, return_type=dict)
+                project = ProjectData.model_validate(data)
+                projects.append(project)
+            except (anyenv.JsonLoadError, Exception) as e:  # noqa: BLE001
+                logger.warning(
+                    "Skipping corrupted project file",
+                    path=str(project_file),
+                    error=str(e),
+                )
+                continue
+        projects.sort(key=lambda p: p.last_active, reverse=True)
+        if limit is not None:
+            projects = projects[:limit]
+        return projects
+
+    async def delete_project(self, project_id: str) -> bool:
+        """Delete a project.
+
+        Args:
+            project_id: Project identifier
+
+        Returns:
+            True if project was deleted, False if not found
+        """
+        project_file = self.projects_path / f"{project_id}.json"
+        if not project_file.exists():
+            return False
+        project_file.unlink()
+        logger.debug("Deleted project", project_id=project_id)
+        return True
+
+    async def touch_project(self, project_id: str) -> None:
+        """Update project's last_active timestamp.
+
+        Args:
+            project_id: Project identifier
+        """
+        project = await self.get_project(project_id)
+        if project is not None:
+            updated = project.touch()
+            await self.save_project(updated)
+
     # Session persistence methods (required by StorageProvider base class)
 
     async def load_session(self, session_id: str) -> SessionData | None:
@@ -810,8 +946,6 @@ class OpenCodeStorageProvider(StorageProvider):
         Returns:
             SessionData if session was found and loaded, None otherwise
         """
-        from agentpool.sessions.models import SessionData
-
         # Find session file
         session_path = next(
             (p for sid, p in self._list_sessions() if sid == session_id),
@@ -946,6 +1080,213 @@ class OpenCodeStorageProvider(StorageProvider):
 
         return True
 
+    async def update_session_title(self, session_id: str, title: str) -> None:
+        """Update the title of a conversation.
+
+        Finds the session JSON file and updates its title field.
+
+        Args:
+            session_id: ID of the conversation to update
+            title: New title for the conversation
+        """
+        session_path = next(
+            (p for sid, p in self._list_sessions() if sid == session_id),
+            None,
+        )
+        if not session_path:
+            logger.warning("Session not found for title update", session_id=session_id)
+            return
+
+        oc_session = helpers.read_session(session_path)
+        if not oc_session:
+            logger.warning("Failed to read session for title update", session_id=session_id)
+            return
+
+        oc_session.title = title
+        oc_session.time.updated = datetime_to_ms(get_now())
+        dct = oc_session.model_dump(by_alias=True)
+        session_path.write_text(anyenv.dump_json(dct, indent=True), encoding="utf-8")
+
+    async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
+        """Update the external SDK session ID for a session.
+
+        Stores the SDK session ID in the session JSON's metadata.sdk_session_id field.
+        Creates the metadata dict if it doesn't exist.
+
+        Args:
+            session_id: Internal session identifier
+            sdk_session_id: External SDK session ID
+        """
+        session_path = next(
+            (p for sid, p in self._list_sessions() if sid == session_id),
+            None,
+        )
+        if not session_path:
+            logger.warning("Session not found for SDK session ID update", session_id=session_id)
+            return
+
+        try:
+            content = session_path.read_text(encoding="utf-8")
+            data = anyenv.load_json(content, return_type=dict)
+        except anyenv.JsonLoadError as e:
+            logger.warning(
+                "Failed to read session for SDK session ID update",
+                session_id=session_id,
+                error=str(e),
+            )
+            return
+
+        metadata = data.get("metadata", {})
+        metadata["sdk_session_id"] = sdk_session_id
+        data["metadata"] = metadata
+        data["time"] = data.get("time", {})
+        data["time"]["updated"] = datetime_to_ms(get_now())
+        session_path.write_text(anyenv.dump_json(data, indent=True), encoding="utf-8")
+
+    async def delete_session_messages(self, session_id: str) -> int:
+        """Delete all messages for a session.
+
+        Removes message JSON files and their associated part files from disk.
+
+        Args:
+            session_id: ID of the conversation to clear
+
+        Returns:
+            Number of messages deleted
+        """
+        msg_dir = self.messages_path / session_id
+        if not msg_dir.exists():
+            return 0
+
+        # Collect message IDs before deleting so we can clean up parts
+        message_files = list(msg_dir.glob("*.json"))
+        message_ids = [f.stem for f in message_files]
+
+        # Delete part files for each message
+        for message_id in message_ids:
+            parts_dir = self.parts_path / message_id
+            if parts_dir.exists():
+                for part_file in parts_dir.glob("*.json"):
+                    part_file.unlink(missing_ok=True)
+                # Remove empty parts directory
+                if not any(parts_dir.iterdir()):
+                    parts_dir.rmdir()
+
+        # Delete message files
+        for msg_file in message_files:
+            msg_file.unlink(missing_ok=True)
+
+        # Remove empty message directory
+        if msg_dir.exists() and not any(msg_dir.iterdir()):
+            msg_dir.rmdir()
+
+        return len(message_files)
+
+    async def get_filtered_conversations(
+        self,
+        agent_name: str | None = None,
+        period: str | None = None,
+        since: datetime | None = None,
+        query: str | None = None,
+        model: str | None = None,
+        limit: int | None = None,
+        *,
+        compact: bool = False,
+        include_tokens: bool = False,
+    ) -> list[ConvData]:
+        """Get filtered conversations with formatted output.
+
+        Iterates all session JSON files, applies filters, and returns matching
+        ConversationData objects.
+
+        Args:
+            agent_name: Filter by agent name
+            period: Time period to include (e.g. "1h", "2d")
+            since: Only show conversations after this time
+            query: Search in message content
+            model: Filter by model used
+            limit: Maximum number of conversations
+            compact: Only show first/last message of each conversation
+            include_tokens: Include token usage statistics
+        """
+        from agentpool.utils.parse_time import parse_time_period
+        from agentpool.utils.time_utils import get_now
+
+        cutoff: datetime | None = None
+        if period:
+            cutoff = get_now() - parse_time_period(period)
+        elif since:
+            cutoff = since
+
+        result: list[ConvData] = []
+        for session_id, session_path in self._list_sessions():
+            session = helpers.read_session(session_path)
+            if not session:
+                continue
+
+            # Date filter
+            session_created = ms_to_datetime(session.time.created)
+            if cutoff and session_created < cutoff:
+                continue
+
+            oc_messages = self._read_messages(session_id)
+            if not oc_messages:
+                continue
+
+            # Read parts for all messages
+            msg_parts_map = {oc_msg.id: self._read_parts(oc_msg.id) for oc_msg in oc_messages}
+
+            # Convert messages
+            chat_messages: list[ChatMessage[str]] = []
+            total_tokens = 0
+            for oc_msg in oc_messages:
+                parts = msg_parts_map.get(oc_msg.id, [])
+                chat_msg = helpers.to_chat_message(msg=oc_msg, parts=parts)
+                chat_messages.append(chat_msg)
+
+                if isinstance(oc_msg, AssistantMessage) and oc_msg.tokens:
+                    total_tokens += oc_msg.tokens.input + oc_msg.tokens.output
+
+            if not chat_messages:
+                continue
+
+            # Agent filter
+            if agent_name and not any(m.name == agent_name for m in chat_messages):
+                continue
+
+            # Content query filter
+            if query and not any(query in m.content for m in chat_messages):
+                continue
+
+            # Model filter
+            if model and not any(
+                isinstance(oc_msg, AssistantMessage) and oc_msg.model_id == model
+                for oc_msg in oc_messages
+            ):
+                continue
+
+            usage = TokenUsage(total=total_tokens, prompt=0, completion=0) if total_tokens else None
+
+            # Compact mode: only first and last message
+            filtered_messages = chat_messages
+            if compact and len(chat_messages) > 2:
+                filtered_messages = [chat_messages[0], chat_messages[-1]]
+
+            conv_data = ConvData(
+                id=session_id,
+                agent=chat_messages[0].name or "opencode",
+                title=session.title,
+                start_time=session_created.isoformat(),
+                messages=filtered_messages,
+                token_usage=usage if include_tokens else None,
+            )
+            result.append(conv_data)
+
+            if limit and len(result) >= limit:
+                break
+
+        return result
+
     async def list_session_ids(
         self,
         *,
@@ -962,7 +1303,7 @@ class OpenCodeStorageProvider(StorageProvider):
             List of session IDs
         """
         session_ids: list[str] = []
-        for session_id, session_path in self._list_sessions():
+        for session_id, _session_path in self._list_sessions():
             # Check agent filter if specified
             # Note: OpenCode session files don't store agent name directly,
             # so we need to check the first message's agent

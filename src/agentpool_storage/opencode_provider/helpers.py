@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import TypeAdapter
 from pydantic_ai import (
     BinaryContent,
+    FileUrl,
     ModelRequest,
     ModelResponse,
     RequestUsage,
     RunUsage,
+    TextContent,
     TextPart as PydanticTextPart,
     ThinkingPart,
     ToolCallPart,
@@ -28,6 +30,7 @@ from pydantic_ai import (
 
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, TokenCost
+from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import to_user_content
 from agentpool.utils.time_utils import ms_to_datetime
 from agentpool_server.opencode_server.models.message import (
@@ -47,6 +50,7 @@ from agentpool_server.opencode_server.models.session import Session
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from datetime import datetime
 
     from pydantic_ai.messages import UserContent
@@ -61,8 +65,21 @@ _part_adapter: TypeAdapter[Part] = TypeAdapter(Part)
 def compute_project_id(directory: str) -> str:
     """Compute OpenCode project ID from directory.
 
-    OpenCode uses the root commit SHA1 of the git repository as the project ID.
-    If not in a git repository, returns 'global'.
+    This is the **OpenCode external contract** for project identification.
+    OpenCode uses the root commit SHA1 of the git repository as the project ID,
+    which determines the session directory structure:
+    ``storage/session/{project_id}/``. This ID is stable across different
+    machines that share the same git history.
+
+    If not in a git repository, returns ``'global'``.
+
+    !!! note "Dual ID scheme"
+        This is DIFFERENT from ``generate_project_id()`` in
+        ``agentpool_storage.project_store``, which hashes the canonical worktree
+        path for AgentPool-internal ``ProjectData`` identification. The two IDs
+        serve distinct purposes and are not interchangeable:
+        - ``compute_project_id`` — git root commit SHA1 (OpenCode session layout)
+        - ``generate_project_id`` — path SHA1 (AgentPool project registry)
 
     Args:
         directory: Project directory path
@@ -180,6 +197,82 @@ def extract_text_content(parts: list[Part]) -> str:
             text_segments.append(combined)
 
     return "\n".join(text_segments)
+
+
+def convert_user_content_to_parts(
+    content: str | Sequence[UserContent],
+    message_id: str,
+    session_id: str,
+    part_counter_start: int,
+) -> list[TextPart]:
+    """Convert user content from pydantic-ai UserPromptPart to OpenCode TextParts.
+
+    Handles both simple string content and structured UserContent lists.
+    Non-text content types (BinaryContent, FileUrl, etc.) are skipped with a
+    warning since the OpenCode storage provider only persists text parts.
+
+    Args:
+        content: String or list of UserContent items from a UserPromptPart
+        message_id: The parent message ID
+        session_id: The parent session ID
+        part_counter_start: Starting counter for generating part IDs
+
+    Returns:
+        List of TextPart models for text content items
+    """
+    if isinstance(content, str):
+        part_id = identifier.ascending("part")
+        return [
+            TextPart(
+                id=part_id,
+                message_id=message_id,
+                session_id=session_id,
+                text=content,
+            )
+        ]
+
+    parts: list[TextPart] = []
+    for item in content:
+        match item:
+            case str():
+                part_id = identifier.ascending("part")
+                parts.append(
+                    TextPart(
+                        id=part_id,
+                        message_id=message_id,
+                        session_id=session_id,
+                        text=item,
+                    )
+                )
+            case TextContent():
+                part_id = identifier.ascending("part")
+                parts.append(
+                    TextPart(
+                        id=part_id,
+                        message_id=message_id,
+                        session_id=session_id,
+                        text=item.content,
+                    )
+                )
+            case BinaryContent():
+                logger.warning(
+                    "Skipping BinaryContent in user message",
+                    media_type=item.media_type,
+                    message_id=message_id,
+                )
+            case FileUrl():
+                logger.warning(
+                    "Skipping FileUrl in user message",
+                    url=item.url,
+                    message_id=message_id,
+                )
+            case _:
+                logger.warning(
+                    "Skipping unsupported UserContent type",
+                    content_type=type(item).__name__,
+                    message_id=message_id,
+                )
+    return parts
 
 
 def _build_user_pydantic_messages(
