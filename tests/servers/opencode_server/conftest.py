@@ -142,6 +142,9 @@ def mock_pool(
     pool.file_ops = file_ops
     pool.todos = todos
     pool.manifest = manifest
+    # Sessions store must use AsyncMock for awaitable save/delete operations
+    pool.sessions = Mock()
+    pool.sessions.store = AsyncMock()
     return pool
 
 

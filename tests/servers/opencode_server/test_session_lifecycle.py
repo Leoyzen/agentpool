@@ -13,6 +13,7 @@ Note: The OpenCode API uses camelCase field names with "ID" suffix:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentpool.sessions.models import SessionData
@@ -21,8 +22,6 @@ from agentpool_server.opencode_server.models.events import SessionCreatedEvent
 
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from httpx import AsyncClient
 
     from agentpool_server.opencode_server.state import ServerState
@@ -110,7 +109,7 @@ class TestSessionCRUD:
         assert session["id"].startswith("ses_")  # Session IDs use "ses_" prefix
         assert session["title"] == "My Session"
         assert session["projectID"] == "global"  # Non-git directory returns "global"
-        assert session["directory"] == str(tmp_project_dir)
+        assert session["directory"] == str(Path(tmp_project_dir).resolve())
         assert session["version"] == "1"
         assert "time" in session
         assert "created" in session["time"]

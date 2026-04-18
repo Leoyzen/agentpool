@@ -586,6 +586,7 @@ router = APIRouter(prefix="/session", tags=["session"])
 @router.get("")
 async def list_sessions(
     state: StateDep,
+    directory: str | None = None,
     roots: bool | None = None,
     start: int | None = None,
     search: str | None = None,
@@ -597,14 +598,19 @@ async def list_sessions(
     from the appropriate storage (pool storage, Claude storage, ACP server, etc.).
 
     Query params:
+        directory: Filter sessions by directory (overrides default cwd).
+                   The OpenCode SDK auto-injects this param.
         roots: Only return root sessions (no parentID)
         start: Filter sessions updated on or after this timestamp (ms since epoch)
         search: Filter sessions by title (case-insensitive)
         limit: Maximum number of sessions to return
     """
+    # Use directory param if provided, otherwise fall back to state.base_path
+    # which resolves to agent.env.cwd (from YAML environment config) or working_dir
+    effective_cwd = directory or state.base_path
     # Convert to OpenCode Session format and cache
     sessions: list[Session] = []
-    for data in await state.agent.list_sessions(cwd=state.agent.env.cwd):
+    for data in await state.agent.list_sessions(cwd=effective_cwd):
         session = session_data_to_opencode(data)
         # Cache in state for later use
         state.sessions[data.session_id] = session
@@ -627,11 +633,11 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     """Create a new session and persist to storage."""
     now = now_ms()
     session_id = identifier.ascending("session")
-    project_id = helpers.compute_project_id(state.working_dir)
+    project_id = helpers.compute_project_id(state.base_path)
     session = Session(
         id=session_id,
         project_id=project_id,
-        directory=state.working_dir,
+        directory=state.base_path,
         title=request.title if request and request.title else "New Session",
         version="1",
         time=TimeCreatedUpdated(created=now, updated=now),
