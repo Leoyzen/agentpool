@@ -633,11 +633,12 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     """Create a new session and persist to storage."""
     now = now_ms()
     session_id = identifier.ascending("session")
-    project_id = helpers.compute_project_id(state.base_path)
+    base_path = state.base_path
+    project_id = helpers.compute_project_id(base_path)
     session = Session(
         id=session_id,
         project_id=project_id,
-        directory=state.base_path,
+        directory=base_path,
         title=request.title if request and request.title else "New Session",
         version="1",
         time=TimeCreatedUpdated(created=now, updated=now),

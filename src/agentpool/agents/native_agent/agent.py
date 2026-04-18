@@ -1185,14 +1185,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             session_ids = await self.agent_pool.storage.list_session_ids(agent_name=self.name)
             # Load each session to get full SessionData
             result: list[SessionData] = []
+            resolved_filter = Path(cwd).resolve() if cwd is not None else None
             for session_id in session_ids:
                 if session_data := await self.agent_pool.storage.load_session(session_id):
                     # Filter by cwd if specified, using path normalization
                     # to handle trailing slashes, symlinks, and relative paths
-                    if cwd is not None and session_data.cwd is not None:
-                        resolved_session = Path(session_data.cwd).resolve()
-                        resolved_filter = Path(cwd).resolve()
-                        if resolved_session != resolved_filter:
+                    if resolved_filter is not None:
+                        if (
+                            not session_data.cwd
+                            or Path(session_data.cwd).resolve() != resolved_filter
+                        ):
                             continue
                     # Fetch title from conversation storage if not in metadata
                     if (
