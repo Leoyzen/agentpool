@@ -807,7 +807,7 @@ class EventProcessor:
                     time=ts,
                     input={
                         "description": f"Subagent: {source_name}",
-                        "subagent_type": source_type,
+                        "subagent_type": source_name,
                         "prompt": "",
                     },
                     metadata={"sessionId": child_session_id, "title": source_name},
@@ -867,7 +867,7 @@ class EventProcessor:
                     completed_state = ToolStateCompleted(
                         input={
                             "description": f"Subagent: {source_name}",
-                            "subagent_type": source_type,
+                            "subagent_type": source_name,
                             "prompt": "",
                         },
                         output=content,
@@ -980,7 +980,7 @@ class EventProcessor:
                 time=ts,
                 input={
                     "description": tool_title,
-                    "subagent_type": event.source_type,
+                    "subagent_type": event.source_name,
                     "prompt": subagent_prompt,
                 },
                 metadata={"sessionId": event.child_session_id, "title": tool_title},

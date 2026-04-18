@@ -571,3 +571,64 @@ async def test_spawn_start_toolpart_metadata_has_title(server_state: ServerState
     assert metadata["sessionId"] == child_session_id
     assert "title" in metadata, f"metadata should contain 'title', got {metadata}"
     assert metadata["title"] == "Metadata consistency test"
+
+
+@pytest.mark.asyncio
+async def test_spawn_start_toolpart_uses_source_name_as_subagent_type(
+    server_state: ServerState,
+) -> None:
+    """ToolPart input.subagent_type uses source_name (agent name), not source_type (category).
+
+    Regression test: agentpool set subagent_type to source_type ("agent",
+    "team_parallel") but opencode's TUI taskAgent() matches against the agent
+    registry by name (e.g., "explore", "general"). Using source_name allows the
+    TUI to display the correct agent name and color instead of a generic "Agent".
+    """
+    processor = EventProcessor()
+    parent_session_id = "parent-session-stype-001"
+    child_session_id = "child-session-stype-001"
+
+    parent_assistant_msg = MessageWithParts.assistant(
+        message_id="msg-parent-stype-001",
+        session_id=parent_session_id,
+        time=MessageTime(created=1000),
+        agent_name="parent-agent",
+        model_id="test-model",
+        parent_id="user-msg-stype-001",
+        provider_id="test-provider",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+    )
+    parent_ctx = EventProcessorContext(
+        session_id=parent_session_id,
+        assistant_msg_id="msg-parent-stype-001",
+        assistant_msg=parent_assistant_msg,
+        state=server_state,
+        working_dir="/tmp",
+    )
+
+    spawn_event = SpawnSessionStart(
+        child_session_id=child_session_id,
+        parent_session_id=parent_session_id,
+        tool_call_id="call-stype-001",
+        spawn_mechanism="task",
+        source_name="explore",  # actual agent name the TUI should match
+        source_type="agent",  # generic category — NOT what TUI wants
+        depth=1,
+        description="Explore codebase",
+    )
+
+    async for _ in processor.process(spawn_event, parent_ctx):
+        pass
+
+    subagent_key = f"1:explore:{child_session_id}"
+    tool_part = parent_ctx.get_subagent_tool_part(subagent_key)
+    assert tool_part is not None, "ToolPart should exist"
+
+    from agentpool_server.opencode_server.models.parts import ToolStateRunning
+
+    assert isinstance(tool_part.state, ToolStateRunning)
+    tool_input = tool_part.state.input
+    assert tool_input.get("subagent_type") == "explore", (
+        f"subagent_type should be source_name 'explore', not source_type 'agent'. "
+        f"Got: {tool_input.get('subagent_type')!r}"
+    )
