@@ -933,6 +933,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         # Start the agent iteration task
         iteration_task = asyncio.create_task(agent_iteration_task())
+        # NOTE: _iteration_task is single-session state. Concurrent run_stream
+        # calls on the same agent instance will overwrite this reference.
+        # See _active_run_ctx guard in base_agent.run_stream() for details.
+        if self._iteration_task is not None and not self._iteration_task.done():
+            self.log.warning(
+                "Starting new stream while iteration_task is still active — "
+                "concurrent runs on a shared agent instance are not safe"
+            )
         self._iteration_task = iteration_task
 
         try:

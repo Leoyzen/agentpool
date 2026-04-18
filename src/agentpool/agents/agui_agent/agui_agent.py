@@ -275,8 +275,9 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
         """
-        if self._current_stream_task and not self._current_stream_task.done():
-            self._current_stream_task.cancel()
+        stream_task = self._active_run_ctx.current_task if self._active_run_ctx else None
+        if stream_task and not stream_task.done():
+            stream_task.cancel()
 
     async def _stream_events(  # noqa: PLR0915
         self,

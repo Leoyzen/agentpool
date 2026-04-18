@@ -471,6 +471,11 @@ async def _process_message_locked(  # noqa: PLR0915
         # assistant response. On the next message, get_or_load_session() skips
         # reloading because agent.session_id matches, so the LLM receives
         # incomplete history — it doesn't know it already (partially) responded.
+        #
+        # NOTE: This mutates the shared agent's conversation. In the current
+        # single-session server architecture this is safe, but if multi-session
+        # support is added, the agent instance should be per-session to avoid
+        # history contamination between concurrent sessions.
         chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
         agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
