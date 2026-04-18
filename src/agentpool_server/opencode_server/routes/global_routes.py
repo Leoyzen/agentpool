@@ -13,7 +13,11 @@ from sse_starlette.sse import EventSourceResponse
 from agentpool import log
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import GlobalEvent, HealthResponse
-from agentpool_server.opencode_server.models.app import DiagnosticResponse
+from agentpool_server.opencode_server.models.app import (
+    DiagnosticResponse,
+    DisposeResponse,
+    UpgradeResponse,
+)
 from agentpool_server.opencode_server.models.events import (
     CommandExecutedEvent,
     FileEditedEvent,
@@ -47,11 +51,11 @@ from agentpool_server.opencode_server.models.events import (
     SessionIdleEvent,
     SessionStatusEvent,
     SessionUpdatedEvent,
+    TodoUpdatedEvent,
     TuiCommandExecuteEvent,
     TuiPromptAppendEvent,
     TuiSessionSelectEvent,
     TuiToastShowEvent,
-    TodoUpdatedEvent,
     VcsBranchUpdatedEvent,
 )
 from agentpool_server.opencode_server.routes.routing import (
@@ -100,6 +104,18 @@ async def get_diagnostic(state: StateDep) -> DiagnosticResponse:
         subscribers=len(state.event_subscribers),
         server_version=VERSION,
     )
+
+
+@router.post("/global/dispose")
+async def post_global_dispose() -> DisposeResponse:
+    """Acknowledge OpenCode dispose requests without stopping the server."""
+    return DisposeResponse(message="dispose acknowledged (no-op)")
+
+
+@router.post("/global/upgrade")
+async def post_global_upgrade() -> UpgradeResponse:
+    """Acknowledge OpenCode upgrade requests without performing an upgrade."""
+    return UpgradeResponse(message="upgrade not supported (stub)")
 
 
 def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
@@ -286,8 +302,10 @@ async def _event_generator(
     Registers a subscriber queue, sends an initial connected event,
     then streams subsequent events from the broadcast system.
 
-    When wrap_payload is True, events are wrapped in a GlobalEvent envelope
-    via the factory; heartbeat events are always sent bare.
+    When wrap_payload is True, session-scoped events are wrapped in a
+    GlobalEvent envelope via the factory. Global server lifecycle events
+    still use a top-level ``payload`` wrapper, but omit directory/project
+    metadata to match OpenCode's `/global/event` contract.
 
     Subscriber lifecycle:
     1. Queue appended to state.event_subscribers
@@ -322,9 +340,10 @@ async def _event_generator(
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
     try:
-        # Send initial connected event (wrapped when payload wrapping is enabled)
+        # Send initial connected event with payload wrapper on /global/event,
+        # but without directory/project metadata.
         connected = ServerConnectedEvent()
-        data = factory.wrap(connected) if factory is not None else _serialize_event(connected)
+        data = _serialize_event(connected, wrap_payload=wrap_payload)
         logger.info("SSE: Sending connected event", data=data)
         yield {"data": data}
         # Stream events
@@ -334,12 +353,17 @@ async def _event_generator(
             except TimeoutError:
                 # No events for 10s — send heartbeat to keep connection alive
                 heartbeat = ServerHeartbeatEvent()
-                data = (
-                    factory.wrap(heartbeat) if factory is not None else _serialize_event(heartbeat)
-                )
+                data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
                 yield {"data": data}
                 continue
-            data = factory.wrap(event) if factory is not None else _serialize_event(event)
+            if factory is not None and not isinstance(
+                event, ServerHeartbeatEvent | ServerConnectedEvent
+            ):
+                data = factory.wrap(event)
+            elif wrap_payload:
+                data = _serialize_event(event, wrap_payload=True)
+            else:
+                data = _serialize_event(event)
             logger.info("SSE: Sending event", event_type=event.type)
             yield {"data": data}
     finally:
@@ -395,3 +419,4 @@ async def get_routing_check(
         event, effective_project_dir, current_workspace=current_workspace
     )
     return RoutingCheckResponse(would_pass=would_pass, reason=reason)
+

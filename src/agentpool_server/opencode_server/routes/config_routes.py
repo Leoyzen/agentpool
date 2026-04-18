@@ -376,6 +376,18 @@ async def _get_variants_from_agent(agent: object) -> dict[str, dict[str, object]
     return {}
 
 
+@router.get("/global/config")
+async def get_global_config(state: StateDep) -> Config:
+    """Get server configuration (global alias for OpenCode 1.4.4+ compat)."""
+    return await get_config(state)
+
+
+@router.patch("/global/config")
+async def update_global_config(state: StateDep, config_update: Config) -> Config:
+    """Update server configuration (global alias for OpenCode 1.4.4+ compat)."""
+    return await update_config(state, config_update)
+
+
 @router.get("/config/providers")
 async def get_providers(state: StateDep) -> ProvidersResponse:
     """Get available providers and models from agent."""

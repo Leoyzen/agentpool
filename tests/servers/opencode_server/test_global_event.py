@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agentpool_server.opencode_server.models import GlobalEvent
+from agentpool_server.opencode_server.models.app import ProjectTime
 from agentpool_server.opencode_server.models.common import TimeCreated
 from agentpool_server.opencode_server.models.events import (
     CommandExecutedEvent,
@@ -28,6 +29,7 @@ from agentpool_server.opencode_server.models.events import (
     PermissionRequestEvent,
     PermissionResolvedEvent,
     PermissionUpdatedEvent,
+    Project,
     ProjectUpdatedEvent,
     PtyCreatedEvent,
     PtyDeletedEvent,
@@ -54,13 +56,11 @@ from agentpool_server.opencode_server.models.events import (
     TuiToastShowEvent,
     VcsBranchUpdatedEvent,
 )
-from agentpool_server.opencode_server.models.app import ProjectTime
-from agentpool_server.opencode_server.models.events import Project
-from agentpool_server.opencode_server.models.pty import PtyInfo
 from agentpool_server.opencode_server.models.message import (
     UserMessage,
 )
 from agentpool_server.opencode_server.models.parts import Part, TextPart  # noqa: TC001
+from agentpool_server.opencode_server.models.pty import PtyInfo
 from agentpool_server.opencode_server.models.question import (
     QuestionInfo,
     QuestionOption,
@@ -246,16 +246,16 @@ async def _collect_events(
 
 
 @pytest.mark.anyio
-async def test_global_event_server_connected_is_wrapped() -> None:
-    """First event from /global/event is wrapped server.connected."""
+async def test_global_event_server_connected_is_payload_wrapped() -> None:
+    """First event from /global/event keeps only the payload wrapper."""
     state = _MockState()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[])
     # Only the connected event
     assert len(events) == 1
     connected = events[0]
     assert connected["payload"]["type"] == "server.connected"
-    assert connected["directory"] == state.working_dir
-    assert connected["project"]
+    assert "directory" not in connected
+    assert "project" not in connected
 
 
 @pytest.mark.anyio
@@ -273,16 +273,16 @@ async def test_global_event_wraps_regular_events_in_envelope() -> None:
 
 
 @pytest.mark.anyio
-async def test_global_event_heartbeat_is_wrapped() -> None:
-    """/global/event wraps ServerHeartbeatEvent in the GlobalEvent envelope."""
+async def test_global_event_heartbeat_is_payload_wrapped() -> None:
+    """/global/event keeps only the payload wrapper for heartbeat."""
     state = _MockState()
     hb = ServerHeartbeatEvent()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
     assert len(events) == 2
     heartbeat = events[1]
     assert heartbeat["payload"]["type"] == "server.heartbeat"
-    assert heartbeat["directory"] == state.working_dir
-    assert heartbeat["project"]
+    assert "directory" not in heartbeat
+    assert "project" not in heartbeat
 
 
 @pytest.mark.anyio
@@ -309,8 +309,10 @@ async def test_global_events_have_no_session_id() -> None:
     state = _MockState()
     hb = ServerHeartbeatEvent()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
-    assert "sessionId" not in events[0]  # server.connected
-    assert "sessionId" not in events[1]  # server.heartbeat
+    assert "sessionId" not in events[0]  # top-level envelope
+    assert "sessionId" not in events[0]["payload"]  # server.connected payload
+    assert "sessionId" not in events[1]  # top-level envelope
+    assert "sessionId" not in events[1]["payload"]  # server.heartbeat payload
 
 
 @pytest.mark.anyio
@@ -337,15 +339,15 @@ async def test_multiple_events_maintain_correct_wrapping() -> None:
         events_to_send=[session_evt, hb, session_evt2],
     )
     assert len(events) == 4
-    # [0] connected — wrapped
+    # [0] connected — payload wrapped, no routing metadata
     assert events[0]["payload"]["type"] == "server.connected"
-    assert events[0]["directory"] == state.working_dir
+    assert "directory" not in events[0]
     # [1] session status — wrapped
     assert "payload" in events[1]
     assert events[1]["payload"]["type"] == "session.status"
-    # [2] heartbeat — wrapped
+    # [2] heartbeat — payload wrapped, no routing metadata
     assert events[2]["payload"]["type"] == "server.heartbeat"
-    assert events[2]["directory"] == state.working_dir
+    assert "directory" not in events[2]
     # [3] session status — wrapped
     assert "payload" in events[3]
     assert events[3]["payload"]["type"] == "session.status"
@@ -457,7 +459,7 @@ async def test_global_event_integration_directory_matches_working_dir(
     event = SessionStatusEvent.create(session_id="s2", status_type="idle")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert received["directory"] == server_state.base_path
+    assert received["directory"] == server_state.working_dir
 
 
 @pytest.mark.integration
@@ -471,7 +473,7 @@ async def test_global_event_integration_project_computed(
     event = SessionStatusEvent.create(session_id="s3", status_type="busy")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    expected_project = compute_project_id(server_state.base_path)
+    expected_project = compute_project_id(server_state.working_dir)
     assert received["project"] == expected_project
 
 
@@ -499,7 +501,7 @@ async def test_global_event_routing_ignores_agent_execution_cwd(
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
 
-    assert received["directory"] == server_state.base_path
+    assert received["directory"] == server_state.working_dir
     assert "workspace" not in received
 
 
@@ -1197,7 +1199,7 @@ async def test_concurrent_subscriber_receives_after_another_disconnects() -> Non
 
 @pytest.mark.anyio
 async def test_concurrent_all_get_server_connected() -> None:
-    """Each subscriber gets the initial bare server.connected event."""
+    """Each subscriber gets the initial payload-wrapped server.connected event."""
     state = _MockState()
 
     gen1 = _event_generator(state, wrap_payload=True)
@@ -1211,8 +1213,8 @@ async def test_concurrent_all_get_server_connected() -> None:
     for item in [item1, item2, item3]:
         data = json.loads(item["data"])
         assert data["payload"]["type"] == "server.connected"
-        assert "directory" in data
-        assert "project" in data
+        assert "directory" not in data
+        assert "project" not in data
         assert "payload" in data
 
 

@@ -2,9 +2,9 @@
 
 Validates that the SSE event stream conforms to the OpenCode TUI protocol:
 - /global/event emits events that pass the TUI routing filter
-- Directory in GlobalEvent envelope uses normalized server base_path
-- Workspace in GlobalEvent envelope mirrors normalized base_path for workspace routing
-- server.connected is wrapped and server.heartbeat is wrapped on /global/event
+- Directory in GlobalEvent envelope uses the configured server working_dir
+- Workspace is omitted for single-directory routing
+- server.connected and server.heartbeat keep a payload wrapper on /global/event
 - All other events are wrapped in GlobalEvent with correct directory
 - sessionId appears at top level of payload for ALL event types
 - UserMessage events use nested model.variant format
@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -83,16 +82,12 @@ class _MockState:
         if self._event_factory is None:
             from agentpool_storage.opencode_provider import helpers
 
-        directory = self.base_path
-        self._event_factory = GlobalEventFactory(
-            directory=directory,
-            project=helpers.compute_project_id(directory),
-        )
+            directory = self.working_dir
+            self._event_factory = GlobalEventFactory(
+                directory=directory,
+                project=helpers.compute_project_id(directory),
+            )
         return self._event_factory
-
-    @property
-    def base_path(self) -> str:
-        return str(Path(self.working_dir).resolve())
 
     def create_background_task(self, coro: Any, name: str = "") -> asyncio.Task[Any]:
         return asyncio.ensure_future(coro)
@@ -160,7 +155,7 @@ async def test_tui_filter_session_status_event_passes() -> None:
         workspace=wrapped.get("workspace"),
         payload=wrapped["payload"],
     )
-    passes, reason = tui_event_filter(ge, state.base_path)
+    passes, reason = tui_event_filter(ge, state.working_dir)
     assert passes, f"SessionStatusEvent should pass filter, got reason={reason}"
 
 
@@ -179,7 +174,7 @@ async def test_tui_filter_part_delta_event_passes() -> None:
         workspace=wrapped.get("workspace"),
         payload=wrapped["payload"],
     )
-    passes, reason = tui_event_filter(ge, state.base_path)
+    passes, reason = tui_event_filter(ge, state.working_dir)
     assert passes, f"PartDeltaEvent should pass filter, got reason={reason}"
 
 
@@ -205,7 +200,7 @@ async def test_tui_filter_all_session_events_pass() -> None:
             workspace=raw.get("workspace"),
             payload=raw["payload"],
         )
-        passes, reason = tui_event_filter(ge, state.base_path)
+        passes, reason = tui_event_filter(ge, state.working_dir)
         assert passes, f"Event {i} ({raw['payload']['type']}) should pass, reason={reason}"
 
 
@@ -223,7 +218,7 @@ async def test_envelope_directory_matches_working_dir() -> None:
     events = await _collect_events(state, wrap_payload=True, events_to_send=[event])
 
     wrapped = events[1]
-    assert wrapped["directory"] == state.base_path
+    assert wrapped["directory"] == state.working_dir
 
 
 @pytest.mark.anyio
@@ -235,7 +230,7 @@ async def test_envelope_directory_has_no_trailing_slash() -> None:
     events = await _collect_events(state, wrap_payload=True, events_to_send=[event])
 
     wrapped = events[1]
-    assert wrapped["directory"] == state.base_path
+    assert wrapped["directory"] == state.working_dir
     assert not wrapped["directory"].endswith("/")
 
 
@@ -276,34 +271,33 @@ async def test_envelope_directory_different_from_mismatched_path() -> None:
 
 
 # =============================================================================
-# 3. server.connected and server.heartbeat are wrapped on /global/event
+# 3. server.connected and server.heartbeat keep only a payload wrapper on /global/event
 # =============================================================================
 
 
 @pytest.mark.anyio
-async def test_server_connected_is_wrapped() -> None:
-    """Initial server.connected event is wrapped for the global stream."""
+async def test_server_connected_is_payload_wrapped() -> None:
+    """Initial server.connected keeps only the payload wrapper."""
     state = _MockState()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[])
     assert len(events) == 1
     connected = events[0]
     assert connected["payload"]["type"] == "server.connected"
-    assert connected["directory"] == state.base_path
-    assert connected["project"]
-    assert connected["payload"]["type"] == "server.connected"
+    assert "directory" not in connected
+    assert "project" not in connected
 
 
 @pytest.mark.anyio
-async def test_server_heartbeat_is_wrapped() -> None:
-    """ServerHeartbeatEvent sent via /global/event is wrapped in GlobalEvent."""
+async def test_server_heartbeat_is_payload_wrapped() -> None:
+    """ServerHeartbeatEvent keeps only the payload wrapper."""
     state = _MockState()
     hb = ServerHeartbeatEvent()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
     assert len(events) == 2
     heartbeat = events[1]
     assert heartbeat["payload"]["type"] == "server.heartbeat"
-    assert heartbeat["directory"] == state.base_path
-    assert heartbeat["project"]
+    assert "directory" not in heartbeat
+    assert "project" not in heartbeat
 
 
 @pytest.mark.anyio
@@ -312,8 +306,10 @@ async def test_server_events_have_no_session_id() -> None:
     state = _MockState()
     hb = ServerHeartbeatEvent()
     events = await _collect_events(state, wrap_payload=True, events_to_send=[hb])
-    assert "sessionId" not in events[0]  # server.connected
-    assert "sessionId" not in events[1]  # server.heartbeat (inside payload)
+    assert "sessionId" not in events[0]  # envelope
+    assert "sessionId" not in events[0]["payload"]  # server.connected payload
+    assert "sessionId" not in events[1]  # envelope
+    assert "sessionId" not in events[1]["payload"]  # server.heartbeat payload
 
 
 # =============================================================================
@@ -332,7 +328,7 @@ async def test_session_created_is_wrapped() -> None:
     assert "directory" in wrapped
     assert "project" in wrapped
     assert "payload" in wrapped
-    assert wrapped["directory"] == state.base_path
+    assert wrapped["directory"] == state.working_dir
     assert "workspace" not in wrapped
     assert wrapped["payload"]["type"] == "session.created"
 
@@ -347,7 +343,7 @@ async def test_session_status_is_wrapped() -> None:
     wrapped = events[1]
     assert "directory" in wrapped
     assert "payload" in wrapped
-    assert wrapped["directory"] == state.base_path
+    assert wrapped["directory"] == state.working_dir
     assert "workspace" not in wrapped
 
 
@@ -361,7 +357,7 @@ async def test_session_compacted_is_wrapped() -> None:
     wrapped = events[1]
     assert "directory" in wrapped
     assert "payload" in wrapped
-    assert wrapped["directory"] == state.base_path
+    assert wrapped["directory"] == state.working_dir
     assert "workspace" not in wrapped
 
 
@@ -375,7 +371,7 @@ async def test_tui_session_select_is_wrapped() -> None:
     wrapped = events[1]
     assert "directory" in wrapped
     assert "payload" in wrapped
-    assert wrapped["directory"] == state.base_path
+    assert wrapped["directory"] == state.working_dir
     assert "workspace" not in wrapped
 
 
@@ -767,7 +763,7 @@ async def test_part_delta_multiple_deltas_stream() -> None:
     ]
     events = await _collect_events(state, wrap_payload=True, events_to_send=deltas)
 
-    # First event is server.connected (wrapped), then 5 wrapped deltas
+    # First event is payload-wrapped server.connected, then 5 wrapped deltas
     for i, wrapped in enumerate(events[1:], start=0):
         assert wrapped["payload"]["sessionId"] == "stream1"
         assert wrapped["payload"]["properties"]["delta"] == f"chunk{i}"
@@ -815,37 +811,37 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     ]
     events = await _collect_events(state, wrap_payload=True, events_to_send=events_to_send)
 
-    # [0] server.connected — wrapped
+    # [0] server.connected — payload wrapped, no routing metadata
     assert events[0]["payload"]["type"] == "server.connected"
-    assert events[0]["directory"] == state.base_path
+    assert "directory" not in events[0]
 
     # [1] session.status — wrapped
     assert "payload" in events[1]
     assert events[1]["payload"]["type"] == "session.status"
     assert events[1]["payload"]["sessionId"] == "mix1"
-    assert events[1]["directory"] == state.base_path
+    assert events[1]["directory"] == state.working_dir
     assert "workspace" not in events[1]
 
-    # [2] server.heartbeat — wrapped
+    # [2] server.heartbeat — payload wrapped, no routing metadata
     assert events[2]["payload"]["type"] == "server.heartbeat"
-    assert events[2]["directory"] == state.base_path
+    assert "directory" not in events[2]
 
     # [3] part.delta — wrapped (CRITICAL)
     assert "payload" in events[3]
     assert events[3]["payload"]["type"] == "message.part.delta"
     assert events[3]["payload"]["sessionId"] == "mix2"
-    assert events[3]["directory"] == state.base_path
+    assert events[3]["directory"] == state.working_dir
     assert "workspace" not in events[3]
 
-    # [4] server.heartbeat — wrapped
+    # [4] server.heartbeat — payload wrapped, no routing metadata
     assert events[4]["payload"]["type"] == "server.heartbeat"
-    assert events[4]["directory"] == state.base_path
+    assert "directory" not in events[4]
 
     # [5] session.compacted — wrapped
     assert "payload" in events[5]
     assert events[5]["payload"]["type"] == "session.compacted"
     assert events[5]["payload"]["sessionId"] == "mix3"
-    assert events[5]["directory"] == state.base_path
+    assert events[5]["directory"] == state.working_dir
     assert "workspace" not in events[5]
 
 

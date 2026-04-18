@@ -118,6 +118,27 @@ class VcsInfo(OpenCodeBaseModel):
     commit: str | None = None
 
 
+class DisposeResponse(OpenCodeBaseModel):
+    """Response for /global/dispose endpoint (OpenCode 1.4.4+ compat).
+
+    Minimal stub: acknowledges the request without actually shutting down.
+    """
+
+    success: bool = True
+    message: str = "dispose acknowledged (no-op)"
+
+
+class UpgradeResponse(OpenCodeBaseModel):
+    """Response for /global/upgrade endpoint (OpenCode 1.4.4+ compat).
+
+    Minimal stub: indicates no upgrade was performed.
+    """
+
+    success: bool = True
+    message: str = "upgrade not supported (stub)"
+    upgraded: bool = False
+
+
 class ProjectUpdateRequest(OpenCodeBaseModel):
     """Request to update project metadata."""
 
