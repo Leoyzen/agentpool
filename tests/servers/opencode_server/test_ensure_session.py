@@ -66,6 +66,9 @@ async def test_ensure_session_creates_new_session(mock_state: ServerState) -> No
     assert result.title == "New Session"
     assert result.version == "1"
     assert isinstance(result.time, TimeCreatedUpdated)
+    assert result.workspace_id == "wrk_global", (
+        f"workspace_id should be derived from project_id, got {result.workspace_id!r}"
+    )
 
 
 @pytest.mark.asyncio
@@ -81,6 +84,7 @@ async def test_ensure_session_returns_existing_session(mock_state: ServerState) 
         version="2",
         time=TimeCreatedUpdated(created=1000, updated=2000),
         parent_id=None,
+        workspace_id="wrk_test_proj",
     )
     mock_state.sessions[session_id] = existing_session
 

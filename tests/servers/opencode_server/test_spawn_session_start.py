@@ -632,3 +632,70 @@ async def test_spawn_start_toolpart_uses_source_name_as_subagent_type(
         f"subagent_type should be source_name 'explore', not source_type 'agent'. "
         f"Got: {tool_input.get('subagent_type')!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_spawn_start_child_session_has_workspace_id(
+    server_state: ServerState,
+) -> None:
+    """Child sessions created by SpawnSessionStart must have workspace_id.
+
+    Regression test: opencode 1.4.11 TUI filters sessions by workspace.
+    If child sessions lack workspace_id, they won't appear in the TUI
+    session list and the subagent view won't be clickable.
+
+    Verifies:
+    - ensure_session() sets workspace_id derived from project_id
+    - workspace_id matches the format wrk_{project_id[:12]}
+    - Session stored in server_state.sessions has workspace_id set
+    """
+    processor = EventProcessor()
+    parent_session_id = "parent-session-wsid-001"
+    child_session_id = "child-session-wsid-001"
+
+    parent_assistant_msg = MessageWithParts.assistant(
+        message_id="msg-parent-wsid-001",
+        session_id=parent_session_id,
+        time=MessageTime(created=1000),
+        agent_name="parent-agent",
+        model_id="test-model",
+        parent_id="user-msg-wsid-001",
+        provider_id="test-provider",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+    )
+    parent_ctx = EventProcessorContext(
+        session_id=parent_session_id,
+        assistant_msg_id="msg-parent-wsid-001",
+        assistant_msg=parent_assistant_msg,
+        state=server_state,
+        working_dir="/tmp",
+    )
+
+    spawn_event = SpawnSessionStart(
+        child_session_id=child_session_id,
+        parent_session_id=parent_session_id,
+        tool_call_id="call-wsid-001",
+        spawn_mechanism="task",
+        source_name="test_agent",
+        source_type="agent",
+        depth=1,
+        description="Workspace ID test",
+    )
+
+    async for _ in processor.process(spawn_event, parent_ctx):
+        pass  # consume events
+
+    # Verify child session exists in server_state.sessions
+    assert child_session_id in server_state.sessions, (
+        f"Child session {child_session_id} should be in server_state.sessions"
+    )
+
+    child_session = server_state.sessions[child_session_id]
+    assert child_session.workspace_id is not None, (
+        "Child session must have workspace_id set (not None)"
+    )
+    # workspace_id must be derived from project_id: wrk_{project_id[:12]}
+    expected_workspace_id = f"wrk_{child_session.project_id[:12]}"
+    assert child_session.workspace_id == expected_workspace_id, (
+        f"workspace_id should be '{expected_workspace_id}', got '{child_session.workspace_id}'"
+    )
