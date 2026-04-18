@@ -138,13 +138,24 @@ class ServerState:
         from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
         if self._event_factory is None:
-            directory = self.working_dir
+            directory = self.base_path
             self._event_factory = GlobalEventFactory(
                 directory=directory,
                 project=helpers.compute_project_id(directory),
                 workspace=None,
             )
         return self._event_factory
+
+    def ensure_runtime_session_state(self, session_id: str) -> None:
+        """Ensure in-memory runtime buckets exist for a session.
+
+        This is used both for brand-new sessions and for sessions reloaded from
+        persisted storage after a server restart. Cold-start recovery should not
+        depend on individual routes remembering to initialize each bucket.
+        """
+        self.messages.setdefault(session_id, [])
+        self.reverted_messages.setdefault(session_id, [])
+        self.todos.setdefault(session_id, [])
 
     @property
     def fs(self) -> AsyncFileSystem:
@@ -239,7 +250,10 @@ class ServerState:
     def has_session_background_task(self, session_id: str) -> bool:
         """Return whether a per-session prompt worker is already running."""
         task_name = f"process_message_{session_id}"
-        return any(task.get_name() == task_name and not task.done() for task in self.background_tasks)
+        return any(
+            task.get_name() == task_name and not task.done()
+            for task in self.background_tasks
+        )
 
     async def cancel_session_background_tasks(self, session_id: str) -> None:
         """Cancel background tasks associated with a session."""
@@ -354,9 +368,8 @@ class ServerState:
 
         # Cache in memory
         self.sessions[session_id] = session
-        self.messages[session_id] = []
+        self.ensure_runtime_session_state(session_id)
         await self.mark_session_idle(session_id)
-        self.todos[session_id] = []
 
         # Create input provider for this session
         input_provider = OpenCodeInputProvider(self, session_id)

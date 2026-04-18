@@ -548,6 +548,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     session = session_data_to_opencode(data)
     # Cache the session
     state.sessions[session_id] = session
+    state.ensure_runtime_session_state(session_id)
     # Initialize runtime state
     if session_id not in state.session_status:
         await state.mark_session_idle(session_id)

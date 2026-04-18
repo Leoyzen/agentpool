@@ -33,7 +33,6 @@ from agentpool_server.opencode_server.models import (
     Part,
     PartRemovedEvent,
     PartUpdatedEvent,
-    SessionErrorEvent,
     SessionStatus,
     SessionStatusEvent,
     StepStartPart,
@@ -54,12 +53,6 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-
-# Maximum time (in seconds) to wait for a single agent stream response.
-# If the model API hangs without producing any events, this timeout ensures
-# the session transitions from "busy" to "idle" instead of getting stuck.
-STREAM_TIMEOUT_SECONDS = 600  # 10 minutes
-
 
 def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
     """Warm up LSP servers for the given file paths.
@@ -441,12 +434,10 @@ async def _process_message_locked(  # noqa: PLR0915
     )
 
     response_time: int | None = None
-    cancelled = False
     try:
         iterator = agent.run_stream(*user_prompt, session_id=session_id)
-        async with asyncio.timeout(STREAM_TIMEOUT_SECONDS):
-            async for oc_event in adapter.process_stream(iterator):
-                await state.broadcast_event(oc_event)
+        async for oc_event in adapter.process_stream(iterator):
+            await state.broadcast_event(oc_event)
 
         for oc_event in adapter.finalize():
             await state.broadcast_event(oc_event)
@@ -466,7 +457,6 @@ async def _process_message_locked(  # noqa: PLR0915
     except asyncio.CancelledError:
         # User cancelled the request (e.g., pressed ESC)
         logger.info("Request cancelled by user", session_id=session_id)
-        cancelled = True
 
         # Finalize the assistant message with aborted state.
         # This mirrors upstream OpenCode's cleanup() in processor.ts:518

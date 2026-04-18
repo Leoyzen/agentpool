@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -455,11 +456,11 @@ async def test_global_event_integration_envelope_fields(
 async def test_global_event_integration_directory_matches_working_dir(
     server_state: ServerState,
 ) -> None:
-    """Test directory field matches the server working directory."""
+    """Test directory field matches the resolved server working directory."""
     event = SessionStatusEvent.create(session_id="s2", status_type="idle")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert received["directory"] == server_state.working_dir
+    assert received["directory"] == str(Path(server_state.working_dir).resolve())
 
 
 @pytest.mark.integration
@@ -501,7 +502,7 @@ async def test_global_event_routing_ignores_agent_execution_cwd(
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
 
-    assert received["directory"] == server_state.working_dir
+    assert received["directory"] == str(Path(server_state.working_dir).resolve())
     assert "workspace" not in received
 
 
