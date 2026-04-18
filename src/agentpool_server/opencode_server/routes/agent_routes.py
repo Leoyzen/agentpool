@@ -48,24 +48,40 @@ router = APIRouter(tags=["agent"])
 logger = get_logger(__name__)
 
 
+<<<<<<< HEAD
 def _extract_hints(template: str | None) -> list[str]:
+=======
+def _extract_hints(template: str) -> list[str]:
+>>>>>>> 451305c59 (fix(opencode): expose skills in TUI slash command autocomplete)
     """Extract input hints from a command template.
 
     Matches the native OpenCode Command.hints() utility which finds
     $N placeholders (e.g. $1, $2) and $ARGUMENTS.
 
     Args:
+<<<<<<< HEAD
         template: The command template string. None is treated as empty.
+=======
+        template: The command template string.
+>>>>>>> 451305c59 (fix(opencode): expose skills in TUI slash command autocomplete)
 
     Returns:
         Sorted list of unique hint strings found in the template.
     """
+<<<<<<< HEAD
     if not template:
         return []
     hints: list[str] = []
     numbered = re.findall(r"\$\d+", template)
     if numbered:
         hints.extend(sorted(set(numbered), key=lambda x: int(x[1:])))
+=======
+    hints: list[str] = []
+    numbered = re.findall(r"\$\d+", template)
+    if numbered:
+        for match in sorted(set(numbered)):
+            hints.append(match)
+>>>>>>> 451305c59 (fix(opencode): expose skills in TUI slash command autocomplete)
     if "$ARGUMENTS" in template:
         hints.append("$ARGUMENTS")
     return hints
