@@ -46,23 +46,24 @@ router = APIRouter(tags=["agent"])
 logger = get_logger(__name__)
 
 
-def _extract_hints(template: str) -> list[str]:
+def _extract_hints(template: str | None) -> list[str]:
     """Extract input hints from a command template.
 
     Matches the native OpenCode Command.hints() utility which finds
     $N placeholders (e.g. $1, $2) and $ARGUMENTS.
 
     Args:
-        template: The command template string.
+        template: The command template string. None is treated as empty.
 
     Returns:
         Sorted list of unique hint strings found in the template.
     """
+    if not template:
+        return []
     hints: list[str] = []
     numbered = re.findall(r"\$\d+", template)
     if numbered:
-        for match in sorted(set(numbered), key=lambda x: int(x[1:])):
-            hints.append(match)
+        hints.extend(sorted(set(numbered), key=lambda x: int(x[1:])))
     if "$ARGUMENTS" in template:
         hints.append("$ARGUMENTS")
     return hints
