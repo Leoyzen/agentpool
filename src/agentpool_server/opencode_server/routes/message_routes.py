@@ -34,7 +34,6 @@ from agentpool_server.opencode_server.models import (
     PartRemovedEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
-    SessionIdleEvent,
     SessionStatus,
     SessionStatusEvent,
     StepStartPart,
@@ -46,6 +45,7 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
+from agentpool_server.opencode_server.state import QueuedAsyncPrompt
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
@@ -310,12 +310,18 @@ async def _process_message_locked(  # noqa: PLR0915
     user_msg_with_parts: MessageWithParts,
     *,
     mark_busy: bool = True,
+    mark_idle: bool = True,
 ) -> MessageWithParts:
     """Actual agent processing logic (called within lock).
 
     Args:
+        session_id: Session receiving the message.
+        request: Request payload containing the user's parts and agent/model choice.
+        state: Shared OpenCode server state.
         user_msg_id: ID of already-created user message
         user_msg_with_parts: The user message with parts (already broadcast)
+        mark_busy: Whether to emit a busy transition before processing.
+        mark_idle: Whether to emit an idle transition when processing completes.
     """
     # --- Mark session busy ---
     if mark_busy:
@@ -500,11 +506,10 @@ async def _process_message_locked(  # noqa: PLR0915
                 logger.info("Restored original model", model=original_model)
 
         # --- Mark session idle ---
-        # Always set session to idle, even if processing failed or was cancelled
-        status = SessionStatus(type="idle")
-        state.session_status[session_id] = status
-        await state.broadcast_event(SessionStatusEvent.create(session_id, status))
-        await state.broadcast_event(SessionIdleEvent.create(session_id))
+        # The async prompt worker owns session idling while it drains queued work.
+        if mark_idle:
+            await state.mark_session_idle(session_id)
+            await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
         # --- Update session timestamp ---
         if response_time is not None:
             session = state.sessions[session_id]
@@ -514,6 +519,65 @@ async def _process_message_locked(  # noqa: PLR0915
                 }
             )
     return assistant_msg_with_parts
+
+
+async def _ensure_async_prompt_worker(
+    session_id: str,
+    state: StateDep,
+    *,
+    mark_busy: bool,
+) -> None:
+    """Start the per-session async prompt worker when queued work exists."""
+    if not state.has_pending_async_prompts(session_id):
+        return
+    if state.has_session_background_task(session_id):
+        return
+
+    if mark_busy:
+        busy = SessionStatus(type="busy")
+        state.session_status[session_id] = busy
+        await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
+
+    state.create_background_task(
+        _run_async_prompt_queue(session_id, state),
+        name=f"process_message_{session_id}",
+    )
+
+
+async def _run_async_prompt_queue(session_id: str, state: StateDep) -> None:
+    """Drain queued async prompts for a session in FIFO order."""
+    lock = state.get_session_lock(session_id)
+    try:
+        while True:
+            async with lock:
+                queued_prompt = state.pop_next_async_prompt(session_id)
+                if queued_prompt is None:
+                    await state.mark_session_idle(session_id)
+                    return
+
+                await _process_message_locked(
+                    session_id,
+                    queued_prompt.request,
+                    state,
+                    queued_prompt.user_msg_id,
+                    queued_prompt.user_msg_with_parts,
+                    mark_busy=False,
+                    mark_idle=False,
+                )
+
+                if state.has_pending_async_prompts(session_id):
+                    await state.emit_session_turn_complete(session_id)
+                    continue
+
+                await state.mark_session_idle(session_id)
+                return
+    except asyncio.CancelledError:
+        logger.info("Async prompt worker cancelled", session_id=session_id)
+        raise
+    except Exception:
+        logger.exception("Async prompt worker failed", session_id=session_id)
+        await state.mark_session_idle(session_id)
+        raise
 
 
 @router.post("/message")
@@ -538,8 +602,8 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     """Send a message asynchronously without waiting for response.
 
     Starts the agent processing in the background and returns immediately.
-    If the session is busy, the message is queued using agent.queue() and
-    will be processed after the current run completes.
+    If the session is busy, the message is queued in server state and
+    processed after the current run completes.
 
     Client should listen to SSE events to get updates.
 
@@ -589,48 +653,29 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
-    # 2. Extract user prompt for queuing/processing
-    user_prompt = await extract_user_prompt_from_parts(
-        request.parts,
-        fs=state.fs,
-        tools=state.agent.tools,
-    )
-
-    # 3. Atomically inspect busy state, then start or queue processing
+    # 2. Atomically queue work, then start a single per-session worker if needed.
     lock = state.get_session_lock(session_id)
     async with lock:
+        state.enqueue_async_prompt(
+            session_id,
+            QueuedAsyncPrompt(
+                request=request,
+                user_msg_id=user_msg_id,
+                user_msg_with_parts=user_msg_with_parts,
+            ),
+        )
+
         current_status = state.session_status.get(session_id)
-        if current_status is not None and current_status.type == "busy":
+        mark_busy = current_status is None or current_status.type != "busy"
+        if not mark_busy:
             logger.info(
-                "Session became busy before async dispatch, queuing prompt",
+                "Session became busy before async dispatch, keeping prompt in server queue",
                 session_id=session_id,
             )
-            agent = state.agent
-            if request.agent and state.agent.agent_pool is not None:
-                agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-            agent.queue_prompt(user_prompt)
-            return
+        else:
+            logger.info("Session idle, starting background task", session_id=session_id)
 
-        logger.info("Session idle, starting background task", session_id=session_id)
-        busy = SessionStatus(type="busy")
-        state.session_status[session_id] = busy
-        await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
-
-        async def process_message() -> MessageWithParts:
-            async with lock:
-                return await _process_message_locked(
-                    session_id,
-                    request,
-                    state,
-                    user_msg_id,
-                    user_msg_with_parts,
-                    mark_busy=False,
-                )
-
-        state.create_background_task(
-            process_message(),
-            name=f"process_message_{session_id}",
-        )
+        await _ensure_async_prompt_worker(session_id, state, mark_busy=mark_busy)
 
 
 @router.get("/message/{message_id}")

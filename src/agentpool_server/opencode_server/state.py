@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.models import (
         Config,
         Event,
+        MessageRequest,
         MessageWithParts,
         QuestionInfo,
         Session,
@@ -58,6 +59,15 @@ class PendingQuestion:
 
     tool: QuestionToolInfo | None = None
     """Optional tool context."""
+
+
+@dataclass
+class QueuedAsyncPrompt:
+    """Queued async prompt work owned by the OpenCode server."""
+
+    request: MessageRequest
+    user_msg_id: str
+    user_msg_with_parts: MessageWithParts
 
 
 @dataclass
@@ -102,6 +112,8 @@ class ServerState:
     _first_subscriber_triggered: bool = field(default=False, repr=False)
     # Background tasks (for cleanup on shutdown)
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    # Per-session async prompt queue owned by the server runtime.
+    pending_async_prompts: dict[str, list[QueuedAsyncPrompt]] = field(default_factory=dict)
     # Event managers for subagent event routing (session_id -> event_manager)
     event_managers: dict[str, Any] = field(default_factory=dict)
     # Provider authentication service
@@ -126,7 +138,7 @@ class ServerState:
         from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
 
         if self._event_factory is None:
-            directory = self.base_path
+            directory = self.working_dir
             self._event_factory = GlobalEventFactory(
                 directory=directory,
                 project=helpers.compute_project_id(directory),
@@ -202,10 +214,38 @@ class ServerState:
         task.add_done_callback(self.background_tasks.discard)
         return task
 
+    def enqueue_async_prompt(self, session_id: str, queued_prompt: QueuedAsyncPrompt) -> None:
+        """Append async prompt work to a session-owned queue."""
+        self.pending_async_prompts.setdefault(session_id, []).append(queued_prompt)
+
+    def pop_next_async_prompt(self, session_id: str) -> QueuedAsyncPrompt | None:
+        """Pop the next queued async prompt for a session, if any."""
+        queue = self.pending_async_prompts.get(session_id)
+        if not queue:
+            return None
+        queued_prompt = queue.pop(0)
+        if not queue:
+            self.pending_async_prompts.pop(session_id, None)
+        return queued_prompt
+
+    def clear_pending_async_prompts(self, session_id: str) -> None:
+        """Drop queued async prompt work for a session."""
+        self.pending_async_prompts.pop(session_id, None)
+
+    def has_pending_async_prompts(self, session_id: str) -> bool:
+        """Return whether a session currently has queued async prompt work."""
+        return bool(self.pending_async_prompts.get(session_id))
+
+    def has_session_background_task(self, session_id: str) -> bool:
+        """Return whether a per-session prompt worker is already running."""
+        task_name = f"process_message_{session_id}"
+        return any(task.get_name() == task_name and not task.done() for task in self.background_tasks)
+
     async def cancel_session_background_tasks(self, session_id: str) -> None:
         """Cancel background tasks associated with a session."""
         task_name = f"process_message_{session_id}"
         tasks = [task for task in self.background_tasks if task.get_name() == task_name]
+        self.clear_pending_async_prompts(session_id)
         for task in tasks:
             task.cancel()
         if tasks:
@@ -248,6 +288,17 @@ class ServerState:
         status = SessionStatus(type="idle")
         self.session_status[session_id] = status
         await self.broadcast_event(SessionStatusEvent.create(session_id, status))
+        await self.broadcast_event(SessionIdleEvent.create(session_id))
+
+    async def emit_session_turn_complete(self, session_id: str) -> None:
+        """Broadcast the per-turn completion signal without changing busy state.
+
+        OpenCode clients still use ``session.idle`` as an end-of-turn marker.
+        For queued async prompts we need that signal after each finished turn,
+        even while the server-owned queue still has follow-up work to process.
+        """
+        from agentpool_server.opencode_server.models import SessionIdleEvent
+
         await self.broadcast_event(SessionIdleEvent.create(session_id))
 
     async def ensure_session(
@@ -296,7 +347,10 @@ class ServerState:
         # Persist to storage
         id_ = self.pool.manifest.config_file_path
         session_data = opencode_to_session_data(session, agent_name=self.agent.name, pool_id=id_)
-        await self.pool.storage.save_session(session_data)
+        if self.pool.sessions.store:
+            await self.pool.sessions.store.save(session_data)
+        else:
+            await self.pool.storage.save_session(session_data)
 
         # Cache in memory
         self.sessions[session_id] = session

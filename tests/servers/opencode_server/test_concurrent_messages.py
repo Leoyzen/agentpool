@@ -119,6 +119,9 @@ def slow_mock_agent():
     pool.todos.on_change = None
     pool.skill_commands = None
 
+    pool.sessions = Mock()
+    pool.sessions.store = None
+
     # CRITICAL: all_agents must return a real dict to avoid Mock issues
     pool.all_agents = {agent.name: agent}
 
