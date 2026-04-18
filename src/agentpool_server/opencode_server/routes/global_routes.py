@@ -19,44 +19,14 @@ from agentpool_server.opencode_server.models.app import (
     UpgradeResponse,
 )
 from agentpool_server.opencode_server.models.events import (
-    CommandExecutedEvent,
-    FileEditedEvent,
-    FileWatcherUpdatedEvent,
-    LspClientDiagnosticsEvent,
-    LspUpdatedEvent,
-    McpToolsChangedEvent,
-    MessageRemovedEvent,
     MessageUpdatedEvent,
-    PartDeltaEvent,
-    PartRemovedEvent,
     PartUpdatedEvent,
-    PermissionRequestEvent,
-    PermissionResolvedEvent,
-    PermissionUpdatedEvent,
-    ProjectUpdatedEvent,
-    PtyCreatedEvent,
-    PtyDeletedEvent,
-    PtyExitedEvent,
-    PtyUpdatedEvent,
-    QuestionAskedEvent,
-    QuestionRejectedEvent,
-    QuestionRepliedEvent,
     ServerConnectedEvent,
     ServerHeartbeatEvent,
-    SessionCompactedEvent,
     SessionCreatedEvent,
-    SessionDeletedEvent,
-    SessionDiffEvent,
     SessionErrorEvent,
-    SessionIdleEvent,
-    SessionStatusEvent,
+    SessionIdProperties,
     SessionUpdatedEvent,
-    TodoUpdatedEvent,
-    TuiCommandExecuteEvent,
-    TuiPromptAppendEvent,
-    TuiSessionSelectEvent,
-    TuiToastShowEvent,
-    VcsBranchUpdatedEvent,
 )
 from agentpool_server.opencode_server.routes.routing import (
     RoutingCheckResponse,
@@ -118,98 +88,42 @@ async def post_global_upgrade() -> UpgradeResponse:
     return UpgradeResponse(message="upgrade not supported (stub)")
 
 
-def _extract_session_id(event: Event) -> str | None:  # noqa: PLR0911
+def _extract_session_id(event: Event) -> str | None:
     """Extract session ID from various event types.
 
-    Uses pattern matching to access session_id from four different
-    property structures:
-    - properties.session_id (most events)
-    - properties.info.id (SessionCreated/Updated events)
-    - properties.info.session_id (MessageUpdatedEvent)
-    - properties.part.session_id (PartUpdatedEvent)
+    Uses a combination of:
+    - ``isinstance(event.properties, SessionIdProperties)`` for the common
+      case where session_id lives directly on the properties model.
+    - Explicit match arms for special-path events where session_id is
+      nested deeper (e.g., ``properties.info.id``,
+      ``properties.info.session_id``, ``properties.part.session_id``).
+    - ``SessionErrorEvent`` handled separately because its session_id is
+      ``str | None`` (not ``str``), so its properties don't inherit from
+      ``SessionIdProperties``.
 
-    Unrecognized event types trigger a warning log and return None,
-    since some events genuinely have no session association.
+    Unrecognized event types return None without warning, since many
+    events genuinely have no session association.
     """
+    # Special-path events: session_id is nested, not at properties.session_id
     match event:
-        # Events with properties.session_id directly
-        case SessionDeletedEvent(properties=props):
-            return props.session_id
-        case SessionStatusEvent(properties=props):
-            return props.session_id
-        case SessionIdleEvent(properties=props):
-            return props.session_id
-        case SessionCompactedEvent(properties=props):
-            return props.session_id
-        case MessageRemovedEvent(properties=props):
-            return props.session_id
-        case PartRemovedEvent(properties=props):
-            return props.session_id
-        case PermissionRequestEvent(properties=props):
-            return props.session_id
-        case PermissionResolvedEvent(properties=props):
-            return props.session_id
-        case QuestionAskedEvent(properties=props):
-            return props.session_id
-        case QuestionRepliedEvent(properties=props):
-            return props.session_id
-        case QuestionRejectedEvent(properties=props):
-            return props.session_id
-        case TodoUpdatedEvent(properties=props):
-            return props.session_id
-        case SessionErrorEvent(properties=props):
-            return props.session_id
-        case SessionDiffEvent(properties=props):
-            return props.session_id
-        case PartDeltaEvent(properties=props):
-            return props.session_id
-        case PermissionUpdatedEvent(properties=props):
-            return props.session_id
-        case CommandExecutedEvent(properties=props):
-            return props.session_id
-        case TuiSessionSelectEvent(properties=props):
-            return props.session_id
-
-        # Events with no session association (explicitly listed to avoid
-        # spurious warnings; these events are broadcast globally and are
-        # not tied to any particular session).
-        case (
-            ServerHeartbeatEvent()
-            | ServerConnectedEvent()
-            | FileWatcherUpdatedEvent()
-            | FileEditedEvent()
-            | McpToolsChangedEvent()
-            | PtyCreatedEvent()
-            | PtyUpdatedEvent()
-            | PtyExitedEvent()
-            | PtyDeletedEvent()
-            | LspUpdatedEvent()
-            | LspClientDiagnosticsEvent()
-            | ProjectUpdatedEvent()
-            | VcsBranchUpdatedEvent()
-            | TuiPromptAppendEvent()
-            | TuiCommandExecuteEvent()
-            | TuiToastShowEvent()
-        ):
-            return None
-
-        # Events with properties.info.id (Session has id field)
         case SessionCreatedEvent(properties=props):
-            return props.info.id
+            session_id: str | None = props.info.id
         case SessionUpdatedEvent(properties=props):
-            return props.info.id
-
-        # Events with properties.info.session_id (MessageInfo has session_id field)
+            session_id = props.info.id
         case MessageUpdatedEvent(properties=props):
-            return props.info.session_id
-
-        # Events with properties.part.session_id (Part has session_id field)
+            session_id = props.info.session_id
         case PartUpdatedEvent(properties=props):
-            return props.part.session_id
-
+            session_id = props.part.session_id
+        case SessionErrorEvent(properties=props):
+            session_id = props.session_id
         case _:
-            logger.warning("Unhandled event type in _extract_session_id: %s", type(event).__name__)
+            # Common path: properties inherit from SessionIdProperties
+            if isinstance(event.properties, SessionIdProperties):
+                return event.properties.session_id
+            # No session association (server events, file events, pty events, etc.)
             return None
+
+    return session_id
 
 
 class GlobalEventFactory:
@@ -419,4 +333,3 @@ async def get_routing_check(
         event, effective_project_dir, current_workspace=current_workspace
     )
     return RoutingCheckResponse(would_pass=would_pass, reason=reason)
-

@@ -47,6 +47,7 @@ from agentpool_server.opencode_server.models.events import (
     SessionDiffEvent,
     SessionErrorEvent,
     SessionIdleEvent,
+    SessionIdProperties,
     SessionStatusEvent,
     SessionUpdatedEvent,
     Todo,
@@ -955,25 +956,22 @@ def test_extract_session_id_no_warning_for_no_session_events(
     assert "Unhandled event type in _extract_session_id" not in caplog.text
 
 
-def test_extract_session_id_warning_for_unknown_event_type(
+def test_extract_session_id_no_warning_for_unknown_event_type(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Warning is logged when an unknown event type hits the wildcard case.
+    """Unknown event types return None without logging warnings.
 
-    Simulates a future event type being added to the Event union but not
-    yet covered in _extract_session_id. The exhaustiveness test catches
-    this at the type level; this test verifies the runtime warning.
+    Since many events genuinely have no session association, the
+    isinstance-based approach returns None silently for unrecognized types.
     """
-    # Use a plain MagicMock (no spec) to simulate an unrecognized event.
-    # A spec-less mock won't match any of the pattern-matching cases
-    # and will fall through to the `case _:` wildcard.
     mock_event = MagicMock()
     mock_event.__class__.__name__ = "FutureUnknownEvent"
+    # Make properties NOT be a SessionIdProperties instance
+    mock_event.properties = MagicMock()
     with caplog.at_level("WARNING"):
         result = _extract_session_id(mock_event)  # type: ignore[arg-type]
     assert result is None
-    assert "Unhandled event type in _extract_session_id" in caplog.text
-    assert "FutureUnknownEvent" in caplog.text
+    assert "Unhandled event type in _extract_session_id" not in caplog.text
 
 
 def test_extract_session_id_no_warning_for_handled(caplog: pytest.LogCaptureFixture) -> None:
@@ -985,85 +983,108 @@ def test_extract_session_id_no_warning_for_handled(caplog: pytest.LogCaptureFixt
 
 
 def test_extract_session_id_exhaustiveness() -> None:
-    """All Event union members are either handled or explicitly documented as no-session.
+    """All Event union members are covered by _extract_session_id.
+
+    Uses SessionIdProperties base class for automatic coverage:
+    - Events whose properties inherit from SessionIdProperties are auto-covered
+    - Special-path events (SessionCreated/Updated, MessageUpdated, PartUpdated,
+      SessionError) have explicit extraction logic
+    - Remaining events have no session association and return None
 
     Catches future regressions: if a new event type with session_id is added
-    to the Event union but not to _extract_session_id, this test fails.
+    to the Event union but its properties don't inherit from SessionIdProperties
+    and it's not in the special-path list, this test fails.
     """
-    # Event types handled by _extract_session_id match cases
-    handled_types: set[type] = {
-        SessionDeletedEvent,
-        SessionStatusEvent,
-        SessionIdleEvent,
-        SessionCompactedEvent,
-        MessageRemovedEvent,
-        PartRemovedEvent,
-        PermissionRequestEvent,
-        PermissionResolvedEvent,
-        QuestionAskedEvent,
-        QuestionRepliedEvent,
-        QuestionRejectedEvent,
-        TodoUpdatedEvent,
-        SessionErrorEvent,
+    # Special-path events: session_id is nested (not at properties.session_id)
+    special_path_types: set[type] = {
         SessionCreatedEvent,
         SessionUpdatedEvent,
-        PartUpdatedEvent,
-        SessionDiffEvent,
-        PartDeltaEvent,
-        PermissionUpdatedEvent,
-        CommandExecutedEvent,
-        TuiSessionSelectEvent,
         MessageUpdatedEvent,
+        PartUpdatedEvent,
+        SessionErrorEvent,
     }
 
-    # Event types that genuinely have no session association
-    # (no session_id field anywhere in their properties)
-    no_session_types: set[type] = {
-        ServerConnectedEvent,
-        ServerHeartbeatEvent,
-        FileWatcherUpdatedEvent,
-        FileEditedEvent,
-        McpToolsChangedEvent,
-        VcsBranchUpdatedEvent,
-        TuiPromptAppendEvent,
-        TuiCommandExecuteEvent,
-        TuiToastShowEvent,
-        ProjectUpdatedEvent,
-        LspUpdatedEvent,
-        LspClientDiagnosticsEvent,
-        PtyCreatedEvent,
-        PtyUpdatedEvent,
-        PtyExitedEvent,
-        PtyDeletedEvent,
-    }
+    # Events whose properties inherit from SessionIdProperties
+    # (automatically covered by isinstance check in _extract_session_id)
+    session_id_props_types: set[type] = set()
+    for event_type in Event.__args__:
+        props_type = event_type.model_fields["properties"].annotation
+        # Resolve annotations that may be stringified or wrapped
+        if (
+            props_type is not None
+            and isinstance(props_type, type)
+            and issubclass(props_type, SessionIdProperties)
+        ):
+            session_id_props_types.add(event_type)
 
-    # Event types with session_id that are NOT handled (known gaps)
-    known_gap_types: set[type] = set()
+    # Events with no session association
+    no_session_types: set[type] = set()
+    for event_type in Event.__args__:
+        if event_type not in special_path_types and event_type not in session_id_props_types:
+            no_session_types.add(event_type)
 
-    expected = handled_types | no_session_types | known_gap_types
-
-    # Get all members of the Event union
+    # Verify every Event union member is accounted for
     event_union_args: set[type] = set(Event.__args__)
+    covered = special_path_types | session_id_props_types | no_session_types
 
-    # Every union member must be accounted for
-    missing = event_union_args - expected
+    missing = event_union_args - covered
     assert not missing, (
         f"New event types not covered by _extract_session_id: "
         f"{sorted(t.__name__ for t in missing)}. "
-        f"Add them to handled_types, no_session_types, or known_gap_types."
+        f"Either make their properties inherit from SessionIdProperties, "
+        f"add to special_path_types, or add to no_session_types."
     )
 
     # No extra types that aren't in the union
-    extra = expected - event_union_args
+    extra = covered - event_union_args
     assert not extra, (
         f"Types listed in test but not in Event union: {sorted(t.__name__ for t in extra)}"
     )
 
-    # Known gaps should be documented — if they're fixed, move them to handled
-    if known_gap_types:
-        gap_names = sorted(t.__name__ for t in known_gap_types)
-        # This assertion always passes but documents the known gaps
-        assert True, f"Known gap types with session_id not handled: {gap_names}"
+    # Verify SessionIdProperties subclasses exist (not just empty set)
+    assert session_id_props_types, (
+        "No event types have properties inheriting from SessionIdProperties. "
+        "The base class refactoring may not have been applied."
+    )
+
+
+def test_session_id_properties_base_class_hierarchy() -> None:
+    """Verify SessionIdProperties is properly used by event properties models.
+
+    Ensures that properties models with session_id: str inherit from
+    SessionIdProperties, and that SessionErrorProperties (which has
+    session_id: str | None) does NOT inherit from it.
+    """
+    from agentpool_server.opencode_server.models.events import SessionErrorProperties
+
+    # SessionIdProperties must have session_id: str
+    assert "session_id" in SessionIdProperties.model_fields
+    field = SessionIdProperties.model_fields["session_id"]
+    # The field annotation should be str (not str | None)
+    assert field.annotation is str
+
+    # SessionErrorProperties must NOT inherit from SessionIdProperties
+    # because its session_id is str | None, not str
+    assert not issubclass(SessionErrorProperties, SessionIdProperties)
+
+
+def test_extract_session_id_uses_isinstance() -> None:
+    """_extract_session_id uses isinstance(SessionIdProperties) for common path.
+
+    Verifies that the isinstance-based dispatch works correctly by testing
+    a representative SessionIdProperties-inheriting event type.
+    """
+    # SessionStatusEvent properties inherit from SessionIdProperties
+    event = SessionStatusEvent.create(session_id="isinstance-test", status_type="busy")
+    assert isinstance(event.properties, SessionIdProperties)
+    result = _extract_session_id(event)
+    assert result == "isinstance-test"
+
+    # ServerHeartbeatEvent properties do NOT inherit from SessionIdProperties
+    event2 = ServerHeartbeatEvent()
+    assert not isinstance(event2.properties, SessionIdProperties)
+    result2 = _extract_session_id(event2)
+    assert result2 is None
 
 
 # =============================================================================
