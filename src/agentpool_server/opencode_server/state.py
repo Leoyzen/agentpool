@@ -91,6 +91,11 @@ class ServerState:
     # Per-session locks for concurrent message handling
     # Ensures messages to the same session are processed sequentially
     session_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # Global lock for the shared OpenCode agent instance.
+    # The base agent mutates per-run state (session_id, input provider,
+    # active run context, model/mode overrides), so cross-session access must
+    # be serialized until the server moves to per-session agent instances.
+    agent_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Message storage (session_id -> messages)
     # Runtime cache - messages are also persisted via pool.storage
     messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
@@ -204,6 +209,32 @@ class ServerState:
         if session_id not in self.session_locks:
             self.session_locks[session_id] = asyncio.Lock()
         return self.session_locks[session_id]
+
+    def ensure_input_provider(self, session_id: str) -> OpenCodeInputProvider:
+        """Get or create the OpenCode input provider for a session."""
+        from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
+
+        input_provider = self.input_providers.get(session_id)
+        if input_provider is None:
+            input_provider = OpenCodeInputProvider(self, session_id)
+            self.input_providers[session_id] = input_provider
+        return input_provider
+
+    def bind_agent_to_session(
+        self,
+        session_id: str,
+        *,
+        agent: BaseAgent[Any, Any] | None = None,
+    ) -> BaseAgent[Any, Any]:
+        """Bind an agent instance to the requested session runtime context.
+
+        Callers must already hold ``agent_lock`` when using this helper.
+        """
+        target_agent = self.agent if agent is None else agent
+        input_provider = self.ensure_input_provider(session_id)
+        target_agent._input_provider = input_provider
+        target_agent.session_id = session_id
+        return target_agent
 
     @property
     def storage(self) -> StorageManager:
@@ -339,7 +370,6 @@ class ServerState:
 
         # Import here to avoid circular imports at module load time
         from agentpool_server.opencode_server.converters import opencode_to_session_data
-        from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
         from agentpool_server.opencode_server.models import (
             Session,
             SessionCreatedEvent,
@@ -371,11 +401,8 @@ class ServerState:
         self.ensure_runtime_session_state(session_id)
         await self.mark_session_idle(session_id)
 
-        # Create input provider for this session
-        input_provider = OpenCodeInputProvider(self, session_id)
-        self.input_providers[session_id] = input_provider
-        self.agent._input_provider = input_provider
-        self.agent.session_id = session_id
+        async with self.agent_lock:
+            self.bind_agent_to_session(session_id)
 
         await self.broadcast_event(SessionCreatedEvent.create(session))
 

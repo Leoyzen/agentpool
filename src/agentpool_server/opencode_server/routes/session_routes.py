@@ -281,12 +281,14 @@ async def _execute_slashed_command(
             )
 
             # Run agent with prompt to use the skill context
-            iterator = state.agent.run_stream(
-                agent_prompt,
-                session_id=session_id,
-            )
-            async for oc_event in adapter.process_stream(iterator):
-                await state.broadcast_event(oc_event)
+            async with state.agent_lock:
+                agent = state.bind_agent_to_session(session_id)
+                iterator = agent.run_stream(
+                    agent_prompt,
+                    session_id=session_id,
+                )
+                async for oc_event in adapter.process_stream(iterator):
+                    await state.broadcast_event(oc_event)
             # Append adapter's response to text_part
             if adapter.response_text:
                 text_part.text = f"{output_text}\n\n{adapter.response_text}"
@@ -389,7 +391,9 @@ async def _execute_skill_command(
 
         # Load session into agent to ensure conversation history is restored
         # This ensures agent sees all previous messages during this run
-        await state.agent.load_session(session_id)
+        async with state.agent_lock:
+            agent = state.bind_agent_to_session(session_id)
+            await agent.load_session(session_id)
 
         # Create USER message (not assistant!)
         user_msg_id = identifier.ascending("message")
@@ -452,9 +456,11 @@ async def _execute_skill_command(
             )
 
             # Run agent with the user prompt
-            iterator = state.agent.run_stream(user_prompt, session_id=session_id)
-            async for oc_event in adapter.process_stream(iterator):
-                await state.broadcast_event(oc_event)
+            async with state.agent_lock:
+                agent = state.bind_agent_to_session(session_id)
+                iterator = agent.run_stream(user_prompt, session_id=session_id)
+                async for oc_event in adapter.process_stream(iterator):
+                    await state.broadcast_event(oc_event)
 
         except Exception as e:
             error_text = f"Error: {e}"
@@ -508,85 +514,58 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     to storage. This ensures users see the latest message state when viewing
     subagent sessions.
     """
-    # Check if session is cached AND agent has the correct session loaded
-    agent_has_correct_session = (
-        state.agent.session_id == session_id
-        and session_id in state.sessions
-        and session_id in state.messages
-    )
+    async with state.agent_lock:
+        # Check if session is cached AND agent has the correct session loaded
+        agent_has_correct_session = (
+            state.agent.session_id == session_id
+            and session_id in state.sessions
+            and session_id in state.messages
+        )
 
-    if agent_has_correct_session:
-        # Session cached and agent has correct history - safe to return
-        return state.sessions[session_id]
+        if agent_has_correct_session:
+            state.bind_agent_to_session(session_id)
+            return state.sessions[session_id]
 
-    # For subagent/child sessions: prioritize in-memory messages if available
-    # This is critical because subagent parts are streamed in real-time to memory
-    # but are only persisted at completion, not after each part update
-    # A session is considered a subagent session if it has a parent_id
-    cached_session = state.sessions.get(session_id)
-    is_subagent_session = cached_session is not None and cached_session.parent_id is not None
+        # For subagent/child sessions: prioritize in-memory messages if available
+        # This is critical because subagent parts are streamed in real-time to memory
+        # but are only persisted at completion, not after each part update
+        # A session is considered a subagent session if it has a parent_id
+        cached_session = state.sessions.get(session_id)
+        is_subagent_session = cached_session is not None and cached_session.parent_id is not None
 
-    if is_subagent_session and session_id in state.messages:
-        # Subagent session exists in memory with messages - return it directly
-        # This avoids overwriting real-time streamed parts with stale storage data
-        return cached_session
+        if is_subagent_session and session_id in state.messages:
+            state.bind_agent_to_session(session_id)
+            return cached_session
 
-    # Need to load/reload session history into agent
-    # This happens when:
-    # 1. Session not in cache (new session)
-    # 2. Agent has different session loaded (session switch)
-    # 3. Session in cache but no messages (e.g., subagent session not yet populated)
+        # Need to load/reload session history into agent
+        existing_messages = state.messages.get(session_id) if is_subagent_session else None
 
-    # Check if we have in-memory messages before reloading (for subagent sessions)
-    existing_messages = state.messages.get(session_id) if is_subagent_session else None
+        agent = state.bind_agent_to_session(session_id)
+        data = await agent.load_session(session_id)
+        if data is None:
+            return None
 
-    data = await state.agent.load_session(session_id)
-    if data is None:
-        return None
+        session = session_data_to_opencode(data)
+        state.sessions[session_id] = session
+        state.ensure_runtime_session_state(session_id)
+        if session_id not in state.session_status:
+            await state.mark_session_idle(session_id)
 
-    # Convert SessionData to OpenCode Session
-    session = session_data_to_opencode(data)
-    # Cache the session
-    state.sessions[session_id] = session
-    state.ensure_runtime_session_state(session_id)
-    # Initialize runtime state
-    if session_id not in state.session_status:
-        await state.mark_session_idle(session_id)
+        if not (is_subagent_session and existing_messages):
+            state.messages[session_id] = [
+                chat_message_to_opencode(
+                    chat_msg,
+                    session_id=session_id,
+                    working_dir=state.working_dir,
+                    agent_name=agent.name,
+                    model_id=chat_msg.model_name or "sonnet",
+                    provider_id=chat_msg.provider_name or "claude-code",
+                )
+                for chat_msg in agent.conversation.chat_messages
+            ]
 
-    # For subagent sessions with existing in-memory messages, preserve them
-    # Subagent messages are streamed in real-time and may not be persisted yet
-    if is_subagent_session and existing_messages:
-        # Keep existing in-memory messages (they're more recent than storage)
-        # Only update if memory is empty
-        pass  # existing_messages already in state.messages[session_id]
-    else:
-        # Convert agent's conversation history to OpenCode format
-        # This is for regular sessions or sessions not yet in memory
-        state.messages[session_id] = [
-            chat_message_to_opencode(
-                chat_msg,
-                session_id=session_id,
-                working_dir=state.working_dir,
-                agent_name=state.agent.name,
-                model_id=chat_msg.model_name or "sonnet",  # Normalized name from Claude storage
-                provider_id=chat_msg.provider_name or "claude-code",
-            )
-            for chat_msg in state.agent.conversation.chat_messages
-        ]
-    # Create input provider for this session if not exists
-    if session_id not in state.input_providers:
-        input_provider = OpenCodeInputProvider(state, session_id)
-        state.input_providers[session_id] = input_provider
-    # Set input provider on agent to ensure correct session routing.
-    # NOTE: The agent singleton is shared across sessions. Setting _input_provider
-    # and session_id here is safe for single-session use but creates a race if
-    # two sessions run concurrently — the later session overwrites the earlier.
-    # Per-session locks (session_locks) prevent message-processing races, but a
-    # full fix would pass session context through the execution path instead of
-    # mutating the shared agent instance.
-    state.agent._input_provider = state.input_providers[session_id]
-    state.agent.session_id = session_id
-    return session
+        state.bind_agent_to_session(session_id, agent=agent)
+        return session
 
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -664,18 +643,9 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     state.messages[session_id] = []
     await state.mark_session_idle(session_id)
     state.todos[session_id] = []
-    # Create input provider for this session
-    input_provider = OpenCodeInputProvider(state, session_id)
-    state.input_providers[session_id] = input_provider
-    # Set input provider on agent.
-    # NOTE: See load_session for the shared-agent race-condition caveat.
-    state.agent._input_provider = input_provider
-    # Clear agent's conversation for the new session
-    # Agent is shared across sessions, so we need to clear its conversation state
-    if hasattr(state.agent, "conversation") and state.agent.conversation:
-        state.agent.conversation.chat_messages.clear()
-    # Update agent's session_id to the new session
-    state.agent.session_id = session_id
+    async with state.agent_lock:
+        agent = state.bind_agent_to_session(session_id)
+        agent.conversation.chat_messages.clear()
     await state.broadcast_event(SessionCreatedEvent.create(session))
     return session
 
@@ -958,8 +928,6 @@ async def init_session(  # noqa: D417
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Get the agent and filesystem
-    agent = state.agent
     fs = state.fs
     working_dir = state.working_dir
     try:
@@ -1005,31 +973,31 @@ async def init_session(  # noqa: D417
 
     init_prompt = "\n".join(prompt_parts)
 
-    # Handle model selection if requested
-    original_model: str | None = None
-    if request and request.model_id and request.provider_id:
-        requested_model = f"{request.provider_id}:{request.model_id}"
-        try:
-            available_models = await agent.get_available_models()
-            if available_models:
-                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
-                if requested_model in valid_ids:
-                    # Store original model to restore later
-                    original_model = agent.model_name
-                    await agent.set_model(requested_model)
-        except Exception:  # noqa: BLE001
-            # Agent doesn't support model selection, ignore
-            pass
-
     # Run the agent in the background
     async def run_init() -> None:
-        try:
-            await agent.run(init_prompt)
-        finally:
-            # Restore original model if we changed it
-            if original_model is not None:
-                with contextlib.suppress(Exception):
-                    await agent.set_model(original_model)
+        original_model: str | None = None
+        async with state.agent_lock:
+            agent = state.bind_agent_to_session(session_id)
+            try:
+                if request and request.model_id and request.provider_id:
+                    requested_model = f"{request.provider_id}:{request.model_id}"
+                    try:
+                        available_models = await agent.get_available_models()
+                        if available_models:
+                            valid_ids = [
+                                m.id_override if m.id_override else m.id for m in available_models
+                            ]
+                            if requested_model in valid_ids:
+                                original_model = agent.model_name
+                                await agent.set_model(requested_model)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                await agent.run(init_prompt)
+            finally:
+                if original_model is not None:
+                    with contextlib.suppress(Exception):
+                        await agent.set_model(original_model)
 
     state.create_background_task(run_init(), name=f"init_{session_id}")
 
@@ -1288,50 +1256,52 @@ async def summarize_session(  # noqa: PLR0915
         cost = 0.0
         text_part: TextPart | None = None
         try:
-            # Stream events from the agent with the summarization prompt
-            # This runs with FULL history - the summary is based on complete context
-            async for event in state.agent.run_stream(SUMMARIZE_PROMPT):
-                match event:
-                    # Text streaming start
-                    case PartStartEvent(part=PydanticTextPart(content=delta)):
-                        response_text = delta
-                        text_part = TextPart(
-                            id=identifier.ascending("part"),
-                            message_id=assistant_msg_id,
-                            session_id=session_id,
-                            text=delta,
-                        )
-                        assistant_msg_with_parts.parts.append(text_part)
-                        await state.broadcast_event(PartUpdatedEvent.create(text_part))
-
-                    # Text streaming delta
-                    case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
-                        response_text += delta
-                        if text_part is not None:
+            async with state.agent_lock:
+                agent = state.bind_agent_to_session(session_id)
+                # Stream events from the agent with the summarization prompt
+                # This runs with FULL history - the summary is based on complete context
+                async for event in agent.run_stream(SUMMARIZE_PROMPT, session_id=session_id):
+                    match event:
+                        # Text streaming start
+                        case PartStartEvent(part=PydanticTextPart(content=delta)):
+                            response_text = delta
                             text_part = TextPart(
-                                id=text_part.id,
+                                id=identifier.ascending("part"),
                                 message_id=assistant_msg_id,
                                 session_id=session_id,
-                                text=response_text,
+                                text=delta,
                             )
-                            # Update in parts list
-                            for i, p in enumerate(assistant_msg_with_parts.parts):
-                                if isinstance(p, TextPart) and p.id == text_part.id:
-                                    assistant_msg_with_parts.parts[i] = text_part
-                                    break
-                            await state.broadcast_event(
-                                PartDeltaEvent.create(
-                                    session_id=session_id,
-                                    message_id=assistant_msg_id,
-                                    part_id=text_part.id,
-                                    delta=delta,
-                                )
-                            )
+                            assistant_msg_with_parts.parts.append(text_part)
+                            await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
-                    # Stream complete - extract token usage
-                    case StreamCompleteEvent(message=msg) if msg and msg.usage:
-                        usage = msg.usage
-                        cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
+                        # Text streaming delta
+                        case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
+                            response_text += delta
+                            if text_part is not None:
+                                text_part = TextPart(
+                                    id=text_part.id,
+                                    message_id=assistant_msg_id,
+                                    session_id=session_id,
+                                    text=response_text,
+                                )
+                                # Update in parts list
+                                for i, p in enumerate(assistant_msg_with_parts.parts):
+                                    if isinstance(p, TextPart) and p.id == text_part.id:
+                                        assistant_msg_with_parts.parts[i] = text_part
+                                        break
+                                await state.broadcast_event(
+                                    PartDeltaEvent.create(
+                                        session_id=session_id,
+                                        message_id=assistant_msg_id,
+                                        part_id=text_part.id,
+                                        delta=delta,
+                                    )
+                                )
+
+                        # Stream complete - extract token usage
+                        case StreamCompleteEvent(message=msg) if msg and msg.usage:
+                            usage = msg.usage
+                            cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
 
         except Exception as e:  # noqa: BLE001
             response_text = f"Error generating summary: {e}"
@@ -1353,23 +1323,19 @@ async def summarize_session(  # noqa: PLR0915
         # Final state will be: [compacted history] + [summary message]
         # The compacted history becomes the cached prefix for future LLM calls.
         try:
-            # Get the compaction pipeline from the agent pool configuration
-            pipeline = None
-            if state.agent.agent_pool is not None:
-                pipeline = state.agent.agent_pool.compaction_pipeline
-            if pipeline is None:
-                # Fall back to a default summarizing pipeline
-                pipeline = summarizing_context()
+            async with state.agent_lock:
+                agent = state.bind_agent_to_session(session_id)
+                pipeline = None
+                if agent.agent_pool is not None:
+                    pipeline = agent.agent_pool.compaction_pipeline
+                if pipeline is None:
+                    pipeline = summarizing_context()
 
-            # Apply the compaction pipeline (modifies agent.conversation in place)
-            await compact_conversation(pipeline, state.agent.conversation)
-            # Persist compacted messages to storage, replacing the old ones
-            if state.storage is not None:
-                compacted_history = state.agent.conversation.get_history()
-                await state.storage.replace_conversation_messages(session_id, compacted_history)
-            # Update in-memory OpenCode messages list with compacted versions
-            # Keep only the summary message we just created
-            state.messages[session_id] = [assistant_msg_with_parts]
+                await compact_conversation(pipeline, agent.conversation)
+                if state.storage is not None:
+                    compacted_history = agent.conversation.get_history()
+                    await state.storage.replace_conversation_messages(session_id, compacted_history)
+                state.messages[session_id] = [assistant_msg_with_parts]
 
         except Exception:  # noqa: BLE001
             # Compaction failure is not fatal - we still have the summary

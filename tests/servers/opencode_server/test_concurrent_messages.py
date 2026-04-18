@@ -283,15 +283,17 @@ class TestConcurrentMessageHandling:
         assert "busy" in status_types or any("busy" in str(h) for h in status_history)
 
     @pytest.mark.asyncio
-    async def test_different_sessions_can_process_concurrently(
+    async def test_different_sessions_are_serialized_by_shared_agent_lock(
         self,
         concurrent_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """Test that different sessions can process messages concurrently.
+        """Test that different sessions are serialized when sharing one agent.
 
-        While the same session should process messages sequentially, different
-        sessions should be able to process messages in parallel.
+        OpenCode currently reuses a single mutable agent instance across
+        sessions. Until the server grows per-session agent instances, the
+        global agent lock must serialize runs across sessions to avoid shared
+        `session_id` / input-provider races.
         """
         state = concurrent_test_state
         session_id_1 = "test-session-1"
@@ -301,17 +303,16 @@ class TestConcurrentMessageHandling:
         await state.ensure_session(session_id_1)
         await state.ensure_session(session_id_2)
 
-        # Track start and end times
-        start_times = {}
-        end_times = {}
+        timeline: list[tuple[str, str]] = []
 
         original_run_stream = state.agent.run_stream
 
         async def tracked_run_stream(*args, session_id=None, **kwargs):
-            start_times[session_id] = asyncio.get_event_loop().time()
+            session_key = session_id or "unknown"
+            timeline.append((session_key, "start"))
             async for event in original_run_stream(*args, session_id=session_id, **kwargs):
                 yield event
-            end_times[session_id] = asyncio.get_event_loop().time()
+            timeline.append((session_key, "end"))
 
         state.agent.run_stream = tracked_run_stream  # type: ignore[method-assign]
 
@@ -324,6 +325,21 @@ class TestConcurrentMessageHandling:
         # Verify both sessions processed their messages
         assert len(state.messages[session_id_1]) == 2  # user + assistant
         assert len(state.messages[session_id_2]) == 2  # user + assistant
+
+        assert timeline in (
+            [
+                (session_id_1, "start"),
+                (session_id_1, "end"),
+                (session_id_2, "start"),
+                (session_id_2, "end"),
+            ],
+            [
+                (session_id_2, "start"),
+                (session_id_2, "end"),
+                (session_id_1, "start"),
+                (session_id_1, "end"),
+            ],
+        )
 
     @pytest.mark.asyncio
     async def test_message_ordering_preserved_under_concurrency(

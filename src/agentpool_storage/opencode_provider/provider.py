@@ -35,6 +35,7 @@ from pydantic_ai.messages import (
 from agentpool.log import get_logger
 from agentpool.sessions.models import ProjectData, SessionData
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
+from agentpool.utils.thread_helpers import run_in_thread
 from agentpool.utils.time_utils import datetime_to_ms, get_now, ms_to_datetime
 from agentpool_config.storage import OpenCodeStorageConfig
 from agentpool_server.opencode_server.models import (
@@ -113,6 +114,80 @@ def _read_session_metadata(session_path: Path) -> OpenCodeSessionMetadata | None
         updated_at=ms_to_datetime(session.time.updated),
         project_id=session.project_id,
     )
+
+
+def _get_filtered_conversations_sync(
+    provider: OpenCodeStorageProvider,
+    *,
+    agent_name: str | None,
+    cutoff: datetime | None,
+    query: str | None,
+    model: str | None,
+    limit: int | None,
+    compact: bool,
+    include_tokens: bool,
+) -> list[ConvData]:
+    """Run conversation filtering with filesystem-heavy reads off the event loop."""
+    result: list[ConvData] = []
+    for session_id, session_path in provider._list_sessions():
+        session = helpers.read_session(session_path)
+        if not session:
+            continue
+
+        session_created = ms_to_datetime(session.time.created)
+        if cutoff and session_created < cutoff:
+            continue
+
+        oc_messages = provider._read_messages(session_id)
+        if not oc_messages:
+            continue
+
+        msg_parts_map = {oc_msg.id: provider._read_parts(oc_msg.id) for oc_msg in oc_messages}
+
+        chat_messages: list[ChatMessage[str]] = []
+        total_tokens = 0
+        for oc_msg in oc_messages:
+            parts = msg_parts_map.get(oc_msg.id, [])
+            chat_msg = helpers.to_chat_message(msg=oc_msg, parts=parts)
+            chat_messages.append(chat_msg)
+
+            if isinstance(oc_msg, AssistantMessage) and oc_msg.tokens:
+                total_tokens += oc_msg.tokens.input + oc_msg.tokens.output
+
+        if not chat_messages:
+            continue
+
+        if agent_name and not any(m.name == agent_name for m in chat_messages):
+            continue
+
+        if query and not any(query in m.content for m in chat_messages):
+            continue
+
+        if model and not any(
+            isinstance(oc_msg, AssistantMessage) and oc_msg.model_id == model
+            for oc_msg in oc_messages
+        ):
+            continue
+
+        usage = TokenUsage(total=total_tokens, prompt=0, completion=0) if total_tokens else None
+        filtered_messages = chat_messages
+        if compact and len(chat_messages) > 2:
+            filtered_messages = [chat_messages[0], chat_messages[-1]]
+
+        conv_data = ConvData(
+            id=session_id,
+            agent=chat_messages[0].name or "opencode",
+            title=session.title,
+            start_time=session_created.isoformat(),
+            messages=filtered_messages,
+            token_usage=usage if include_tokens else None,
+        )
+        result.append(conv_data)
+
+        if limit and len(result) >= limit:
+            break
+
+    return result
 
 
 class OpenCodeStorageProvider(StorageProvider):
@@ -810,10 +885,15 @@ class OpenCodeStorageProvider(StorageProvider):
         Args:
             project: Project data to persist
         """
+        await self._save_project_sync(project)
+        logger.debug("Saved project", project_id=project.project_id)
+
+    @run_in_thread
+    def _save_project_sync(self, project: ProjectData) -> None:
+        """Persist project metadata without blocking the event loop."""
         project_file = self.projects_path / f"{project.project_id}.json"
         data = project.model_dump(mode="json")
         project_file.write_text(anyenv.dump_json(data, indent=True), encoding="utf-8")
-        logger.debug("Saved project", project_id=project.project_id)
 
     async def get_project(self, project_id: str) -> ProjectData | None:
         """Get a project by ID.
@@ -1218,74 +1298,39 @@ class OpenCodeStorageProvider(StorageProvider):
         elif since:
             cutoff = since
 
-        result: list[ConvData] = []
-        for session_id, session_path in self._list_sessions():
-            session = helpers.read_session(session_path)
-            if not session:
-                continue
+        return await self._get_filtered_conversations_sync(
+            agent_name=agent_name,
+            cutoff=cutoff,
+            query=query,
+            model=model,
+            limit=limit,
+            compact=compact,
+            include_tokens=include_tokens,
+        )
 
-            # Date filter
-            session_created = ms_to_datetime(session.time.created)
-            if cutoff and session_created < cutoff:
-                continue
-
-            oc_messages = self._read_messages(session_id)
-            if not oc_messages:
-                continue
-
-            # Read parts for all messages
-            msg_parts_map = {oc_msg.id: self._read_parts(oc_msg.id) for oc_msg in oc_messages}
-
-            # Convert messages
-            chat_messages: list[ChatMessage[str]] = []
-            total_tokens = 0
-            for oc_msg in oc_messages:
-                parts = msg_parts_map.get(oc_msg.id, [])
-                chat_msg = helpers.to_chat_message(msg=oc_msg, parts=parts)
-                chat_messages.append(chat_msg)
-
-                if isinstance(oc_msg, AssistantMessage) and oc_msg.tokens:
-                    total_tokens += oc_msg.tokens.input + oc_msg.tokens.output
-
-            if not chat_messages:
-                continue
-
-            # Agent filter
-            if agent_name and not any(m.name == agent_name for m in chat_messages):
-                continue
-
-            # Content query filter
-            if query and not any(query in m.content for m in chat_messages):
-                continue
-
-            # Model filter
-            if model and not any(
-                isinstance(oc_msg, AssistantMessage) and oc_msg.model_id == model
-                for oc_msg in oc_messages
-            ):
-                continue
-
-            usage = TokenUsage(total=total_tokens, prompt=0, completion=0) if total_tokens else None
-
-            # Compact mode: only first and last message
-            filtered_messages = chat_messages
-            if compact and len(chat_messages) > 2:
-                filtered_messages = [chat_messages[0], chat_messages[-1]]
-
-            conv_data = ConvData(
-                id=session_id,
-                agent=chat_messages[0].name or "opencode",
-                title=session.title,
-                start_time=session_created.isoformat(),
-                messages=filtered_messages,
-                token_usage=usage if include_tokens else None,
-            )
-            result.append(conv_data)
-
-            if limit and len(result) >= limit:
-                break
-
-        return result
+    @run_in_thread
+    def _get_filtered_conversations_sync(
+        self,
+        *,
+        agent_name: str | None,
+        cutoff: datetime | None,
+        query: str | None,
+        model: str | None,
+        limit: int | None,
+        compact: bool,
+        include_tokens: bool,
+    ) -> list[ConvData]:
+        """Threaded wrapper for filesystem-heavy conversation filtering."""
+        return _get_filtered_conversations_sync(
+            self,
+            agent_name=agent_name,
+            cutoff=cutoff,
+            query=query,
+            model=model,
+            limit=limit,
+            compact=compact,
+            include_tokens=include_tokens,
+        )
 
     async def list_session_ids(
         self,

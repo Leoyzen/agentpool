@@ -360,69 +360,6 @@ async def _process_message_locked(  # noqa: PLR0915
     assistant_msg_with_parts.parts.append(step_start)
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
     # --- Resolve agent and variant ---
-    agent = state.agent
-    if request.agent and state.agent.agent_pool is not None:
-        agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-    request_variant = request.model.variant if request.model else None
-    if request_variant:
-        # set_mode raises ValueError (or its subclasses UnknownModeError/
-        # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
-        try:
-            await agent.set_mode(request_variant, category_id="thought_level")
-        except ValueError:
-            logger.debug("Variant mode not applicable", variant=request_variant)
-
-    # Handle model selection if requested
-    original_model: str | None = None
-    if request.model and request.model.model_id and request.model.provider_id:
-        provider_id = request.model.provider_id
-        model_id = request.model.model_id
-
-        # Strategy: First try to use model_id as a variant name
-        # OpenCode TUI sends variant names as model_id (e.g., "ack-dev", "qwen35")
-        # The provider_id is the first part of the identifier (e.g., "openai-chat")
-        requested_model = model_id  # Try variant name first
-
-        logger.info(f"Model selection requested: provider={provider_id}, model_id={model_id}")
-
-        try:
-            available_models = await agent.get_available_models()
-            is_valid = False
-
-            # Check 1: Is model_id a variant name in manifest?
-            if state.pool and model_id in state.pool.manifest.model_variants:
-                is_valid = True
-                logger.info(f"Model {model_id} found as variant name in manifest")
-            # Check 2: Is it in tokonomics models?
-            elif available_models:
-                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
-                # Try both "provider:model" format and just model_id
-                full_id = f"{provider_id}:{model_id}"
-                if full_id in valid_ids:
-                    is_valid = True
-                    requested_model = full_id
-                    logger.info(f"Model {full_id} found in tokonomics models")
-                elif model_id in valid_ids:
-                    is_valid = True
-                    logger.info(f"Model {model_id} found in tokonomics models")
-
-            if is_valid:
-                # Store original model to restore later
-                original_model = agent.model_name
-                logger.info(f"Switching model from {original_model} to {requested_model}")
-                await agent.set_model(requested_model)
-                logger.info("Switched to requested model", model=requested_model)
-            else:
-                logger.warning(f"Model {model_id} (provider: {provider_id}) is not valid")
-                if state.pool:
-                    logger.warning(
-                        f"Available model_variants: {list(state.pool.manifest.model_variants.keys())}"
-                    )
-        except Exception as e:  # noqa: BLE001
-            # Broad catch: agents differ on how they signal unsupported/invalid model switching.
-            # Keep behavior stable for OpenCode (see PR #10 review iterations).
-            logger.warning(f"Failed to switch model: {e}")
-
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
         state=state,
@@ -435,9 +372,95 @@ async def _process_message_locked(  # noqa: PLR0915
 
     response_time: int | None = None
     try:
-        iterator = agent.run_stream(*user_prompt, session_id=session_id)
-        async for oc_event in adapter.process_stream(iterator):
-            await state.broadcast_event(oc_event)
+        async with state.agent_lock:
+            agent = state.agent
+            if request.agent and state.agent.agent_pool is not None:
+                agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
+            agent = state.bind_agent_to_session(session_id, agent=agent)
+
+            request_variant = request.model.variant if request.model else None
+            if request_variant:
+                # set_mode raises ValueError (or its subclasses UnknownModeError/
+                # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
+                try:
+                    await agent.set_mode(request_variant, category_id="thought_level")
+                except ValueError:
+                    logger.debug("Variant mode not applicable", variant=request_variant)
+
+            # Handle model selection if requested
+            original_model: str | None = None
+            if request.model and request.model.model_id and request.model.provider_id:
+                provider_id = request.model.provider_id
+                model_id = request.model.model_id
+
+                # Strategy: First try to use model_id as a variant name
+                # OpenCode TUI sends variant names as model_id (e.g., "ack-dev", "qwen35")
+                # The provider_id is the first part of the identifier (e.g., "openai-chat")
+                requested_model = model_id  # Try variant name first
+
+                logger.info(
+                    "Model selection requested", provider=provider_id, model_id=model_id
+                )
+
+                try:
+                    available_models = await agent.get_available_models()
+                    is_valid = False
+
+                    # Check 1: Is model_id a variant name in manifest?
+                    if state.pool and model_id in state.pool.manifest.model_variants:
+                        is_valid = True
+                        logger.info("Model found as manifest variant", model_id=model_id)
+                    # Check 2: Is it in tokonomics models?
+                    elif available_models:
+                        valid_ids = [
+                            m.id_override if m.id_override else m.id
+                            for m in available_models
+                        ]
+                        # Try both "provider:model" format and just model_id
+                        full_id = f"{provider_id}:{model_id}"
+                        if full_id in valid_ids:
+                            is_valid = True
+                            requested_model = full_id
+                            logger.info("Model found in available models", model_id=full_id)
+                        elif model_id in valid_ids:
+                            is_valid = True
+                            logger.info("Model found in available models", model_id=model_id)
+
+                    if is_valid:
+                        # Store original model to restore later
+                        original_model = agent.model_name
+                        logger.info(
+                            "Switching model for OpenCode request",
+                            original_model=original_model,
+                            requested_model=requested_model,
+                        )
+                        await agent.set_model(requested_model)
+                        logger.info("Switched to requested model", model=requested_model)
+                    else:
+                        logger.warning(
+                            "Requested model is not valid",
+                            model_id=model_id,
+                            provider_id=provider_id,
+                        )
+                        if state.pool:
+                            logger.warning(
+                                "Available manifest variants",
+                                variants=list(state.pool.manifest.model_variants.keys()),
+                            )
+                except Exception as e:  # noqa: BLE001
+                    # Broad catch: agents differ on how they signal
+                    # unsupported/invalid model switching.
+                    # Keep behavior stable for OpenCode (see PR #10 review iterations).
+                    logger.warning("Failed to switch model", error=str(e))
+
+            try:
+                iterator = agent.run_stream(*user_prompt, session_id=session_id)
+                async for oc_event in adapter.process_stream(iterator):
+                    await state.broadcast_event(oc_event)
+            finally:
+                if original_model is not None:
+                    with contextlib.suppress(Exception):
+                        await agent.set_model(original_model)
 
         for oc_event in adapter.finalize():
             await state.broadcast_event(oc_event)
@@ -489,12 +512,6 @@ async def _process_message_locked(  # noqa: PLR0915
         chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
         agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
-        # Restore original model if we changed it
-        if original_model is not None:
-            with contextlib.suppress(Exception):
-                await agent.set_model(original_model)
-                logger.info("Restored original model", model=original_model)
-
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:

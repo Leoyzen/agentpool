@@ -225,23 +225,23 @@ async def _build_providers_with_fallback(
     # Primary: Configured variants
     configured = await _get_configured_variants(manifest)
     if configured:
-        logger.info(f"Using {len(configured)} configured variants from manifest")
+        logger.info("Using configured variants from manifest", count=len(configured))
         return _build_providers_from_configured(configured)
 
     # Secondary: Tokonomics discovery
     try:
         toko_models = await _get_available_models()
         if toko_models:
-            logger.debug(f"Using {len(toko_models)} models from tokonomics discovery")
+            logger.debug("Using models from tokonomics discovery", count=len(toko_models))
             return _build_providers_from_tokonomics(toko_models)
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"Tokonomics discovery failed: {e}")
+        logger.warning("Tokonomics discovery failed", error=str(e))
 
     # Tertiary: Agent-specific modes
     if agent:
         agent_variants = await _get_variants_from_agent(agent)
         if agent_variants:
-            logger.debug(f"Using {len(agent_variants)} variants from agent modes")
+            logger.debug("Using variants from agent modes", count=len(agent_variants))
             return _build_providers_from_variants(agent_variants)
 
     # Last resort: Empty with warning
@@ -293,7 +293,8 @@ async def get_config(state: StateDep) -> Config:
     if state.config.model is None:
         try:
             # Get available models
-            toko_models = await state.agent.get_available_models()
+            async with state.agent_lock:
+                toko_models = await state.agent.get_available_models()
             if toko_models:
                 providers = _build_providers(toko_models)
 
@@ -326,17 +327,16 @@ async def update_config(state: StateDep, config_update: Config) -> Config:
     # Sync model change to agent if provided
     if "model" in update_data and update_data["model"] is not None:
         new_model = update_data["model"]
-        logger.info(f"PATCH /config received model update: {new_model}")
+        logger.info("PATCH /config received model update", model=new_model)
         if state.agent is not None:
             try:
-                logger.info(f"Calling agent.set_model({new_model})...")
-                await state.agent.set_model(new_model)
-                logger.info(f"Agent model successfully updated to: {new_model}")
-            except Exception as e:
-                logger.warning(f"Failed to update agent model: {e}")
-                import traceback
-
-                logger.warning(f"Traceback: {traceback.format_exc()}")
+                logger.info("Calling agent.set_model", model=new_model)
+                async with state.agent_lock:
+                    await state.agent.set_model(new_model)
+                logger.info("Agent model successfully updated", model=new_model)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to update agent model", error=str(e))
+                logger.exception("Traceback while updating agent model")
         else:
             logger.warning("state.agent is None, cannot update model")
 
