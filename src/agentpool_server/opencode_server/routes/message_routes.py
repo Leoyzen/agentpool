@@ -477,9 +477,14 @@ async def _process_message_locked(  # noqa: PLR0915
         assistant_msg_with_parts.info = updated_assistant
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-    except asyncio.CancelledError:
-        # User cancelled the request (e.g., pressed ESC)
-        logger.info("Request cancelled by user", session_id=session_id)
+    except (asyncio.CancelledError, TimeoutError) as exc:
+        # User cancelled the request (e.g., pressed ESC), or an external
+        # timeout (e.g. anyio.fail_after in a tool call) propagated as
+        # TimeoutError instead of CancelledError on Python 3.12+.
+        # Both cases require the same cleanup: finalize the assistant
+        # message with an aborted state so the TUI doesn't get stuck.
+        reason = "Request cancelled by user" if isinstance(exc, asyncio.CancelledError) else "Request timed out"
+        logger.info(reason, session_id=session_id)
 
         # Finalize the assistant message with aborted state.
         # This mirrors upstream OpenCode's cleanup() in processor.ts:518
@@ -489,7 +494,7 @@ async def _process_message_locked(  # noqa: PLR0915
         # to display as "QUEUED".
         response_time = now_ms()
         aborted_error = MessageAbortedError(
-            data=MessageAbortedErrorData(message="Request cancelled by user")
+            data=MessageAbortedErrorData(message=reason)
         )
         msg_time = MessageTime(created=now, completed=response_time)
         update = {"time": msg_time, "error": aborted_error}

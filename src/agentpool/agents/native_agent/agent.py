@@ -952,6 +952,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         break
                     yield event
                 except TimeoutError:
+                    # On Python 3.12+, asyncio.wait_for() uses asyncio.timeout()
+                    # internally. When an *external* cancellation (e.g. from
+                    # anyio.fail_after in a tool call) arrives during the
+                    # wait_for, the nested timeout context manager can convert
+                    # the CancelledError into a TimeoutError. Detect this by
+                    # checking whether the current task is still being
+                    # cancelled, and re-raise as CancelledError so that callers
+                    # (especially _process_message_locked) handle it properly.
+                    # See: https://github.com/python/cpython/issues/111162
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling() > 0:
+                        raise asyncio.CancelledError() from None
                     # Check if we should exit
                     if run_ctx.cancelled:
                         break
