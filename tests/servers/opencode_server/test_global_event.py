@@ -78,6 +78,7 @@ from agentpool_server.opencode_server.routes.global_routes import (
     _serialize_event,
 )
 from agentpool_server.opencode_server.state import ServerState
+from agentpool_storage.opencode_provider import helpers
 
 
 if TYPE_CHECKING:
@@ -152,6 +153,67 @@ def test_global_event_workspace_omitted_when_none() -> None:
     event = GlobalEvent(directory="/tmp/test", project="abc123", payload={})
     dumped = event.model_dump(by_alias=True, exclude_none=True)
     assert "workspace" not in dumped
+
+
+def test_global_event_factory_workspace_derived_from_project() -> None:
+    """Factory derives workspace as wrk_{project[:12]} for TUI workspace routing.
+
+    Regression test: opencode 1.4.11 TUI silently drops events whose workspace
+    field does not match the active workspace.  Agentpool's workspace API
+    returns id=f"wrk_{project_id[:12]}", so the event factory must produce the
+    same value so that events survive the TUI's workspace filter.
+    """
+    factory = GlobalEventFactory(directory="/tmp", project="abc123def456")
+    event = SessionStatusEvent.create(session_id="ws1", status_type="idle")
+    result = factory.wrap(event)
+    data = json.loads(result)
+    assert data["workspace"] == "wrk_abc123def456"
+
+
+def test_global_event_factory_workspace_matches_workspace_api_id() -> None:
+    """Workspace in events matches the id returned by /experimental/workspace.
+
+    The workspace API computes id=f"wrk_{compute_project_id(directory)[:12]}",
+    and the event factory must produce the identical value.
+    """
+    directory = "/tmp/test_workspace_consistency"
+    project = helpers.compute_project_id(directory)
+    expected_workspace = f"wrk_{project[:12]}"
+
+    factory = GlobalEventFactory(directory=directory, project=project)
+    event = SessionStatusEvent.create(session_id="ws2", status_type="busy")
+    result = factory.wrap(event)
+    data = json.loads(result)
+    assert data["workspace"] == expected_workspace
+
+
+def test_global_event_factory_workspace_passes_tui_workspace_filter() -> None:
+    """Events with workspace field pass tui_event_filter when workspace is active.
+
+    Regression test: opencode 1.4.11 TUI drops events whose workspace does not
+    match the active workspace.  Before the fix, workspace=None caused all
+    events to be dropped when any workspace was active.
+    """
+    from agentpool_server.opencode_server.routes.routing import tui_event_filter
+
+    directory = "/tmp/test_tui_filter"
+    project = helpers.compute_project_id(directory)
+    workspace_id = f"wrk_{project[:12]}"
+
+    factory = GlobalEventFactory(directory=directory, project=project)
+    event = SessionStatusEvent.create(session_id="ws3", status_type="busy")
+    result = factory.wrap(event)
+    data = json.loads(result)
+
+    ge = GlobalEvent(
+        directory=data["directory"],
+        project=data["project"],
+        workspace=data.get("workspace"),
+        payload=data["payload"],
+    )
+    passes, reason = tui_event_filter(ge, directory, current_workspace=workspace_id)
+    assert passes, f"Event with workspace={workspace_id!r} should pass filter, got reason={reason}"
+    assert reason == "workspace_match"
 
 
 def test_global_event_factory_wrap() -> None:
@@ -481,14 +543,16 @@ async def test_global_event_integration_project_computed(
 
 @pytest.mark.integration
 @pytest.mark.anyio
-async def test_global_event_integration_workspace_absent(
+async def test_global_event_integration_workspace_present(
     server_state: ServerState,
 ) -> None:
-    """Test workspace field is omitted for single-directory routing."""
+    """Test workspace field is present and matches wrk_{project[:12]} format."""
     event = SessionStatusEvent.create(session_id="s4", status_type="retry")
     results = await _collect_real_events(server_state, wrap_payload=True, events_to_send=[event])
     received = results[1]
-    assert "workspace" not in received
+    assert "workspace" in received
+    expected_project = helpers.compute_project_id(server_state.working_dir)
+    assert received["workspace"] == f"wrk_{expected_project[:12]}"
 
 
 @pytest.mark.integration
@@ -504,7 +568,7 @@ async def test_global_event_routing_ignores_agent_execution_cwd(
     received = results[1]
 
     assert received["directory"] == str(Path(server_state.working_dir).resolve())
-    assert "workspace" not in received
+    assert "workspace" in received
 
 
 @pytest.mark.integration

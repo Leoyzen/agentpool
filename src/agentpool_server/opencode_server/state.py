@@ -144,10 +144,11 @@ class ServerState:
 
         if self._event_factory is None:
             directory = self.base_path
+            project = helpers.compute_project_id(directory)
             self._event_factory = GlobalEventFactory(
                 directory=directory,
-                project=helpers.compute_project_id(directory),
-                workspace=None,
+                project=project,
+                workspace=f"wrk_{project[:12]}",
             )
         return self._event_factory
 
@@ -282,8 +283,7 @@ class ServerState:
         """Return whether a per-session prompt worker is already running."""
         task_name = f"process_message_{session_id}"
         return any(
-            task.get_name() == task_name and not task.done()
-            for task in self.background_tasks
+            task.get_name() == task_name and not task.done() for task in self.background_tasks
         )
 
     async def cancel_session_background_tasks(self, session_id: str) -> None:

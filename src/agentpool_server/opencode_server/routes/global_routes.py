@@ -139,11 +139,13 @@ class GlobalEventFactory:
         Args:
             directory: Working directory for event routing
             project: Project identifier for event routing
-            workspace: Workspace identifier for TUI workspace routing
+            workspace: Workspace identifier for TUI workspace routing.
+                When None, derives from project as f"wrk_{project[:12]}"
+                to match the /experimental/workspace API id format.
         """
         self._directory = directory
         self._project = project
-        self._workspace = workspace
+        self._workspace = workspace if workspace is not None else f"wrk_{project[:12]}"
 
     def wrap(self, event: Event) -> str:
         """Wrap an Event in a GlobalEvent envelope JSON string.
@@ -158,10 +160,9 @@ class GlobalEventFactory:
         envelope: dict[str, Any] = {
             "directory": self._directory,
             "project": self._project,
+            "workspace": self._workspace,
             "payload": payload,
         }
-        if self._workspace is not None:
-            envelope["workspace"] = self._workspace
         return json.dumps(envelope, ensure_ascii=False)
 
 
