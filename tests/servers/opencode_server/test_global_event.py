@@ -288,6 +288,10 @@ class _MockState:
     def create_background_task(self, coro: Any, name: str = "") -> asyncio.Task[Any]:
         return asyncio.ensure_future(coro)
 
+    def cancel_all_pending_questions(self) -> list[str]:
+        """No-op mock for SSE disconnect handler."""
+        return []
+
 
 async def _collect_events(
     state: _MockState,

@@ -45,7 +45,7 @@ from agentpool_server.opencode_server.models.message import (
     MessageWithParts,
 )
 from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
-from agentpool_server.opencode_server.state import ServerState
+from agentpool_server.opencode_server.state import PendingQuestion, ServerState
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 
@@ -148,6 +148,70 @@ class BlockingOnQuestionAgentMock:
         return stream()
 
 
+class BlockingOnRealQuestionAgentMock:
+    """Mock agent that creates a real PendingQuestion and blocks on its Future.
+
+    Unlike BlockingOnQuestionAgentMock which blocks on an Event, this creates
+    an actual PendingQuestion in state.pending_questions and awaits the Future.
+    This simulates the real question_for_user flow more accurately, allowing
+    tests to verify that cancel_all_pending_questions() releases agent_lock.
+    """
+
+    def __init__(self, state: ServerState) -> None:
+        self.name = "test-agent"
+        self.run_stream_call_count = 0
+        self.agent_pool: Mock | None = None
+        self.env: Mock | None = None
+        self.storage: Any = None
+        self.tools: list[Any] = []
+        self._input_provider = None
+        self.model_name = "test-model"
+        self.session_id: str | None = None
+        self._state = state
+        from agentpool.messaging.message_history import MessageHistory
+
+        self.conversation = MessageHistory()
+
+    async def set_model(self, model: str) -> None:
+        self.model_name = model
+
+    async def set_mode(self, mode: str, category_id: str | None = None) -> None:
+        pass
+
+    async def get_available_models(self):
+        return []
+
+    async def load_session(self, session_id: str) -> None:
+        return None
+
+    def run_stream(self, *args: Any, session_id: str | None = None, **kwargs: Any):
+        self.run_stream_call_count += 1
+        state = self._state
+
+        async def stream():
+            # Simulate: agent calls question_for_user → input_provider.get_elicitation()
+            # creates a PendingQuestion and awaits the Future.
+            question_id = f"que_test_{id(self)}"
+            future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
+            state.pending_questions[question_id] = PendingQuestion(
+                session_id=session_id or "unknown",
+                questions=[],
+                future=future,
+            )
+            try:
+                # This blocks until the Future is resolved or cancelled
+                await future
+            except asyncio.CancelledError:
+                # Same path as input_provider.py:354-356
+                raise RunAbortedError("User cancelled the questionnaire") from None
+            finally:
+                state.pending_questions.pop(question_id, None)
+            if False:
+                yield None  # noqa: unreachable — makes this an async generator
+
+        return stream()
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -208,6 +272,24 @@ def aborted_test_state(aborted_mock_agent, tmp_project_dir):
 @pytest.fixture
 def blocking_test_state(blocking_mock_agent, tmp_project_dir):
     return ServerState(working_dir=str(tmp_project_dir), agent=blocking_mock_agent)
+
+
+@pytest.fixture
+def blocking_real_question_state(tmp_project_dir):
+    """Create a ServerState with an agent that creates real PendingQuestions."""
+    # Need to create state first so the agent can reference it
+    placeholder_agent = RunAbortedAgentMock()
+    placeholder_agent.agent_pool = _make_pool_mock(placeholder_agent)
+    placeholder_agent.env = _make_env_mock(str(tmp_project_dir))
+    placeholder_agent.storage = placeholder_agent.agent_pool.storage
+    state = ServerState(working_dir=str(tmp_project_dir), agent=placeholder_agent)
+    # Now create the real blocking agent with state reference
+    real_agent = BlockingOnRealQuestionAgentMock(state)
+    real_agent.agent_pool = _make_pool_mock(real_agent)
+    real_agent.env = _make_env_mock(str(tmp_project_dir))
+    real_agent.storage = real_agent.agent_pool.storage
+    state.agent = real_agent
+    return state
 
 
 @pytest.fixture
@@ -667,6 +749,150 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
             pytest.fail(
                 "agent_lock should be released after cancelling the blocked task, "
                 "but it's still held. This indicates a lock leak on CancelledError."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Red Flag Test #4: SSE disconnect cancels pending questions → releases agent_lock
+# ---------------------------------------------------------------------------
+
+
+class TestSSEDisconnectReleasesAgentLock:
+    """BUG: agent_lock deadlock when TUI disconnects with pending question.
+
+    When the agent calls question_for_user and awaits the Future, agent_lock
+    is held. If the TUI disconnects (SSE connection drops), the Future is
+    never resolved and agent_lock is never released. On reconnect, all
+    requests needing agent_lock deadlock.
+
+    Fix: ServerState.cancel_all_pending_questions() cancels all pending
+    question Futures, which causes RunAbortedError through the agent stack,
+    which _process_message_locked handles, releasing agent_lock.
+
+    This is called from the SSE disconnect handler in global_routes.py.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_pending_questions_cancels_futures(
+        self,
+        blocking_real_question_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """cancel_all_pending_questions() must cancel all pending question Futures."""
+        state = blocking_real_question_state
+        session_id = "test-cancel-questions"
+
+        _setup_session(state, session_id)
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        # Start message processing in background (will create PendingQuestion)
+        process_task = asyncio.create_task(
+            _process_message_locked(
+                session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+            )
+        )
+
+        # Wait for the question to be created in state.pending_questions
+        for _ in range(20):
+            if state.pending_questions:
+                break
+            await asyncio.sleep(0.05)
+
+        assert state.pending_questions, (
+            "Agent should have created a pending question, but state.pending_questions is empty."
+        )
+
+        # Simulate SSE disconnect: call cancel_all_pending_questions
+        cancelled_ids = state.cancel_all_pending_questions()
+
+        assert len(cancelled_ids) > 0, "cancel_all_pending_questions should return cancelled IDs"
+
+        # The process task should complete (no longer blocked)
+        try:
+            await asyncio.wait_for(process_task, timeout=2.0)
+        except TimeoutError:
+            pytest.fail(
+                "process_task should complete after cancel_all_pending_questions, "
+                "but it's still running. The agent_lock is deadlocked."
+            )
+
+        # Verify agent_lock is released
+        try:
+            acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
+            state.agent_lock.release()
+        except TimeoutError:
+            pytest.fail(
+                "agent_lock should be released after cancelling pending questions, "
+                "but it's still held. This is the deadlock bug."
+            )
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_pending_questions_allows_new_message_after_sse_disconnect(
+        self,
+        blocking_real_question_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """After SSE disconnect + cancel_all_pending_questions, a new message
+        to a different session must succeed (no deadlock).
+
+        This reproduces the exact user scenario: "关了 opencode 重新启动，无法在新
+        session 中发送 user message". After SSE disconnect, pending questions
+        are cancelled, agent_lock is released, and a new session's message
+        can acquire agent_lock.
+        """
+        state = blocking_real_question_state
+        session_id = "test-sse-disconnect"
+
+        _setup_session(state, session_id)
+        user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+        state.messages[session_id].append(user_msg_with_parts)
+
+        # Start message processing in background (will block on question)
+        process_task = asyncio.create_task(
+            _process_message_locked(
+                session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+            )
+        )
+
+        # Wait for the question to be created
+        for _ in range(20):
+            if state.pending_questions:
+                break
+            await asyncio.sleep(0.05)
+
+        # Simulate SSE disconnect
+        state.cancel_all_pending_questions()
+
+        # Wait for the process task to complete
+        try:
+            await asyncio.wait_for(process_task, timeout=2.0)
+        except TimeoutError:
+            pytest.fail("process_task should complete after cancelling questions")
+
+        # Now try sending a message to a NEW session (simulates reconnect)
+        new_session_id = "test-sse-reconnect"
+        _setup_session(state, new_session_id)
+
+        new_request = MessageRequest(
+            parts=[TextPartInput(text="Message after reconnect")],
+            agent="default",
+        )
+        user_msg_id_2, user_msg_2 = _create_user_message(new_session_id, new_request)
+        state.messages[new_session_id].append(user_msg_2)
+
+        # This MUST NOT deadlock
+        try:
+            await asyncio.wait_for(
+                _process_message_locked(
+                    new_session_id, new_request, state, user_msg_id_2, user_msg_2
+                ),
+                timeout=2.0,
+            )
+        except TimeoutError:
+            pytest.fail(
+                "New session message should succeed after SSE disconnect + "
+                "cancel_all_pending_questions, but it timed out (deadlock)."
             )
 
 

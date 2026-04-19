@@ -286,6 +286,20 @@ async def _event_generator(
         # due to error handling. Using discard-style pattern to avoid ValueError.
         with contextlib.suppress(ValueError):
             state.event_subscribers.remove(queue)
+        # Cancel any pending questions when the SSE client disconnects.
+        # This prevents agent_lock deadlock: when the agent is blocked waiting
+        # for a question answer (Future.await) and the TUI disconnects, the
+        # Future would never resolve, leaving agent_lock permanently held.
+        # Cancelling the Future causes CancelledError in input_provider, which
+        # returns ElicitResult(action="cancel"), leading to RunAbortedError,
+        # which propagates through _process_message_locked's except handler
+        # and releases agent_lock.
+        cancelled = state.cancel_all_pending_questions()
+        if cancelled:
+            logger.info(
+                "SSE: Cancelled pending questions on disconnect",
+                question_ids=cancelled,
+            )
         logger.info("SSE: Client disconnected", remaining_subscribers=len(state.event_subscribers))
 
 

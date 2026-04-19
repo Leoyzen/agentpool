@@ -296,6 +296,26 @@ class ServerState:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    def cancel_all_pending_questions(self) -> list[str]:
+        """Cancel all pending questions and return their IDs.
+
+        Called when the SSE client disconnects to prevent agent_lock deadlock.
+        When a question's Future is cancelled, the agent's get_elicitation()
+        handler catches CancelledError and returns ElicitResult(action="cancel"),
+        which causes question_for_user to raise RunAbortedError. This propagates
+        through process_stream and _process_message_locked's except handler,
+        properly finalizing the assistant message and releasing agent_lock.
+
+        Returns:
+            List of cancelled question IDs.
+        """
+        cancelled_ids: list[str] = []
+        for question_id, pending in self.pending_questions.items():
+            if not pending.future.done():
+                pending.future.cancel()
+                cancelled_ids.append(question_id)
+        return cancelled_ids
+
     async def cleanup_tasks(self) -> None:
         """Cancel and wait for all background tasks."""
         for task in self.background_tasks:
