@@ -320,7 +320,7 @@ async def _event_generator(
         wrap_payload: Whether to wrap events in GlobalEvent envelopes
     """
     factory = state.get_event_factory() if wrap_payload else None
-    queue: asyncio.Queue[Event] = asyncio.Queue()
+    queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=100)
     state.event_subscribers.append(queue)
     subscriber_count = len(state.event_subscribers)
     logger.info("SSE: New client connected (total subscribers: %s)", subscriber_count)
@@ -406,17 +406,14 @@ async def get_routing_check(
         workspace: The event's workspace field (optional).
         current_workspace: The TUI's active workspace for rule 3 filtering.
         project_directory: The project directory to match against
-            (defaults to state.working_dir).
+            (defaults to state.base_path).
 
     Returns:
         RoutingCheckResponse with would_pass and reason fields.
     """
-    effective_project_dir = (
-        project_directory if project_directory is not None else state.working_dir
-    )
+    effective_project_dir = project_directory if project_directory is not None else state.base_path
     event = GlobalEvent(directory=directory, workspace=workspace, payload={})
     would_pass, reason = tui_event_filter(
         event, effective_project_dir, current_workspace=current_workspace
     )
     return RoutingCheckResponse(would_pass=would_pass, reason=reason)
-

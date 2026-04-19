@@ -1026,3 +1026,120 @@ def test_unicode_file_diff_patch_preserved() -> None:
     assert "中文文件" in result
     assert "新代码" in result
     assert "\\u" not in result
+
+
+# =============================================================================
+# Bounded subscriber queue tests — verifying maxsize=100 does not affect payloads
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_subscriber_queue_is_bounded() -> None:
+    """Subscriber queues created by _event_generator are bounded at maxsize=100."""
+    state = _MockState()
+    gen = _event_generator(state, wrap_payload=False)
+    await gen.__anext__()  # consume connected event
+
+    queue = state.event_subscribers[-1]
+    assert queue.maxsize == 100
+
+    await gen.aclose()
+
+
+@pytest.mark.anyio
+async def test_bounded_queue_event_endpoint_payload_compatibility() -> None:
+    """Bounded queue does not change /event raw payload format."""
+    state = _MockState()
+    event = PartDeltaEvent.create(
+        session_id="bq1", message_id="m1", part_id="p1", delta="bounded queue test"
+    )
+    events = await _collect_events(state, wrap_payload=False, events_to_send=[event])
+
+    # Verify queue is bounded
+    queue = state.event_subscribers[-1]
+    assert queue.maxsize == 100
+
+    # Verify payload compatibility — raw /event format unchanged
+    connected = events[0]
+    assert connected["type"] == "server.connected"
+    assert "directory" not in connected
+    assert "payload" not in connected
+
+    delta_data = events[1]
+    assert delta_data["type"] == "message.part.delta"
+    assert delta_data["sessionId"] == "bq1"
+    assert delta_data["properties"]["delta"] == "bounded queue test"
+    assert "directory" not in delta_data
+    assert "payload" not in delta_data
+
+
+@pytest.mark.anyio
+async def test_bounded_queue_global_event_endpoint_payload_compatibility() -> None:
+    """Bounded queue does not change /global/event wrapped payload format."""
+    wd = "/bounded/queue/test"
+    state = _MockState(working_dir=wd)
+    event = PartDeltaEvent.create(
+        session_id="bq2", message_id="m1", part_id="p1", delta="global bounded test"
+    )
+    events = await _collect_events(state, wrap_payload=True, events_to_send=[event])
+
+    # Verify queue is bounded
+    queue = state.event_subscribers[-1]
+    assert queue.maxsize == 100
+
+    # Verify payload compatibility — /global/event envelope format unchanged
+    connected = events[0]
+    assert connected["payload"]["type"] == "server.connected"
+    assert "directory" not in connected
+
+    wrapped = events[1]
+    assert wrapped["directory"] == wd
+    assert "project" in wrapped
+    assert "workspace" not in wrapped
+    assert wrapped["payload"]["type"] == "message.part.delta"
+    assert wrapped["payload"]["sessionId"] == "bq2"
+    assert wrapped["payload"]["properties"]["delta"] == "global bounded test"
+
+
+@pytest.mark.anyio
+async def test_bounded_queue_backpressure_drops_without_affecting_others() -> None:
+    """When one subscriber's bounded queue is full, events are dropped for that
+    subscriber but other subscribers with available capacity still receive them.
+    """
+    state = _MockState()
+
+    gen1 = _event_generator(state, wrap_payload=True)
+    gen2 = _event_generator(state, wrap_payload=True)
+    await gen1.__anext__()
+    await gen2.__anext__()
+
+    queue1 = state.event_subscribers[0]
+    queue2 = state.event_subscribers[1]
+    assert queue1.maxsize == 100
+    assert queue2.maxsize == 100
+
+    # Fill queue1 to capacity
+    for _ in range(100):
+        queue1.put_nowait(ServerHeartbeatEvent())
+
+    # Broadcast an event — queue1 is full (event dropped by put_nowait),
+    # queue2 receives it via direct put
+    event = SessionStatusEvent.create(session_id="bp1", status_type="busy")
+    # Simulate broadcast_event behavior: put_nowait to each queue
+    for q in list(state.event_subscribers):
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            pass  # drop-on-backpressure
+
+    # queue1 still has exactly 100 items (the heartbeats), event was dropped
+    assert queue1.qsize() == 100
+
+    # queue2 received the event
+    item2 = await gen2.__anext__()
+    data2 = json.loads(item2["data"])
+    assert data2["payload"]["type"] == "session.status"
+    assert data2["payload"]["sessionId"] == "bp1"
+
+    await gen1.aclose()
+    await gen2.aclose()
