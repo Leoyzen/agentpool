@@ -760,6 +760,11 @@ class EventProcessor:
             user_msg.add_text_part(f"Task: {source_name}")
             ctx.state.messages[child_session_id].append(user_msg)
             yield MessageUpdatedEvent.create(user_msg.info)
+            # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
+            # text part.  Without this, the UserMessage component finds no text
+            # part and renders nothing for the first user message card.
+            if user_msg.parts:
+                yield PartUpdatedEvent.create(user_msg.parts[0])
 
             # Persist user message to storage
             with contextlib.suppress(Exception):
@@ -927,9 +932,13 @@ class EventProcessor:
             agent_name=event.source_name,
         )
         # Use prompt from metadata if available, fall back to description
-        user_msg.add_text_part(event.metadata.get("prompt") or event.description)
+        text_part = user_msg.add_text_part(event.metadata.get("prompt") or event.description)
         ctx.state.messages[event.child_session_id].append(user_msg)
         yield MessageUpdatedEvent.create(user_msg.info)
+        # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
+        # text part.  Without this, the UserMessage component finds no text
+        # part and renders nothing for the first user message card.
+        yield PartUpdatedEvent.create(text_part)
 
         # Persist user message to storage
         with contextlib.suppress(Exception):
