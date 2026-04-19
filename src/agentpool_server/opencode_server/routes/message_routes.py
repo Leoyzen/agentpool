@@ -360,12 +360,14 @@ async def _process_message_locked(  # noqa: PLR0915
     step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
     assistant_msg_with_parts.parts.append(step_start)
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
-    # --- Short critical section: bind agent to session and capture snapshot ---
+    # --- Short critical section: bind agent to session, apply mutations, then capture snapshot ---
+    from agentpool.agents.context import RunSnapshot
+
+    snapshot: RunSnapshot | None = None
     async with state.agent_lock:
         agent = state.agent
         if request.agent and state.agent.agent_pool is not None:
             agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-        snapshot = await state.snapshot_for_session(session_id, agent=agent)
 
         # Apply variant/mode under the lock
         request_variant = request.model.variant if request.model else None
@@ -403,11 +405,13 @@ async def _process_message_locked(  # noqa: PLR0915
                     original_model = agent.model_name
                     logger.info(f"Switching model from {original_model} to {requested_model}")
                     await agent.set_model(requested_model)
-                    snapshot.model_name = requested_model
                 else:
                     logger.warning(f"Model {model_id} (provider: {provider_id}) is not valid")
             except ValueError as e:
                 logger.warning(f"Failed to switch model: {e}")
+
+        # Capture snapshot AFTER mutations so mode_name/model_name are current
+        snapshot = await state.snapshot_for_session(session_id, agent=agent)
     # --- End short critical section ---
 
     # --- Stream via adapter ---
@@ -486,15 +490,14 @@ async def _process_message_locked(  # noqa: PLR0915
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:
             has_queued = state.has_pending_async_prompts(session_id)
-            has_worker = state.has_session_background_task(session_id)
-            if has_queued and not has_worker:
-                # Async work is queued and will take over — skip idle
-                # to avoid idle→busy flicker. The worker will emit
-                # session.idle when it finishes the queue.
-                await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
+            if has_queued:
+                # Queued work exists — skip idle to avoid idle→busy flicker.
+                # If no worker is running, start one; if one is already
+                # running, it will drain the queue and mark idle when done.
+                if not state.has_session_background_task(session_id):
+                    await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
             else:
                 await state.mark_session_idle(session_id)
-                await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
         # --- Update session timestamp ---
         if response_time is not None:
             session = state.sessions[session_id]
@@ -540,15 +543,21 @@ async def _run_async_prompt_queue(session_id: str, state: StateDep) -> None:
                     await state.mark_session_idle(session_id)
                     return
 
-                await _process_message_locked(
-                    session_id,
-                    queued_prompt.request,
-                    state,
-                    queued_prompt.user_msg_id,
-                    queued_prompt.user_msg_with_parts,
-                    mark_busy=False,
-                    mark_idle=False,
-                )
+                try:
+                    await _process_message_locked(
+                        session_id,
+                        queued_prompt.request,
+                        state,
+                        queued_prompt.user_msg_id,
+                        queued_prompt.user_msg_with_parts,
+                        mark_busy=False,
+                        mark_idle=False,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Async prompt processing failed", session_id=session_id)
+                    # Continue draining — don't kill the queue
 
                 if state.has_pending_async_prompts(session_id):
                     await state.emit_session_turn_complete(session_id)
@@ -560,7 +569,7 @@ async def _run_async_prompt_queue(session_id: str, state: StateDep) -> None:
         logger.info("Async prompt worker cancelled", session_id=session_id)
         raise
     except Exception:
-        logger.exception("Async prompt worker failed", session_id=session_id)
+        logger.exception("Async prompt worker failed catastrophically", session_id=session_id)
         await state.mark_session_idle(session_id)
         raise
 

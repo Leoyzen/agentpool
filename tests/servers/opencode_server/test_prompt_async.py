@@ -480,3 +480,274 @@ class TestPromptAsync:
         # The default agent must have received the input provider and session id.
         assert server_state.agent._input_provider is server_state.input_providers[session_id]
         assert server_state.agent.session_id == session_id
+
+    @pytest.mark.asyncio
+    async def test_snapshot_mode_name_after_mutation(
+        self,
+        server_state,
+        monkeypatch,
+    ) -> None:
+        """Snapshot must reflect mode_name AFTER set_mode mutation, not before."""
+        from agentpool_server.opencode_server.models.common import ModelRef
+
+        session = await server_state.ensure_session("snapshot-mode-mutation")
+        session_id = session.id
+
+        # Set up agent with initial mode
+        server_state.agent.model_name = "test-model"
+        server_state.agent._current_mode = "low"
+
+        # Make set_mode actually mutate _current_mode on the mock agent
+        original_set_mode = server_state.agent.set_mode
+
+        async def fake_set_mode(variant: str, **kwargs: object) -> None:
+            server_state.agent._current_mode = variant
+
+        server_state.agent.set_mode = fake_set_mode
+        server_state.agent.get_available_models = AsyncMock(return_value=[])
+
+        # Mock run_stream and extract to allow _process_message_locked to complete
+        async def empty_run_stream(*args, **kwargs):
+            return
+            yield  # noqa: unreachable — makes this an async generator
+
+        server_state.agent.run_stream = empty_run_stream  # type: ignore[assignment]
+
+        monkeypatch.setattr(
+            message_routes,
+            "extract_user_prompt_from_parts",
+            async_mock_return_value(["hello"]),
+        )
+
+        # Prevent background tasks from running
+        def fake_create_background_task(coro, *, name=None):
+            coro.close()
+            return Mock()
+
+        server_state.create_background_task = fake_create_background_task  # type: ignore[method-assign]
+
+        request = MessageRequest(
+            parts=[TextPartInput(text="hello")],
+            agent=None,
+            message_id="msg-mutation",
+            model=ModelRef(provider_id="test", model_id="test-model", variant="high"),
+        )
+        user_msg = UserMessage(
+            id="msg-mutation",
+            session_id=session_id,
+            time=TimeCreated(created=0),
+            agent="default",
+            model=request.model,
+        )
+        msg_with_parts = MessageWithParts(info=user_msg)
+
+        # We need to capture the snapshot that _process_message_locked uses.
+        # Intercept snapshot_for_session to capture the returned snapshot.
+        captured_snapshot = None
+        original_snapshot = server_state.snapshot_for_session
+
+        async def capturing_snapshot(*args, **kwargs):
+            nonlocal captured_snapshot
+            snap = await original_snapshot(*args, **kwargs)
+            captured_snapshot = snap
+            return snap
+
+        server_state.snapshot_for_session = capturing_snapshot  # type: ignore[method-assign]
+
+        await message_routes._process_message_locked(
+            session_id,
+            request,
+            server_state,
+            "msg-mutation",
+            msg_with_parts,
+            mark_busy=True,
+            mark_idle=True,
+        )
+
+        # The snapshot must reflect the post-mutation mode_name
+        assert captured_snapshot is not None
+        assert captured_snapshot.mode_name == "high", (
+            f"Expected mode_name='high' but got '{captured_snapshot.mode_name}'"
+        )
+
+    @pytest.mark.asyncio
+    async def test_async_queue_survives_prompt_failure(
+        self,
+        server_state,
+        monkeypatch,
+    ) -> None:
+        """A single prompt failure should not kill remaining queued prompts."""
+        session = await server_state.ensure_session("queue-resilience")
+        session_id = session.id
+
+        processed: list[str] = []
+        call_count = 0
+
+        async def fake_process_message_locked(
+            session_id: str,
+            request: MessageRequest,
+            state,
+            user_msg_id: str,
+            user_msg_with_parts,
+            *,
+            mark_busy: bool = True,
+            mark_idle: bool = True,
+        ):
+            nonlocal call_count
+            call_count += 1
+            text = request.parts[0].text
+            # Make the 2nd call fail
+            if call_count == 2:
+                msg = "Simulated prompt failure"
+                raise RuntimeError(msg)
+            processed.append(text)
+            return user_msg_with_parts
+
+        monkeypatch.setattr(
+            message_routes,
+            "_process_message_locked",
+            fake_process_message_locked,
+        )
+
+        # Enqueue 3 prompts
+        for idx in range(3):
+            request = MessageRequest(
+                parts=[TextPartInput(text=f"prompt-{idx}")],
+                agent="default",
+                message_id=f"msg-{idx}",
+            )
+            queued_user = UserMessage(
+                id=f"msg-{idx}",
+                session_id=session_id,
+                time=TimeCreated(created=idx),
+                agent="default",
+                model=None,
+            )
+            server_state.enqueue_async_prompt(
+                session_id,
+                message_routes.QueuedAsyncPrompt(
+                    request=request,
+                    user_msg_id=f"msg-{idx}",
+                    user_msg_with_parts=MessageWithParts(info=queued_user),
+                ),
+            )
+
+        server_state.session_status[session_id] = message_routes.SessionStatus(type="busy")
+
+        # Run the queue worker
+        await message_routes._run_async_prompt_queue(session_id, server_state)
+
+        # Prompts 1 and 3 should have been processed (2nd failed but queue continued)
+        assert processed == ["prompt-0", "prompt-2"], f"Expected ['prompt-0', 'prompt-2'] but got {processed}"
+        # Session should end idle
+        assert server_state.session_status[session_id].type == "idle"
+        # No orphaned prompts
+        assert not server_state.has_pending_async_prompts(session_id)
+
+    @pytest.mark.asyncio
+    async def test_handoff_no_idle_when_worker_running(
+        self,
+        server_state,
+        monkeypatch,
+    ) -> None:
+        """When has_queued=True AND has_worker=True, no idle status is emitted."""
+        session = await server_state.ensure_session("handoff-worker-running")
+        session_id = session.id
+
+        # Enqueue a pending async prompt so has_pending_async_prompts returns True.
+        request = MessageRequest(
+            parts=[TextPartInput(text="queued")],
+            agent="default",
+            message_id="msg-queued",
+        )
+        queued_user = UserMessage(
+            id="msg-queued",
+            session_id=session_id,
+            time=TimeCreated(created=0),
+            agent="default",
+            model=None,
+        )
+        server_state.enqueue_async_prompt(
+            session_id,
+            message_routes.QueuedAsyncPrompt(
+                request=request,
+                user_msg_id="msg-queued",
+                user_msg_with_parts=MessageWithParts(info=queued_user),
+            ),
+        )
+
+        # Track status/idle events.
+        event_types: list[str] = []
+        original_broadcast = server_state.broadcast_event
+
+        async def tracking_broadcast(event) -> None:
+            if isinstance(event, SessionStatusEvent):
+                event_types.append(f"status:{event.properties.status.type}")
+            elif isinstance(event, SessionIdleEvent):
+                event_types.append("session.idle")
+            await original_broadcast(event)
+
+        server_state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
+
+        user_msg = UserMessage(
+            id="msg-handoff",
+            session_id=session_id,
+            time=TimeCreated(created=0),
+            agent="default",
+            model=None,
+        )
+        msg_with_parts = MessageWithParts(info=user_msg)
+
+        # Mock the agent's run_stream to yield nothing (empty response).
+        async def empty_run_stream(*args, **kwargs):
+            return
+            yield  # noqa: unreachable — makes this an async generator
+
+        server_state.agent.run_stream = empty_run_stream  # type: ignore[assignment]
+
+        # Mock extract_user_prompt_from_parts to return a simple text prompt.
+        monkeypatch.setattr(
+            message_routes,
+            "extract_user_prompt_from_parts",
+            async_mock_return_value(["hello"]),
+        )
+
+        # Simulate a running worker by creating a mock task with the expected name.
+        worker_names: list[str | None] = []
+
+        def fake_create_background_task(coro, *, name=None):
+            worker_names.append(name)
+            coro.close()
+            task = Mock()
+            task.get_name.return_value = name
+            task.done.return_value = False
+            server_state.background_tasks.add(task)
+            return task
+
+        server_state.create_background_task = fake_create_background_task  # type: ignore[method-assign]
+
+        # Simulate that a worker is already running
+        mock_task = Mock()
+        mock_task.get_name.return_value = f"process_message_{session_id}"
+        mock_task.done.return_value = False
+        server_state.background_tasks.add(mock_task)
+
+        assert server_state.has_session_background_task(session_id)
+
+        # Call the REAL _process_message_locked — the handoff logic will
+        # execute with has_queued=True AND has_worker=True.
+        await message_routes._process_message_locked(
+            session_id,
+            request,
+            server_state,
+            "msg-handoff",
+            msg_with_parts,
+            mark_busy=True,
+            mark_idle=True,
+        )
+
+        # No idle should appear — the existing worker will drain the queue
+        assert "status:idle" not in event_types, f"Expected no status:idle but got {event_types}"
+        assert "session.idle" not in event_types, f"Expected no session.idle but got {event_types}"
+        # No new worker should be started since one is already running
+        assert f"process_message_{session_id}" not in worker_names
