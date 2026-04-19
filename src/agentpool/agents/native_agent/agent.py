@@ -1193,13 +1193,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             return []
         # Get sessions from session store
         try:
-            # Get session IDs from store
-            session_ids = await self.agent_pool.storage.list_session_ids(agent_name=self.name)
+            # Get session IDs from store — do NOT filter by agent_name so that
+            # sessions from previous default_agents remain visible in the TUI.
+            # Filter by cwd at the SQL level when provided.
+            session_ids = await self.agent_pool.storage.list_session_ids(cwd=cwd)
             # Batch load all sessions in one query instead of N+1
-            sessions = await self.agent_pool.storage.load_sessions_batch(
-                session_ids, agent_name=self.name
-            )
-            # Filter by cwd
+            sessions = await self.agent_pool.storage.load_sessions_batch(session_ids)
+            # Python-level cwd filter as secondary safeguard for path normalization
+            # (resolve handles trailing slashes, symlinks, relative paths)
             resolved_filter = Path(cwd).resolve() if cwd is not None else None
             if resolved_filter is not None:
                 sessions = [
