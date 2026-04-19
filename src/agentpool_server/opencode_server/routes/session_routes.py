@@ -537,6 +537,41 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             state.bind_agent_to_session(session_id)
             return cached_session
 
+        # If the session is cached in memory (regardless of subagent status),
+        # we have it from create_session or a previous load. Bind the agent
+        # and try to load conversation history. If the session hasn't been
+        # persisted to StorageManager yet (e.g., just created via create_session
+        # which saves to pool.sessions.store / MemorySessionStore but
+        # agent.load_session reads from StorageManager), we still return the
+        # cached session with whatever history we can get.
+        if cached_session is not None and session_id in state.messages:
+            existing_messages = state.messages[session_id]
+            agent = state.bind_agent_to_session(session_id)
+            # Try to load history — may return None if session is new
+            # and hasn't been persisted to StorageManager yet
+            data = await agent.load_session(session_id)
+            if data is not None:
+                # Reload history from storage
+                state.messages[session_id] = [
+                    chat_message_to_opencode(
+                        chat_msg,
+                        session_id=session_id,
+                        working_dir=state.working_dir,
+                        agent_name=agent.name,
+                        model_id=chat_msg.model_name or "sonnet",
+                        provider_id=chat_msg.provider_name or "claude-code",
+                    )
+                    for chat_msg in agent.conversation.chat_messages
+                ]
+                state.bind_agent_to_session(session_id, agent=agent)
+            else:
+                # Session exists in cache but not in StorageManager yet.
+                # This happens when create_session saves to MemorySessionStore
+                # but StorageManager uses a different backend (e.g., SQL).
+                # Bind agent to session with existing (possibly empty) history.
+                state.bind_agent_to_session(session_id, agent=agent)
+            return cached_session
+
         # Need to load/reload session history into agent
         existing_messages = state.messages.get(session_id) if is_subagent_session else None
 
@@ -637,8 +672,18 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # Persist to storage
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
+    # Save to BOTH the session store (MemorySessionStore) AND the storage manager.
+    # The session store is used by the opencode server's session management,
+    # while agent.load_session() reads from StorageManager (SQL/etc.).
+    # If we only save to one, get_or_load_session fails when the other is queried.
     if state.pool.sessions.store:
         await state.pool.sessions.store.save(session_data)
+    try:
+        await state.pool.storage.save_session(session_data)
+    except Exception:
+        logger.warning(
+            "Failed to persist session to StorageManager", session_id=session_id, exc_info=True
+        )
     # Cache in memory
     state.sessions[session_id] = session
     state.messages[session_id] = []
