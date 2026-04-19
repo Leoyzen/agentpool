@@ -495,12 +495,14 @@ class StorageProvider:
         *,
         pool_id: str | None = None,
         agent_name: str | None = None,
+        cwd: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered.
 
         Args:
             pool_id: Filter by pool/manifest ID
             agent_name: Filter by agent name
+            cwd: Filter by working directory
 
         Returns:
             List of session IDs

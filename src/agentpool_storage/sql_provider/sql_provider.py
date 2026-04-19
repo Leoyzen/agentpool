@@ -831,6 +831,7 @@ class SQLModelProvider(StorageProvider):
         *,
         pool_id: str | None = None,
         agent_name: str | None = None,
+        cwd: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered."""
         async with AsyncSession(self.engine) as session:
@@ -839,6 +840,8 @@ class SQLModelProvider(StorageProvider):
                 stmt = stmt.where(Conversation.pool_id == pool_id)
             if agent_name is not None:
                 stmt = stmt.where(Conversation.agent_name == agent_name)
+            if cwd is not None:
+                stmt = stmt.where(Conversation.cwd == cwd)
             stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
             result = await session.execute(stmt)
             return list(result.scalars().all())

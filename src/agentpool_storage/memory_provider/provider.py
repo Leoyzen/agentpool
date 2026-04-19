@@ -431,6 +431,7 @@ class MemoryStorageProvider(StorageProvider):
         *,
         pool_id: str | None = None,
         agent_name: str | None = None,
+        cwd: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered."""
         result = []
@@ -438,6 +439,8 @@ class MemoryStorageProvider(StorageProvider):
             if pool_id is not None and data.pool_id != pool_id:
                 continue
             if agent_name is not None and data.agent_name != agent_name:
+                continue
+            if cwd is not None and data.cwd != cwd:
                 continue
             result.append(session_id)
         return result

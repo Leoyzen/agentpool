@@ -424,18 +424,20 @@ class StorageManager:
         self,
         pool_id: str | None = None,
         agent_name: str | None = None,
+        cwd: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered.
 
         Args:
             pool_id: Filter by pool/manifest ID
             agent_name: Filter by agent name
+            cwd: Filter by working directory
 
         Returns:
             List of session IDs
         """
         provider = self.get_project_provider()
-        return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
+        return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name, cwd=cwd)
 
     @method_spawner
     async def load_sessions_batch(
