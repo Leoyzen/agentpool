@@ -479,3 +479,82 @@ class TestConcurrentMessageHandling:
 
         # Session A should have completed successfully
         assert len(state.messages[session_id_a]) == 2
+
+    @pytest.mark.asyncio
+    async def test_read_only_route_during_active_turn(
+        self,
+        concurrent_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Test that a read-only route returns immediately during an active turn.
+
+        When Session A has an in-flight agent run, calling get_or_load_session
+        for a different, already-cached Session B should return without waiting
+        for A's turn to complete. This verifies that read-only (cache-hit) paths
+        do not acquire agent_lock or block on in-flight turns.
+        """
+        state = concurrent_test_state
+        session_id_a = "test-session-readonly-a"
+        session_id_b = "test-session-readonly-b"
+
+        # Create both sessions and ensure B is cached
+        await state.ensure_session(session_id_a)
+        await state.ensure_session(session_id_b)
+
+        # Ensure B has messages so it passes the agent_has_correct_session check
+        from agentpool_server.opencode_server.models import (
+            AssistantMessage,
+            MessagePath,
+            MessageTime,
+            MessageWithParts,
+            TextPart,
+        )
+        from agentpool.utils import identifiers as identifier
+
+        msg_id = identifier.ascending("message")
+        part_id = identifier.ascending("part")
+        assistant_msg = AssistantMessage(
+            id=msg_id,
+            session_id=session_id_b,
+            parent_id="",
+            model_id="test",
+            provider_id="test",
+            mode="test",
+            agent="default",
+            path=MessagePath(cwd=state.working_dir, root=state.working_dir),
+            time=MessageTime(created=0),
+        )
+        state.messages[session_id_b] = [
+            MessageWithParts(
+                info=assistant_msg,
+                parts=[TextPart(id=part_id, message_id=msg_id, session_id=session_id_b, text="hi")],
+            )
+        ]
+
+        # Make agent report session_id_b so the fast-path triggers
+        state.agent.session_id = session_id_b
+
+        # Start a slow agent turn on Session A
+        task_a = asyncio.create_task(_process_message(session_id_a, sample_message_request, state))
+
+        # Wait briefly for A's turn to start
+        await asyncio.sleep(0.05)
+
+        # Now call get_or_load_session for B — this should return immediately
+        # because B is cached and agent has correct session loaded (fast path)
+        start = asyncio.get_event_loop().time()
+        from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
+
+        session_b = await get_or_load_session(state, session_id_b)
+        elapsed = asyncio.get_event_loop().time() - start
+
+        # The read should have returned very quickly (< 0.1s), not waited for A
+        assert elapsed < 0.1, (
+            f"get_or_load_session for cached session B took {elapsed:.3f}s, "
+            f"should return immediately from cache"
+        )
+        assert session_b is not None
+        assert session_b.id == session_id_b
+
+        # Clean up: wait for A to finish
+        await task_a

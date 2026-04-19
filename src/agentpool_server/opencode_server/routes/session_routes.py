@@ -280,10 +280,17 @@ async def _execute_slashed_command(
                 "请使用已加载的 skill context 来回答用户的请求。"
             )
 
+            # Capture snapshot under short agent_lock critical section
+            async with state.agent_lock:
+                snapshot = await state.snapshot_for_session(session_id)
+
             # Run agent with prompt to use the skill context
             iterator = state.agent.run_stream(
                 agent_prompt,
-                session_id=session_id,
+                session_id=snapshot.session_id,
+                message_history=snapshot.conversation,
+                input_provider=snapshot.input_provider,
+                snapshot=snapshot,
             )
             async for oc_event in adapter.process_stream(iterator):
                 await state.broadcast_event(oc_event)
@@ -387,9 +394,12 @@ async def _execute_skill_command(
             SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
         )
 
-        # Load session into agent to ensure conversation history is restored
-        # This ensures agent sees all previous messages during this run
-        await state.agent.load_session(session_id)
+        # Load session and capture snapshot under short agent_lock critical section.
+        # This ensures load_session (which mutates agent.conversation) and the
+        # snapshot capture see a consistent agent state.
+        async with state.agent_lock:
+            await state.agent.load_session(session_id)
+            snapshot = await state.snapshot_for_session(session_id)
 
         # Create USER message (not assistant!)
         user_msg_id = identifier.ascending("message")
@@ -451,8 +461,14 @@ async def _execute_skill_command(
                 working_dir=state.working_dir,
             )
 
-            # Run agent with the user prompt
-            iterator = state.agent.run_stream(user_prompt, session_id=session_id)
+            # Run agent with the user prompt using snapshot
+            iterator = state.agent.run_stream(
+                user_prompt,
+                session_id=snapshot.session_id,
+                message_history=snapshot.conversation,
+                input_provider=snapshot.input_provider,
+                snapshot=snapshot,
+            )
             async for oc_event in adapter.process_stream(iterator):
                 await state.broadcast_event(oc_event)
 
@@ -577,15 +593,11 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     if session_id not in state.input_providers:
         input_provider = OpenCodeInputProvider(state, session_id)
         state.input_providers[session_id] = input_provider
-    # Set input provider on agent to ensure correct session routing.
-    # NOTE: The agent singleton is shared across sessions. Setting _input_provider
-    # and session_id here is safe for single-session use but creates a race if
-    # two sessions run concurrently — the later session overwrites the earlier.
-    # Per-session locks (session_locks) prevent message-processing races, but a
-    # full fix would pass session context through the execution path instead of
-    # mutating the shared agent instance.
-    state.agent._input_provider = state.input_providers[session_id]
-    state.agent.session_id = session_id
+    # Bind agent to this session under agent_lock so that a concurrent turn's
+    # snapshot capture sees a consistent (input_provider, session_id) pair.
+    async with state.agent_lock:
+        state.agent._input_provider = state.input_providers[session_id]
+        state.agent.session_id = session_id
     return session
 
 
@@ -1027,7 +1039,15 @@ async def init_session(  # noqa: D417
     # Run the agent in the background
     async def run_init() -> None:
         try:
-            await agent.run(init_prompt)
+            async with state.agent_lock:
+                snapshot = await state.snapshot_for_session(session_id)
+            await agent.run(
+                init_prompt,
+                session_id=snapshot.session_id,
+                message_history=snapshot.conversation,
+                input_provider=snapshot.input_provider,
+                snapshot=snapshot,
+            )
         finally:
             # Restore original model if we changed it
             if original_model is not None:
@@ -1291,9 +1311,19 @@ async def summarize_session(  # noqa: PLR0915
         cost = 0.0
         text_part: TextPart | None = None
         try:
+            # Capture snapshot under short agent_lock critical section
+            async with state.agent_lock:
+                snapshot = await state.snapshot_for_session(session_id)
+
             # Stream events from the agent with the summarization prompt
             # This runs with FULL history - the summary is based on complete context
-            async for event in state.agent.run_stream(SUMMARIZE_PROMPT):
+            async for event in state.agent.run_stream(
+                SUMMARIZE_PROMPT,
+                session_id=snapshot.session_id,
+                message_history=snapshot.conversation,
+                input_provider=snapshot.input_provider,
+                snapshot=snapshot,
+            ):
                 match event:
                     # Text streaming start
                     case PartStartEvent(part=PydanticTextPart(content=delta)):
@@ -1364,11 +1394,11 @@ async def summarize_session(  # noqa: PLR0915
                 # Fall back to a default summarizing pipeline
                 pipeline = summarizing_context()
 
-            # Apply the compaction pipeline (modifies agent.conversation in place)
-            await compact_conversation(pipeline, state.agent.conversation)
+            # Apply the compaction pipeline (modifies snapshot.conversation in place)
+            await compact_conversation(pipeline, snapshot.conversation)
             # Persist compacted messages to storage, replacing the old ones
             if state.storage is not None:
-                compacted_history = state.agent.conversation.get_history()
+                compacted_history = snapshot.conversation.get_history()
                 await state.storage.replace_conversation_messages(session_id, compacted_history)
             # Update in-memory OpenCode messages list with compacted versions
             # Keep only the summary message we just created
