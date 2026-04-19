@@ -25,6 +25,8 @@ from agentpool_server.opencode_server.routes.routing import (
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
+    from agentpool_server.opencode_server.state import ServerState
+
 
 # =============================================================================
 # Helper
@@ -425,9 +427,9 @@ async def test_routing_check_custom_project_directory(async_client: AsyncClient)
 
 @pytest.mark.anyio
 async def test_routing_check_default_project_directory(async_client: AsyncClient) -> None:
-    """Without project_directory param, uses server's working_dir.
+    """Without project_directory param, uses server's base_path (resolved).
 
-    Since the server's working_dir is a temp directory, we use a known
+    Since the server's base_path is a temp directory, we use a known
     different directory to verify it fails (directory_mismatch), which
     confirms the default is being used rather than matching any value.
     """
@@ -439,3 +441,26 @@ async def test_routing_check_default_project_directory(async_client: AsyncClient
     data = response.json()
     assert data["wouldPass"] is False
     assert data["reason"] == "directory_mismatch"
+
+
+@pytest.mark.anyio
+async def test_routing_check_default_uses_base_path(
+    async_client: AsyncClient,
+    server_state: ServerState,
+) -> None:
+    """Routing-check default is state.base_path, not raw working_dir.
+
+    The endpoint should use the resolved canonical path (base_path) as
+    the default project directory, matching how get_event_factory()
+    already uses self.base_path for directory normalization.  Verify by
+    sending directory=base_path without an explicit project_directory
+    override — the event must pass the directory-match rule.
+    """
+    response = await async_client.get(
+        "/global/routing-check",
+        params={"directory": server_state.base_path},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["wouldPass"] is True
+    assert data["reason"] == "directory_match"
