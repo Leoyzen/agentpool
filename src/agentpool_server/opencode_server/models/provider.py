@@ -123,7 +123,7 @@ class Model(OpenCodeBaseModel):
             name=model.name,
             capabilities=ProviderCapabilities(
                 attachment=False,
-                reasoning="reasoning" in model.output_modalities
+                reasoning="reasoning" in output_mods
                 or "thinking" in model.name.lower(),
                 temperature=True,
                 input=ProviderModalities(
@@ -167,14 +167,17 @@ class Provider(OpenCodeBaseModel):
 
     @model_validator(mode="after")
     def _populate_model_refs(self) -> Self:
-        """Auto-populate provider_id and api on all models."""
+        """Auto-populate provider_id and api on all models.
+
+        Updates fields individually to preserve existing data like url.
+        """
         for model in self.models.values():
             model.provider_id = self.id
+            # Only populate missing fields to avoid overwriting existing data
             if not model.api.id:
-                model.api = ProviderApiInfo(
-                    id=self.api or "",
-                    npm=self.npm or "",
-                )
+                model.api.id = self.api or ""
+            if not model.api.npm:
+                model.api.npm = self.npm or ""
         return self
 
 

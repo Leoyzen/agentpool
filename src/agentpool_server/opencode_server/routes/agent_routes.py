@@ -429,11 +429,12 @@ async def log(request: LogRequest, state: StateDep) -> bool:
 async def get_console_state() -> dict[str, Any]:
     """Return console state for OpenCode TUI compatibility.
 
-    Provides an empty ConsoleState so the TUI can bootstrap without
-    waiting for the proxy catch-all to time out.
+    Provides an empty ConsoleState so that TUI can bootstrap without
+    waiting for proxy catch-all to time out.
     """
     return {
         "consoleManagedProviders": [],
+        "activeOrgName": None,
         "switchableOrgCount": 0,
     }
 

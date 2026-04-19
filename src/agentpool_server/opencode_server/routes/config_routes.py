@@ -337,7 +337,7 @@ async def update_config(state: StateDep, config_update: Config) -> Config:
                 async with state.agent_lock:
                     await state.agent.set_model(new_model)
                 logger.info("Agent model successfully updated", model=new_model)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to update agent model", error=str(e))
                 logger.exception("Traceback while updating agent model")
         else:
