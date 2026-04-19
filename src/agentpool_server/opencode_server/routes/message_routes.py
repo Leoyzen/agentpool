@@ -221,6 +221,16 @@ async def list_messages(
     limit: int | None = Query(default=None),
 ) -> list[MessageWithParts]:
     """List messages in a session."""
+    # Fast path for subagent/child sessions already in memory:
+    # Skip get_or_load_session (which acquires agent_lock) because the
+    # parent agent holds agent_lock while streaming, so the lock would
+    # block until the parent finishes — making child messages invisible
+    # during subagent execution.
+    cached_session = state.sessions.get(session_id)
+    if cached_session is not None and cached_session.parent_id is not None and session_id in state.messages:
+        messages = state.messages[session_id]
+        return messages[-limit:] if limit else messages
+
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")

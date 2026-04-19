@@ -719,6 +719,14 @@ async def get_session(session_id: str, state: StateDep) -> Session:
 
     Loads from storage if not in memory cache.
     """
+    # Fast path for subagent/child sessions already in memory:
+    # Skip get_or_load_session (which acquires agent_lock) because the
+    # parent agent holds agent_lock while streaming, so the lock would
+    # block until the parent finishes.
+    cached_session = state.sessions.get(session_id)
+    if cached_session is not None and cached_session.parent_id is not None:
+        return cached_session
+
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -743,6 +751,18 @@ async def get_session_messages(
     Returns:
         List of messages with their parts
     """
+    # Fast path for subagent/child sessions already in memory:
+    # Skip get_or_load_session (which acquires agent_lock) because the
+    # parent agent holds agent_lock while streaming, so the lock would
+    # block until the parent finishes — making child messages invisible
+    # during subagent execution.
+    cached_session = state.sessions.get(session_id)
+    if cached_session is not None and cached_session.parent_id is not None and session_id in state.messages:
+        messages = state.messages[session_id]
+        if limit is not None and limit > 0:
+            messages = messages[-limit:]
+        return messages
+
     # Ensure session is loaded
     session = await get_or_load_session(state, session_id)
     if session is None:
@@ -1068,6 +1088,18 @@ async def get_session_todos(session_id: str, state: StateDep) -> list[Todo]:
 
     Returns todos from the agent pool's TodoTracker.
     """
+    # Fast path for subagent/child sessions already in memory:
+    # Skip get_or_load_session (which acquires agent_lock) because the
+    # parent agent holds agent_lock while streaming, so the lock would
+    # block until the parent finishes.
+    cached_session = state.sessions.get(session_id)
+    if cached_session is not None and cached_session.parent_id is not None:
+        tracker = state.pool.todos
+        return [
+            Todo(id=e.id, content=e.content, status=e.status, priority=e.priority)
+            for e in tracker.entries
+        ]
+
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -1091,6 +1123,18 @@ async def get_session_diff(
     Returns a list of file changes with unified diffs.
     Optionally filter to changes since a specific message.
     """
+    # Fast path for subagent/child sessions already in memory:
+    # Skip get_or_load_session (which acquires agent_lock) because the
+    # parent agent holds agent_lock while streaming, so the lock would
+    # block until the parent finishes.
+    cached_session = state.sessions.get(session_id)
+    if cached_session is not None and cached_session.parent_id is not None:
+        file_ops = state.pool.file_ops
+        if not file_ops.changes:
+            return []
+        changes = file_ops.get_changes_since(message_id) if message_id else file_ops.changes
+        return [FileDiff.from_file_change(change) for change in changes]
+
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
