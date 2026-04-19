@@ -96,10 +96,14 @@ class SQLSessionStore:
         )
 
     def _from_db_model(self, row: Session) -> SessionData:
-        """Convert database model to SessionData."""
-        # Merge title into metadata for SessionData compatibility
+        """Convert database model to SessionData.
+
+        ``Session.title`` is the single source of truth — it always
+        overrides ``metadata_json["title"]`` so that title updates that
+        only write the column are correctly reflected on read.
+        """
         metadata = row.metadata_json or {}
-        if row.title and "title" not in metadata:
+        if row.title:
             metadata = {**metadata, "title": row.title}
         return SessionData(
             session_id=row.id,  # id is the primary key

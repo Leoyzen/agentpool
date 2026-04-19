@@ -237,7 +237,12 @@ class SQLModelProvider(StorageProvider):
             await session.commit()
 
     async def update_session_title(self, session_id: str, title: str) -> None:
-        """Update the title of a conversation."""
+        """Update the title of a conversation.
+
+        Only writes the ``title`` column.  ``_session_from_db`` always
+        syncs ``row.title`` → ``metadata["title"]`` on read, so this
+        single write is sufficient.
+        """
         async with AsyncSession(self.engine) as session:
             result = await session.execute(
                 select(Conversation).where(Conversation.id == session_id)
@@ -743,11 +748,16 @@ class SQLModelProvider(StorageProvider):
 
         Mirrors ``SQLSessionStore._from_db_model`` logic: merges ``title``
         into ``metadata`` and maps ``start_time`` → ``created_at``.
+
+        ``Conversation.title`` is the single source of truth — it always
+        overrides ``metadata_json["title"]`` so that ``update_session_title``
+        (which only writes the column) is sufficient.
         """
         from agentpool.sessions.models import SessionData
 
         metadata = row.metadata_json or {}
-        if row.title and "title" not in metadata:
+        # Conversation.title is authoritative — always sync to metadata
+        if row.title:
             metadata = {**metadata, "title": row.title}
         return SessionData(
             session_id=row.id,

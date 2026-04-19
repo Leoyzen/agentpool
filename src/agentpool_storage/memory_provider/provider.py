@@ -114,14 +114,32 @@ class MemoryStorageProvider(StorageProvider):
         # Note: parent_session_id is accepted but not stored (no-op for memory provider)
 
     async def update_session_title(self, session_id: str, title: str) -> None:
-        """Update the title of a conversation."""
+        """Update the title of a conversation.
+
+        ``SessionData.metadata["title"]`` is the single source of truth
+        (``SessionData.title`` is a property that reads from ``metadata``).
+        Also updates ``self.conversations`` for backward compatibility.
+        """
+        # Update SessionData (source of truth for load_session)
+        session_data = self.sessions.get(session_id)
+        if session_data:
+            session_data.metadata["title"] = title
+        # Also update conversations list for backward compat
         for conv in self.conversations:
             if conv["id"] == session_id:
                 conv["title"] = title
-                return
+                break
 
     async def get_session_title(self, session_id: str) -> str | None:
-        """Get the title of a conversation."""
+        """Get the title of a conversation.
+
+        Prefers ``SessionData.metadata["title"]``, falls back to
+        ``self.conversations`` for sessions created via ``log_session``.
+        """
+        session_data = self.sessions.get(session_id)
+        if session_data:
+            return session_data.metadata.get("title")
+        # Fallback for sessions only in conversations list
         for conv in self.conversations:
             if conv["id"] == session_id:
                 return conv.get("title")

@@ -609,5 +609,85 @@ class TestModelVariantResolution:
                 pass  # Expected - LLM call fails in test, but variant lookup didn't crash
 
 
+class TestTitlePersistedAfterReload:
+    """Regression tests: title must survive session reload from storage.
+
+    Bug: ``update_session_title`` only wrote the ``Conversation.title`` column,
+    but ``_session_from_db`` skipped syncing it into ``metadata["title"]`` when
+    a stale entry already existed there (from ``create_session`` setting
+    ``title="New Session"``).  Result: generated title visible in current TUI
+    session but lost on reload.
+
+    Fix: ``_session_from_db`` always lets ``Conversation.title`` override
+    ``metadata_json["title"]`` so the column is the single source of truth.
+    """
+
+    @pytest.fixture
+    def sql_config(self, tmp_path: Path) -> SQLStorageConfig:
+        """Create SQL config with temp database."""
+        db_path = tmp_path / "test_title_reload.db"
+        return SQLStorageConfig(url=f"sqlite:///{db_path}")
+
+    async def test_sql_title_survives_reload(self, sql_config: SQLStorageConfig) -> None:
+        """Verify generated title persists after load_session round-trip."""
+        async with SQLModelProvider(sql_config) as provider:
+            session_id = "reload_test_001"
+
+            # 1. Save session with default title (mimics create_session)
+            data = SessionData(
+                session_id=session_id,
+                agent_name="test_agent",
+                metadata={"title": "New Session"},
+            )
+            await provider.save_session(data)
+
+            # 2. Update title (mimics title generation)
+            await provider.update_session_title(session_id, "Generated Title")
+
+            # 3. Reload from storage — title must be "Generated Title", not "New Session"
+            loaded = await provider.load_session(session_id)
+            assert loaded is not None
+            assert loaded.title == "Generated Title"
+
+    async def test_sql_title_in_list_sessions(self, sql_config: SQLStorageConfig) -> None:
+        """Verify generated title appears in list_sessions (batch query)."""
+        async with SQLModelProvider(sql_config) as provider:
+            session_id = "list_test_001"
+            data = SessionData(
+                session_id=session_id,
+                agent_name="test_agent",
+                metadata={"title": "New Session"},
+            )
+            await provider.save_session(data)
+            await provider.update_session_title(session_id, "Listed Title")
+
+            # Batch load should return updated title
+            sessions = await provider.load_sessions_batch([session_id])
+            assert len(sessions) == 1
+            assert sessions[0].title == "Listed Title"
+
+    async def test_memory_title_survives_reload(self) -> None:
+        """Verify generated title persists in MemoryStorageProvider."""
+        config = StorageConfig(providers=[MemoryStorageConfig()])
+        async with StorageManager(config) as manager:
+            session_id = "mem_reload_001"
+            await manager.log_session(session_id=session_id, node_name="test_agent")
+            # Save to sessions dict (mimics create_session flow)
+            data = SessionData(
+                session_id=session_id,
+                agent_name="test_agent",
+                metadata={"title": "New Session"},
+            )
+            await manager.save_session(data)
+
+            # Update title
+            await manager.update_session_title(session_id, "Memory Generated Title")
+
+            # Reload
+            loaded = await manager.load_session(session_id)
+            assert loaded is not None
+            assert loaded.title == "Memory Generated Title"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
