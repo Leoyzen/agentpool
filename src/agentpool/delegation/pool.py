@@ -141,6 +141,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             self.exit_stack = AsyncExitStack()
             self.parallel_load = parallel_load
             self.storage = StorageManager(self.manifest.storage)
+            self.storage._model_variants = self.manifest.model_variants
             self.vfs_registry = VFSRegistry()
             for name, resource_config in self.manifest.resources.items():
                 self.vfs_registry.register_from_config(name, resource_config)

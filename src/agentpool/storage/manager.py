@@ -89,6 +89,7 @@ class StorageManager:
         self.task_manager = TaskManager()
         self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
         self._session_logged: set[str] = set()  # Track logged conversations for idempotency
+        self._model_variants: dict[str, Any] = {}  # Set by AgentPool after init
 
     @staticmethod
     def generate_session_id() -> str:
@@ -731,7 +732,12 @@ class StorageManager:
             return None
 
         try:
-            model = infer_model(self.config.title_generation_model)
+            # Resolve model_variants reference if applicable
+            model_str = self.config.title_generation_model
+            if model_str in self._model_variants:
+                model = self._model_variants[model_str].get_model()
+            else:
+                model = infer_model(model_str)
             agent = Agent(
                 model=model,
                 system_prompt=self.config.title_generation_prompt,
