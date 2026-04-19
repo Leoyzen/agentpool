@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
 def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
     """Warm up LSP servers for the given file paths.
 
@@ -371,9 +372,13 @@ async def _process_message_locked(  # noqa: PLR0915
     )
 
     response_time: int | None = None
+    # Resolve agent before entering agent_lock so the except handler can always
+    # reference `agent` — even if CancelledError fires before the lock is acquired.
+    # Without this, `agent` is a local defined only inside `async with agent_lock:`
+    # and UnboundLocalError occurs when the except clause at line ~518 accesses it.
+    agent = state.agent
     try:
         async with state.agent_lock:
-            agent = state.agent
             if request.agent and state.agent.agent_pool is not None:
                 agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
             agent = state.bind_agent_to_session(session_id, agent=agent)
@@ -398,9 +403,7 @@ async def _process_message_locked(  # noqa: PLR0915
                 # The provider_id is the first part of the identifier (e.g., "openai-chat")
                 requested_model = model_id  # Try variant name first
 
-                logger.info(
-                    "Model selection requested", provider=provider_id, model_id=model_id
-                )
+                logger.info("Model selection requested", provider=provider_id, model_id=model_id)
 
                 try:
                     available_models = await agent.get_available_models()
@@ -413,8 +416,7 @@ async def _process_message_locked(  # noqa: PLR0915
                     # Check 2: Is it in tokonomics models?
                     elif available_models:
                         valid_ids = [
-                            m.id_override if m.id_override else m.id
-                            for m in available_models
+                            m.id_override if m.id_override else m.id for m in available_models
                         ]
                         # Try both "provider:model" format and just model_id
                         full_id = f"{provider_id}:{model_id}"
@@ -483,7 +485,11 @@ async def _process_message_locked(  # noqa: PLR0915
         # TimeoutError instead of CancelledError on Python 3.12+.
         # Both cases require the same cleanup: finalize the assistant
         # message with an aborted state so the TUI doesn't get stuck.
-        reason = "Request cancelled by user" if isinstance(exc, asyncio.CancelledError) else "Request timed out"
+        reason = (
+            "Request cancelled by user"
+            if isinstance(exc, asyncio.CancelledError)
+            else "Request timed out"
+        )
         logger.info(reason, session_id=session_id)
 
         # Finalize the assistant message with aborted state.
@@ -493,9 +499,7 @@ async def _process_message_locked(  # noqa: PLR0915
         # stale assistant message, causing all subsequent user messages
         # to display as "QUEUED".
         response_time = now_ms()
-        aborted_error = MessageAbortedError(
-            data=MessageAbortedErrorData(message=reason)
-        )
+        aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
         msg_time = MessageTime(created=now, completed=response_time)
         update = {"time": msg_time, "error": aborted_error}
         updated_assistant = assistant_msg.model_copy(update=update)
