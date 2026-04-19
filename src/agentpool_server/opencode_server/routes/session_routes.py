@@ -667,7 +667,6 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
         version="1",
         time=TimeCreatedUpdated(created=now, updated=now),
         parent_id=request.parent_id if request else None,
-        workspace_id=f"wrk_{project_id[:12]}",
     )
 
     # Persist to storage
@@ -947,7 +946,7 @@ async def fork_session(  # noqa: D417
         version="1",
         time=TimeCreatedUpdated(created=now, updated=now),
         parent_id=session_id,  # Link to original session
-        workspace_id=original_session.workspace_id,
+
     )
 
     # Persist the forked session to storage

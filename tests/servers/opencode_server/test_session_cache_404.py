@@ -41,7 +41,6 @@ def _make_session(session_id: str, parent_id: str | None = None) -> Session:
         version="1",
         time=TimeCreatedUpdated(created=0, updated=0),
         parent_id=parent_id,
-        workspace_id="wrk_test-project",
     )
 
 

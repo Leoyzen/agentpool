@@ -133,19 +133,15 @@ class GlobalEventFactory:
     the server's lifetime. Created lazily on first access.
     """
 
-    def __init__(self, directory: str, project: str, workspace: str | None = None) -> None:
+    def __init__(self, directory: str, project: str) -> None:
         """Initialize with directory and project routing metadata.
 
         Args:
             directory: Working directory for event routing
             project: Project identifier for event routing
-            workspace: Workspace identifier for TUI workspace routing.
-                When None, derives from project as f"wrk_{project[:12]}"
-                to match the /experimental/workspace API id format.
         """
         self._directory = directory
         self._project = project
-        self._workspace = workspace if workspace is not None else f"wrk_{project[:12]}"
 
     def wrap(self, event: Event) -> str:
         """Wrap an Event in a GlobalEvent envelope JSON string.
@@ -154,13 +150,12 @@ class GlobalEventFactory:
             event: The event to wrap
 
         Returns:
-            JSON string with directory, project, workspace, and payload keys.
+            JSON string with directory, project, and payload keys.
         """
         payload = _event_to_dict(event)
         envelope: dict[str, Any] = {
             "directory": self._directory,
             "project": self._project,
-            "workspace": self._workspace,
             "payload": payload,
         }
         return json.dumps(envelope, ensure_ascii=False)
@@ -335,21 +330,17 @@ async def get_events(state: StateDep) -> EventSourceResponse:
 async def get_routing_check(
     state: StateDep,
     directory: str,
-    workspace: str | None = None,
-    current_workspace: str | None = None,
     project_directory: str | None = None,
 ) -> RoutingCheckResponse:
     """Check whether an event would pass the OpenCode TUI routing filter.
 
     Diagnostic endpoint that constructs a synthetic GlobalEvent with the
-    given directory/workspace and runs it through the 4-rule TUI event
+    given directory and runs it through the 3-rule TUI event
     routing filter. Returns whether the event would pass and why.
 
     Args:
         state: Server state (injected dependency).
         directory: The event's directory field.
-        workspace: The event's workspace field (optional).
-        current_workspace: The TUI's active workspace for rule 3 filtering.
         project_directory: The project directory to match against
             (defaults to state.working_dir).
 
@@ -359,8 +350,8 @@ async def get_routing_check(
     effective_project_dir = (
         project_directory if project_directory is not None else state.working_dir
     )
-    event = GlobalEvent(directory=directory, workspace=workspace, payload={})
+    event = GlobalEvent(directory=directory, payload={})
     would_pass, reason = tui_event_filter(
-        event, effective_project_dir, current_workspace=current_workspace
+        event, effective_project_dir
     )
     return RoutingCheckResponse(would_pass=would_pass, reason=reason)

@@ -1,10 +1,9 @@
 """Tests for TUI event routing filter and /global/routing-check endpoint.
 
-Covers all 4 rules of the OpenCode TUI routing filter:
+Covers all 3 rules of the OpenCode TUI routing filter:
 1. Sync events always dropped
 2. Global directory always passes (except sync)
-3. Workspace filtering (if active)
-4. Directory must match exactly (string comparison, no normalization)
+3. Directory must match exactly (string comparison, no normalization)
 
 Plus edge cases and the HTTP endpoint integration.
 """
@@ -33,14 +32,13 @@ if TYPE_CHECKING:
 
 def _make_event(
     directory: str = "/project",
-    workspace: str | None = None,
     payload_type: str | None = None,
 ) -> GlobalEvent:
     """Create a GlobalEvent for testing."""
     payload: dict[str, Any] = {}
     if payload_type is not None:
         payload["type"] = payload_type
-    return GlobalEvent(directory=directory, workspace=workspace, payload=payload)
+    return GlobalEvent(directory=directory, payload=payload)
 
 
 # =============================================================================
@@ -60,14 +58,6 @@ def test_sync_event_dropped_even_with_matching_directory() -> None:
     """Sync event with matching directory is still dropped."""
     event = _make_event(directory="/project", payload_type="sync")
     passed, reason = tui_event_filter(event, "/project")
-    assert passed is False
-    assert reason == "sync_dropped"
-
-
-def test_sync_event_dropped_with_matching_workspace() -> None:
-    """Sync event with matching workspace is still dropped."""
-    event = _make_event(directory="/project", workspace="ws1", payload_type="sync")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
     assert passed is False
     assert reason == "sync_dropped"
 
@@ -109,14 +99,6 @@ def test_global_directory_passes_regardless_of_project_directory() -> None:
     assert reason == "global_directory"
 
 
-def test_global_directory_passes_with_workspace_active() -> None:
-    """Global directory passes even when workspace filtering is active."""
-    event = _make_event(directory="global", workspace="other-ws")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
-    assert passed is True
-    assert reason == "global_directory"
-
-
 def test_global_directory_with_sync_still_dropped() -> None:
     """Sync event with global directory is dropped (rule 1 takes precedence)."""
     event = _make_event(directory="global", payload_type="sync")
@@ -126,68 +108,7 @@ def test_global_directory_with_sync_still_dropped() -> None:
 
 
 # =============================================================================
-# Rule 3: workspace filtering (if active)
-# =============================================================================
-
-
-def test_workspace_match_passes() -> None:
-    """Event workspace matches current_workspace → passes."""
-    event = _make_event(directory="/project", workspace="ws1")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
-    assert passed is True
-    assert reason == "workspace_match"
-
-
-def test_workspace_mismatch_fails() -> None:
-    """Event workspace doesn't match current_workspace → fails."""
-    event = _make_event(directory="/project", workspace="ws1")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws2")
-    assert passed is False
-    assert reason == "workspace_mismatch"
-
-
-def test_workspace_match_passes_even_with_wrong_directory() -> None:
-    """Workspace match takes priority over directory mismatch."""
-    event = _make_event(directory="/other", workspace="ws1")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
-    assert passed is True
-    assert reason == "workspace_match"
-
-
-def test_workspace_mismatch_even_with_matching_directory() -> None:
-    """Workspace mismatch fails even when directory matches."""
-    event = _make_event(directory="/project", workspace="ws1")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws2")
-    assert passed is False
-    assert reason == "workspace_mismatch"
-
-
-def test_workspace_none_event_with_active_workspace_fails() -> None:
-    """Event with workspace=None fails when current_workspace is set."""
-    event = _make_event(directory="/project", workspace=None)
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
-    assert passed is False
-    assert reason == "workspace_mismatch"
-
-
-def test_empty_string_workspace_vs_none_mismatch() -> None:
-    """Empty string workspace != None current_workspace."""
-    event = _make_event(directory="/project", workspace="")
-    passed, reason = tui_event_filter(event, "/project", current_workspace=None)
-    assert passed is True
-    assert reason == "directory_match"
-
-
-def test_workspace_none_current_none_falls_through() -> None:
-    """Both workspace and current_workspace None falls through to directory check."""
-    event = _make_event(directory="/project", workspace=None)
-    passed, reason = tui_event_filter(event, "/project", current_workspace=None)
-    assert passed is True
-    assert reason == "directory_match"
-
-
-# =============================================================================
-# Rule 4: directory must match exactly
+# Rule 3: directory must match exactly
 # =============================================================================
 
 
@@ -260,22 +181,6 @@ def test_rule_priority_sync_over_global() -> None:
     assert reason == "sync_dropped"
 
 
-def test_rule_priority_global_over_workspace() -> None:
-    """Rule 2 (global directory) takes precedence over rule 3 (workspace)."""
-    event = _make_event(directory="global", workspace="wrong-ws")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
-    assert passed is True
-    assert reason == "global_directory"
-
-
-def test_rule_priority_workspace_over_directory() -> None:
-    """Rule 3 (workspace) takes precedence over rule 4 (directory)."""
-    event = _make_event(directory="/wrong", workspace="ws1")
-    passed, reason = tui_event_filter(event, "/project", current_workspace="ws1")
-    assert passed is True
-    assert reason == "workspace_match"
-
-
 def test_full_path_cjk_directory() -> None:
     """CJK characters in directory match exactly."""
     event = _make_event(directory="/项目/代码")
@@ -302,8 +207,6 @@ def test_routing_check_response_all_reasons() -> None:
     valid_reasons = [
         "sync_dropped",
         "global_directory",
-        "workspace_match",
-        "workspace_mismatch",
         "directory_match",
         "directory_mismatch",
     ]
@@ -371,40 +274,6 @@ async def test_routing_check_sync_dropped(async_client: AsyncClient) -> None:
     passed, reason = tui_event_filter(event, "/project")
     assert passed is False
     assert reason == "sync_dropped"
-
-
-@pytest.mark.anyio
-async def test_routing_check_workspace_match(async_client: AsyncClient) -> None:
-    """Workspace match with current_workspace set returns would_pass=True."""
-    response = await async_client.get(
-        "/global/routing-check",
-        params={
-            "directory": "/project",
-            "workspace": "ws1",
-            "current_workspace": "ws1",
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["wouldPass"] is True
-    assert data["reason"] == "workspace_match"
-
-
-@pytest.mark.anyio
-async def test_routing_check_workspace_mismatch(async_client: AsyncClient) -> None:
-    """Workspace mismatch with current_workspace set returns would_pass=False."""
-    response = await async_client.get(
-        "/global/routing-check",
-        params={
-            "directory": "/project",
-            "workspace": "ws1",
-            "current_workspace": "ws2",
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["wouldPass"] is False
-    assert data["reason"] == "workspace_mismatch"
 
 
 @pytest.mark.anyio

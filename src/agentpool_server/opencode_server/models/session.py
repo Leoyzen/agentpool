@@ -52,7 +52,6 @@ class Session(OpenCodeBaseModel):
     version: str = "1"
     time: TimeCreatedUpdated
     parent_id: str | None = None
-    workspace_id: str | None = None
     summary: SessionSummary | None = None
     revert: SessionRevert | None = None
     share: SessionShare | None = None

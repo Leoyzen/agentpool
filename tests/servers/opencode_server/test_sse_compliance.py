@@ -3,7 +3,6 @@
 Validates that the SSE event stream conforms to the OpenCode TUI protocol:
 - /global/event emits events that pass the TUI routing filter
 - Directory in GlobalEvent envelope uses the configured server working_dir
-- Workspace is omitted for single-directory routing
 - server.connected and server.heartbeat keep a payload wrapper on /global/event
 - All other events are wrapped in GlobalEvent with correct directory
 - sessionId appears at top level of payload for ALL event types
@@ -152,7 +151,6 @@ async def test_tui_filter_session_status_event_passes() -> None:
     ge = GlobalEvent(
         directory=wrapped["directory"],
         project=wrapped.get("project"),
-        workspace=wrapped.get("workspace"),
         payload=wrapped["payload"],
     )
     passes, reason = tui_event_filter(ge, state.working_dir)
@@ -171,7 +169,6 @@ async def test_tui_filter_part_delta_event_passes() -> None:
     ge = GlobalEvent(
         directory=wrapped["directory"],
         project=wrapped.get("project"),
-        workspace=wrapped.get("workspace"),
         payload=wrapped["payload"],
     )
     passes, reason = tui_event_filter(ge, state.working_dir)
@@ -197,7 +194,6 @@ async def test_tui_filter_all_session_events_pass() -> None:
         ge = GlobalEvent(
             directory=raw["directory"],
             project=raw.get("project"),
-            workspace=raw.get("workspace"),
             payload=raw["payload"],
         )
         passes, reason = tui_event_filter(ge, state.working_dir)
@@ -205,7 +201,7 @@ async def test_tui_filter_all_session_events_pass() -> None:
 
 
 # =============================================================================
-# 2. Directory/workspace routing metadata in GlobalEvent envelope
+# 2. Directory routing metadata in GlobalEvent envelope
 # =============================================================================
 
 
@@ -235,20 +231,6 @@ async def test_envelope_directory_has_no_trailing_slash() -> None:
 
 
 @pytest.mark.anyio
-async def test_envelope_workspace_is_present() -> None:
-    """Envelope includes workspace derived as wrk_{project[:12]}."""
-    wd = "/tmp/workspace_meta/../workspace_meta"
-    state = _MockState(working_dir=wd)
-    event = SessionStatusEvent.create(session_id="dir3", status_type="busy")
-    events = await _collect_events(state, wrap_payload=True, events_to_send=[event])
-
-    wrapped = events[1]
-    assert "workspace" in wrapped
-    project = wrapped["project"]
-    assert wrapped["workspace"] == f"wrk_{project[:12]}"
-
-
-@pytest.mark.anyio
 async def test_envelope_directory_different_from_mismatched_path() -> None:
     """TUI filter rejects event whose directory doesn't match project_directory."""
     wd = "/correct/dir"
@@ -260,7 +242,6 @@ async def test_envelope_directory_different_from_mismatched_path() -> None:
     ge = GlobalEvent(
         directory=wrapped["directory"],
         project=wrapped.get("project"),
-        workspace=wrapped.get("workspace"),
         payload=wrapped["payload"],
     )
     # Should pass with correct directory
@@ -331,7 +312,6 @@ async def test_session_created_is_wrapped() -> None:
     assert "project" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.working_dir
-    assert "workspace" in wrapped
     assert wrapped["payload"]["type"] == "session.created"
 
 
@@ -346,7 +326,6 @@ async def test_session_status_is_wrapped() -> None:
     assert "directory" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.working_dir
-    assert "workspace" in wrapped
 
 
 @pytest.mark.anyio
@@ -360,7 +339,6 @@ async def test_session_compacted_is_wrapped() -> None:
     assert "directory" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.working_dir
-    assert "workspace" in wrapped
 
 
 @pytest.mark.anyio
@@ -374,7 +352,6 @@ async def test_tui_session_select_is_wrapped() -> None:
     assert "directory" in wrapped
     assert "payload" in wrapped
     assert wrapped["directory"] == state.working_dir
-    assert "workspace" in wrapped
 
 
 # =============================================================================
@@ -746,7 +723,6 @@ async def test_part_delta_tui_filter_passes() -> None:
     ge = GlobalEvent(
         directory=wrapped["directory"],
         project=wrapped.get("project"),
-        workspace=wrapped.get("workspace"),
         payload=wrapped["payload"],
     )
     passes, reason = tui_event_filter(ge, wd)
@@ -822,7 +798,6 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     assert events[1]["payload"]["type"] == "session.status"
     assert events[1]["payload"]["sessionId"] == "mix1"
     assert events[1]["directory"] == state.working_dir
-    assert "workspace" in events[1]
 
     # [2] server.heartbeat — payload wrapped, no routing metadata
     assert events[2]["payload"]["type"] == "server.heartbeat"
@@ -833,7 +808,6 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     assert events[3]["payload"]["type"] == "message.part.delta"
     assert events[3]["payload"]["sessionId"] == "mix2"
     assert events[3]["directory"] == state.working_dir
-    assert "workspace" in events[3]
 
     # [4] server.heartbeat — payload wrapped, no routing metadata
     assert events[4]["payload"]["type"] == "server.heartbeat"
@@ -844,33 +818,6 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     assert events[5]["payload"]["type"] == "session.compacted"
     assert events[5]["payload"]["sessionId"] == "mix3"
     assert events[5]["directory"] == state.working_dir
-    assert "workspace" in events[5]
-
-
-@pytest.mark.anyio
-async def test_workspace_mode_routing_passes_with_matching_workspace() -> None:
-    """Wrapped events pass routing when workspace matches active workspace."""
-    wd = "/workspace/mode/test"
-    state = _MockState(working_dir=wd)
-    event = PartDeltaEvent.create(session_id="ws1", message_id="m1", part_id="p1", delta="x")
-    events = await _collect_events(state, wrap_payload=True, events_to_send=[event])
-
-    wrapped = events[1]
-    ge = GlobalEvent(
-        directory=wrapped["directory"],
-        project=wrapped.get("project"),
-        workspace=wrapped.get("workspace"),
-        payload=wrapped["payload"],
-    )
-    workspace_id = wrapped["workspace"]
-    passes, reason = tui_event_filter(
-        ge,
-        wd,
-        current_workspace=workspace_id,
-    )
-    assert passes, f"Workspace-routed event should pass, got reason={reason}"
-    assert reason == "workspace_match"
-
 
 # =============================================================================
 # Cross-cutting: sessionId consistency between top level and properties

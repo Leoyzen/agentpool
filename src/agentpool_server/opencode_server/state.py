@@ -148,7 +148,6 @@ class ServerState:
             self._event_factory = GlobalEventFactory(
                 directory=directory,
                 project=project,
-                workspace=f"wrk_{project[:12]}",
             )
         return self._event_factory
 
@@ -411,7 +410,6 @@ class ServerState:
             version="1",
             time=TimeCreatedUpdated(created=now, updated=now),
             parent_id=parent_id,
-            workspace_id=f"wrk_{project_id[:12]}",
         )
 
         # Persist to storage

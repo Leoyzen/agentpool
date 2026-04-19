@@ -34,15 +34,12 @@ from agentpool_server.opencode_server.models import (
     ProviderAuthMethod,
     Session,
     SkillInfo,
-    WorkspaceConnectionStatus,
-    WorkspaceInfo,
     WorktreeCreateRequest,
     WorktreeInfo,
     WorktreeRemoveRequest,
     WorktreeResetRequest,
 )
 from agentpool_server.opencode_server.state import ServerState
-from agentpool_storage.opencode_provider import helpers
 
 
 router = APIRouter(tags=["agent"])
@@ -537,63 +534,6 @@ async def list_sessions_global(
         lower_search = search.lower()
         sessions = [s for s in sessions if lower_search in s.title.lower()]
     return sessions
-
-
-def _build_workspace_info(state: ServerState) -> WorkspaceInfo:
-    """Build the singleton local workspace info from server state.
-
-    AgentPool exposes a single local workspace rooted at the server's
-    working directory. The workspace ID is derived from the project ID
-    to give the TUI a stable identifier across restarts.
-    """
-    directory = state.base_path
-    project_id = helpers.compute_project_id(directory)
-    return WorkspaceInfo(
-        id=f"wrk_{project_id[:12]}",
-        type="local",
-        name=Path(directory).name,
-        branch=None,
-        directory=directory,
-        extra=None,
-        project_id=project_id,
-    )
-
-
-def _build_workspace_status(state: ServerState) -> WorkspaceConnectionStatus:
-    """Build connection status for the singleton local workspace."""
-    info = _build_workspace_info(state)
-    return WorkspaceConnectionStatus(
-        workspace_id=info.id,
-        status="connected",
-        error=None,
-    )
-
-
-@router.get("/experimental/workspace")
-async def list_workspaces(
-    state: StateDep,
-    directory: str | None = None,
-    workspace: str | None = None,
-) -> list[WorkspaceInfo]:
-    """List workspaces for the current project.
-
-    AgentPool currently exposes a single local workspace rooted at the attached
-    server working directory. Query parameters are accepted for OpenCode SDK
-    compatibility but do not alter the singleton response.
-    """
-    _ = directory, workspace
-    return [_build_workspace_info(state)]
-
-
-@router.get("/experimental/workspace/status")
-async def get_workspace_status(
-    state: StateDep,
-    directory: str | None = None,
-    workspace: str | None = None,
-) -> list[WorkspaceConnectionStatus]:
-    """Return connection status for the singleton local workspace."""
-    _ = directory, workspace
-    return [_build_workspace_status(state)]
 
 
 @router.get("/experimental/tool/ids")

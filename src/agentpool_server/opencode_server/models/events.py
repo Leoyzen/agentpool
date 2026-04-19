@@ -1050,11 +1050,5 @@ class GlobalEvent(OpenCodeBaseModel):
     project: str | None = None
     """Project identifier for event routing (git root commit SHA or 'global')."""
 
-    workspace: str | None = None
-    """Workspace identifier for event routing.
-
-    Omitted for single-directory servers.
-    """
-
     payload: dict[str, Any]
     """The wrapped event data."""

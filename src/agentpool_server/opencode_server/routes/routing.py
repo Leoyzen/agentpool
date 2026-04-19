@@ -1,15 +1,13 @@
 """TUI event routing filter — diagnostic re-implementation of OpenCode TUI routing.
 
-Re-implements the 4-rule event routing filter from the OpenCode TUI's
+Re-implements the 3-rule event routing filter from the OpenCode TUI's
 event.ts as a pure Python function for diagnostic purposes. This allows
 debugging why events may be dropped by the TUI's client-side filter.
 
-The 4 rules (evaluated in order):
+The 3 rules (evaluated in order):
 1. **Sync events always dropped**: if `payload.type == "sync"` → False
 2. **Global directory always passes**: if `directory == "global"` → True
-3. **Workspace filtering (if active)**: if `current_workspace` is set →
-   `event.workspace == current_workspace`
-4. **Directory must match exactly**: `event.directory == project_directory`
+3. **Directory must match exactly**: `event.directory == project_directory`
 """
 
 from __future__ import annotations
@@ -23,8 +21,6 @@ from agentpool_server.opencode_server.models.events import GlobalEvent
 RoutingReason = Literal[
     "sync_dropped",
     "global_directory",
-    "workspace_match",
-    "workspace_mismatch",
     "directory_match",
     "directory_mismatch",
 ]
@@ -44,17 +40,15 @@ class RoutingCheckResponse(OpenCodeBaseModel):
 def tui_event_filter(
     event: GlobalEvent,
     project_directory: str,
-    current_workspace: str | None = None,
 ) -> tuple[bool, RoutingReason]:
     """Re-implements OpenCode TUI event routing filter for diagnostic purposes.
 
-    Evaluates the 4-rule filter in priority order and returns both
+    Evaluates the 3-rule filter in priority order and returns both
     the pass/fail result and the reason for the decision.
 
     Args:
         event: The GlobalEvent to check against the routing filter.
         project_directory: The server's working directory for directory matching.
-        current_workspace: The TUI's active workspace, or None if not set.
 
     Returns:
         A tuple of (would_pass, reason) where reason explains which rule
@@ -68,13 +62,7 @@ def tui_event_filter(
     if event.directory == "global":
         return (True, "global_directory")
 
-    # Rule 3: workspace filtering (if workspace active)
-    if current_workspace is not None:
-        if event.workspace == current_workspace:
-            return (True, "workspace_match")
-        return (False, "workspace_mismatch")
-
-    # Rule 4: directory must match exactly (string comparison, no normalization)
+    # Rule 3: directory must match exactly (string comparison, no normalization)
     if event.directory == project_directory:
         return (True, "directory_match")
     return (False, "directory_mismatch")

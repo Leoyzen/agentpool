@@ -543,7 +543,7 @@ def session_data_to_opencode(data: SessionData) -> Session:
 
     # Recompute project_id from cwd when stored value is missing or "default".
     # Older sessions were persisted with project_id="default" which doesn't
-    # match the workspace API's projectID, breaking the TUI workspace filter.
+    # match the projectID computed from the cwd.
     project_id = data.project_id
     if not project_id or project_id == "default":
         if data.cwd:
@@ -561,9 +561,6 @@ def session_data_to_opencode(data: SessionData) -> Session:
         version=data.version,
         time=TimeCreatedUpdated(created=created_ms, updated=updated_ms),
         parent_id=data.parent_id,
-        workspace_id=data.metadata.get("workspace_id")
-        if data.metadata.get("workspace_id")
-        else f"wrk_{project_id[:12]}",
         revert=revert,
         share=share,
     )
@@ -584,8 +581,6 @@ def opencode_to_session_data(
         metadata["revert"] = session.revert.model_dump()
     if session.share:
         metadata["share"] = session.share.model_dump()
-    if session.workspace_id:
-        metadata["workspace_id"] = session.workspace_id
     return SessionData(
         session_id=session.id,
         agent_name=agent_name,
