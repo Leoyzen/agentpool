@@ -44,13 +44,13 @@ if TYPE_CHECKING:
     from upathtools.filesystems import OverlayFileSystem
 
     from acp.schema import AvailableCommandsUpdate
+    from agentpool.agents.context import RunSnapshot
     from agentpool.agents.events import (
         CommandCompleteEvent,
         CommandOutputEvent,
         RichAgentStreamEvent,
         StreamWithCommandsEvent,
     )
-    from agentpool.agents.context import RunSnapshot
     from agentpool.agents.modes import ConfigOptionChanged, ModeCategory, ModeCategoryId
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import (
@@ -1185,6 +1185,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         input_provider: InputProvider | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         wait_for_connections: bool | None = None,
+        snapshot: RunSnapshot | None = None,
     ) -> ChatMessage[TResult]:
         """Run agent with prompt and get response.
 
@@ -1206,6 +1207,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             input_provider: Optional input provider for the agent
             event_handlers: Optional event handlers for this run (overrides agent's handlers)
             wait_for_connections: Whether to wait for connected agents to complete
+            snapshot: Optional per-run snapshot for concurrent session isolation
 
         Returns:
             ChatMessage containing response and run information
@@ -1228,6 +1230,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             input_provider=input_provider,
             event_handlers=event_handlers,
             wait_for_connections=wait_for_connections,
+            snapshot=snapshot,
         ):
             if isinstance(event, StreamCompleteEvent):
                 final_message = event.message
