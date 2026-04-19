@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic_ai import UserContent
 
 from agentpool.common_types import PathReference
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -479,17 +480,20 @@ async def _process_message_locked(  # noqa: PLR0915
         assistant_msg_with_parts.info = updated_assistant
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-    except (asyncio.CancelledError, TimeoutError) as exc:
+    except (asyncio.CancelledError, TimeoutError, RunAbortedError) as exc:
         # User cancelled the request (e.g., pressed ESC), or an external
         # timeout (e.g. anyio.fail_after in a tool call) propagated as
-        # TimeoutError instead of CancelledError on Python 3.12+.
-        # Both cases require the same cleanup: finalize the assistant
+        # TimeoutError instead of CancelledError on Python 3.12+, or the
+        # agent aborted the run (e.g. question_for_user raised RunAbortedError
+        # when the user cancelled the questionnaire).
+        # All three cases require the same cleanup: finalize the assistant
         # message with an aborted state so the TUI doesn't get stuck.
-        reason = (
-            "Request cancelled by user"
-            if isinstance(exc, asyncio.CancelledError)
-            else "Request timed out"
-        )
+        if isinstance(exc, asyncio.CancelledError):
+            reason = "Request cancelled by user"
+        elif isinstance(exc, RunAbortedError):
+            reason = str(exc) or "Run aborted by agent"
+        else:
+            reason = "Request timed out"
         logger.info(reason, session_id=session_id)
 
         # Finalize the assistant message with aborted state.

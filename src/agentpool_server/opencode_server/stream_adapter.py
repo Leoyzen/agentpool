@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import RequestUsage
 
 from agentpool.log import get_logger
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.event_processor import EventProcessor
@@ -173,6 +174,13 @@ class OpenCodeStreamAdapter:
             # Don't propagate the error, just log it
             logger.debug("Stream cancelled by user", session_id=self.session_id)
             raise  # Re-raise so caller can handle cleanup
+        except RunAbortedError:
+            # Agent aborted the run (e.g. question_for_user raised RunAbortedError
+            # when user cancelled the questionnaire). Re-raise so
+            # _process_message_locked can finalize the assistant message with
+            # aborted state and update the agent's conversation history.
+            logger.debug("Run aborted by agent", session_id=self.session_id)
+            raise
         except Exception as e:  # noqa: BLE001
             self.main_context.response_text = f"Error calling agent: {e}"
             yield SessionErrorEvent.from_exception(session_id=self.session_id, exception=e)
