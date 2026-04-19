@@ -679,15 +679,15 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # Create input provider for this session
     input_provider = OpenCodeInputProvider(state, session_id)
     state.input_providers[session_id] = input_provider
-    # Set input provider on agent.
-    # NOTE: See load_session for the shared-agent race-condition caveat.
-    state.agent._input_provider = input_provider
-    # Clear agent's conversation for the new session
-    # Agent is shared across sessions, so we need to clear its conversation state
-    if hasattr(state.agent, "conversation") and state.agent.conversation:
-        state.agent.conversation.chat_messages.clear()
-    # Update agent's session_id to the new session
-    state.agent.session_id = session_id
+    # Bind agent to this session under lock to avoid racing with snapshot_for_session()
+    async with state.agent_lock:
+        state.agent._input_provider = input_provider
+        # Clear agent's conversation for the new session
+        # Agent is shared across sessions, so we need to clear its conversation state
+        if hasattr(state.agent, "conversation") and state.agent.conversation:
+            state.agent.conversation.chat_messages.clear()
+        # Update agent's session_id to the new session
+        state.agent.session_id = session_id
     await state.broadcast_event(SessionCreatedEvent.create(session))
     return session
 

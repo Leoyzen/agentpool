@@ -429,11 +429,10 @@ class ServerState:
         # Create input provider for this session
         input_provider = OpenCodeInputProvider(self, session_id)
         self.input_providers[session_id] = input_provider
-        # NOTE: Direct mutation of self.agent._input_provider and self.agent.session_id
-        # is safe for new session creation but should use snapshot_for_session()
-        # when concurrent runs may exist, to avoid overwriting another session's state.
-        self.agent._input_provider = input_provider
-        self.agent.session_id = session_id
+        # Bind agent to this session under lock to avoid racing with snapshot_for_session()
+        async with self.agent_lock:
+            self.agent._input_provider = input_provider
+            self.agent.session_id = session_id
 
         await self.broadcast_event(SessionCreatedEvent.create(session))
 

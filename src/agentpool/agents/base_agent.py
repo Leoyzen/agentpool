@@ -812,7 +812,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     prompt=user_msg.content
                     if isinstance(user_msg.content, str)
                     else str(user_msg.content),
-                    session_id=self.session_id,
+                    session_id=snapshot.session_id if snapshot else self.session_id,
                 )
                 if pre_run_result.get("decision") == "deny":
                     reason = pre_run_result.get("reason", "Blocked by pre-run hook")
@@ -861,7 +861,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     agent_name=self.name,
                     prompt=prompt_str,
                     result=final_message.content,
-                    session_id=self.session_id,
+                    session_id=snapshot.session_id if snapshot else self.session_id,
                 )
 
             # Emit signal (always - for event handlers)
