@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 from typing import Any
 
@@ -47,6 +48,33 @@ router = APIRouter(tags=["agent"])
 
 # Module-level logger for route-level logging
 logger = get_logger(__name__)
+
+
+def _build_workspace_info(state: StateDep) -> WorkspaceInfo:
+    """Build the singleton local workspace description for OpenCode clients."""
+    directory = state.base_path
+    project_id = helpers.compute_project_id(directory)
+    workspace_id = f"wrk_{project_id[:12]}"
+
+    return WorkspaceInfo(
+        id=workspace_id,
+        type="local",
+        name=Path(directory).name,
+        branch=None,
+        directory=directory,
+        extra=None,
+        project_id=project_id,
+    )
+
+
+def _build_workspace_status(state: StateDep) -> WorkspaceConnectionStatus:
+    """Build the singleton local workspace connection status."""
+    workspace = _build_workspace_info(state)
+    return WorkspaceConnectionStatus(
+        workspace_id=workspace.id,
+        status="connected",
+        error=None,
+    )
 
 
 def _extract_hints(template: str | None) -> list[str]:
