@@ -289,6 +289,50 @@ class TestStorageManagerTitleGenerationFix:
                 assert title == "Existing Title"
                 mock_core.assert_not_called()  # Should not generate
 
+    async def test_generate_title_from_prompt_generates_despite_default_title(self) -> None:
+        """Verify _generate_title_from_prompt generates title even when default 'New Session' exists.
+
+        Regression test: 'New Session' is the default placeholder title assigned
+        when a session is created.  Title generation should NOT be blocked by
+        this default value — it should proceed and replace it with an LLM-generated title.
+        """
+        config = StorageConfig(
+            providers=[MemoryStorageConfig()],
+            title_generation_model="test",
+        )
+
+        async with StorageManager(config) as manager:
+            session_id = "gen_test_new_session_default"
+            await manager.log_session(session_id=session_id, node_name="test_agent")
+
+            # Set the default placeholder title (simulates what create_session does)
+            await manager.update_session_title(session_id, "New Session")
+
+            mock_metadata = SessionMetadata(
+                title="Generated Title",
+                emoji="🧪",
+                icon="mdi:test-tube",
+            )
+
+            with patch.object(
+                StorageManager,
+                "_generate_title_core",
+                return_value=mock_metadata,
+            ) as mock_core:
+                title = await manager._generate_title_from_prompt(
+                    session_id=session_id,
+                    prompt="Test prompt",
+                    on_title_generated=None,
+                )
+
+                # Should have called _generate_title_core (not skipped)
+                mock_core.assert_called_once()
+                # Should return the generated title, not "New Session"
+                assert title == "Generated Title"
+                # Title should be stored
+                stored = await manager.get_session_title(session_id)
+                assert stored == "Generated Title"
+
     async def test_log_session_triggers_generation(self) -> None:
         """Verify log_session triggers title generation with initial_prompt."""
         config = StorageConfig(

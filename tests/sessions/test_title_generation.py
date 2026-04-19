@@ -106,6 +106,26 @@ class TestStorageManagerTitleGeneration:
             title = await manager._generate_title_from_prompt(conv_id, "New message", None)
             assert title == existing_title
 
+    async def test_generate_title_overrides_default_new_session(self) -> None:
+        """Test that 'New Session' default title does not block generation.
+
+        When a session is created, its title is set to 'New Session' by default.
+        This default should NOT prevent title generation — the LLM should still
+        be called to generate a proper title.
+        """
+        config = StorageConfig(providers=[MemoryStorageConfig()], title_generation_model="test")
+        async with StorageManager(config) as manager:
+            conv_id = "test_conv_new_session"
+            # Create conversation
+            await manager.log_session(session_id=conv_id, node_name="test_agent")
+            # Set the default placeholder title
+            await manager.update_session_title(conv_id, "New Session")
+            # Direct call should still generate a title (not return "New Session")
+            title = await manager._generate_title_from_prompt(conv_id, "Hello world", None)
+            # Title should be generated (not "New Session")
+            assert title is not None
+            assert title != "New Session"
+
     async def test_update_and_get_title(self) -> None:
         """Test updating and retrieving conversation title."""
         config = StorageConfig(providers=[MemoryStorageConfig()])

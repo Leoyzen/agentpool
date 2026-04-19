@@ -436,6 +436,27 @@ class StorageManager:
         provider = self.get_project_provider()
         return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
 
+    @method_spawner
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs in a single query.
+
+        Delegates to the project provider's batch method to avoid N+1 queries.
+
+        Args:
+            session_ids: List of session identifiers to load
+            agent_name: Optional filter to return only sessions for this agent
+
+        Returns:
+            List of found SessionData objects
+        """
+        provider = self.get_project_provider()
+        return await provider.load_sessions_batch(session_ids, agent_name=agent_name)
+
     async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
         """Update the external SDK session ID for a session.
 
@@ -761,8 +782,9 @@ class StorageManager:
         Returns:
             The generated title, or None if generation fails/disabled.
         """
-        # Check if title already exists
-        if existing := await self.get_session_title(session_id):
+        # Check if title already exists and is not the default placeholder
+        existing = await self.get_session_title(session_id)
+        if existing and existing != "New Session":
             if on_title_generated:
                 on_title_generated(existing)
             return existing
