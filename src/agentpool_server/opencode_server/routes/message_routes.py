@@ -485,8 +485,16 @@ async def _process_message_locked(  # noqa: PLR0915
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:
-            await state.mark_session_idle(session_id)
-            await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
+            has_queued = state.has_pending_async_prompts(session_id)
+            has_worker = state.has_session_background_task(session_id)
+            if has_queued and not has_worker:
+                # Async work is queued and will take over — skip idle
+                # to avoid idle→busy flicker. The worker will emit
+                # session.idle when it finishes the queue.
+                await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
+            else:
+                await state.mark_session_idle(session_id)
+                await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
         # --- Update session timestamp ---
         if response_time is not None:
             session = state.sessions[session_id]
