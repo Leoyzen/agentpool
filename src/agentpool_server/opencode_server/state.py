@@ -397,6 +397,7 @@ class ServerState:
         from agentpool_server.opencode_server.models import (
             Session,
             SessionCreatedEvent,
+            SessionUpdatedEvent,
             TimeCreatedUpdated,
         )
 
@@ -435,6 +436,13 @@ class ServerState:
                 self.bind_agent_to_session(session_id)
 
         await self.broadcast_event(SessionCreatedEvent.create(session))
+        # Broadcast session.updated so the CLI TUI can upsert the session
+        # into its SolidJS store.  The CLI TUI's sync.tsx event handler
+        # processes session.updated (upsert) but NOT session.created
+        # (insert-only), so without this event the TUI would rely solely
+        # on the async REST session.sync() call, causing a delay while
+        # the store is empty and messages cannot be rendered.
+        await self.broadcast_event(SessionUpdatedEvent.create(session))
         logger.info(
             "ensure_session: completed successfully",
             session_id=session_id,
