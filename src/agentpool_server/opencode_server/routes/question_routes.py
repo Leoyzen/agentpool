@@ -23,7 +23,7 @@ def _find_permission_provider(
     permission_id: str,
 ) -> tuple[str, OpenCodeInputProvider] | None:
     for session_id, input_provider in state.input_providers.items():
-        if permission_id in input_provider._pending_permissions:
+        if input_provider.has_pending_permission(permission_id):
             return session_id, input_provider
     return None
 

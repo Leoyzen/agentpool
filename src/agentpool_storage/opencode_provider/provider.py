@@ -48,6 +48,7 @@ from agentpool_server.opencode_server.models import (
 from agentpool_storage.base import StorageProvider
 from agentpool_storage.models import ConversationData as ConvData, TokenUsage
 from agentpool_storage.opencode_provider import helpers
+from agentpool_storage.project_store import generate_project_id
 
 
 if TYPE_CHECKING:
@@ -263,7 +264,7 @@ class OpenCodeStorageProvider(StorageProvider):
                 parent_id=parent_id or "",
                 model_id=model or "",
                 provider_id=model.split(":")[0] if model else "agentpool",
-                path=MessagePath(cwd=str(Path.cwd()), root=str(Path.cwd())),
+                path=MessagePath(cwd=str(self.base_path), root=str(self.base_path)),
                 time=MessageTime(created=now_ms),
                 tokens=Tokens(
                     input=cost_info.token_usage.input_tokens if cost_info else 0,
@@ -839,6 +840,7 @@ class OpenCodeStorageProvider(StorageProvider):
         """Get a project by worktree path.
 
         Resolves the worktree path before comparing to handle symlink differences.
+        Uses generate_project_id for O(1) lookup instead of scanning all project files.
 
         Args:
             worktree: Absolute path to the project worktree
@@ -846,16 +848,21 @@ class OpenCodeStorageProvider(StorageProvider):
         Returns:
             Project data if found, None otherwise
         """
-        resolved_worktree = str(Path(worktree).resolve())
-        for project_file in self.projects_path.glob("*.json"):
-            try:
-                content = project_file.read_text(encoding="utf-8")
-                data = anyenv.load_json(content, return_type=dict)
-                project = ProjectData.model_validate(data)
-                if project.worktree and str(Path(project.worktree).resolve()) == resolved_worktree:
-                    return project
-            except (anyenv.JsonLoadError, Exception):  # noqa: BLE001
-                continue
+        project_id = generate_project_id(worktree)
+        project_file = self.projects_path / f"{project_id}.json"
+        if not project_file.exists():
+            return None
+        try:
+            content = project_file.read_text(encoding="utf-8")
+            data = anyenv.load_json(content, return_type=dict)
+            project = ProjectData.model_validate(data)
+            # Verify the worktree matches (safety check for hash collisions / stale data)
+            if project.worktree and str(Path(project.worktree).resolve()) == str(
+                Path(worktree).resolve()
+            ):
+                return project
+        except (anyenv.JsonLoadError, Exception):  # noqa: BLE001
+            pass
         return None
 
     async def get_project_by_name(self, name: str) -> ProjectData | None:
