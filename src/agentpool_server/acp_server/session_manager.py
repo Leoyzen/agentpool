@@ -95,11 +95,20 @@ class ACPSessionManager:
                 logger.warning("Session ID already exists", session_id=session_id)
                 msg = f"Session {session_id} already exists"
                 raise ValueError(msg)
+            # Compute project_id from cwd so that ACP sessions are
+            # correctly associated with the project in the TUI sidebar.
+            # Without this, project_id defaults to None which breaks
+            # per-project session filtering.
+            from agentpool_storage.opencode_provider.helpers import compute_project_id
+
+            project_id = compute_project_id(cwd)
+
             # Create and persist session data via pool's SessionManager
             data = SessionData(
                 session_id=session_id,
                 agent_name=agent.name,
                 cwd=cwd,
+                project_id=project_id,
                 metadata={"protocol": "acp", "mcp_server_count": len(mcp_servers or [])},
             )
             if self.session_store:

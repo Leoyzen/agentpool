@@ -705,7 +705,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 run_ctx.injection_manager.flush_pending_to_queue()
         finally:
             if token is not None:
-                _current_run_ctx_var.reset(token)
+                # Suppress ValueError when token was created in a different async
+                # context (happens during GeneratorExit / generator cleanup).
+                # The ContextVar reverts to its default (None) in the original
+                # context when the task exits, so ignoring the reset is safe.
+                with suppress(ValueError):
+                    _current_run_ctx_var.reset(token)
             run_ctx.injection_manager.clear()
             self._current_stream_task = None
             self._active_run_ctx = None

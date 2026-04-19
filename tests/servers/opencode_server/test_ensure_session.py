@@ -20,6 +20,7 @@ def create_mock_agent() -> MagicMock:
     """Create a properly configured mock agent."""
     agent = MagicMock(spec=BaseAgent)
     agent.name = "test_agent"
+    agent.session_id = "original_session_id"
     agent.agent_pool = MagicMock()
     agent.agent_pool.manifest.config_file_path = "test_config.yml"
     agent.agent_pool.storage.save_session = AsyncMock()
@@ -232,3 +233,26 @@ async def test_ensure_session_is_idempotent(mock_state: ServerState) -> None:
 
     assert result1 is result2
     mock_state.agent.agent_pool.storage.save_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_child_skips_agent_binding(mock_state: ServerState) -> None:
+    """Test that ensure_session does NOT bind agent for child sessions.
+
+    Child sessions live inside the parent's agent stream. Binding the
+    shared agent to a child session would overwrite the parent's
+    session_id and also deadlock on agent_lock.
+    """
+    session_id = "child_session_abc"
+    parent_id = "parent_session_xyz"
+
+    with (
+        patch("agentpool_server.opencode_server.converters.opencode_to_session_data"),
+        patch("agentpool_server.opencode_server.input_provider.OpenCodeInputProvider"),
+    ):
+        result = await mock_state.ensure_session(session_id, parent_id=parent_id)
+
+    assert result.id == session_id
+    assert result.parent_id == parent_id
+    # Agent session_id must NOT be changed to the child's ID
+    assert mock_state.agent.session_id != session_id

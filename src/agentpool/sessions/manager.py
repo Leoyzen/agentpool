@@ -70,6 +70,15 @@ class SessionManager:
             from agentpool.sessions.models import SessionData
             from agentpool.utils.time_utils import get_now
 
+            # Inherit project_id and cwd from parent session so that
+            # child sessions appear in the same workspace/project filter
+            # in the TUI.  Without this, project_id defaults to None,
+            # which later falls back to "default" or "global" and breaks
+            # the per-project session listing.
+            parent_data = await self.store.load(parent_session_id)
+            parent_project_id = parent_data.project_id if parent_data else None
+            parent_cwd = parent_data.cwd if parent_data else None
+
             # Create session data with parent-child relationship
             session_data = SessionData(
                 session_id=child_session_id,
@@ -77,7 +86,8 @@ class SessionManager:
                 agent_type=agent_type,
                 parent_id=parent_session_id,
                 pool_id=self.pool.manifest.name if self.pool.manifest else None,
-                cwd=None,
+                project_id=parent_project_id,
+                cwd=parent_cwd,
                 created_at=get_now(),
                 last_active=get_now(),
             )

@@ -402,9 +402,19 @@ class ServerState:
         self.ensure_runtime_session_state(session_id)
         await self.mark_session_idle(session_id)
 
-        async with self.agent_lock:
-            self.bind_agent_to_session(session_id)
+        # Only bind agent to session for top-level sessions.
+        # Child sessions (parent_id is set) live inside the parent's agent stream
+        # and must NOT rebind the shared agent — that would overwrite the parent's
+        # session_id and also deadlock on agent_lock held by the parent stream.
+        if parent_id is None:
+            async with self.agent_lock:
+                self.bind_agent_to_session(session_id)
 
         await self.broadcast_event(SessionCreatedEvent.create(session))
+        logger.info(
+            "ensure_session: completed successfully",
+            session_id=session_id,
+            parent_id=parent_id,
+        )
 
         return session

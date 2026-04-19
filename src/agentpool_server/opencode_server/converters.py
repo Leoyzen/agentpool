@@ -541,9 +541,21 @@ def session_data_to_opencode(data: SessionData) -> Session:
     if "share" in data.metadata:
         share = SessionShare(**data.metadata["share"])
 
+    # Recompute project_id from cwd when stored value is missing or "default".
+    # Older sessions were persisted with project_id="default" which doesn't
+    # match the workspace API's projectID, breaking the TUI workspace filter.
+    project_id = data.project_id
+    if not project_id or project_id == "default":
+        if data.cwd:
+            from agentpool_storage.opencode_provider import helpers
+
+            project_id = helpers.compute_project_id(data.cwd)
+        else:
+            project_id = "default"
+
     return Session(
         id=data.session_id,
-        project_id=data.project_id or "default",
+        project_id=project_id,
         directory=data.cwd or "",
         title=data.title or "New Session",
         version=data.version,
@@ -551,7 +563,7 @@ def session_data_to_opencode(data: SessionData) -> Session:
         parent_id=data.parent_id,
         workspace_id=data.metadata.get("workspace_id")
         if data.metadata.get("workspace_id")
-        else f"wrk_{(data.project_id or 'default')[:12]}",
+        else f"wrk_{project_id[:12]}",
         revert=revert,
         share=share,
     )
