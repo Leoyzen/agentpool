@@ -53,6 +53,9 @@ class StorageProvider:
     can_load_history: bool = False
     """Whether this provider supports loading history."""
 
+    can_store_projects: bool = False
+    """Whether this provider supports project storage."""
+
     def __init__(self, config: BaseStorageProviderConfig) -> None:
         super().__init__()
         self.config = config
@@ -504,6 +507,34 @@ class StorageProvider:
         """
         msg = f"{self.__class__.__name__} does not support session storage"
         raise NotImplementedError(msg)
+
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs in a single query.
+
+        Default implementation falls back to calling ``load_session`` for each ID.
+        Subclasses with database backends should override this to perform a
+        single batch query and avoid the N+1 problem.
+
+        Args:
+            session_ids: List of session identifiers to load
+            agent_name: Optional filter to return only sessions for this agent
+
+        Returns:
+            List of found SessionData objects (order may differ from input)
+        """
+        result: list[SessionData] = []
+        for sid in session_ids:
+            session = await self.load_session(sid)
+            if session is not None:
+                if agent_name is not None and session.agent_name != agent_name:
+                    continue
+                result.append(session)
+        return result
 
     async def update_sdk_session_id(
         self,

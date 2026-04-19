@@ -29,6 +29,21 @@ FileUpdateEvent = Literal["add", "change", "unlink"]
 ConnectionStatus = Literal["connected", "error"]
 
 
+class SessionIdProperties(OpenCodeBaseModel):
+    """Base class for event properties that carry a non-nullable session_id.
+
+    Properties models with ``session_id: str`` should inherit from this class
+    so that ``_extract_session_id`` can use ``isinstance`` instead of a
+    per-type match arm.  This eliminates maintenance burden when new
+    session-bearing events are added.
+
+    **Exception**: ``SessionErrorProperties`` has ``session_id: str | None``,
+    so it must NOT inherit from this class.
+    """
+
+    session_id: str
+
+
 class EmptyProperties(OpenCodeBaseModel):
     """Empty properties object."""
 
@@ -75,10 +90,8 @@ class SessionUpdatedEvent(OpenCodeBaseModel):
         return cls(properties=SessionInfoProperties(info=session))
 
 
-class SessionDeletedProperties(OpenCodeBaseModel):
+class SessionDeletedProperties(SessionIdProperties):
     """Properties for session deleted event."""
-
-    session_id: str
 
 
 class SessionDeletedEvent(OpenCodeBaseModel):
@@ -92,10 +105,9 @@ class SessionDeletedEvent(OpenCodeBaseModel):
         return cls(properties=SessionDeletedProperties(session_id=session_id))
 
 
-class SessionStatusProperties(OpenCodeBaseModel):
+class SessionStatusProperties(SessionIdProperties):
     """Properties for session status event."""
 
-    session_id: str
     status: SessionStatus
 
 
@@ -111,10 +123,8 @@ class SessionStatusEvent(OpenCodeBaseModel):
         return cls(properties=SessionStatusProperties(session_id=session_id, status=status))
 
 
-class SessionIdleProperties(OpenCodeBaseModel):
+class SessionIdleProperties(SessionIdProperties):
     """Properties for session idle event (deprecated but still used by TUI)."""
-
-    session_id: str
 
 
 class SessionIdleEvent(OpenCodeBaseModel):
@@ -128,10 +138,8 @@ class SessionIdleEvent(OpenCodeBaseModel):
         return cls(properties=SessionIdleProperties(session_id=session_id))
 
 
-class SessionCompactedProperties(OpenCodeBaseModel):
+class SessionCompactedProperties(SessionIdProperties):
     """Properties for session compacted event."""
-
-    session_id: str
 
 
 class SessionCompactedEvent(OpenCodeBaseModel):
@@ -225,10 +233,9 @@ class PartUpdatedEvent(OpenCodeBaseModel):
         return cls(properties=PartUpdatedEventProperties(part=part, delta=delta))
 
 
-class PartDeltaEventProperties(OpenCodeBaseModel):
+class PartDeltaEventProperties(SessionIdProperties):
     """Properties for message part delta event."""
 
-    session_id: str
     message_id: str
     part_id: str
     field: str  # Field being updated, e.g., "text" for TextPart/ReasoningPart
@@ -261,10 +268,9 @@ class PartDeltaEvent(OpenCodeBaseModel):
         )
 
 
-class MessageRemovedProperties(OpenCodeBaseModel):
+class MessageRemovedProperties(SessionIdProperties):
     """Properties for message removed event."""
 
-    session_id: str
     message_id: str
 
 
@@ -281,10 +287,9 @@ class MessageRemovedEvent(OpenCodeBaseModel):
         return cls(properties=props)
 
 
-class PartRemovedProperties(OpenCodeBaseModel):
+class PartRemovedProperties(SessionIdProperties):
     """Properties for part removed event."""
 
-    session_id: str
     message_id: str
     part_id: str
 
@@ -326,7 +331,7 @@ class PermissionToolInfo(OpenCodeBaseModel):
     """Optional tool call ID."""
 
 
-class PermissionAskedProperties(OpenCodeBaseModel):
+class PermissionAskedProperties(SessionIdProperties):
     """Properties for permission.asked event.
 
     Matches OpenCode's PermissionNext.Event.Asked schema.
@@ -334,9 +339,6 @@ class PermissionAskedProperties(OpenCodeBaseModel):
 
     id: str
     """Permission request ID."""
-
-    session_id: str
-    """Session ID."""
 
     permission: str
     """Tool/permission type name."""
@@ -389,14 +391,11 @@ class PermissionRequestEvent(OpenCodeBaseModel):
         return cls(properties=props)
 
 
-class PermissionRepliedProperties(OpenCodeBaseModel):
+class PermissionRepliedProperties(SessionIdProperties):
     """Properties for permission replied event.
 
     Matches OpenCode's permission.replied event schema.
     """
-
-    session_id: str
-    """Session ID."""
 
     request_id: str
     """Request/Permission ID."""
@@ -429,14 +428,11 @@ class PermissionResolvedEvent(OpenCodeBaseModel):
         return cls(properties=props)
 
 
-class PermissionUpdatedProperties(OpenCodeBaseModel):
+class PermissionUpdatedProperties(SessionIdProperties):
     """Properties for permission updated event."""
 
     id: str
     """Permission request ID."""
-
-    session_id: str
-    """Session ID."""
 
     permission: str
     """Tool/permission type name."""
@@ -562,10 +558,8 @@ class TuiToastShowEvent(OpenCodeBaseModel):
         return cls(properties=props)
 
 
-class TuiSessionSelectProperties(OpenCodeBaseModel):
+class TuiSessionSelectProperties(SessionIdProperties):
     """Properties for TUI session select event."""
-
-    session_id: str
 
 
 class TuiSessionSelectEvent(OpenCodeBaseModel):
@@ -600,10 +594,9 @@ class Todo(OpenCodeBaseModel):
     """Priority level: high, medium, low."""
 
 
-class TodoUpdatedProperties(OpenCodeBaseModel):
+class TodoUpdatedProperties(SessionIdProperties):
     """Properties for todo updated event."""
 
-    session_id: str
     todos: list[Todo]
 
 
@@ -802,10 +795,9 @@ class VcsBranchUpdatedProperties(OpenCodeBaseModel):
 # =============================================================================
 
 
-class SessionDiffProperties(OpenCodeBaseModel):
+class SessionDiffProperties(SessionIdProperties):
     """Properties for session diff event."""
 
-    session_id: str
     diff: list[FileDiff]
 
 
@@ -875,14 +867,11 @@ class McpToolsChangedEvent(OpenCodeBaseModel):
 # =============================================================================
 
 
-class CommandExecutedProperties(OpenCodeBaseModel):
+class CommandExecutedProperties(SessionIdProperties):
     """Properties for command executed event."""
 
     name: str
     """Command name."""
-
-    session_id: str
-    """Session ID."""
 
     arguments: str
     """Command arguments."""
@@ -926,11 +915,10 @@ class VcsBranchUpdatedEvent(OpenCodeBaseModel):
         return cls(properties=VcsBranchUpdatedProperties(branch=branch))
 
 
-class QuestionAskedProperties(OpenCodeBaseModel):
+class QuestionAskedProperties(SessionIdProperties):
     """Properties for question asked event."""
 
     id: str
-    session_id: str
     questions: list[QuestionInfo]
     tool: QuestionToolInfo | None = None
 
@@ -958,10 +946,9 @@ class QuestionAskedEvent(OpenCodeBaseModel):
         return cls(properties=props)
 
 
-class QuestionRepliedProperties(OpenCodeBaseModel):
+class QuestionRepliedProperties(SessionIdProperties):
     """Properties for question replied event."""
 
-    session_id: str
     request_id: str
     answers: list[list[str]]
 
@@ -987,10 +974,9 @@ class QuestionRepliedEvent(OpenCodeBaseModel):
         return cls(properties=props)
 
 
-class QuestionRejectedProperties(OpenCodeBaseModel):
+class QuestionRejectedProperties(SessionIdProperties):
     """Properties for question rejected event."""
 
-    session_id: str
     request_id: str
 
 
@@ -1050,3 +1036,19 @@ Event = (
     | TuiToastShowEvent
     | TuiSessionSelectEvent
 )
+
+
+class GlobalEvent(OpenCodeBaseModel):
+    """SSE envelope for OpenCode v1.4.4+ global event routing.
+
+    Not an event type itself — wraps Event instances with routing metadata.
+    """
+
+    directory: str
+    """Working directory used for event routing in multi-directory servers."""
+
+    project: str | None = None
+    """Project identifier for event routing (git root commit SHA or 'global')."""
+
+    payload: dict[str, Any]
+    """The wrapped event data."""

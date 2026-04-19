@@ -952,6 +952,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         break
                     yield event
                 except TimeoutError:
+                    # On Python 3.12+, asyncio.wait_for() uses asyncio.timeout()
+                    # internally. When an *external* cancellation (e.g. from
+                    # anyio.fail_after in a tool call) arrives during the
+                    # wait_for, the nested timeout context manager can convert
+                    # the CancelledError into a TimeoutError. Detect this by
+                    # checking whether the current task is still being
+                    # cancelled, and re-raise as CancelledError so that callers
+                    # (especially _process_message_locked) handle it properly.
+                    # See: https://github.com/python/cpython/issues/111162
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling() > 0:
+                        raise asyncio.CancelledError() from None
                     # Check if we should exit
                     if run_ctx.cancelled:
                         break
@@ -1183,36 +1195,24 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         try:
             # Get session IDs from store
             session_ids = await self.agent_pool.storage.list_session_ids(agent_name=self.name)
-            # Load each session to get full SessionData
-            result: list[SessionData] = []
+            # Batch load all sessions in one query instead of N+1
+            sessions = await self.agent_pool.storage.load_sessions_batch(
+                session_ids, agent_name=self.name
+            )
+            # Filter by cwd
             resolved_filter = Path(cwd).resolve() if cwd is not None else None
-            for session_id in session_ids:
-                if session_data := await self.agent_pool.storage.load_session(session_id):
-                    # Filter by cwd if specified, using path normalization
-                    # to handle trailing slashes, symlinks, and relative paths
-                    if resolved_filter is not None:
-                        if (
-                            not session_data.cwd
-                            or Path(session_data.cwd).resolve() != resolved_filter
-                        ):
-                            continue
-                    # Fetch title from conversation storage if not in metadata
-                    if (
-                        not session_data.title
-                        and (storage := self.agent_pool.storage)
-                        and (title := await storage.get_session_title(session_data.session_id))
-                    ):
-                        session_data = session_data.with_metadata(title=title)
-                    result.append(session_data)
-                    # Check limit
-                    if limit is not None and len(result) >= limit:
-                        break
+            if resolved_filter is not None:
+                sessions = [
+                    s for s in sessions if s.cwd and Path(s.cwd).resolve() == resolved_filter
+                ]
+            # Apply limit
+            if limit is not None:
+                sessions = sessions[:limit]
+            return sessions
 
         except Exception:
             self.log.exception("Failed to list sessions")
             return []
-        else:
-            return result
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load and restore a session from storage.

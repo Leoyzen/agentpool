@@ -760,6 +760,11 @@ class EventProcessor:
             user_msg.add_text_part(f"Task: {source_name}")
             ctx.state.messages[child_session_id].append(user_msg)
             yield MessageUpdatedEvent.create(user_msg.info)
+            # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
+            # text part.  Without this, the UserMessage component finds no text
+            # part and renders nothing for the first user message card.
+            if user_msg.parts:
+                yield PartUpdatedEvent.create(user_msg.parts[0])
 
             # Persist user message to storage
             with contextlib.suppress(Exception):
@@ -807,7 +812,7 @@ class EventProcessor:
                     time=ts,
                     input={
                         "description": f"Subagent: {source_name}",
-                        "subagent_type": source_type,
+                        "subagent_type": source_name,
                         "prompt": "",
                     },
                     metadata={"sessionId": child_session_id, "title": source_name},
@@ -867,7 +872,7 @@ class EventProcessor:
                     completed_state = ToolStateCompleted(
                         input={
                             "description": f"Subagent: {source_name}",
-                            "subagent_type": source_type,
+                            "subagent_type": source_name,
                             "prompt": "",
                         },
                         output=content,
@@ -926,11 +931,14 @@ class EventProcessor:
             time=TimeCreated(created=now_ms()),
             agent_name=event.source_name,
         )
-        # Use description if available
-        description = event.description or f"Task: {event.source_name}"
-        user_msg.add_text_part(description)
+        # Use prompt from metadata if available, fall back to description
+        text_part = user_msg.add_text_part(event.metadata.get("prompt") or event.description)
         ctx.state.messages[event.child_session_id].append(user_msg)
         yield MessageUpdatedEvent.create(user_msg.info)
+        # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
+        # text part.  Without this, the UserMessage component finds no text
+        # part and renders nothing for the first user message card.
+        yield PartUpdatedEvent.create(text_part)
 
         # Persist user message to storage
         with contextlib.suppress(Exception):
@@ -980,10 +988,10 @@ class EventProcessor:
                 time=ts,
                 input={
                     "description": tool_title,
-                    "subagent_type": event.source_type,
+                    "subagent_type": event.source_name,
                     "prompt": subagent_prompt,
                 },
-                metadata={"sessionId": event.child_session_id},
+                metadata={"sessionId": event.child_session_id, "title": tool_title},
                 title=tool_title,
             )
             tool_part = ToolPart(

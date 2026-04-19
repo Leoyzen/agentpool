@@ -64,6 +64,7 @@ class SQLModelProvider(StorageProvider):
     """
 
     can_load_history = True
+    can_store_projects = True
 
     def __init__(self, config: SQLStorageConfig | None = None) -> None:
         """Initialize provider with async database engine.
@@ -225,14 +226,10 @@ class SQLModelProvider(StorageProvider):
 
             # Apply dialect-specific "insert or ignore duplicate PK" semantics
             dialect_name = self.engine.dialect.name
-            if dialect_name in ("sqlite", "postgresql") and hasattr(
-                stmt, "on_conflict_do_nothing"
-            ):
+            if dialect_name in ("sqlite", "postgresql") and hasattr(stmt, "on_conflict_do_nothing"):
                 # Conversation.id is the primary key (indexed); required for ON CONFLICT target.
                 stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
-            elif dialect_name in ("mysql", "mariadb") and hasattr(
-                stmt, "on_duplicate_key_update"
-            ):
+            elif dialect_name in ("mysql", "mariadb") and hasattr(stmt, "on_duplicate_key_update"):
                 # MySQL/MariaDB have no on_conflict_do_nothing; update PK to itself is a no-op
                 stmt = stmt.on_duplicate_key_update(id=stmt.inserted.id)
 
@@ -240,7 +237,12 @@ class SQLModelProvider(StorageProvider):
             await session.commit()
 
     async def update_session_title(self, session_id: str, title: str) -> None:
-        """Update the title of a conversation."""
+        """Update the title of a conversation.
+
+        Only writes the ``title`` column.  ``_session_from_db`` always
+        syncs ``row.title`` → ``metadata["title"]`` on read, so this
+        single write is sufficient.
+        """
         async with AsyncSession(self.engine) as session:
             result = await session.execute(
                 select(Conversation).where(Conversation.id == session_id)
@@ -741,29 +743,88 @@ class SQLModelProvider(StorageProvider):
 
     # Session persistence methods
 
-    async def save_session(self, data: SessionData) -> None:
-        """Save or update session data."""
-        from agentpool_storage.session_store import SQLSessionStore
+    def _session_from_db(self, row: Conversation) -> SessionData:
+        """Convert database Conversation row to SessionData.
 
-        store = SQLSessionStore(self.config)
-        async with store:
-            await store.save(data)
+        Mirrors ``SQLSessionStore._from_db_model`` logic: merges ``title``
+        into ``metadata`` and maps ``start_time`` → ``created_at``.
+
+        ``Conversation.title`` is the single source of truth — it always
+        overrides ``metadata_json["title"]`` so that ``update_session_title``
+        (which only writes the column) is sufficient.
+        """
+        from agentpool.sessions.models import SessionData
+
+        metadata = row.metadata_json or {}
+        # Conversation.title is authoritative — always sync to metadata
+        if row.title:
+            metadata = {**metadata, "title": row.title}
+        return SessionData(
+            session_id=row.id,
+            agent_name=row.agent_name,
+            pool_id=row.pool_id,
+            project_id=row.project_id,
+            parent_id=row.parent_id,
+            version=row.version,
+            cwd=row.cwd,
+            created_at=row.start_time,
+            last_active=row.last_active or get_now(),
+            metadata=metadata,
+        )
+
+    async def save_session(self, data: SessionData) -> None:
+        """Save or update session data.
+
+        Uses delete-then-insert upsert semantics (same pattern as
+        ``save_project`` and ``SQLSessionStore.save``) to avoid creating
+        a ``SQLSessionStore`` instance which would dispose ``self.engine``
+        on exit.
+        """
+        from sqlalchemy import delete as sa_delete
+
+        db_obj = Conversation(
+            id=data.session_id,
+            agent_name=data.agent_name,
+            pool_id=data.pool_id,
+            project_id=data.project_id,
+            parent_id=data.parent_id,
+            title=data.title,
+            version=data.version,
+            cwd=data.cwd,
+            start_time=data.created_at,
+            last_active=data.last_active,
+            metadata_json=data.metadata,
+        )
+
+        async with AsyncSession(self.engine) as session:
+            # Delete existing if present (upsert via delete+insert)
+            stmt = sa_delete(Conversation).where(Conversation.id == data.session_id)  # type: ignore[arg-type]
+            await session.execute(stmt)
+            # Insert new/updated
+            session.add(db_obj)
+            await session.commit()
 
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load session data by ID."""
-        from agentpool_storage.session_store import SQLSessionStore
-
-        store = SQLSessionStore(self.config)
-        async with store:
-            return await store.load(session_id)
+        async with AsyncSession(self.engine) as session:
+            result = await session.execute(
+                select(Conversation).where(Conversation.id == session_id)
+            )
+            row = result.scalars().first()
+            return self._session_from_db(row) if row else None
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a session."""
-        from agentpool_storage.session_store import SQLSessionStore
+        from sqlalchemy import delete as sa_delete
 
-        store = SQLSessionStore(self.config)
-        async with store:
-            return await store.delete(session_id)
+        async with AsyncSession(self.engine) as session:
+            stmt = sa_delete(Conversation).where(Conversation.id == session_id)  # type: ignore[arg-type]
+            result = await session.execute(stmt)
+            await session.commit()
+            deleted: bool = result.rowcount > 0  # type: ignore[attr-defined]
+            if deleted:
+                logger.debug("Deleted session", session_id=session_id)
+            return deleted
 
     async def list_session_ids(
         self,
@@ -772,8 +833,42 @@ class SQLModelProvider(StorageProvider):
         agent_name: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered."""
-        from agentpool_storage.session_store import SQLSessionStore
+        async with AsyncSession(self.engine) as session:
+            stmt = select(Conversation.id)
+            if pool_id is not None:
+                stmt = stmt.where(Conversation.pool_id == pool_id)
+            if agent_name is not None:
+                stmt = stmt.where(Conversation.agent_name == agent_name)
+            stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
 
-        store = SQLSessionStore(self.config)
-        async with store:
-            return await store.list_sessions(pool_id=pool_id, agent_name=agent_name)
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs in a single query.
+
+        Avoids the N+1 problem of calling ``load_session`` per ID by fetching
+        all matching rows in one SQL statement.
+
+        Args:
+            session_ids: List of session identifiers to load
+            agent_name: Optional filter to return only sessions for this agent
+
+        Returns:
+            List of found SessionData objects, ordered by last_active descending
+        """
+        if not session_ids:
+            return []
+
+        async with AsyncSession(self.engine) as session:
+            stmt = select(Conversation).where(Conversation.id.in_(session_ids))  # type: ignore[attr-defined]
+            if agent_name is not None:
+                stmt = stmt.where(Conversation.agent_name == agent_name)
+            stmt = stmt.order_by(Conversation.last_active.desc())  # type: ignore[attr-defined]
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [self._session_from_db(row) for row in rows]

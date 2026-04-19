@@ -14,20 +14,15 @@ import pytest
 
 from agentpool_server.opencode_server.models import (
     MessageRequest,
-    Session,
-    SessionStatus,
     TextPartInput,
 )
-from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.models.message import UserMessage
 from agentpool_server.opencode_server.routes.message_routes import _process_message
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.utils.time_utils import now_ms
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from agentpool.agents.base_agent import BaseAgent
 
 
 class SlowAgentMock:
@@ -52,7 +47,7 @@ class SlowAgentMock:
 
     async def set_mode(self, mode: str, category_id: str | None = None) -> None:
         """Mock set_mode method."""
-        pass
+        return
 
     async def get_available_models(self):
         """Mock get_available_models method."""
@@ -86,7 +81,7 @@ class SlowAgentMock:
                 await asyncio.sleep(self.delay)
 
                 # Yield a simple text event
-                from agentpool.agents.events import TextContentItem, StreamCompleteEvent
+                from agentpool.agents.events import StreamCompleteEvent, TextContentItem
                 from agentpool.messaging import ChatMessage
 
                 yield TextContentItem(text=f"Response for {session_id}")
@@ -101,6 +96,7 @@ class SlowAgentMock:
 def slow_mock_agent():
     """Create a slow mock agent for testing concurrency."""
     agent = SlowAgentMock(delay=0.3)
+    saved_sessions: dict[str, Any] = {}
 
     # Set up pool mock with async storage methods
     pool = Mock()
@@ -110,13 +106,21 @@ def slow_mock_agent():
 
     # Storage needs to be properly mocked with async methods
     storage = Mock()
-    storage.save_session = AsyncMock()
+
+    async def save_session(session_data: Any) -> None:
+        saved_sessions[session_data.session_id] = session_data
+
+    storage.save_session = AsyncMock(side_effect=save_session)
+    storage.log_session = AsyncMock()
     storage.log_message = AsyncMock()
     pool.storage = storage
 
     pool.todos = Mock()
     pool.todos.on_change = None
     pool.skill_commands = None
+
+    pool.sessions = Mock()
+    pool.sessions.store = None
 
     # CRITICAL: all_agents must return a real dict to avoid Mock issues
     pool.all_agents = {agent.name: agent}
@@ -133,6 +137,15 @@ def slow_mock_agent():
 
     # Set up storage
     agent.storage = storage
+
+    conversation = Mock()
+    conversation.chat_messages = []
+    agent.conversation = conversation
+
+    async def load_session(session_id: str) -> Any:
+        return saved_sessions.get(session_id)
+
+    agent.load_session = AsyncMock(side_effect=load_session)
 
     return agent
 
@@ -270,15 +283,17 @@ class TestConcurrentMessageHandling:
         assert "busy" in status_types or any("busy" in str(h) for h in status_history)
 
     @pytest.mark.asyncio
-    async def test_different_sessions_can_process_concurrently(
+    async def test_different_sessions_are_serialized_by_shared_agent_lock(
         self,
         concurrent_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """Test that different sessions can process messages concurrently.
+        """Test that different sessions are serialized when sharing one agent.
 
-        While the same session should process messages sequentially, different
-        sessions should be able to process messages in parallel.
+        OpenCode currently reuses a single mutable agent instance across
+        sessions. Until the server grows per-session agent instances, the
+        global agent lock must serialize runs across sessions to avoid shared
+        `session_id` / input-provider races.
         """
         state = concurrent_test_state
         session_id_1 = "test-session-1"
@@ -288,17 +303,16 @@ class TestConcurrentMessageHandling:
         await state.ensure_session(session_id_1)
         await state.ensure_session(session_id_2)
 
-        # Track start and end times
-        start_times = {}
-        end_times = {}
+        timeline: list[tuple[str, str]] = []
 
         original_run_stream = state.agent.run_stream
 
         async def tracked_run_stream(*args, session_id=None, **kwargs):
-            start_times[session_id] = asyncio.get_event_loop().time()
+            session_key = session_id or "unknown"
+            timeline.append((session_key, "start"))
             async for event in original_run_stream(*args, session_id=session_id, **kwargs):
                 yield event
-            end_times[session_id] = asyncio.get_event_loop().time()
+            timeline.append((session_key, "end"))
 
         state.agent.run_stream = tracked_run_stream  # type: ignore[method-assign]
 
@@ -311,6 +325,21 @@ class TestConcurrentMessageHandling:
         # Verify both sessions processed their messages
         assert len(state.messages[session_id_1]) == 2  # user + assistant
         assert len(state.messages[session_id_2]) == 2  # user + assistant
+
+        assert timeline in (
+            [
+                (session_id_1, "start"),
+                (session_id_1, "end"),
+                (session_id_2, "start"),
+                (session_id_2, "end"),
+            ],
+            [
+                (session_id_2, "start"),
+                (session_id_2, "end"),
+                (session_id_1, "start"),
+                (session_id_1, "end"),
+            ],
+        )
 
     @pytest.mark.asyncio
     async def test_message_ordering_preserved_under_concurrency(

@@ -27,6 +27,22 @@ class HealthResponse(OpenCodeBaseModel):
     version: str
 
 
+class DiagnosticResponse(OpenCodeBaseModel):
+    """Response for /global/diagnostic endpoint."""
+
+    directory: str | None = None
+    """Working directory of the server."""
+
+    project: str
+    """Project identifier computed from the working directory."""
+
+    subscribers: int
+    """Current number of SSE event subscribers."""
+
+    server_version: str
+    """Server version string."""
+
+
 class PathInfo(OpenCodeBaseModel):
     """Path information for the OpenCode instance.
 
@@ -100,6 +116,27 @@ class VcsInfo(OpenCodeBaseModel):
     branch: str | None = None
     dirty: bool = False
     commit: str | None = None
+
+
+class DisposeResponse(OpenCodeBaseModel):
+    """Response for /global/dispose endpoint (OpenCode 1.4.4+ compat).
+
+    Minimal stub: acknowledges the request without actually shutting down.
+    """
+
+    success: bool = True
+    message: str = "dispose acknowledged (no-op)"
+
+
+class UpgradeResponse(OpenCodeBaseModel):
+    """Response for /global/upgrade endpoint (OpenCode 1.4.4+ compat).
+
+    Minimal stub: indicates no upgrade was performed.
+    """
+
+    success: bool = True
+    message: str = "upgrade not supported (stub)"
+    upgraded: bool = False
 
 
 class ProjectUpdateRequest(OpenCodeBaseModel):

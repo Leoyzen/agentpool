@@ -43,10 +43,20 @@ class TimeStartEnd(OpenCodeBaseModel):
 
 
 class ModelRef(OpenCodeBaseModel):
-    """Reference to a provider model (provider_id + model_id)."""
+    """Reference to a provider model with optional variant.
 
-    provider_id: str
-    model_id: str
+    OpenCode v1.4.0+ nests ``variant`` inside the ``model`` object:
+    ``{ providerID?, modelID?, variant? }``.
+
+    All fields are optional to support partial references — e.g. a message
+    that only specifies a ``variant`` (thinking effort level) without
+    changing the provider or model.
+    """
+
+    provider_id: str | None = None
+    model_id: str | None = None
+    variant: str | None = None
+    """Reasoning/thinking variant for this model (e.g. 'low', 'medium', 'high', 'max')."""
 
 
 class TokenCache(OpenCodeBaseModel):
@@ -95,11 +105,14 @@ class TextSpan(OpenCodeBaseModel):
 
 
 class FileDiff(OpenCodeBaseModel):
-    """A file diff entry."""
+    """A file diff entry.
+
+    Matches the OpenCode v1.4.0+ SnapshotFileDiff schema:
+    ``{ file, patch, additions, deletions, status? }``
+    """
 
     file: str
-    before: str
-    after: str
+    patch: str | None = None
     additions: int
     deletions: int
     status: FileDiffStatus | None = None
@@ -119,8 +132,7 @@ class FileDiff(OpenCodeBaseModel):
                 status = None
         return cls(
             file=change.path,
-            before=change.old_content or "",
-            after=change.new_content or "",
+            patch=diff_text,
             additions=diff_text.count("\n+"),
             deletions=diff_text.count("\n-"),
             status=status,

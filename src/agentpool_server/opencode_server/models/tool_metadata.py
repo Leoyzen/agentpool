@@ -60,12 +60,12 @@ LSPDiagnosticsMap = dict[str, list[LSPDiagnostic]]
 class FileDiff(TypedDict):
     """A file diff entry (mirrors ``Snapshot.FileDiff`` in opencode).
 
-    Used by edit and apply_patch tools.
+    Matches the OpenCode v1.4.0+ SnapshotFileDiff schema:
+    ``{ file, patch, additions, deletions, status? }``
     """
 
     file: str
-    before: str
-    after: str
+    patch: str
     additions: int
     deletions: int
     status: NotRequired[FileDiffStatus]
@@ -125,7 +125,7 @@ class EditMetadata(TruncationFields):
     diff: str
     """Unified diff string."""
     filediff: FileDiff
-    """Structured before/after content with change counts."""
+    """Structured patch content with change counts."""
     diagnostics: LSPDiagnosticsMap
     """LSP diagnostics keyed by normalized file path."""
 

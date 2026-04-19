@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, Request  # noqa: TC002
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -343,6 +343,24 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     async def get_doc() -> RedirectResponse:
         """Redirect to OpenAPI docs."""
         return RedirectResponse(url="/docs")
+
+    # OTLP telemetry sink endpoints (compatibility for OpenCode 1.4.4+)
+    # Must be registered BEFORE the catch-all proxy so POST /v1/metrics etc.
+    # don't fall through to a GET/HEAD/OPTIONS-only route (→ 405).
+    @app.post("/v1/metrics")
+    async def otlp_metrics(request: Request) -> Response:
+        """Accept OTLP metrics payloads and discard them."""
+        return Response(status_code=204)
+
+    @app.post("/v1/traces")
+    async def otlp_traces(request: Request) -> Response:
+        """Accept OTLP traces payloads and discard them."""
+        return Response(status_code=204)
+
+    @app.post("/v1/logs")
+    async def otlp_logs(request: Request) -> Response:
+        """Accept OTLP logs payloads and discard them."""
+        return Response(status_code=204)
 
     # Proxy catch-all for OpenCode's hosted web UI
     # This must be registered LAST so it doesn't catch API routes

@@ -66,6 +66,11 @@ class OpenCodeInputProvider(InputProvider):
         self._id_counter += 1
         return f"perm_{self._id_counter}_{int(__import__('time').time() * 1000)}"
 
+    def _generate_question_id(self) -> str:
+        """Generate a unique question ID."""
+        self._id_counter += 1
+        return f"que_{self._id_counter}_{int(__import__('time').time() * 1000)}"
+
     async def get_tool_confirmation(
         self,
         context: AgentContext[Any],
@@ -193,6 +198,17 @@ class OpenCodeInputProvider(InputProvider):
         )
         return True
 
+    def has_pending_permission(self, permission_id: str) -> bool:
+        """Check whether a specific permission request is pending.
+
+        Args:
+            permission_id: The permission request ID to look up
+
+        Returns:
+            True if the permission is pending, False otherwise
+        """
+        return permission_id in self._pending_permissions
+
     def get_pending_permissions(self) -> list[PermissionAskedProperties]:
         """Get all pending permission requests.
 
@@ -292,7 +308,7 @@ class OpenCodeInputProvider(InputProvider):
                 return types.ElicitResult(action="decline")
         # Extract descriptions if available (custom x-option-descriptions field)
         descriptions = schema.get("x-option-descriptions", {})
-        question_id = self._generate_permission_id()  # Reuse ID generator
+        question_id = self._generate_question_id()
         opts = [
             QuestionOption(label=str(val), description=descriptions.get(str(val), ""))
             for val in enum_values
@@ -478,7 +494,7 @@ class OpenCodeInputProvider(InputProvider):
             logger.warning("No valid questions could be created from object schema")
             return types.ElicitResult(action="decline")
 
-        question_id = self._generate_permission_id()
+        question_id = self._generate_question_id()
 
         # Create future to wait for answers
         future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()

@@ -62,7 +62,13 @@ def _project_data_to_response(data: ProjectData) -> Project:
 
 
 async def _get_current_project(state: StateDep) -> ProjectData:
-    """Get or create the current project from storage."""
+    """Get or create the current project from storage.
+
+    The returned ``ProjectData`` carries ``project_id`` from
+    ``generate_project_id()`` (a SHA1 of the worktree path — AgentPool's
+    internal identifier). That internal project ID is distinct from OpenCode's
+    git-root-based session layout ID; the two IDs are not interchangeable.
+    """
     project_store = ProjectStore(state.storage)
     return await project_store.get_or_create(state.working_dir)
 

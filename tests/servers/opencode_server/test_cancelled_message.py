@@ -183,7 +183,6 @@ def _create_user_message(
         time=TimeCreated.now(),
         agent=request.agent or "default",
         model=request.model,
-        variant=request.variant,
     )
     user_msg_with_parts = MessageWithParts(info=user_message)
     # Add text parts from request

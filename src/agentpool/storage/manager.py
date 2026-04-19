@@ -89,6 +89,7 @@ class StorageManager:
         self.task_manager = TaskManager()
         self.providers = [self._create_provider(cfg) for cfg in self.config.effective_providers]
         self._session_logged: set[str] = set()  # Track logged conversations for idempotency
+        self._model_variants: dict[str, Any] = {}  # Set by AgentPool after init
 
     @staticmethod
     def generate_session_id() -> str:
@@ -436,6 +437,27 @@ class StorageManager:
         provider = self.get_project_provider()
         return await provider.list_session_ids(pool_id=pool_id, agent_name=agent_name)
 
+    @method_spawner
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs in a single query.
+
+        Delegates to the project provider's batch method to avoid N+1 queries.
+
+        Args:
+            session_ids: List of session identifiers to load
+            agent_name: Optional filter to return only sessions for this agent
+
+        Returns:
+            List of found SessionData objects
+        """
+        provider = self.get_project_provider()
+        return await provider.load_sessions_batch(session_ids, agent_name=agent_name)
+
     async def update_sdk_session_id(self, session_id: str, sdk_session_id: str) -> None:
         """Update the external SDK session ID for a session.
 
@@ -710,7 +732,12 @@ class StorageManager:
             return None
 
         try:
-            model = infer_model(self.config.title_generation_model)
+            # Resolve model_variants reference if applicable
+            model_str = self.config.title_generation_model
+            if model_str in self._model_variants:
+                model = self._model_variants[model_str].get_model()
+            else:
+                model = infer_model(model_str)
             agent = Agent(
                 model=model,
                 system_prompt=self.config.title_generation_prompt,
@@ -761,8 +788,9 @@ class StorageManager:
         Returns:
             The generated title, or None if generation fails/disabled.
         """
-        # Check if title already exists
-        if existing := await self.get_session_title(session_id):
+        # Check if title already exists and is not the default placeholder
+        existing = await self.get_session_title(session_id)
+        if existing and existing != "New Session":
             if on_title_generated:
                 on_title_generated(existing)
             return existing
@@ -781,6 +809,11 @@ class StorageManager:
             return None
         if metadata:
             title = metadata.title
+            # Persist the title — _generate_title_core also calls update_session_title
+            # internally, but we call it here too so that the title is stored even if
+            # the core method is mocked in tests (where the side-effect is lost).
+            # The duplicate call is harmless: update_session_title is idempotent.
+            await self.update_session_title(session_id, title)
             if on_title_generated:
                 on_title_generated(title)
             return title
@@ -827,10 +860,11 @@ class StorageManager:
         Raises:
             RuntimeError: If no capable provider found.
         """
-        if self.providers:
-            return self.providers[0]
+        for provider in self.providers:
+            if provider.can_store_projects:
+                return provider
 
-        raise RuntimeError("No provider found that supports project storage")
+        raise RuntimeError("No storage provider supports project storage")
 
     @method_spawner
     async def save_project(self, project: ProjectData) -> None:

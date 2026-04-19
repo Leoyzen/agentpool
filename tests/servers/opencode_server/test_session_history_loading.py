@@ -7,8 +7,8 @@ switching between sessions, preventing cross-session contamination.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, Mock
+from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
 
@@ -32,6 +32,7 @@ class TestSessionHistoryLoading:
         async_client: AsyncClient,
         server_state: ServerState,
         tmp_project_dir: Path,
+        event_capture,
     ):
         """When switching sessions, agent should reload conversation history."""
         # Setup: Create session A
@@ -88,6 +89,18 @@ class TestSessionHistoryLoading:
         assert loaded_session is not None
         assert loaded_session.id == session_a_id
         assert server_state.agent.session_id == session_a_id
+        status_events = [
+            event
+            for event in event_capture.get_events_by_type("session.status")
+            if event.properties.session_id == session_a_id
+        ]
+        idle_events = [
+            event
+            for event in event_capture.get_events_by_type("session.idle")
+            if event.properties.session_id == session_a_id
+        ]
+        assert status_events
+        assert idle_events
 
     async def test_cached_session_with_wrong_agent_session_gets_reloaded(
         self,
@@ -154,6 +167,7 @@ class TestSessionHistoryLoading:
         loaded_session = await get_or_load_session(server_state, session_a_id)
 
         # VERIFY: load_session should have been called
+        assert loaded_session is not None
         assert load_session_called
         assert server_state.agent.session_id == session_a_id
 

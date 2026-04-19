@@ -1,12 +1,12 @@
 ---
 rfc_id: RFC-0022
 title: OpenCode v1.4.4+ GlobalEvent Protocol Support
-status: DRAFT
+status: ACCEPTED
 author: yuchen.liu
 reviewers: []
 created: 2026-04-15
-last_updated: 2026-04-15
-decision_date:
+last_updated: 2026-04-16
+decision_date: 2026-04-16
 related_prds: []
 related_rfcs:
   - RFC-0013-subagent-event-unification.md
@@ -635,33 +635,46 @@ No new endpoints. Changes are limited to the SSE data format:
 
 ---
 
-## Decision Record
+## Implementation Status
 
-> Complete this section after RFC review is concluded.
+> Implemented 2026-04-16. Key deviations from the original design:
+
+| # | Deviation | Rationale |
+|---|-----------|-----------|
+| 1 | `GlobalEventFactory` placed in `global_routes.py` instead of `state.py` | Avoids circular imports — `state.py` cannot import from `models/events.py` without creating a dependency cycle |
+| 2 | `wrap()` returns `str` (JSON) instead of `GlobalEvent` model instance | The SSE generator needs serialized JSON strings; returning the model would require the caller to serialize, adding unnecessary coupling |
+| 3 | Reuses `_serialize_event()` for payload generation | The existing `_serialize_event()` already handles event serialization correctly; duplicating that logic in the factory would violate DRY |
+| 4 | Uses `json.dumps(ensure_ascii=False)` instead of `model_dump_json()` | `model_dump_json()` escapes non-ASCII characters by default; `ensure_ascii=False` preserves Unicode content in event payloads |
+
+---
+
+## Decision Record
 
 ### Decision
 
-**Status**: PENDING
+**Status**: ACCEPTED
 
-**Date**:
+**Date**: 2026-04-16
 
-**Approvers**:
+**Approvers**: yuchen.liu
 
 ### Decision Summary
 
-[To be completed after review]
+Accepted Option 2 (Formal GlobalEvent Model) with pragmatic implementation deviations documented above.
 
 ### Key Discussion Points
 
-[To be completed after review]
+- Circular import issue required moving factory out of `state.py`
+- Serialization strategy prioritized simplicity and DRY over strict model-driven design
 
 ### Conditions of Approval
 
-[To be completed after review]
+- Must not break the existing `/event` endpoint
+- Must pass manual testing with OpenCode v1.4.4+ TUI
 
 ### Dissenting Opinions
 
-[To be completed after review]
+None
 
 ---
 

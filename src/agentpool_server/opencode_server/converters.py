@@ -541,9 +541,21 @@ def session_data_to_opencode(data: SessionData) -> Session:
     if "share" in data.metadata:
         share = SessionShare(**data.metadata["share"])
 
+    # Recompute project_id from cwd when stored value is missing or "default".
+    # Older sessions were persisted with project_id="default" which doesn't
+    # match the projectID computed from the cwd.
+    project_id = data.project_id
+    if not project_id or project_id == "default":
+        if data.cwd:
+            from agentpool_storage.opencode_provider import helpers
+
+            project_id = helpers.compute_project_id(data.cwd)
+        else:
+            project_id = "default"
+
     return Session(
         id=data.session_id,
-        project_id=data.project_id or "default",
+        project_id=project_id,
         directory=data.cwd or "",
         title=data.title or "New Session",
         version=data.version,

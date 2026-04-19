@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import RequestUsage
 
 from agentpool.log import get_logger
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.event_processor import EventProcessor
@@ -80,6 +81,17 @@ class OpenCodeStreamAdapter:
     processor: EventProcessor = field(default_factory=EventProcessor, init=False)
     main_context: EventProcessorContext = field(init=False)
     _cost_info: Any = field(default=None, init=False)
+    _step_finish_emitted: bool = field(default=False, init=False)
+    """Tracks whether StepFinishPart was emitted for THIS session (not children).
+
+    Only set when the StepFinishPart's session_id matches the adapter's
+    session_id.  Child subagent sessions also emit StepFinishPart events
+    that bubble through process_stream(), but those must NOT suppress
+    the parent's StepFinishPart — otherwise a stream interrupted after
+    a child completes but before the parent's StreamCompleteEvent would
+    leave the parent session without a StepFinishPart, causing the TUI
+    to show it stuck in "working" state.
+    """
 
     def __post_init__(self) -> None:
         self.main_context = EventProcessorContext(
@@ -147,12 +159,28 @@ class OpenCodeStreamAdapter:
         try:
             async for event in stream:
                 async for oc_event in self.processor.process(event, self.main_context):
+                    # Track if StepFinishPart was emitted for THIS session.
+                    # Child subagent sessions also emit StepFinishPart events
+                    # but must not suppress the parent's finalize() fallback.
+                    if (
+                        isinstance(oc_event, PartUpdatedEvent)
+                        and isinstance(oc_event.properties.part, StepFinishPart)
+                        and oc_event.properties.part.session_id == self.session_id
+                    ):
+                        self._step_finish_emitted = True
                     yield oc_event
         except asyncio.CancelledError:
             # Stream was cancelled by user - this is expected behavior
             # Don't propagate the error, just log it
             logger.debug("Stream cancelled by user", session_id=self.session_id)
             raise  # Re-raise so caller can handle cleanup
+        except RunAbortedError:
+            # Agent aborted the run (e.g. question_for_user raised RunAbortedError
+            # when user cancelled the questionnaire). Re-raise so
+            # _process_message_locked can finalize the assistant message with
+            # aborted state and update the agent's conversation history.
+            logger.debug("Run aborted by agent", session_id=self.session_id)
+            raise
         except Exception as e:  # noqa: BLE001
             self.main_context.response_text = f"Error calling agent: {e}"
             yield SessionErrorEvent.from_exception(session_id=self.session_id, exception=e)
@@ -176,7 +204,8 @@ class OpenCodeStreamAdapter:
         """Yield final events after the stream has ended.
 
         Produces the final text part update (or creates one if text was never
-        streamed), the step-finish part, and the final text timing update.
+        streamed), the step-finish part (if not already emitted by
+        _process_stream_complete), and the final text timing update.
         """
         response_time = now_ms()
         start = self.main_context.stream_start_ms
@@ -204,7 +233,11 @@ class OpenCodeStreamAdapter:
             )
             self.assistant_msg.update_part(final_text_part)
 
-        # Step finish
+        # Step finish — skip if already emitted by _process_stream_complete
+        # (StreamCompleteEvent handler in EventProcessor also emits StepFinishPart)
+        if self._step_finish_emitted:
+            return
+
         cache = TokenCache(read=0, write=0)
         tokens = Tokens(
             cache=cache,

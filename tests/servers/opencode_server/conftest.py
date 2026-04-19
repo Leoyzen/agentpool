@@ -11,6 +11,8 @@ Provides fixtures for testing the OpenCode server API, including:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 from pathlib import Path
 import tempfile
 from typing import TYPE_CHECKING, Any
@@ -30,8 +32,9 @@ from agentpool_server.opencode_server.dependencies import get_state
 from agentpool_server.opencode_server.models import Session
 from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
 from agentpool_server.opencode_server.routes import agent_router, file_router, session_router
+from agentpool_server.opencode_server.routes.global_routes import router as global_router
+from agentpool_server.opencode_server.routes.message_routes import router as message_router
 from agentpool_server.opencode_server.state import ServerState
-from agentpool_storage.memory_provider.provider import MemoryStorageProvider
 
 
 if TYPE_CHECKING:
@@ -142,9 +145,17 @@ def mock_pool(
     pool.file_ops = file_ops
     pool.todos = todos
     pool.manifest = manifest
-    # Sessions store must use AsyncMock for awaitable save/delete operations
+    pool.skill_commands = None
+    # Sessions store delegates to the real StorageManager so that
+    # create_session's pool.sessions.store.save() persists data that
+    # storage.load_session() can retrieve. Without this, the mock
+    # absorbs saves and load_session returns None.
     pool.sessions = Mock()
-    pool.sessions.store = AsyncMock()
+    pool.sessions.store = Mock()
+    pool.sessions.store.save = storage_manager.save_session
+    pool.sessions.store.delete = storage_manager.delete_session
+    pool.sessions.store.load = storage_manager.load_session
+    pool.sessions.store.list_sessions = AsyncMock(return_value=[])
     return pool
 
 
@@ -183,8 +194,22 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     agent.agent_pool = mock_pool
     # Real storage manager (accessed via state.storage -> agent.storage)
     agent.storage = storage_manager
+
     # Session management methods (used by session routes)
-    agent.list_sessions = AsyncMock(return_value=[])
+    # list_sessions delegates to storage_manager so that sessions created via
+    # pool.sessions.store.save() are visible in GET /session.
+    async def _list_sessions(**kwargs: object) -> list[SessionData]:
+        from agentpool.sessions.models import SessionData
+
+        ids = await storage_manager.list_session_ids()
+        results: list[SessionData] = []
+        for sid in ids:
+            data = await storage_manager.load_session(sid)
+            if data is not None:
+                results.append(data)
+        return results
+
+    agent.list_sessions = _list_sessions
     agent.load_session = AsyncMock(return_value=None)
     return agent
 
@@ -210,8 +235,10 @@ def app(server_state: ServerState) -> FastAPI:
     """Create a FastAPI app with all routes for testing."""
     app = FastAPI()
     app.include_router(session_router)
+    app.include_router(message_router)
     app.include_router(file_router)
     app.include_router(agent_router)
+    app.include_router(global_router)
     app.dependency_overrides[get_state] = lambda: server_state
     return app
 
@@ -269,6 +296,79 @@ def event_capture(server_state: ServerState) -> EventCapture:
 
     server_state.broadcast_event = capturing_broadcast  # type: ignore[method-assign]
     return capture
+
+
+# =============================================================================
+# SSE Stream Fixtures
+# =============================================================================
+
+
+class SSEStream:
+    r"""Async helper for consuming SSE events from the /global/event endpoint.
+
+    Connects via httpx streaming, parses ``data: {json}\n\n`` lines,
+    and exposes parsed events through an async queue.
+    """
+
+    def __init__(self, client: AsyncClient) -> None:
+        self._client = client
+        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._task: asyncio.Task[None] | None = None
+
+    async def connect(self) -> None:
+        """Connect to SSE endpoint and start consuming events."""
+        self._task = asyncio.create_task(self._consume())
+
+    async def _consume(self) -> None:
+        """Background task that reads SSE events and puts them in queue."""
+        async with self._client.stream("GET", "/global/event") as response:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    event_data = json.loads(line[6:])
+                    await self._queue.put(event_data)
+                elif line.startswith(": "):
+                    continue  # SSE comment / keepalive
+
+    async def next_event(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Get next parsed SSE event with timeout."""
+        return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+
+    async def aclose(self) -> None:
+        """Close the SSE stream."""
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+
+@pytest.fixture
+async def global_event_stream(async_client: AsyncClient) -> AsyncIterator[SSEStream]:
+    """Create an SSE stream consumer for /global/event endpoint.
+
+    Automatically connects and consumes the initial ``server.connected``
+    event before yielding.
+    """
+    stream = SSEStream(async_client)
+    await stream.connect()
+    # Consume the initial server.connected event
+    connected = await stream.next_event(timeout=5.0)
+    assert connected.get("type") == "server.connected"
+    yield stream
+    await stream.aclose()
+
+
+def parse_sse_event(line: str) -> dict[str, Any]:
+    """Parse a single SSE data line into a dict.
+
+    Args:
+        line: Raw SSE line, e.g. ``data: {"type": "server.connected"}``
+
+    Returns:
+        Parsed JSON dict from the data payload.
+    """
+    if line.startswith("data: "):
+        return json.loads(line[6:])
+    return json.loads(line)
 
 
 # =============================================================================

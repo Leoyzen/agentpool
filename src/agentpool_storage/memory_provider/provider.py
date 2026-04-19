@@ -25,6 +25,7 @@ class MemoryStorageProvider(StorageProvider):
     """In-memory storage provider for testing."""
 
     can_load_history = True
+    can_store_projects = True
 
     def __init__(self, config: MemoryStorageConfig | None = None) -> None:
         super().__init__(config or MemoryStorageConfig())
@@ -113,14 +114,32 @@ class MemoryStorageProvider(StorageProvider):
         # Note: parent_session_id is accepted but not stored (no-op for memory provider)
 
     async def update_session_title(self, session_id: str, title: str) -> None:
-        """Update the title of a conversation."""
+        """Update the title of a conversation.
+
+        ``SessionData.metadata["title"]`` is the single source of truth
+        (``SessionData.title`` is a property that reads from ``metadata``).
+        Also updates ``self.conversations`` for backward compatibility.
+        """
+        # Update SessionData (source of truth for load_session)
+        session_data = self.sessions.get(session_id)
+        if session_data:
+            session_data.metadata["title"] = title
+        # Also update conversations list for backward compat
         for conv in self.conversations:
             if conv["id"] == session_id:
                 conv["title"] = title
-                return
+                break
 
     async def get_session_title(self, session_id: str) -> str | None:
-        """Get the title of a conversation."""
+        """Get the title of a conversation.
+
+        Prefers ``SessionData.metadata["title"]``, falls back to
+        ``self.conversations`` for sessions created via ``log_session``.
+        """
+        session_data = self.sessions.get(session_id)
+        if session_data:
+            return session_data.metadata.get("title")
+        # Fallback for sessions only in conversations list
         for conv in self.conversations:
             if conv["id"] == session_id:
                 return conv.get("title")
@@ -421,6 +440,32 @@ class MemoryStorageProvider(StorageProvider):
             if agent_name is not None and data.agent_name != agent_name:
                 continue
             result.append(session_id)
+        return result
+
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs.
+
+        For in-memory provider, this is a simple dict lookup — no N+1 issue.
+
+        Args:
+            session_ids: List of session identifiers to load
+            agent_name: Optional filter to return only sessions for this agent
+
+        Returns:
+            List of found SessionData objects
+        """
+        result: list[SessionData] = []
+        for sid in session_ids:
+            session = self.sessions.get(sid)
+            if session is not None:
+                if agent_name is not None and session.agent_name != agent_name:
+                    continue
+                result.append(session)
         return result
 
     # Project methods

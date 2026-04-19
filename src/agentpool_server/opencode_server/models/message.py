@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from agentpool.utils import identifiers as identifier
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
@@ -71,6 +71,27 @@ class OutputFormatJsonSchema(OpenCodeBaseModel):
 OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
 
+def _migrate_variant_into_model_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Backward-compat: move top-level ``variant`` into ``model.variant``.
+
+    OpenCode v1.4.0+ nests ``variant`` inside the ``model`` object.
+    Older clients may still send ``variant`` at the top level.
+    """
+    variant = data.get("variant")
+    if variant is None:
+        return data
+    model = data.get("model")
+    if model is None:
+        # No model object — create one with just the variant
+        data["model"] = {"variant": variant}
+    elif isinstance(model, dict) and "variant" not in model:
+        # Model exists but has no variant — add it
+        model["variant"] = variant
+    # Remove top-level variant so it doesn't shadow the nested one
+    data.pop("variant", None)
+    return data
+
+
 class UserMessage(OpenCodeBaseModel):
     """User message."""
 
@@ -84,7 +105,14 @@ class UserMessage(OpenCodeBaseModel):
     summary: MessageSummary | None = None
     system: str | None = None
     tools: dict[str, bool] | None = None
-    variant: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_variant_to_model(cls, data: Any) -> Any:
+        """Backward-compat: move top-level ``variant`` into ``model.variant``."""
+        if not isinstance(data, dict):
+            return data
+        return _migrate_variant_into_model_dict(data)
 
 
 # --- Assistant message error types ---
@@ -231,7 +259,23 @@ class AssistantMessage(OpenCodeBaseModel):
     summary: bool | None = None
     finish: str | None = None
     structured: Any | None = None
-    variant: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_variant_to_model(cls, data: Any) -> Any:
+        """Backward-compat: move top-level ``variant`` into model context.
+
+        For AssistantMessage, variant is informational only (no model object).
+        We keep the variant in a private field for backward compat but the
+        canonical location is on the associated UserMessage's model.variant.
+        """
+        if not isinstance(data, dict):
+            return data
+        # For assistant messages, variant was informational only.
+        # Remove from top-level to match OpenCode v1.4.0+ schema.
+        # We don't have a model object on AssistantMessage to nest it in.
+        data.pop("variant", None)
+        return data
 
 
 class MessageWithParts(OpenCodeBaseModel):
@@ -515,12 +559,14 @@ class MessageRequest(OpenCodeBaseModel):
     no_reply: bool | None = None
     system: str | None = None
     tools: dict[str, bool] | None = None
-    variant: str | None = None
-    """Reasoning/thinking variant for this message.
 
-    Maps to the model's variants (e.g., 'low', 'medium', 'high', 'max').
-    When set, the agent will use this thinking effort level for the response.
-    """
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_variant_to_model(cls, data: Any) -> Any:
+        """Backward-compat: move top-level ``variant`` into ``model.variant``."""
+        if not isinstance(data, dict):
+            return data
+        return _migrate_variant_into_model_dict(data)
 
 
 class ShellRequest(OpenCodeBaseModel):

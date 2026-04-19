@@ -9,6 +9,9 @@ import pytest
 from agentpool.agents.base_agent import BaseAgent
 from agentpool_server.opencode_server.models import (
     Session,
+    SessionIdleEvent,
+    SessionStatusEvent,
+    SessionUpdatedEvent,
     TimeCreatedUpdated,
 )
 from agentpool_server.opencode_server.state import ServerState
@@ -18,9 +21,11 @@ def create_mock_agent() -> MagicMock:
     """Create a properly configured mock agent."""
     agent = MagicMock(spec=BaseAgent)
     agent.name = "test_agent"
+    agent.session_id = "original_session_id"
     agent.agent_pool = MagicMock()
     agent.agent_pool.manifest.config_file_path = "test_config.yml"
     agent.agent_pool.storage.save_session = AsyncMock()
+    agent.agent_pool.sessions.store = None
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"
     return agent
@@ -149,6 +154,34 @@ async def test_ensure_session_caches_in_memory(mock_state: ServerState) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ensure_session_broadcasts_idle_events(mock_state: ServerState) -> None:
+    """Test that ensure_session broadcasts both status and idle events."""
+    session_id = "test_session_idle_event"
+
+    with (
+        patch("agentpool_server.opencode_server.converters.opencode_to_session_data"),
+        patch("agentpool_server.opencode_server.input_provider.OpenCodeInputProvider"),
+        patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast,
+    ):
+        await mock_state.ensure_session(session_id)
+
+    status_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionStatusEvent)
+    ]
+    idle_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionIdleEvent)
+    ]
+    assert len(status_events) == 1
+    assert len(idle_events) == 1
+    assert status_events[0].properties.status.type == "idle"
+    assert idle_events[0].properties.session_id == session_id
+
+
+@pytest.mark.asyncio
 async def test_ensure_session_creates_input_provider(mock_state: ServerState) -> None:
     """Test that ensure_session creates and stores an OpenCodeInputProvider."""
     session_id = "test_session_def"
@@ -197,3 +230,66 @@ async def test_ensure_session_is_idempotent(mock_state: ServerState) -> None:
 
     assert result1 is result2
     mock_state.agent.agent_pool.storage.save_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_broadcasts_updated_event_on_early_return(
+    mock_state: ServerState,
+) -> None:
+    """Test that ensure_session broadcasts SessionUpdatedEvent when returning an existing session.
+
+    Without this broadcast, the TUI's store stays empty on reconnect because
+    it relies on `session.updated` SSE events to populate it.
+    """
+    session_id = "test_session_existing"
+
+    existing_session = Session(
+        id=session_id,
+        project_id="test_project",
+        directory="/custom/dir",
+        title="Existing Session",
+        version="2",
+        time=TimeCreatedUpdated(created=1000, updated=2000),
+        parent_id=None,
+    )
+    mock_state.sessions[session_id] = existing_session
+
+    with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
+        result = await mock_state.ensure_session(session_id)
+
+    # Should still return the existing session
+    assert result is existing_session
+
+    # Should have broadcast a SessionUpdatedEvent
+    updated_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionUpdatedEvent)
+    ]
+    assert len(updated_events) == 1, (
+        f"Expected exactly 1 SessionUpdatedEvent, got {len(updated_events)}"
+    )
+    assert updated_events[0].properties.info is existing_session
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_child_skips_agent_binding(mock_state: ServerState) -> None:
+    """Test that ensure_session does NOT bind agent for child sessions.
+
+    Child sessions live inside the parent's agent stream. Binding the
+    shared agent to a child session would overwrite the parent's
+    session_id and also deadlock on agent_lock.
+    """
+    session_id = "child_session_abc"
+    parent_id = "parent_session_xyz"
+
+    with (
+        patch("agentpool_server.opencode_server.converters.opencode_to_session_data"),
+        patch("agentpool_server.opencode_server.input_provider.OpenCodeInputProvider"),
+    ):
+        result = await mock_state.ensure_session(session_id, parent_id=parent_id)
+
+    assert result.id == session_id
+    assert result.parent_id == parent_id
+    # Agent session_id must NOT be changed to the child's ID
+    assert mock_state.agent.session_id != session_id

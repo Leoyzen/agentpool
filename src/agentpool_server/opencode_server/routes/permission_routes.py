@@ -46,7 +46,7 @@ async def reply_to_permission(
     # Find which session has this permission request
     for session_id, input_provider in state.input_providers.items():
         # Check if this permission belongs to this session
-        if permission_id not in input_provider._pending_permissions:
+        if not input_provider.has_pending_permission(permission_id):
             continue
         # Resolve the permission
         resolved = input_provider.resolve_permission(permission_id, body.reply)
