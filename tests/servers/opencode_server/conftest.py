@@ -145,11 +145,16 @@ def mock_pool(
     pool.file_ops = file_ops
     pool.todos = todos
     pool.manifest = manifest
-    # Sessions store must use AsyncMock for awaitable save/delete operations
+    pool.skill_commands = None
+    # Sessions store delegates to the real StorageManager so that
+    # create_session's pool.sessions.store.save() persists data that
+    # storage.load_session() can retrieve. Without this, the mock
+    # absorbs saves and load_session returns None.
     pool.sessions = Mock()
-    pool.sessions.store = AsyncMock()
-    pool.sessions.store.save = AsyncMock()
-    pool.sessions.store.delete = AsyncMock()
+    pool.sessions.store = Mock()
+    pool.sessions.store.save = storage_manager.save_session
+    pool.sessions.store.delete = storage_manager.delete_session
+    pool.sessions.store.load = storage_manager.load_session
     pool.sessions.store.list_sessions = AsyncMock(return_value=[])
     return pool
 
@@ -189,8 +194,22 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     agent.agent_pool = mock_pool
     # Real storage manager (accessed via state.storage -> agent.storage)
     agent.storage = storage_manager
+
     # Session management methods (used by session routes)
-    agent.list_sessions = AsyncMock(return_value=[])
+    # list_sessions delegates to storage_manager so that sessions created via
+    # pool.sessions.store.save() are visible in GET /session.
+    async def _list_sessions(**kwargs: object) -> list[SessionData]:
+        from agentpool.sessions.models import SessionData
+
+        ids = await storage_manager.list_session_ids()
+        results: list[SessionData] = []
+        for sid in ids:
+            data = await storage_manager.load_session(sid)
+            if data is not None:
+                results.append(data)
+        return results
+
+    agent.list_sessions = _list_sessions
     agent.load_session = AsyncMock(return_value=None)
     return agent
 

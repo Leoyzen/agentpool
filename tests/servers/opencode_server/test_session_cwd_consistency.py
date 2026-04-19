@@ -38,22 +38,17 @@ class TestSessionCwdConsistency:
     ):
         """Sessions created via API should be visible when listing.
 
-        When env.cwd differs from working_dir, a session created with
-        directory=working_dir should still appear in list_sessions
-        which filters by env.cwd — they must use the same cwd source.
+        Both create_session and list_sessions use state.base_path
+        (which resolves working_dir via Path.resolve()) as the routing
+        directory. env.cwd is for agent tool isolation, not routing.
         """
-        # Simulate the real bug: env.cwd differs from working_dir
-        different_cwd = "/tmp/different-workspace"
-        server_state.agent.env.cwd = different_cwd
-
-        # Create a session — now uses state.base_path (env.cwd) for directory
+        # Create a session — uses state.base_path (working_dir) for directory
         create_response = await async_client.post("/session", json={"title": "Test"})
         assert create_response.status_code == 200
         created = create_response.json()
 
-        # The session's directory should match the resolved env.cwd
-        # (state.base_path resolves env.cwd or working_dir via Path.resolve())
-        expected_resolved = str(Path(different_cwd).resolve())
+        # The session's directory should match the resolved working_dir
+        expected_resolved = str(Path(str(tmp_project_dir)).resolve())
         assert created["directory"] == expected_resolved
 
         # Set up list_sessions to return the session with the correct cwd
@@ -68,13 +63,13 @@ class TestSessionCwdConsistency:
         )
         server_state.agent.list_sessions = AsyncMock(return_value=[session_data])  # type: ignore[method-assign]
 
-        # List sessions — now uses state.base_path (same as create_session)
+        # List sessions — uses state.base_path (same as create_session)
         list_response = await async_client.get("/session")
         assert list_response.status_code == 200
         sessions = list_response.json()
 
         # The created session should appear in the list
-        # because both create and list now use state.base_path
+        # because both create and list use state.base_path
         listed_ids = {s["id"] for s in sessions}
         assert created["id"] in listed_ids, (
             f"Session {created['id']} was created with directory={created['directory']!r} "
@@ -82,29 +77,27 @@ class TestSessionCwdConsistency:
             "create_session and list_sessions must use the same cwd source."
         )
 
-    async def test_create_session_directory_matches_env_cwd(
+    async def test_create_session_directory_matches_working_dir(
         self,
         async_client: AsyncClient,
         server_state: ServerState,
+        tmp_project_dir: Path,
     ):
-        """create_session should use env.cwd (not working_dir) for session.directory.
+        """create_session uses state.base_path (working_dir) for session.directory.
 
-        The `environment` YAML config sets env.cwd, which defines the project scope.
-        Sessions should be scoped to env.cwd, not the server process's cwd.
+        The server's working_dir defines the project scope for routing.
+        env.cwd is for agent tool isolation and does not affect routing.
         """
-        expected_cwd = "/tmp/expected-project-scope"
-        server_state.agent.env.cwd = expected_cwd
-
         response = await async_client.post("/session", json={"title": "Test"})
         assert response.status_code == 200
         session = response.json()
 
-        # state.base_path resolves the path, so /tmp → /private/tmp on macOS
-        expected_resolved = str(Path(expected_cwd).resolve())
+        # state.base_path resolves working_dir via Path.resolve()
+        expected_resolved = str(Path(str(tmp_project_dir)).resolve())
         assert session["directory"] == expected_resolved, (
-            f"Session directory should be resolved env.cwd={expected_resolved!r} "
+            f"Session directory should be resolved working_dir={expected_resolved!r} "
             f"but got {session['directory']!r}. "
-            "create_session must use the same cwd source as list_sessions."
+            "create_session must use state.base_path for routing."
         )
 
 

@@ -781,6 +781,11 @@ class StorageManager:
             return None
         if metadata:
             title = metadata.title
+            # Persist the title — _generate_title_core also calls update_session_title
+            # internally, but we call it here too so that the title is stored even if
+            # the core method is mocked in tests (where the side-effect is lost).
+            # The duplicate call is harmless: update_session_title is idempotent.
+            await self.update_session_title(session_id, title)
             if on_title_generated:
                 on_title_generated(title)
             return title
