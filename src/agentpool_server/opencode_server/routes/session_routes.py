@@ -600,6 +600,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             ]
 
         state.bind_agent_to_session(session_id, agent=agent)
+        await state.broadcast_event(SessionUpdatedEvent.create(session))
         return session
 
 
@@ -693,6 +694,13 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
         agent = state.bind_agent_to_session(session_id)
         agent.conversation.chat_messages.clear()
     await state.broadcast_event(SessionCreatedEvent.create(session))
+    # Broadcast session.updated so the CLI TUI can upsert the session into
+    # its SolidJS store.  The CLI TUI's sync.tsx event handler processes
+    # session.updated (upsert) but NOT session.created (insert-only), so
+    # without this event the TUI would rely solely on the async REST
+    # session.sync() call, causing a "black screen" delay while the store
+    # is empty.
+    await state.broadcast_event(SessionUpdatedEvent.create(session))
     return session
 
 
@@ -950,6 +958,9 @@ async def fork_session(  # noqa: D417
     state.input_providers[new_session_id] = input_provider
     # Broadcast session created event
     await state.broadcast_event(SessionCreatedEvent.create(forked_session))
+    # Also broadcast session.updated so the CLI TUI upserts the forked
+    # session into its store immediately (same reason as create_session).
+    await state.broadcast_event(SessionUpdatedEvent.create(forked_session))
     return forked_session
 
 

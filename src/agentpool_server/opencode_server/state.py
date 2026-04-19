@@ -386,7 +386,11 @@ class ServerState:
         """
         # Check if session already exists in memory
         if session_id in self.sessions:
-            return self.sessions[session_id]
+            session = self.sessions[session_id]
+            from agentpool_server.opencode_server.models import SessionUpdatedEvent
+
+            await self.broadcast_event(SessionUpdatedEvent.create(session))
+            return session
 
         # Import here to avoid circular imports at module load time
         from agentpool_server.opencode_server.converters import opencode_to_session_data
