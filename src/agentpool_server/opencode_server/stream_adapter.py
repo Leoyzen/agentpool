@@ -81,7 +81,16 @@ class OpenCodeStreamAdapter:
     main_context: EventProcessorContext = field(init=False)
     _cost_info: Any = field(default=None, init=False)
     _step_finish_emitted: bool = field(default=False, init=False)
-    """Tracks whether StepFinishPart was already emitted by _process_stream_complete."""
+    """Tracks whether StepFinishPart was emitted for THIS session (not children).
+
+    Only set when the StepFinishPart's session_id matches the adapter's
+    session_id.  Child subagent sessions also emit StepFinishPart events
+    that bubble through process_stream(), but those must NOT suppress
+    the parent's StepFinishPart — otherwise a stream interrupted after
+    a child completes but before the parent's StreamCompleteEvent would
+    leave the parent session without a StepFinishPart, causing the TUI
+    to show it stuck in "working" state.
+    """
 
     def __post_init__(self) -> None:
         self.main_context = EventProcessorContext(
@@ -149,9 +158,13 @@ class OpenCodeStreamAdapter:
         try:
             async for event in stream:
                 async for oc_event in self.processor.process(event, self.main_context):
-                    # Track if StepFinishPart was emitted by _process_stream_complete
-                    if isinstance(oc_event, PartUpdatedEvent) and isinstance(
-                        oc_event.properties.part, StepFinishPart
+                    # Track if StepFinishPart was emitted for THIS session.
+                    # Child subagent sessions also emit StepFinishPart events
+                    # but must not suppress the parent's finalize() fallback.
+                    if (
+                        isinstance(oc_event, PartUpdatedEvent)
+                        and isinstance(oc_event.properties.part, StepFinishPart)
+                        and oc_event.properties.part.session_id == self.session_id
                     ):
                         self._step_finish_emitted = True
                     yield oc_event
