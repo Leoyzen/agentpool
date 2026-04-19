@@ -218,24 +218,31 @@ class ServerState:
             self.session_conversations[session_id] = MessageHistory()
         return self.session_conversations[session_id]
 
-    async def snapshot_for_session(self, session_id: str) -> Any:
+    async def snapshot_for_session(self, session_id: str, *, agent: BaseAgent | None = None) -> Any:
         """Capture per-run state from the shared agent.
 
         Must be called while holding agent_lock. Binds the agent to the session
         and captures all mutable state into an immutable snapshot.
+
+        Args:
+            session_id: The session to snapshot.
+            agent: Resolved agent to bind. Falls back to ``self.agent`` when
+                ``None`` so existing callers are unaffected.
         """
         from agentpool.agents.context import RunSnapshot
         from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 
+        resolved = agent or self.agent
+
         if session_id not in self.input_providers:
             self.input_providers[session_id] = OpenCodeInputProvider(self, session_id)
 
-        self.agent._input_provider = self.input_providers[session_id]
-        self.agent.session_id = session_id
+        resolved._input_provider = self.input_providers[session_id]
+        resolved.session_id = session_id
 
         conversation = self.get_session_conversation(session_id)
-        model_name = self.agent.model_name if hasattr(self.agent, "model_name") else None
-        mode_name = self.agent._current_mode if hasattr(self.agent, "_current_mode") else None
+        model_name = resolved.model_name
+        mode_name = getattr(resolved, "_current_mode", None)
 
         return RunSnapshot(
             session_id=session_id,

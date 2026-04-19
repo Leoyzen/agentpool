@@ -365,7 +365,7 @@ async def _process_message_locked(  # noqa: PLR0915
         agent = state.agent
         if request.agent and state.agent.agent_pool is not None:
             agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-        snapshot = await state.snapshot_for_session(session_id)
+        snapshot = await state.snapshot_for_session(session_id, agent=agent)
 
         # Apply variant/mode under the lock
         request_variant = request.model.variant if request.model else None

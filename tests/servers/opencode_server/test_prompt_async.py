@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -434,3 +434,49 @@ class TestPromptAsync:
         assert event_types == ["status:busy", "status:idle", "session.idle"]
         # No async prompt worker started — nothing was queued.
         assert f"process_message_{session_id}" not in worker_names
+
+    @pytest.mark.asyncio
+    async def test_snapshot_binds_resolved_agent(
+        self,
+        server_state,
+    ) -> None:
+        """snapshot_for_session(agent=...) must bind the resolved agent, not self.agent."""
+        session_id = "snapshot-resolved"
+
+        # Create an alternate agent that differs from the default.
+        alt_agent = Mock()
+        alt_agent.model_name = "alt-model-v2"
+        alt_agent._input_provider = None
+        alt_agent._current_mode = "reasoning"
+
+        # Ensure the default agent also has model_name so the comparison is meaningful.
+        server_state.agent.model_name = "default-model"
+
+        snapshot = await server_state.snapshot_for_session(session_id, agent=alt_agent)
+
+        # The snapshot must reflect the alternate agent, not the default.
+        assert snapshot.model_name == "alt-model-v2"
+        assert snapshot.mode_name == "reasoning"
+        # The alternate agent must have received the input provider and session id.
+        assert alt_agent._input_provider is server_state.input_providers[session_id]
+        assert alt_agent.session_id == session_id
+        # The default agent must NOT have been touched.
+        assert server_state.agent._input_provider is None
+
+    @pytest.mark.asyncio
+    async def test_snapshot_default_agent_unchanged(
+        self,
+        server_state,
+    ) -> None:
+        """snapshot_for_session(session_id) without agent= still binds self.agent."""
+        session_id = "snapshot-default"
+
+        server_state.agent.model_name = "default-model"
+
+        snapshot = await server_state.snapshot_for_session(session_id)
+
+        # The snapshot must reflect the default agent.
+        assert snapshot.model_name == "default-model"
+        # The default agent must have received the input provider and session id.
+        assert server_state.agent._input_provider is server_state.input_providers[session_id]
+        assert server_state.agent.session_id == session_id
