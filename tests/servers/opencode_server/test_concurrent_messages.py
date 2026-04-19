@@ -40,6 +40,10 @@ class SlowAgentMock:
         self._input_provider = None
         self.model_name = "test-model"
         self.session_id: str | None = None
+        # Snapshot tracking: maps session_id -> model_name captured from snapshot
+        self.snapshot_session_ids: dict[str, str] = {}
+        # Model name captured from snapshot at run_stream call time
+        self.model_names_at_call: dict[str, str | None] = {}
 
     async def set_model(self, model: str) -> None:
         """Mock set_model method."""
@@ -62,9 +66,16 @@ class SlowAgentMock:
         self,
         user_prompt: Any,
         session_id: str | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[Any]:
         """Simulate slow processing with concurrent run detection."""
         self.run_stream_call_count += 1
+
+        # Capture snapshot info for verification in tests
+        snapshot = kwargs.get("snapshot")
+        if snapshot is not None and session_id is not None:
+            self.snapshot_session_ids[session_id] = snapshot.session_id
+            self.model_names_at_call[session_id] = snapshot.model_name
 
         # Check if another run is already active for this session
         if session_id in self.active_runs:
@@ -369,3 +380,102 @@ class TestConcurrentMessageHandling:
         # Verify the agent was called 3 times
         agent_mock = cast(SlowAgentMock, state.agent)
         assert agent_mock.run_stream_call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_two_sessions_back_to_back_b_not_blocked(
+        self,
+        concurrent_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Test that Session B can start while Session A is still running.
+
+        When two sessions start their turns close together, Session B should NOT
+        wait for Session A's full turn to finish. The per-session locking only
+        serializes messages within the same session; different sessions run in
+        parallel. This is verified by checking that the total wall time for both
+        sessions is less than 2 * agent_delay (which would be the sequential time).
+        """
+        state = concurrent_test_state
+        session_id_a = "test-session-back-to-back-a"
+        session_id_b = "test-session-back-to-back-b"
+
+        # Create both sessions
+        await state.ensure_session(session_id_a)
+        await state.ensure_session(session_id_b)
+
+        agent_mock = cast(SlowAgentMock, state.agent)
+        agent_delay = agent_mock.delay
+
+        start = asyncio.get_event_loop().time()
+
+        # Start Session A processing
+        task_a = asyncio.create_task(_process_message(session_id_a, sample_message_request, state))
+
+        # After a short delay, start Session B processing
+        await asyncio.sleep(0.05)
+        task_b = asyncio.create_task(_process_message(session_id_b, sample_message_request, state))
+
+        # Wait for both to complete
+        await asyncio.gather(task_a, task_b)
+
+        elapsed = asyncio.get_event_loop().time() - start
+
+        # Both sessions should have their messages (2 each: user + assistant)
+        assert len(state.messages[session_id_a]) == 2
+        assert len(state.messages[session_id_b]) == 2
+
+        # Agent was called twice (once per session)
+        assert agent_mock.run_stream_call_count == 2
+
+        # Timing assertion: if they ran sequentially, total would be >= 2 * delay.
+        # Since they ran concurrently, total should be < 2 * delay.
+        # We use a generous margin to avoid flaky CI failures.
+        assert elapsed < 2 * agent_delay, (
+            f"Sessions did not run concurrently: elapsed={elapsed:.3f}s "
+            f"but sequential would be ~{2 * agent_delay:.3f}s"
+        )
+
+    @pytest.mark.asyncio
+    async def test_in_flight_uses_snapshot_not_live_fields(
+        self,
+        concurrent_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Test that an in-flight run uses captured snapshot values, not live fields.
+
+        When Session A is mid-run and the shared agent's model_name is mutated
+        (simulating Session B binding to a different model), Session A's ongoing
+        run must continue using the snapshot it captured at the start — not the
+        new live value. This is the core guarantee of the RunSnapshot mechanism.
+        """
+        state = concurrent_test_state
+        session_id_a = "test-session-snapshot-a"
+
+        # Create session A
+        await state.ensure_session(session_id_a)
+
+        agent_mock = cast(SlowAgentMock, state.agent)
+
+        # Start Session A processing (model_name is "test-model" at this point)
+        task_a = asyncio.create_task(_process_message(session_id_a, sample_message_request, state))
+
+        # Wait briefly for Session A to have captured its snapshot
+        await asyncio.sleep(0.05)
+
+        # Mutate the live agent model_name (simulating Session B binding)
+        agent_mock.model_name = "different-model"
+
+        # Wait for Session A to finish
+        await task_a
+
+        # Verify Session A used the original snapshot model, not the mutated live value
+        assert agent_mock.model_names_at_call.get(session_id_a) == "test-model", (
+            f"Session A should have seen snapshot model_name='test-model', "
+            f"but got '{agent_mock.model_names_at_call.get(session_id_a)}'"
+        )
+
+        # The live value should still be the mutated one
+        assert agent_mock.model_name == "different-model"
+
+        # Session A should have completed successfully
+        assert len(state.messages[session_id_a]) == 2

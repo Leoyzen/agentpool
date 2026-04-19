@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from upathtools import JoinablePathLike
 
     from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.context import RunSnapshot
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import (
@@ -826,6 +827,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         input_provider: InputProvider | None = None,
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         from pydantic_graph import End
 
@@ -836,8 +838,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         start_time = time.perf_counter()
         history_list = message_history.get_history()
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
+        effective_session_id = snapshot.session_id if snapshot else self.session_id
+        assert effective_session_id is not None
         yield RunStartedEvent(
-            session_id=self.session_id,
+            session_id=effective_session_id,
             run_id=run_id,
             agent_name=self.name,
             parent_session_id=parent_session_id,
@@ -905,7 +909,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             role="assistant",
                             name=self.name,
                             message_id=message_id,
-                            session_id=self.session_id,
+                            session_id=effective_session_id,
                             parent_id=user_msg.message_id,
                             response_time=response_time,
                             finish_reason="stop",
@@ -916,7 +920,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             agent_run.result,
                             agent_name=self.name,
                             message_id=message_id,
-                            session_id=self.session_id,
+                            session_id=effective_session_id,
                             parent_id=user_msg.message_id,
                             response_time=time.perf_counter() - start_time,
                             metadata=None,

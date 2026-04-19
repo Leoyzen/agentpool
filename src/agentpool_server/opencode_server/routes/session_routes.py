@@ -830,9 +830,12 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     # Stop any in-flight prompt worker for this session before interrupting the agent.
     await state.cancel_session_background_tasks(session_id)
 
-    # Interrupt the agent to cancel any ongoing stream
+    # Cancel the specific session's run without affecting other sessions
+    state.cancel_session_run(session_id)
+
+    # Interrupt the agent with session-scoped targeting
     try:
-        await state.agent.interrupt()
+        await state.agent.interrupt(session_id=session_id)
         # Give a moment for the cancellation to propagate
         await asyncio.sleep(0.1)
     except Exception:  # noqa: BLE001

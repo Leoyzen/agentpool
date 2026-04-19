@@ -91,6 +91,8 @@ class ServerState:
     # Per-session locks for concurrent message handling
     # Ensures messages to the same session are processed sequentially
     session_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # Global lock for binding agent to a session (short critical section)
+    agent_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Message storage (session_id -> messages)
     # Runtime cache - messages are also persisted via pool.storage
     messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
@@ -102,6 +104,8 @@ class ServerState:
     todos: dict[str, list[Todo]] = field(default_factory=dict)
     # Input providers for permission handling (session_id -> provider)
     input_providers: dict[str, OpenCodeInputProvider] = field(default_factory=dict)
+    # Per-session conversation histories for snapshot-based execution
+    session_conversations: dict[str, Any] = field(default_factory=dict)
     # Question storage (question_id -> pending question info)
     pending_questions: dict[str, PendingQuestion] = field(default_factory=dict)
     # SSE event subscribers
@@ -127,6 +131,7 @@ class ServerState:
         """Initialize derived state."""
         self.lsp_manager = LSPManager(env=self.agent.env)
         self.lsp_manager.register_defaults()
+        self._active_run_tasks: dict[str, asyncio.Task[Any]] = {}
 
     def get_event_factory(self) -> GlobalEventFactory:
         """Get or lazily create the GlobalEventFactory for event wrapping.
@@ -205,6 +210,57 @@ class ServerState:
             self.session_locks[session_id] = asyncio.Lock()
         return self.session_locks[session_id]
 
+    def get_session_conversation(self, session_id: str) -> Any:
+        """Get or create a per-session MessageHistory."""
+        from agentpool.messaging import MessageHistory
+
+        if session_id not in self.session_conversations:
+            self.session_conversations[session_id] = MessageHistory()
+        return self.session_conversations[session_id]
+
+    async def snapshot_for_session(self, session_id: str) -> Any:
+        """Capture per-run state from the shared agent.
+
+        Must be called while holding agent_lock. Binds the agent to the session
+        and captures all mutable state into an immutable snapshot.
+        """
+        from agentpool.agents.context import RunSnapshot
+        from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
+
+        if session_id not in self.input_providers:
+            self.input_providers[session_id] = OpenCodeInputProvider(self, session_id)
+
+        self.agent._input_provider = self.input_providers[session_id]
+        self.agent.session_id = session_id
+
+        conversation = self.get_session_conversation(session_id)
+        model_name = self.agent.model_name if hasattr(self.agent, "model_name") else None
+        mode_name = self.agent._current_mode if hasattr(self.agent, "_current_mode") else None
+
+        return RunSnapshot(
+            session_id=session_id,
+            input_provider=self.input_providers[session_id],
+            conversation=conversation,
+            model_name=model_name,
+            mode_name=mode_name,
+        )
+
+    def register_active_run(self, session_id: str, task: asyncio.Task[Any]) -> None:
+        """Register an active run task for a session."""
+        self._active_run_tasks[session_id] = task
+
+    def unregister_active_run(self, session_id: str) -> None:
+        """Unregister an active run task for a session."""
+        self._active_run_tasks.pop(session_id, None)
+
+    def cancel_session_run(self, session_id: str) -> bool:
+        """Cancel a specific session's active run without affecting other sessions."""
+        task = self._active_run_tasks.get(session_id)
+        if task and not task.done():
+            task.cancel()
+            return True
+        return False
+
     @property
     def storage(self) -> StorageManager:
         """Get the storage manager from the agent's pool.
@@ -251,8 +307,7 @@ class ServerState:
         """Return whether a per-session prompt worker is already running."""
         task_name = f"process_message_{session_id}"
         return any(
-            task.get_name() == task_name and not task.done()
-            for task in self.background_tasks
+            task.get_name() == task_name and not task.done() for task in self.background_tasks
         )
 
     async def cancel_session_background_tasks(self, session_id: str) -> None:
@@ -374,6 +429,9 @@ class ServerState:
         # Create input provider for this session
         input_provider = OpenCodeInputProvider(self, session_id)
         self.input_providers[session_id] = input_provider
+        # NOTE: Direct mutation of self.agent._input_provider and self.agent.session_id
+        # is safe for new session creation but should use snapshot_for_session()
+        # when concurrent runs may exist, to avoid overwriting another session's state.
         self.agent._input_provider = input_provider
         self.agent.session_id = session_id
 

@@ -60,11 +60,31 @@ class AgentRunContext:
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     """Unique identifier for this run session."""
 
+    snapshot: RunSnapshot | None = None
+    """Per-run snapshot captured under agent_lock for concurrent session isolation."""
+
     deps: Any = None
     """Optional dependencies passed to the run."""
 
     start_time: float = field(default_factory=time.perf_counter)
     """Timestamp when the run started (for metrics)."""
+
+
+@dataclass(kw_only=True)
+class RunSnapshot:
+    """Immutable per-run state captured from the shared agent under a short lock.
+
+    Once created, this snapshot is the source of truth for the entire run.
+    In-flight runs MUST NOT read live singleton fields (self.session_id, etc.)
+    -- they read from this snapshot instead.
+    """
+
+    session_id: str
+    input_provider: Any = None
+    conversation: Any = None  # MessageHistory instance
+    model_name: str | None = None
+    mode_name: str | None = None
+    parent_session_id: str | None = None
 
 
 @dataclass(kw_only=True)

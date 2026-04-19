@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
 def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
     """Warm up LSP servers for the given file paths.
 
@@ -359,69 +360,55 @@ async def _process_message_locked(  # noqa: PLR0915
     step_start = StepStartPart(id=part_id, message_id=assistant_msg_id, session_id=session_id)
     assistant_msg_with_parts.parts.append(step_start)
     await state.broadcast_event(PartUpdatedEvent.create(step_start))
-    # --- Resolve agent and variant ---
-    agent = state.agent
-    if request.agent and state.agent.agent_pool is not None:
-        agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-    request_variant = request.model.variant if request.model else None
-    if request_variant:
-        # set_mode raises ValueError (or its subclasses UnknownModeError/
-        # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
-        try:
-            await agent.set_mode(request_variant, category_id="thought_level")
-        except ValueError:
-            logger.debug("Variant mode not applicable", variant=request_variant)
+    # --- Short critical section: bind agent to session and capture snapshot ---
+    async with state.agent_lock:
+        agent = state.agent
+        if request.agent and state.agent.agent_pool is not None:
+            agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
+        snapshot = await state.snapshot_for_session(session_id)
 
-    # Handle model selection if requested
-    original_model: str | None = None
-    if request.model and request.model.model_id and request.model.provider_id:
-        provider_id = request.model.provider_id
-        model_id = request.model.model_id
+        # Apply variant/mode under the lock
+        request_variant = request.model.variant if request.model else None
+        if request_variant:
+            try:
+                await agent.set_mode(request_variant, category_id="thought_level")
+            except ValueError:
+                logger.debug("Variant mode not applicable", variant=request_variant)
 
-        # Strategy: First try to use model_id as a variant name
-        # OpenCode TUI sends variant names as model_id (e.g., "ack-dev", "qwen35")
-        # The provider_id is the first part of the identifier (e.g., "openai-chat")
-        requested_model = model_id  # Try variant name first
+        # Handle model selection if requested
+        original_model: str | None = None
+        if request.model and request.model.model_id and request.model.provider_id:
+            provider_id = request.model.provider_id
+            model_id = request.model.model_id
+            requested_model = model_id
 
-        logger.info(f"Model selection requested: provider={provider_id}, model_id={model_id}")
+            logger.info(f"Model selection requested: provider={provider_id}, model_id={model_id}")
 
-        try:
-            available_models = await agent.get_available_models()
-            is_valid = False
+            try:
+                available_models = await agent.get_available_models()
+                is_valid = False
 
-            # Check 1: Is model_id a variant name in manifest?
-            if state.pool and model_id in state.pool.manifest.model_variants:
-                is_valid = True
-                logger.info(f"Model {model_id} found as variant name in manifest")
-            # Check 2: Is it in tokonomics models?
-            elif available_models:
-                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
-                # Try both "provider:model" format and just model_id
-                full_id = f"{provider_id}:{model_id}"
-                if full_id in valid_ids:
+                if state.pool and model_id in state.pool.manifest.model_variants:
                     is_valid = True
-                    requested_model = full_id
-                    logger.info(f"Model {full_id} found in tokonomics models")
-                elif model_id in valid_ids:
-                    is_valid = True
-                    logger.info(f"Model {model_id} found in tokonomics models")
+                elif available_models:
+                    valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
+                    full_id = f"{provider_id}:{model_id}"
+                    if full_id in valid_ids:
+                        is_valid = True
+                        requested_model = full_id
+                    elif model_id in valid_ids:
+                        is_valid = True
 
-            if is_valid:
-                # Store original model to restore later
-                original_model = agent.model_name
-                logger.info(f"Switching model from {original_model} to {requested_model}")
-                await agent.set_model(requested_model)
-                logger.info("Switched to requested model", model=requested_model)
-            else:
-                logger.warning(f"Model {model_id} (provider: {provider_id}) is not valid")
-                if state.pool:
-                    logger.warning(
-                        f"Available model_variants: {list(state.pool.manifest.model_variants.keys())}"
-                    )
-        except Exception as e:  # noqa: BLE001
-            # Broad catch: agents differ on how they signal unsupported/invalid model switching.
-            # Keep behavior stable for OpenCode (see PR #10 review iterations).
-            logger.warning(f"Failed to switch model: {e}")
+                if is_valid:
+                    original_model = agent.model_name
+                    logger.info(f"Switching model from {original_model} to {requested_model}")
+                    await agent.set_model(requested_model)
+                    snapshot.model_name = requested_model
+                else:
+                    logger.warning(f"Model {model_id} (provider: {provider_id}) is not valid")
+            except ValueError as e:
+                logger.warning(f"Failed to switch model: {e}")
+    # --- End short critical section ---
 
     # --- Stream via adapter ---
     adapter = OpenCodeStreamAdapter(
@@ -435,7 +422,13 @@ async def _process_message_locked(  # noqa: PLR0915
 
     response_time: int | None = None
     try:
-        iterator = agent.run_stream(*user_prompt, session_id=session_id)
+        iterator = agent.run_stream(
+            *user_prompt,
+            session_id=snapshot.session_id,
+            message_history=snapshot.conversation,
+            input_provider=snapshot.input_provider,
+            snapshot=snapshot,
+        )
         async for oc_event in adapter.process_stream(iterator):
             await state.broadcast_event(oc_event)
 
@@ -475,19 +468,13 @@ async def _process_message_locked(  # noqa: PLR0915
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
-        # Add the aborted assistant message to the agent's in-memory conversation.
-        # Without this, the agent's conversation.chat_messages only has the user
-        # message (added by _run_stream_once at base_agent.py:784) but not the
-        # assistant response. On the next message, get_or_load_session() skips
-        # reloading because agent.session_id matches, so the LLM receives
-        # incomplete history — it doesn't know it already (partially) responded.
-        #
-        # NOTE: This mutates the shared agent's conversation. In the current
-        # single-session server architecture this is safe, but if multi-session
-        # support is added, the agent instance should be per-session to avoid
-        # history contamination between concurrent sessions.
-        chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
-        agent.conversation.add_chat_messages([chat_msg], extend_last=True)
+        # Add the aborted assistant message to the snapshot's conversation.
+        # Using snapshot.conversation instead of agent.conversation avoids
+        # cross-session contamination when multiple sessions run concurrently.
+        chat_msg = opencode_to_chat_message(
+            assistant_msg_with_parts, session_id=snapshot.session_id
+        )
+        snapshot.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
         # Restore original model if we changed it
         if original_model is not None:

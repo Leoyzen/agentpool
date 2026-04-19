@@ -50,6 +50,7 @@ if TYPE_CHECKING:
         RichAgentStreamEvent,
         StreamWithCommandsEvent,
     )
+    from agentpool.agents.context import RunSnapshot
     from agentpool.agents.modes import ConfigOptionChanged, ModeCategory, ModeCategoryId
     from agentpool.agents.native_agent import Agent
     from agentpool.common_types import (
@@ -614,6 +615,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run agent with streaming output.
 
@@ -633,24 +635,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             wait_for_connections: Whether to wait for connected agents
             deps: Optional dependencies
             event_handlers: Optional event handlers
+            snapshot: Optional per-run snapshot for concurrent session isolation
 
         Yields:
             Stream events during execution
         """
         from agentpool.utils.identifiers import generate_session_id
-
-        # Initialize session_id once for the entire run (including queued prompts)
-        if self.session_id is None:
-            self.session_id = session_id or generate_session_id()
-            self.parent_session_id = parent_session_id
-            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
-            initial_prompt = user_prompts[-1] if user_prompts else None
-            await self.log_session(
-                initial_prompt, model=self.model_name, parent_session_id=self.parent_session_id
-            )
-        elif session_id and self.session_id != session_id:
-            self.session_id = session_id
-            self.parent_session_id = parent_session_id
 
         # Create per-run context for state isolation
         run_ctx = AgentRunContext(deps=deps)
@@ -660,6 +650,25 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.current_task = asyncio.current_task()
         # Track the stream task so interrupt() can cancel it even without run_ctx
         self._current_stream_task = run_ctx.current_task
+
+        # Initialize session_id once for the entire run (including queued prompts)
+        if snapshot is not None:
+            # Snapshot is the source of truth — do NOT mutate self.session_id
+            run_ctx.snapshot = snapshot
+            run_ctx.session_id = snapshot.session_id
+        else:
+            run_ctx.snapshot = None
+            if self.session_id is None:
+                self.session_id = session_id or generate_session_id()
+                self.parent_session_id = parent_session_id
+                user_prompts = [str(p) for p in prompts if isinstance(p, str)]
+                initial_prompt = user_prompts[-1] if user_prompts else None
+                await self.log_session(
+                    initial_prompt, model=self.model_name, parent_session_id=self.parent_session_id
+                )
+            elif session_id and self.session_id != session_id:
+                self.session_id = session_id
+                self.parent_session_id = parent_session_id
         # Store run_ctx as instance variable so interrupt() can find it
         # from a different task (ContextVar is task-scoped and returns None
         # when read from outside the run_stream task).
@@ -698,6 +707,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     wait_for_connections=wait_for_connections,
                     deps=deps,
                     event_handlers=event_handlers,
+                    snapshot=snapshot,
                 ):
                     yield event
 
@@ -724,6 +734,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Process a single prompt group with streaming output.
 
@@ -743,6 +754,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             wait_for_connections: Whether to wait for connected agents
             deps: Optional dependencies
             event_handlers: Optional event handlers
+            snapshot: Optional per-run snapshot for concurrent session isolation
 
         Yields:
             Stream events during execution
@@ -766,7 +778,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         user_msg = ChatMessage.user_prompt(
             message=converted_prompts,
             parent_id=effective_parent_id,
-            session_id=self.session_id,
+            session_id=snapshot.session_id if snapshot else self.session_id,
         )
 
         # Resolve event handlers
@@ -821,6 +833,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 input_provider=input_provider,
                 wait_for_connections=wait_for_connections,
                 deps=deps,
+                snapshot=snapshot,
             ):
                 await resolved_handler(context, event)
                 yield event
@@ -1001,6 +1014,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Agent-specific streaming implementation.
 
@@ -1021,6 +1035,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             deps: Optional dependencies
             wait_for_connections: Whether to wait for connected agents
             store_history: Whether to store in history
+            snapshot: Optional per-run snapshot for concurrent session isolation
 
         Yields:
             Stream events during execution
@@ -1076,7 +1091,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         )
         return self._cancelled or background_cancelled
 
-    async def interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+    async def interrupt(
+        self,
+        run_ctx: AgentRunContext | None = None,
+        session_id: str | None = None,
+    ) -> None:
         """Interrupt the currently running stream.
 
         Sets the cancelled flag, calls subclass-specific _interrupt(),
@@ -1086,9 +1105,29 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         falls back to the active run_ctx stored by run_stream() so that
         run_ctx.cancelled is set and the streaming loop can exit.
 
+        When session_id is provided, performs a targeted interrupt for that
+        specific session only, without setting self._cancelled (which would
+        kill all sessions).
+
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
+            session_id: Optional session ID for targeted session-scoped interrupt
         """
+        if session_id is not None:
+            # Targeted interrupt — only cancel this session's context
+            if run_ctx is not None:
+                run_ctx.cancelled = True
+            effective_run_ctx = run_ctx or self._active_run_ctx
+            if effective_run_ctx:
+                effective_run_ctx.cancelled = True
+            await self._interrupt(effective_run_ctx)
+            await self.interrupted.emit(self.InterruptEvent(agent_name=self.name))
+            logger.info(
+                "Agent interrupted (session-scoped)", agent=self.name, session_id=session_id
+            )
+            return
+
+        # Legacy global interrupt
         self._cancelled = True
         # When no run_ctx is provided, try the active per-run context
         # stored by run_stream() as _active_run_ctx. We can't use

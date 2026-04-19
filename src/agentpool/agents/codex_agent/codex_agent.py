@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from tokonomics.model_discovery.model_info import ModelInfo
 
     from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.context import RunSnapshot
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType, MCPServerStatus, StrPath
@@ -353,6 +354,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream events from Codex turn execution."""
         from codex_adapter.events import (
@@ -370,7 +372,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Generate IDs if not provided
         run_id = str(uuid4())
         final_message_id = message_id or str(uuid4())
-        final_session_id = session_id or self.session_id
+        final_session_id = snapshot.session_id if snapshot else (session_id or self.session_id)
         # Ensure session_id is set (should always be from base class)
         if final_session_id is None:
             raise ValueError("session_id must be set")
