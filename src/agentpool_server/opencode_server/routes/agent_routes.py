@@ -425,6 +425,20 @@ async def log(request: LogRequest, state: StateDep) -> bool:
     return True
 
 
+@router.get("/experimental/console")
+async def get_console_state() -> dict[str, Any]:
+    """Return console state for OpenCode TUI compatibility.
+
+    Provides an empty ConsoleState so that TUI can bootstrap without
+    waiting for proxy catch-all to time out.
+    """
+    return {
+        "consoleManagedProviders": [],
+        "activeOrgName": None,
+        "switchableOrgCount": 0,
+    }
+
+
 @router.get("/experimental/resource")
 async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
     """Get all available MCP resources from connected servers.

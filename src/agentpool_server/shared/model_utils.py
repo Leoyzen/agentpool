@@ -156,6 +156,7 @@ def _apply_configured_variants(
         ModelCost,
         ModelLimit,
         Provider,
+        ProviderCapabilities,
     )
 
     # Build lookup for provider name -> Provider object
@@ -182,14 +183,14 @@ def _apply_configured_variants(
             # Override existing (configured takes precedence)
             existing = provider.models[variant_name]
             existing.name = variant_name
-            existing.attachment = True  # Enable multimodal support
+            existing.capabilities.attachment = True  # Enable multimodal support
             # Note: variant-specific settings (temp, thinking) not exposed to client
         else:
             # Add new model - use a minimal Model creation
             provider.models[variant_name] = Model(
                 id=variant_name,
                 name=variant_name,
-                attachment=True,  # Enable multimodal support for manually configured models
+                capabilities=ProviderCapabilities(attachment=True),
                 cost=ModelCost(
                     input=DEFAULT_MODEL_INPUT_COST,
                     output=DEFAULT_MODEL_OUTPUT_COST,

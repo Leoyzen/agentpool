@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter
 
+from agentpool.log import get_logger
 from agentpool.models.manifest import AgentsManifest
 from agentpool_server.opencode_server.dependencies import StateDep
 from agentpool_server.opencode_server.models import (
@@ -18,6 +19,7 @@ from agentpool_server.opencode_server.models import (
     ModelCost,
     ModelLimit,
     Provider,
+    ProviderCapabilities,
     ProviderListResponse,
     ProvidersResponse,
 )
@@ -32,8 +34,6 @@ from agentpool_server.shared.model_utils import (
     _extract_provider,
 )
 
-
-from agentpool.log import get_logger
 
 logger = get_logger(__name__)
 
@@ -152,7 +152,7 @@ def _build_providers_from_configured(
         providers_by_name[provider_name].models[variant_name] = Model(
             id=variant_name,
             name=variant_name,
-            attachment=True,  # Enable multimodal support for manually configured models
+            capabilities=ProviderCapabilities(attachment=True),
             cost=ModelCost(
                 input=DEFAULT_MODEL_INPUT_COST,
                 output=DEFAULT_MODEL_OUTPUT_COST,
@@ -189,7 +189,7 @@ def _build_providers_from_variants(
                 name: Model(
                     id=name,
                     name=name,
-                    attachment=True,  # Enable multimodal support for agent modes
+                    capabilities=ProviderCapabilities(attachment=True),
                     cost=ModelCost(
                         input=DEFAULT_MODEL_INPUT_COST,
                         output=DEFAULT_MODEL_OUTPUT_COST,
@@ -256,13 +256,15 @@ def _get_dummy_providers() -> list[Provider]:
     dummy_model = Model(
         id="gpt-4o",
         name="GPT-4o",
-        attachment=True,
+        capabilities=ProviderCapabilities(
+            attachment=True,
+            reasoning=False,
+            temperature=True,
+            tool_call=True,
+        ),
         cost=ModelCost(input=5.0, output=15.0),
         limit=ModelLimit(context=128000.0, output=4096.0),
-        reasoning=False,
         release_date="2024-05-13",
-        temperature=True,
-        tool_call=True,
     )
     dummy_provider = Provider(
         id="openai",
