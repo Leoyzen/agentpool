@@ -306,13 +306,29 @@ async def _event_generator(
 @router.get("/global/event")
 async def get_global_events(state: StateDep) -> EventSourceResponse:
     """Get global events as SSE stream (uses payload wrapper)."""
-    return EventSourceResponse(_event_generator(state, wrap_payload=True), sep="\n")
+    return EventSourceResponse(
+        _event_generator(state, wrap_payload=True),
+        sep="\n",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/event")
 async def get_events(state: StateDep) -> EventSourceResponse:
     """Get events as SSE stream (no payload wrapper)."""
-    return EventSourceResponse(_event_generator(state, wrap_payload=False), sep="\n")
+    return EventSourceResponse(
+        _event_generator(state, wrap_payload=False),
+        sep="\n",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/global/routing-check", response_model=RoutingCheckResponse)
