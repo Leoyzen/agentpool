@@ -401,11 +401,21 @@ class ServerState:
         )
 
         now = now_ms()
-        project_id = helpers.compute_project_id(self.working_dir)
+        if parent_id is not None:
+            parent_session = self.sessions.get(parent_id)
+            if parent_session:
+                project_id = parent_session.project_id
+                directory = parent_session.directory
+            else:
+                project_id = helpers.compute_project_id(self.working_dir)
+                directory = self.working_dir
+        else:
+            project_id = helpers.compute_project_id(self.working_dir)
+            directory = self.working_dir
         session = Session(
             id=session_id,
             project_id=project_id,
-            directory=self.working_dir,
+            directory=directory,
             title="New Session",
             version="1",
             time=TimeCreatedUpdated(created=now, updated=now),

@@ -273,6 +273,66 @@ async def test_ensure_session_broadcasts_updated_event_on_early_return(
 
 
 @pytest.mark.asyncio
+async def test_ensure_session_child_inherits_parent_project_and_directory(
+    mock_state: ServerState,
+) -> None:
+    """Test that ensure_session inherits project_id and directory from parent session.
+
+    When a subagent session is created with a parent_id, it must inherit the
+    parent's project_id and directory so that the child remains visible when
+    listing sessions filtered by cwd/project_id.
+    """
+    parent_id = "parent_session_proj"
+    child_id = "child_session_proj"
+
+    # Pre-populate a parent session with explicit project_id / directory
+    parent_session = Session(
+        id=parent_id,
+        project_id="my-project",
+        directory="/custom/project/dir",
+        title="Parent",
+        version="1",
+        time=TimeCreatedUpdated(created=1000, updated=2000),
+        parent_id=None,
+    )
+    mock_state.sessions[parent_id] = parent_session
+
+    with (
+        patch("agentpool_server.opencode_server.converters.opencode_to_session_data"),
+        patch("agentpool_server.opencode_server.input_provider.OpenCodeInputProvider"),
+    ):
+        child = await mock_state.ensure_session(child_id, parent_id=parent_id)
+
+    assert child.project_id == parent_session.project_id, (
+        f"Child project_id should be {parent_session.project_id!r}, "
+        f"got {child.project_id!r}"
+    )
+    assert child.directory == parent_session.directory, (
+        f"Child directory should be {parent_session.directory!r}, "
+        f"got {child.directory!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_session_child_falls_back_when_parent_missing(
+    mock_state: ServerState,
+) -> None:
+    """Test that ensure_session falls back to working_dir when parent_id is not found."""
+    child_id = "child_orphan"
+    orphan_parent_id = "nonexistent_parent"
+
+    with (
+        patch("agentpool_server.opencode_server.converters.opencode_to_session_data"),
+        patch("agentpool_server.opencode_server.input_provider.OpenCodeInputProvider"),
+    ):
+        child = await mock_state.ensure_session(child_id, parent_id=orphan_parent_id)
+
+    # Should fall back to working_dir-based values
+    assert child.project_id == "global"
+    assert child.directory == mock_state.working_dir
+
+
+@pytest.mark.asyncio
 async def test_ensure_session_child_skips_agent_binding(mock_state: ServerState) -> None:
     """Test that ensure_session does NOT bind agent for child sessions.
 
