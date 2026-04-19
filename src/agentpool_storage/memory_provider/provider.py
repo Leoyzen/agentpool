@@ -424,6 +424,32 @@ class MemoryStorageProvider(StorageProvider):
             result.append(session_id)
         return result
 
+    async def load_sessions_batch(
+        self,
+        session_ids: list[str],
+        *,
+        agent_name: str | None = None,
+    ) -> list[SessionData]:
+        """Load multiple sessions by IDs.
+
+        For in-memory provider, this is a simple dict lookup — no N+1 issue.
+
+        Args:
+            session_ids: List of session identifiers to load
+            agent_name: Optional filter to return only sessions for this agent
+
+        Returns:
+            List of found SessionData objects
+        """
+        result: list[SessionData] = []
+        for sid in session_ids:
+            session = self.sessions.get(sid)
+            if session is not None:
+                if agent_name is not None and session.agent_name != agent_name:
+                    continue
+                result.append(session)
+        return result
+
     # Project methods
     # Project methods
 

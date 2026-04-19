@@ -64,10 +64,13 @@ class SQLSessionStore:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        """Close database connection."""
-        if self._engine:
-            await self._engine.dispose()
-            self._engine = None
+        """Release database connection.
+
+        Does NOT dispose the engine because it may be shared via
+        get_shared_engine(). Engine lifecycle is managed by the
+        application (StorageManager, etc.).
+        """
+        self._engine = None
 
     def _get_engine(self) -> AsyncEngine:
         """Get engine, raising if not initialized."""
