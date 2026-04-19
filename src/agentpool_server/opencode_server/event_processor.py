@@ -926,9 +926,8 @@ class EventProcessor:
             time=TimeCreated(created=now_ms()),
             agent_name=event.source_name,
         )
-        # Use description if available
-        description = event.description or f"Task: {event.source_name}"
-        user_msg.add_text_part(description)
+        # Use prompt from metadata if available, fall back to description
+        user_msg.add_text_part(event.metadata.get("prompt") or event.description)
         ctx.state.messages[event.child_session_id].append(user_msg)
         yield MessageUpdatedEvent.create(user_msg.info)
 
