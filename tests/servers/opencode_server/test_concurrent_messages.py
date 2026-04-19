@@ -17,6 +17,7 @@ from agentpool_server.opencode_server.models import (
     TextPartInput,
 )
 from agentpool_server.opencode_server.models.message import UserMessage
+from agentpool_server.opencode_server.models.parts import TextPart
 from agentpool_server.opencode_server.routes.message_routes import _process_message
 from agentpool_server.opencode_server.state import ServerState
 
@@ -558,3 +559,128 @@ class TestConcurrentMessageHandling:
 
         # Clean up: wait for A to finish
         await task_a
+
+    @pytest.mark.asyncio
+    async def test_conversation_isolation_concurrent_sessions(
+        self,
+        concurrent_test_state: ServerState,
+    ) -> None:
+        """Test that messages from one session never leak into another.
+
+        Two sessions run concurrently; after both finish, messages from Session A
+        must not appear in Session B's `state.messages` and vice versa.  Also
+        verifies that per-session `MessageHistory` instances are separate objects.
+        """
+        state = concurrent_test_state
+        session_id_a = "test-session-isolation-a"
+        session_id_b = "test-session-isolation-b"
+
+        # Create both sessions
+        await state.ensure_session(session_id_a)
+        await state.ensure_session(session_id_b)
+
+        # Build unique requests so we can distinguish message content
+        req_a = MessageRequest(
+            parts=[TextPartInput(text="Message for Session A")],
+            agent="default",
+        )
+        req_b = MessageRequest(
+            parts=[TextPartInput(text="Message for Session B")],
+            agent="default",
+        )
+
+        # Process both sessions concurrently
+        await asyncio.gather(
+            _process_message(session_id_a, req_a, state),
+            _process_message(session_id_b, req_b, state),
+        )
+
+        # Each session should have exactly 2 messages (user + assistant)
+        assert len(state.messages[session_id_a]) == 2
+        assert len(state.messages[session_id_b]) == 2
+
+        # Verify content isolation: Session A's messages must not appear in B
+        texts_b = [
+            part.text
+            for msg in state.messages[session_id_b]
+            for part in msg.parts
+            if isinstance(part, TextPart)
+        ]
+        assert not any("Session A" in t for t in texts_b), (
+            "Session A content leaked into Session B's messages"
+        )
+
+        # Verify content isolation: Session B's messages must not appear in A
+        texts_a = [
+            part.text
+            for msg in state.messages[session_id_a]
+            for part in msg.parts
+            if isinstance(part, TextPart)
+        ]
+        assert not any("Session B" in t for t in texts_a), (
+            "Session B content leaked into Session A's messages"
+        )
+
+        # Per-session MessageHistory instances must be separate objects
+        assert (
+            state.session_conversations[session_id_a]
+            is not state.session_conversations[session_id_b]
+        ), "Session A and B share the same MessageHistory instance"
+
+    @pytest.mark.asyncio
+    async def test_interrupt_session_a_does_not_cancel_session_b(
+        self,
+        concurrent_test_state: ServerState,
+        sample_message_request: MessageRequest,
+    ) -> None:
+        """Test that cancelling Session A's run does not affect Session B.
+
+        Two sessions start overlapping runs; `cancel_session_run` on Session A
+        cancels A but Session B completes successfully with all messages intact.
+        """
+        state = concurrent_test_state
+        session_id_a = "test-session-interrupt-a"
+        session_id_b = "test-session-interrupt-b"
+
+        # Create both sessions
+        await state.ensure_session(session_id_a)
+        await state.ensure_session(session_id_b)
+
+        # Start Session A processing
+        task_a = asyncio.create_task(_process_message(session_id_a, sample_message_request, state))
+
+        # Wait for A to have started (snapshot captured + task registered)
+        await asyncio.sleep(0.05)
+
+        # Register A's task so cancel_session_run can find it
+        state.register_active_run(session_id_a, task_a)
+
+        # Start Session B processing
+        task_b = asyncio.create_task(_process_message(session_id_b, sample_message_request, state))
+
+        # Wait for B to have started
+        await asyncio.sleep(0.05)
+
+        # Cancel only Session A
+        cancelled = state.cancel_session_run(session_id_a)
+        assert cancelled, "cancel_session_run should return True for active Session A"
+
+        # Session A should be done (cancelled or completed after handling CancelledError)
+        # _process_message_locked catches CancelledError internally, but the
+        # task may still surface it depending on timing. Either way, it must be done.
+        try:
+            await task_a
+        except asyncio.CancelledError:
+            pass
+        assert task_a.done()
+
+        # Wait for Session B to complete (with timeout)
+        await asyncio.wait_for(task_b, timeout=2.0)
+
+        # Session B should have completed successfully
+        assert len(state.messages[session_id_b]) == 2, (
+            "Session B should have 2 messages (user + assistant) after completing"
+        )
+
+        # Session B was NOT cancelled by Session A's interrupt
+        assert not task_b.cancelled(), "Session B should not have been cancelled"
