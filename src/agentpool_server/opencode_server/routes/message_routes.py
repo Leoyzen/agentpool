@@ -370,10 +370,22 @@ async def _process_message_locked(  # noqa: PLR0915
             agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
 
         # Apply variant/mode under the lock
+        original_variant: str | None = None
         request_variant = request.model.variant if request.model else None
         if request_variant:
+            # Save current thought_level mode before mutation so we can restore after the turn
+            current_variant: str | None = None
+            try:
+                modes = await agent.get_modes()
+                for cat in modes:
+                    if cat.category == "thought_level" and cat.current_mode_id:
+                        current_variant = cat.current_mode_id
+                        break
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 await agent.set_mode(request_variant, category_id="thought_level")
+                original_variant = current_variant  # Only save for restore after successful mutation
             except ValueError:
                 logger.debug("Variant mode not applicable", variant=request_variant)
 
@@ -485,6 +497,12 @@ async def _process_message_locked(  # noqa: PLR0915
             with contextlib.suppress(Exception):
                 await agent.set_model(original_model)
                 logger.info("Restored original model", model=original_model)
+
+        # Restore original variant/mode if we changed it
+        if original_variant is not None:
+            with contextlib.suppress(Exception):
+                await agent.set_mode(original_variant, category_id="thought_level")
+                logger.info("Restored original variant mode", variant=original_variant)
 
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.

@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
 
-    from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.context import AgentRunContext, RunSnapshot
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType, StrPath, ToolType
@@ -295,6 +295,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[str]]:
         from ag_ui.core import RunAgentInput, UserMessage
 
@@ -310,9 +311,11 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         if not self._client:
             raise AgentNotInitializedError
 
+        effective_session_id = snapshot.session_id if snapshot else self.session_id
+
         # Set thread_id from session_id (needed for AG-UI protocol)
         if self._sdk_session_id is None:
-            self._sdk_session_id = self.session_id
+            self._sdk_session_id = effective_session_id
 
         run_id = str(uuid4())  # New run ID for each run
         # Track messages in pydantic-ai format: ModelRequest -> ModelResponse -> ModelRequest...
@@ -322,8 +325,8 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         initial_request = ModelRequest(parts=[UserPromptPart(content=prompts)])
         model_messages.append(initial_request)
         response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
-        assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
-        thread_id = self._sdk_session_id or self.session_id
+        assert effective_session_id is not None  # Initialized by BaseAgent.run_stream()
+        thread_id = self._sdk_session_id or effective_session_id
         yield RunStartedEvent(
             session_id=thread_id,
             run_id=run_id,
@@ -350,7 +353,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     break
 
                 request_data = RunAgentInput(
-                    thread_id=self._sdk_session_id or self.session_id,
+                    thread_id=self._sdk_session_id or effective_session_id,
                     run_id=run_id,
                     state={},
                     messages=messages,
@@ -436,7 +439,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid4()),
-                session_id=self.session_id,
+                session_id=effective_session_id,
                 parent_id=user_msg.message_id,
                 messages=model_messages,
                 finish_reason="stop",
@@ -464,7 +467,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             role="assistant",
             name=self.name,
             message_id=message_id or str(uuid4()),
-            session_id=self.session_id,
+            session_id=effective_session_id,
             parent_id=user_msg.message_id,
             messages=model_messages,
             usage=usage,

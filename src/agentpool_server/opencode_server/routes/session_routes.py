@@ -1036,6 +1036,17 @@ async def init_session(  # noqa: D417
             # Agent doesn't support model selection, ignore
             pass
 
+    # Save current thought_level mode to restore after run
+    original_variant: str | None = None
+    try:
+        modes = await agent.get_modes()
+        for cat in modes:
+            if cat.category == "thought_level" and cat.current_mode_id:
+                original_variant = cat.current_mode_id
+                break
+    except Exception:  # noqa: BLE001
+        pass
+
     # Run the agent in the background
     async def run_init() -> None:
         try:
@@ -1053,6 +1064,10 @@ async def init_session(  # noqa: D417
             if original_model is not None:
                 with contextlib.suppress(Exception):
                     await agent.set_model(original_model)
+            # Restore original variant/mode if it was saved
+            if original_variant is not None:
+                with contextlib.suppress(Exception):
+                    await agent.set_mode(original_variant, category_id="thought_level")
 
     state.create_background_task(run_init(), name=f"init_{session_id}")
 

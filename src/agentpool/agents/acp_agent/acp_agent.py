@@ -80,7 +80,7 @@ if TYPE_CHECKING:
     from acp.schema.capabilities import AgentCapabilities
     from acp.schema.mcp import McpServer
     from agentpool.agents.acp_agent.client_handler import ACPClientHandler
-    from agentpool.agents.context import AgentRunContext
+    from agentpool.agents.context import AgentRunContext, RunSnapshot
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.agents.modes import ModeCategory
     from agentpool.common_types import AnyEventHandlerType
@@ -414,6 +414,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         deps: TDeps | None = None,
         wait_for_connections: bool | None = None,
         store_history: bool = True,
+        snapshot: RunSnapshot | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[str]]:
         from agentpool.agents.acp_agent.acp_converters import (
             convert_to_acp_content,
@@ -426,6 +427,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         if not self._api or not self._sdk_session_id or not self._state:
             raise AgentNotInitializedError
 
+        effective_session_id = snapshot.session_id if snapshot else self.session_id
         run_id = str(uuid.uuid4())
         self._state.clear()
         model_messages: list[ModelResponse | ModelRequest] = []
@@ -434,9 +436,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         text_chunks: list[str] = []
 
-        assert self.session_id is not None
+        assert effective_session_id is not None
         yield RunStartedEvent(
-            session_id=self.session_id,
+            session_id=effective_session_id,
             run_id=run_id,
             agent_name=self.name,
             parent_session_id=parent_session_id,
@@ -514,7 +516,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid.uuid4()),
-                session_id=self.session_id,
+                session_id=effective_session_id,
                 parent_id=user_msg.message_id,
                 model_name=self.model_name,
                 messages=model_messages,
@@ -551,7 +553,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             role="assistant",
             name=self.name,
             message_id=message_id or str(uuid.uuid4()),
-            session_id=self.session_id,
+            session_id=effective_session_id,
             parent_id=user_msg.message_id,
             model_name=self.model_name,
             messages=model_messages,
