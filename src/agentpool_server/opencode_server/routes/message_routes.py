@@ -468,9 +468,14 @@ async def _process_message_locked(  # noqa: PLR0915
 
             try:
                 iterator = agent.run_stream(*user_prompt, session_id=session_id)
+                # Track active stream task for abort_session() synchronization
+                # This allows abort_session() to wait for actual stream completion
+                state.active_stream_task = asyncio.current_task()
                 async for oc_event in adapter.process_stream(iterator):
                     await state.broadcast_event(oc_event)
             finally:
+                # Clear active stream task after stream completes (or is cancelled)
+                state.active_stream_task = None
                 if original_model is not None:
                     with contextlib.suppress(Exception):
                         await agent.set_model(original_model)

@@ -127,6 +127,10 @@ class ServerState:
     skill_bridge: Any = field(default=None)
     # Command store for slash commands
     command_store: CommandStore | None = field(default=None)
+    # Active stream task for cancellation synchronization
+    # Tracks the current message processing task so abort_session() can wait for it
+    # This prevents race conditions where new messages arrive before stream stops
+    active_stream_task: asyncio.Task[Any] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""

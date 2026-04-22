@@ -876,8 +876,38 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     # Interrupt the agent to cancel any ongoing stream
     try:
         await state.agent.interrupt()
-        # Give a moment for the cancellation to propagate
+
+        # Give a moment for cancellation to propagate
         await asyncio.sleep(0.1)
+
+        # Wait for active stream task to complete
+        # This ensures agent_lock is released before we mark session as idle
+        if state.active_stream_task and not state.active_stream_task.done():
+            logger.info(
+                "Waiting for active stream task to complete",
+                session_id=session_id,
+                task_id=id(state.active_stream_task),
+            )
+            try:
+                # Wait for task with timeout to prevent hanging
+                await asyncio.wait_for(
+                    state.active_stream_task,
+                    timeout=5.0,  # 5s timeout for stream to stop
+                )
+                logger.info("Active stream task completed", session_id=session_id)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Active stream task did not complete in time",
+                    session_id=session_id,
+                    timeout=5.0,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Error waiting for active stream task",
+                    session_id=session_id,
+                    error=str(exc),
+                )
+
     except Exception:  # noqa: BLE001
         pass
 
