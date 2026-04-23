@@ -26,6 +26,7 @@ from pydantic_ai.messages import (
 from agentpool.agents.events import (
     FileContentItem,
     LocationContentItem,
+    RunErrorEvent,
     RunStartedEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
@@ -54,6 +55,7 @@ from agentpool_server.opencode_server.models import (
     MessageWithParts,
     PartDeltaEvent,
     PartUpdatedEvent,
+    SessionErrorEvent,
     SessionStatusEvent,
     TimeCreated,
     TokenCache,
@@ -842,8 +844,55 @@ class EventProcessor:
         async for event in self.process(wrapped_event, child_ctx):
             yield event
 
-        # 8. Handle StreamCompleteEvent - finalize child session and update parent
-        if isinstance(wrapped_event, StreamCompleteEvent) and wrapped_event.message:
+        # 8. Handle RunErrorEvent - transition parent ToolPart to error state
+        if isinstance(wrapped_event, RunErrorEvent):
+            error_msg = wrapped_event.message or "Unknown error"
+            subagent_key = f"{depth}:{source_name}:{child_session_id}"
+            if ctx.has_subagent_tool_part(subagent_key):
+                existing = ctx.get_subagent_tool_part(subagent_key)
+                if existing is not None:
+                    tool_title = source_name
+                    start_time = (
+                        existing.state.time.start
+                        if isinstance(existing.state, ToolStateRunning)
+                        else now_ms()
+                    )
+                    error_state = ToolStateError(
+                        error=error_msg,
+                        input={
+                            "description": tool_title,
+                            "subagent_type": tool_title,
+                            "prompt": "",
+                        },
+                        metadata={"sessionId": child_session_id, "title": tool_title},
+                        time=TimeStartEnd(start=start_time, end=now_ms()),
+                    )
+                    updated = ToolPart(
+                        id=existing.id,
+                        message_id=existing.message_id,
+                        session_id=existing.session_id,
+                        tool=existing.tool,
+                        call_id=existing.call_id,
+                        state=error_state,
+                    )
+                    ctx.add_subagent_tool_part(subagent_key, updated)
+                    ctx.assistant_msg.update_part(updated)
+                    yield PartUpdatedEvent.create(updated)
+
+            # Emit SessionErrorEvent for the child session
+            yield SessionErrorEvent.create(
+                session_id=child_session_id,
+                error_name=wrapped_event.code or "AgentError",
+                error_message=error_msg,
+            )
+
+            # Mark the child context as errored to prevent StreamCompleteEvent
+            # from overriding the error state
+            child_ctx.is_errored = True
+
+        # 9. Handle StreamCompleteEvent - finalize child session and update parent
+        # Skip if the subagent already errored (RunErrorEvent was processed)
+        if isinstance(wrapped_event, StreamCompleteEvent) and wrapped_event.message and not child_ctx.is_errored:
             msg = wrapped_event.message
             content = str(msg.content) if msg.content else "(no output)"
 
