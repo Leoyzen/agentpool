@@ -68,6 +68,10 @@ class EventProcessorContext:
     # Subagent tool parts tracking (key: "depth:source_name" -> ToolPart)
     subagent_tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
 
+    # Error flag: set when RunErrorEvent is processed for this context's subagent,
+    # preventing a subsequent StreamCompleteEvent from overriding the error state.
+    is_errored: bool = field(default=False, init=False)
+
     def __post_init__(self) -> None:
         from agentpool.utils.time_utils import now_ms
 
