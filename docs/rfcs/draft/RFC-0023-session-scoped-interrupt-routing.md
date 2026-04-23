@@ -9,7 +9,7 @@ status: DRAFT
 author: yuchen.liu
 reviewers: []
 created: 2026-04-18
-last_updated: 2026-04-18
+last_updated: 2026-04-23
 decision_date:
 related_documents:
   - RFC-0021-agent-concurrent-execution-safety.md (Parent RFC — per-run context isolation)
@@ -18,13 +18,14 @@ related_documents:
 review_notes:
   - Metis review: self.session_id instance variable has same concurrent bug; run_in_background/stop break without _cancelled
   - Oracle review: session_id key mismatch (run_ctx.session_id UUID vs OpenCode session_id); is_cancelled() caller audit needed
+  - 2026-04-23 review: OpenCode abort path also has a route-layer deadlock because abort_session() acquires agent_lock through get_or_load_session()
 ---
 
 ## 1. Overview
 
 ### 1.1 Summary
 
-This RFC proposes a **session-scoped interrupt routing** mechanism that aligns OpenCode server's interrupt flow with RFC-0021's per-run context isolation design. The current `interrupt()` implementation stores `AgentRunContext` as an instance variable (`self._active_run_ctx`) to work around ContextVar's cross-task limitation, re-introducing shared mutable state that RFC-0021 was designed to eliminate. This RFC replaces the single instance variable with a `dict[session_id, AgentRunContext]` registry, enabling `interrupt()` to route cancellation to the correct per-session run context.
+This RFC proposes a **session-scoped interrupt routing** mechanism that aligns OpenCode server's interrupt flow with RFC-0021's per-run context isolation design. The current `interrupt()` implementation stores `AgentRunContext` as an instance variable (`self._active_run_ctx`) to work around ContextVar's cross-task limitation, re-introducing shared mutable state that RFC-0021 was designed to eliminate. This RFC replaces the single instance variable with a `dict[session_id, AgentRunContext]` registry, enabling `interrupt()` to route cancellation to the correct per-session run context. It also fixes the OpenCode server's current abort deadlock by removing the lock-taking session load from `abort_session()`.
 
 ### 1.2 Why This Matters Now
 
@@ -34,8 +35,9 @@ PR #17 (title-gen-nonblocking) introduced `self._active_run_ctx` and `self._iter
 
 After implementation:
 - **`interrupt(session_id=...)`** routes cancellation to the correct `AgentRunContext` even when called from a different async task
-- **No instance-level mutable run state**: `_active_run_ctx`, `_iteration_task`, and `_cancelled` are removed from instance scope
+- **No instance-level mutable streaming state**: `_active_run_ctx` and `_iteration_task` are removed from instance scope, while `_cancelled` is retained only for background-run compatibility
 - **Concurrent safety preserved**: Multiple sessions can run `run_stream()` on the same agent without overwriting each other's interrupt handles
+- **OpenCode abort path becomes deadlock-free**: `abort_session()` no longer waits on `agent_lock` before calling `interrupt()`
 - **Backward compatible**: Serial single-session usage continues to work identically
 
 ## 2. Background & Context
@@ -87,16 +89,19 @@ This works for single-session use but re-introduces shared mutable state:
 ### 2.4 OpenCode's Abort Flow
 
 ```python
-# session_routes.py:806-824
+# session_routes.py: current flow
 @router.post("/{session_id}/abort")
 async def abort_session(session_id: str, state: StateDep) -> bool:
-    session = await get_or_load_session(state, session_id)
+    session = await get_or_load_session(state, session_id)  # acquires state.agent_lock
     # ...
-    await state.agent.interrupt()   # ← No session_id passed!
+    await state.agent.interrupt()   # ← No session_id passed, and often never reached
     # ...
 ```
 
-Key observation: `abort_session()` **already has `session_id`** in its handler signature but does not pass it to `interrupt()`. The `session_id` is the natural routing key for interrupt.
+Key observations:
+
+1. `abort_session()` **already has `session_id`** in its handler signature but does not pass it to `interrupt()`. The `session_id` is the natural routing key for interrupt.
+2. `get_or_load_session()` acquires `state.agent_lock`, while `_process_message_locked()` holds that same lock for the entire stream. During an active stream, `abort_session()` blocks before it can call `interrupt()`. This route-layer deadlock must be fixed together with session-scoped routing.
 
 ### 2.5 Glossary
 
@@ -105,6 +110,7 @@ Key observation: `abort_session()` **already has `session_id`** in its handler s
 | **Run Registry** | A `dict[session_id, AgentRunContext]` mapping maintained by `BaseAgent` to route interrupts |
 | **Cross-Task Interrupt** | Calling `interrupt()` from a different async task than the one running `run_stream()` |
 | **Session-Scoped Routing** | Using `session_id` to identify which `AgentRunContext` to target for cancellation |
+| **Route-Layer Deadlock** | `abort_session()` blocks on `agent_lock` before it can call `interrupt()` |
 | **Zombie Run** | An active `run_stream()` that has lost its interrupt handle and cannot be cancelled |
 
 ## 3. Problem Statement
@@ -119,6 +125,15 @@ Three instance variables introduced by PR #17 violate RFC-0021's per-run isolati
 | `self._iteration_task` | `native_agent/agent.py` | Same overwrite problem; LLM API call cancellation targets wrong task |
 | `self._cancelled` | `base_agent.py` | Dual-track: both `self._cancelled` and `run_ctx.cancelled` exist; `is_cancelled()` checks instance flag, not per-run flag |
 
+In addition, the current OpenCode abort route has a **server-side deadlock** independent of the registry problem:
+
+| Component | Location | Problem |
+|----------|----------|---------|
+| `abort_session()` → `get_or_load_session()` | `session_routes.py` | Acquires `agent_lock` before calling `interrupt()` |
+| `_process_message_locked()` | `message_routes.py` | Holds `agent_lock` for the full streaming duration |
+
+These two problems stack: even a perfect registry does not help if the abort route never reaches `interrupt()`.
+
 ### 3.2 Evidence
 
 **Code Review (PR #17, 11 comments, 6 high-priority)**:
@@ -130,6 +145,13 @@ Three instance variables introduced by PR #17 violate RFC-0021's per-run isolati
 5. Redundant `_current_stream_task` (1 comment)
 6. Stale comment referencing ContextVar (1 comment)
 7. Duplicate fixture (1 comment)
+
+**OpenCode abort investigation (2026-04-23)**:
+
+1. `abort_session()` calls `get_or_load_session()`, which acquires `state.agent_lock`
+2. `_process_message_locked()` already holds `state.agent_lock` while streaming
+3. `abort_session()` therefore blocks before `interrupt()` and cannot cancel the active run
+4. A later patch proposal that only waited for the stream task after `interrupt()` was insufficient, because the code path still never reached `interrupt()` when the lock was held
 
 **Test Coverage Gap**: No test validates concurrent session interrupt routing.
 
@@ -145,10 +167,11 @@ Three instance variables introduced by PR #17 violate RFC-0021's per-run isolati
 ### 4.1 Goals (In Scope)
 
 1. **Primary**: Enable cross-task interrupt that routes to the correct `AgentRunContext` by `session_id`
-2. **Primary**: Remove all instance-level mutable run state (`_active_run_ctx`, `_iteration_task`, `_cancelled` instance flag)
-3. **Secondary**: Unify cancellation to a single source of truth (`run_ctx.cancelled`)
-4. **Secondary**: Update `is_cancelled()` to check per-run context, not instance flag
-5. **Secondary**: Add concurrent session interrupt routing tests
+2. **Primary**: Remove instance-level mutable streaming state (`_active_run_ctx`, `_iteration_task`) and stop using `_cancelled` for streaming runs
+3. **Primary**: Make OpenCode `abort_session()` reach `interrupt()` without acquiring `agent_lock`
+4. **Secondary**: Unify streaming cancellation to a single source of truth (`run_ctx.cancelled`)
+5. **Secondary**: Update `is_cancelled()` to check per-run context, not instance flag, for streaming flows
+6. **Secondary**: Add concurrent session interrupt routing and abort deadlock regression tests
 
 ### 4.2 Non-Goals (Out of Scope)
 
@@ -156,17 +179,18 @@ Three instance variables introduced by PR #17 violate RFC-0021's per-run isolati
 2. **Not**: Solving `conversation` history isolation (requires per-session agent — noted as future work)
 3. **Not**: Modifying the OpenCode TUI client (server-side change only)
 4. **Not**: Addressing SSE disconnect-triggered cancellation (separate bug, deferred)
-5. **Not**: Changing `AgentRunContext` dataclass fields (the context model is sufficient)
+5. **Not**: Replacing the background-run control flow (`run_in_background()` / `stop()`) with a new registry mechanism in this RFC
 
 ### 4.3 Success Criteria
 
 - [ ] `interrupt(session_id="ses_A")` cancels only `run_ctx` for session A, even when session B is also active
 - [ ] `self._active_run_ctx` and `self._iteration_task` instance variables are removed
-- [ ] `self._cancelled` instance flag is removed; `is_cancelled()` uses per-run context
-- [ ] `abort_session()` passes `session_id` to `interrupt()`
+- [ ] `self._cancelled` is no longer used for streaming cancellation; `is_cancelled()` uses per-run context for streaming flows
+- [ ] `abort_session()` bypasses `get_or_load_session()` and passes `session_id` to `interrupt()`
 - [ ] All 9 existing concurrent safety tests pass
 - [ ] All 8 existing interrupt tests pass
 - [ ] New test: concurrent sessions can be interrupted independently
+- [ ] New test: `abort_session()` does not block on `agent_lock` during an active stream
 - [ ] Serial single-session behavior unchanged
 
 ## 5. Evaluation Criteria
@@ -174,7 +198,7 @@ Three instance variables introduced by PR #17 violate RFC-0021's per-run isolati
 | Criterion | Weight | Description | Measurement |
 |-----------|--------|-------------|-------------|
 | **Concurrent Safety** | Critical | No shared state between concurrent runs | Test: 2+ concurrent sessions, each interruptable independently |
-| **RFC-0021 Alignment** | High | No regression of per-run isolation | Zero instance-level mutable run state remaining |
+| **RFC-0021 Alignment** | High | No regression of per-run isolation | No instance-level mutable streaming state remains; `_cancelled` stays background-only |
 | **Backward Compatibility** | High | Serial execution works unchanged | All existing tests pass |
 | **Implementation Complexity** | Medium | Reasonable effort and risk | Estimated dev days |
 | **Debuggability** | Medium | Easy to trace interrupt routing | Clear logging of session_id → run_ctx resolution |
@@ -193,7 +217,8 @@ class BaseAgent:
 
     async def run_stream(self, ..., session_id: str | None = None):
         run_ctx = AgentRunContext(deps=deps)
-        effective_session_id = session_id or run_ctx.session_id
+        effective_session_id = session_id or generate_session_id()
+        run_ctx.session_id = effective_session_id
         self._active_runs[effective_session_id] = run_ctx
         try:
             ...
@@ -203,11 +228,10 @@ class BaseAgent:
     async def interrupt(
         self,
         run_ctx: AgentRunContext | None = None,
+        *,
         session_id: str | None = None,
     ):
-        effective = run_ctx or self._active_runs.get(session_id) if session_id else None
-        if effective is None and len(self._active_runs) == 1:
-            effective = next(iter(self._active_runs.values()))
+        effective = run_ctx or (self._active_runs.get(session_id) if session_id else None)
         if effective:
             effective.cancelled = True
         await self._interrupt(effective)
@@ -217,20 +241,20 @@ class BaseAgent:
 - Full concurrent safety: each session's `run_ctx` is tracked independently
 - Natural routing via `session_id` — the key that `abort_session()` already has
 - No new data structures — just a dict replacing single instance variable
-- Backward compatible: single-session case falls through to `len() == 1` heuristic
+- Backward compatible at the API level: `interrupt(session_id=...)` is additive and explicit
 - Aligns with RFC-0021 design: state stays in `AgentRunContext`, agent only holds a lookup table
 
 **Disadvantages**:
 - `interrupt()` API gains a new parameter (backward compatible — optional with default)
-- Single-session fallback heuristic (`len() == 1`) may surprise if a stale entry lingers (mitigated by `finally` cleanup)
+- All meaningful cross-task interrupt callers must pass `session_id` (caller audit required)
 - `session_id` must be passed from `run_stream()` callers (already available in most call sites)
 
 **Evaluation Against Criteria**:
 | Criterion | Score | Notes |
 |-----------|-------|-------|
 | Concurrent Safety | ✅ | Per-session isolation |
-| RFC-0021 Alignment | ✅ | No instance-level mutable run state |
-| Backward Compatibility | ✅ | Optional parameter, fallback heuristic |
+| RFC-0021 Alignment | ✅ | No instance-level mutable streaming state |
+| Backward Compatibility | ✅ | Optional parameter, explicit caller contract |
 | Implementation Complexity | ✅ | 1-2 days |
 | Debuggability | ✅ | Dict is inspectable, log session_id resolution |
 | Performance | ✅ | Dict O(1) lookup |
@@ -393,14 +417,14 @@ class BaseAgent:
 
 **Justification**:
 
-1. **Solves the complete problem**: Routes interrupt by `session_id`, cancels the correct `run_ctx` and `iteration_task`, removes all instance-level mutable state
+1. **Solves the concurrency problem at the correct abstraction**: Routes interrupt by `session_id`, cancels the correct `run_ctx` and `iteration_task`, and removes instance-level mutable streaming state
 2. **Minimal API change**: One new optional parameter (`session_id`) on `interrupt()` — fully backward compatible
 3. **Aligns with RFC-0021**: State stays in `AgentRunContext`; agent holds only a lookup table, not mutable state
 4. **Natural fit**: `abort_session()` already has `session_id` in its handler signature
-5. **Low risk**: Dict lookup is simple, `finally` cleanup is reliable, fallback heuristic handles legacy callers
+5. **Pairs cleanly with the required route-layer deadlock fix**: the server can validate the session in memory, then call `interrupt(session_id=...)` without touching `agent_lock`
 
 **Trade-offs Accepted**:
-- Single-session fallback heuristic (`len() == 1`) is a best-effort guess — but this only applies to callers that don't pass `session_id`, which is a legacy path
+- Callers that need cross-task interrupt must pass `session_id`; silent fallback guessing is explicitly rejected
 - `session_id` must flow from `run_stream()` callers — but it's already available in all server-side call sites
 
 **Alternatives Rejected**:
@@ -446,7 +470,7 @@ interrupt(session_id="ses_A")
   → self._active_runs["ses_A"] → run_ctx_A
   → run_ctx_A.cancelled = True
   → _interrupt(run_ctx_A) → cancels run_ctx_A.current_task
-  → native_agent._iteration_task via run_ctx (see 8.3)
+  → NativeAgent iteration task via run_ctx (see 8.3)
 ```
 
 ### 8.2 API Changes
@@ -470,6 +494,8 @@ Resolution order:
 1. Explicit `run_ctx` parameter (highest priority — for programmatic callers)
 2. Registry lookup by `session_id` (for OpenCode abort flow)
 3. No target found: no-op (caller must pass `run_ctx` or `session_id`; no heuristic guessing)
+
+Important behavioral rule: `interrupt()` **must not** set `self._cancelled`. Only `run_ctx.cancelled` is updated for streaming runs; `self._cancelled` remains reserved for `stop()` / background-run behavior.
 
 Note: Background run cancellation is handled separately via `self._cancelled` and
 `_background_run_ctx`. See Section 10.3 for rationale.
@@ -537,7 +563,7 @@ async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
 
 ### 8.3 Data Model Changes
 
-#### `AgentRunContext` — New Field
+#### `AgentRunContext` — New Fields
 
 ```python
 @dataclass(kw_only=True)
@@ -545,6 +571,10 @@ class AgentRunContext:
     # ... existing fields unchanged ...
     iteration_task: asyncio.Task[Any] | None = None
     """The asyncio.Task running the LLM iteration for this run (NativeAgent only)."""
+    parent_session_id: str | None = None
+    """Per-run parent session reference used by OpenCode/subagent event metadata."""
+    prompt_task: asyncio.Task[Any] | None = None
+    """Per-run ACP prompt task used for cancellation without shared instance state."""
     # session_id is overridden in run_stream() to match the caller's session_id
     # (not the auto-generated UUID). See Section 10.2.
 ```
@@ -576,9 +606,13 @@ self._iteration_task: asyncio.Task[Any] | None = None
 # session_routes.py — abort_session
 @router.post("/{session_id}/abort")
 async def abort_session(session_id: str, state: StateDep) -> bool:
-    session = await get_or_load_session(state, session_id)
-    if session is None:
+    # IMPORTANT: do not call get_or_load_session() here.
+    # It acquires state.agent_lock and deadlocks against an active stream.
+    if session_id not in state.sessions:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    await state.cancel_session_background_tasks(session_id)
+
     try:
         await state.agent.interrupt(session_id=session_id)  # ← Pass session_id
         await asyncio.sleep(0.1)
@@ -589,11 +623,13 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     return True
 ```
 
+If the server later chooses to wait for stream completion before broadcasting idle, that wait must be tracked **per session** (for example, `active_stream_tasks[session_id]`) and treated as a sequencing enhancement, not as a substitute for the deadlock fix above.
+
 ### 8.5 Security Considerations
 
 1. **Session isolation**: Per-session `run_ctx` prevents one session from cancelling another's agent run
 2. **Registry cleanup**: `finally` block in `run_stream()` guarantees removal, preventing stale entries
-3. **No privilege escalation**: `session_id` is already validated by `get_or_load_session()` before `interrupt()` is called
+3. **No privilege escalation**: `abort_session()` only interrupts sessions already active in server memory; persistent-only sessions are not loaded during abort because there is nothing live to interrupt
 
 ## 9. Implementation Plan
 
@@ -602,11 +638,11 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
 **Tasks**:
 1. Add `iteration_task` field to `AgentRunContext`
 2. Add `_active_runs: dict[str, AgentRunContext]` to `BaseAgent.__init__`
-3. Remove `_cancelled`, `_current_stream_task`, `_active_run_ctx` from `BaseAgent.__init__`
+3. Remove `_active_run_ctx` from `BaseAgent.__init__`; retain `_cancelled` only for background-run compatibility
 4. Remove `_iteration_task` from `NativeAgent.__init__`
-5. Update `run_stream()` to register/unregister in `_active_runs`
+5. Update `run_stream()` to register/unregister in `_active_runs` and override `run_ctx.session_id`
 6. Update `interrupt()` with `session_id` parameter and resolution logic
-7. Update `is_cancelled()` to check per-run context
+7. Update `is_cancelled()` to check per-run context for streaming runs
 
 **Files Modified**:
 - `src/agentpool/agents/context.py` (add `iteration_task` field)
@@ -620,10 +656,10 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
 ### Phase 2: Subclass Migration (Day 1-2)
 
 **Tasks**:
-1. Update `ACPAgent._interrupt()` to use `run_ctx.current_task` instead of `self._current_stream_task`
-2. Update `AGUIAgent._interrupt()` same
-3. Update `ClaudeCodeAgent` if it references removed instance variables
-4. Update `CodexAgent` if needed (audit first)
+1. Update `ACPAgent._interrupt()` to use `run_ctx.current_task` / `run_ctx.prompt_task`
+2. Update `AGUIAgent._interrupt()` to use `run_ctx.current_task`
+3. Migrate all subclass streaming-time `self.session_id` / `self.parent_session_id` reads to `run_ctx`
+4. Audit `ClaudeCodeAgent`, `CodexAgent`, and converter/helper call graphs for removed instance-state reads
 
 **Files Modified**:
 - `src/agentpool/agents/acp_agent/acp_agent.py`
@@ -638,8 +674,10 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
 
 **Tasks**:
 1. Update `abort_session()` to pass `session_id` to `interrupt()`
-2. Update `message_routes.py` CancelledError handler to not need `_cancelled` flag
-3. Verify `send_message_async` background tasks interact correctly
+2. Remove `get_or_load_session()` from `abort_session()` to avoid `agent_lock` deadlock
+3. Update `message_routes.py` CancelledError handler to not depend on `_cancelled` for streaming runs
+4. Verify `send_message_async` background tasks interact correctly
+5. Optional follow-up: if waiting for stream completion is implemented, use a per-session task map instead of a global task slot
 
 **Files Modified**:
 - `src/agentpool_server/opencode_server/routes/session_routes.py`
@@ -833,25 +871,50 @@ This is a **behavioral change** from the current code. An implementer who copies
 
 **Action**: Add `prompt_task: asyncio.Task[Any] | None = None` to `AgentRunContext` for ACP agent use. Migrate `self._prompt_task` references in `acp_agent.py` to `run_ctx.prompt_task`.
 
-## 11. Open Questions
+### 10.12 CRITICAL: OpenCode `abort_session()` Deadlocks Before `interrupt()`
 
-1. **`self.session_id` instance variable migration** (from Section 10.1): Should this RFC also migrate `self.session_id` reads inside `run_stream()` / `_run_stream_once()` / `_stream_events()` to read from `run_ctx`? This is the same class of concurrent overwrite bug as `_active_run_ctx`, but affects message creation integrity. **Recommended**: In scope — store `effective_session_id` in `run_ctx` and update internal reads.
+**Source**: 2026-04-23 local debugging of OpenCode ESC abort flow
 
-2. **Background run cancellation strategy** (from Section 10.3): Should we (a) keep `self._cancelled` for background runs only, (b) route background runs through `_active_runs` with a reserved key, or (c) merge `_background_run_ctx` into `_active_runs`? **Recommended**: Option (a) — simplest, minimal risk.
+Current route flow:
 
-3. **`conversation` isolation**: This RFC does not address `conversation` history pollution between sessions. The correct long-term solution is per-session agent instances. Should this be noted as a future RFC? **Recommended**: Yes, document as known limitation. This is the most impactful remaining concurrent safety gap.
+```python
+abort_session()
+  -> get_or_load_session()      # acquires state.agent_lock
+  -> await state.agent.interrupt()
 
-4. **Subagent sessions** (from Oracle review): When a subagent runs within a parent session, should its `run_ctx` be registered under the parent's `session_id` or its own? If the parent is interrupted, should subagents be cancelled too? **Recommended**: Register under own session_id. Subagent cancellation should be handled by the parent agent's `_interrupt()` implementation, not by the registry.
+_process_message_locked()
+  -> async with state.agent_lock:
+       async for event in agent.run_stream(...):
+           ...
+```
 
-5. **`AgentRunContext.session_id` field semantics** (from Section 10.2): Should the auto-generated `session_id` field in `AgentRunContext` be removed, made `init=False`, or always overridden by the `run_stream()` parameter? **Recommended**: Override in `run_stream()` — set `run_ctx.session_id = effective_session_id` after creating the context.
+During an active stream, `_process_message_locked()` already holds `state.agent_lock`. `abort_session()` therefore blocks inside `get_or_load_session()` and never reaches `interrupt()`. This is not a registry bug; it is a routing-layer deadlock.
 
-## 11. Decision Record
+**Action**: `abort_session()` must validate session existence from in-memory state and call `interrupt(session_id=...)` without acquiring `agent_lock`.
+
+### 10.13 MEDIUM: Waiting for Stream Completion Is Secondary, Not Primary
+
+**Source**: Review of PR #23 (`fix: opencode cancal`)
+
+Waiting for the active stream task after `interrupt()` may improve idle-event sequencing, but it does **not** fix the primary bug if `abort_session()` still acquires `agent_lock` first. Any such waiting logic must come after the deadlock fix and must be tracked per session, not via a single global `active_stream_task` field.
+
+**Action**: Keep stream-completion waiting out of the core RFC requirements. If adopted later, specify a per-session task map and treat it as a follow-up server sequencing enhancement.
+
+## 11. Remaining Open Questions
+
+1. **`conversation` isolation**: This RFC does not address conversation history pollution between sessions. The correct long-term solution is per-session agent instances. This should likely become a follow-up RFC because it remains the most impactful concurrent-safety gap after interrupt routing is fixed.
+
+2. **Subagent interrupt semantics**: When a subagent runs within a parent session, should interrupting the parent also explicitly traverse child session IDs, or should parent-agent `_interrupt()` implementations remain solely responsible? Current recommendation: register each run under its own `session_id`, and keep subagent cancellation inside the parent agent's implementation.
+
+3. **Idle-event sequencing**: After the deadlock fix lands, do we also want `abort_session()` to wait for per-session stream completion before broadcasting idle, or is the existing stream-side cleanup sufficient? This is intentionally deferred because it is a sequencing refinement, not part of the core deadlock/routing fix.
+
+## 12. Decision Record
 
 **Status**: DRAFT (post-review round 2 — all critical issues addressed)
 
 **Decision**: Option 1 (Session-ID Run Registry) — approved with modifications
 
-**Date**: 2026-04-18
+**Date**: 2026-04-23
 
 **Approvers**: yuchen.liu
 
@@ -859,10 +922,11 @@ This is a **behavioral change** from the current code. An implementer who copies
 1. **`self.session_id` migration**: IN SCOPE — store `effective_session_id` in `run_ctx`, internal reads use `run_ctx` instead of `self.session_id`. Applies to ALL agent types (ACP, AGUI, Claude Code, Codex), not just NativeAgent. (Decision 1, expanded per Section 10.8)
 2. **`self._cancelled` retention**: KEPT for background run compatibility only, with docstring; streaming runs use `run_ctx.cancelled`. `interrupt()` does NOT set `self._cancelled`. (Decision 2, clarified per Section 10.10)
 3. **Fallback heuristic removal**: `len()==1` fallback removed; `interrupt()` without `run_ctx` or `session_id` is a no-op (Decision 3)
+4. **Abort route deadlock fix**: `abort_session()` does NOT call `get_or_load_session()`; it validates in-memory session presence and calls `interrupt(session_id=...)` without acquiring `agent_lock`.
 
 **Additional Decisions (from Oracle final review)**:
-4. **`self.parent_session_id` migration**: IN SCOPE — add `parent_session_id` to `AgentRunContext`, migrate internal reads to `run_ctx` (Section 10.9)
-5. **ACP `_prompt_task` migration**: IN SCOPE — add `prompt_task` to `AgentRunContext` for ACP agent per-session tracking (Section 10.11)
+5. **`self.parent_session_id` migration**: IN SCOPE — add `parent_session_id` to `AgentRunContext`, migrate internal reads to `run_ctx` (Section 10.9)
+6. **ACP `_prompt_task` migration**: IN SCOPE — add `prompt_task` to `AgentRunContext` for ACP agent per-session tracking (Section 10.11)
 
 **Key Discussion Points**:
 - Option 1 selected for alignment with RFC-0021 and minimal API surface change
@@ -870,16 +934,19 @@ This is a **behavioral change** from the current code. An implementer who copies
 - Review identified `self.session_id` as additional concurrent overwrite bug (Section 10.1)
 - Review identified `session_id` key mismatch bug in proposed code (Section 10.2)
 - `self._cancelled` retained for background run compatibility (Section 10.3)
+- Local debugging identified the OpenCode abort deadlock in `abort_session()` / `get_or_load_session()` (Section 10.12)
 
 **Conditions on Implementation**:
 - [ ] All existing tests pass
 - [ ] New concurrent interrupt tests demonstrate session-scoped isolation
-- [ ] No remaining instance-level mutable run state in `BaseAgent` or `NativeAgent` (except `self._cancelled` for background runs)
+- [ ] No remaining instance-level mutable streaming state in `BaseAgent` or `NativeAgent` (except `self._cancelled` for background runs)
 - [ ] `session_id` key mismatch bug fixed: `run_ctx.session_id` overridden with `effective_session_id` from `run_stream()` parameter
 - [ ] `self.session_id` internal reads migrated to `run_ctx` in ALL agent types (ACP, AGUI, Claude Code, Codex) — not just NativeAgent
 - [ ] `self.parent_session_id` migrated to `AgentRunContext` alongside `session_id`
 - [ ] `interrupt()` does NOT set `self._cancelled` — only `stop()` does
 - [ ] ACP `self._prompt_task` migrated to `run_ctx.prompt_task`
+- [ ] `abort_session()` no longer acquires `agent_lock` through `get_or_load_session()` before calling `interrupt()`
+- [ ] If idle sequencing waits for stream completion, the wait is tracked per session rather than via a global active-task slot
 - [ ] All `interrupt()` callers audited: must pass `run_ctx` or `session_id` (no fallback heuristic)
 
 ---
@@ -933,7 +1000,7 @@ This is a **behavioral change** from the current code. An implementer who copies
 
 | Call Site | Current | Updated |
 |-----------|---------|---------|
-| `abort_session()` | `await state.agent.interrupt()` | `await state.agent.interrupt(session_id=session_id)` |
+| `abort_session()` | `session = await get_or_load_session(...); await state.agent.interrupt()` | `if session_id not in state.sessions: raise 404; await state.agent.interrupt(session_id=session_id)` |
 | `ACP session.cancel()` | `await self.agent.interrupt()` | `await self.agent.interrupt(session_id=self.session_id)` |
 | `ACP._interrupt()` | `self._active_run_ctx.current_task` / `self._prompt_task` | `run_ctx.current_task` if `run_ctx` / `run_ctx.prompt_task` |
 | `AGUI._interrupt()` | `self._active_run_ctx.current_task` | `run_ctx.current_task` if `run_ctx` |
@@ -995,13 +1062,18 @@ async def test_interrupt_by_session_id():
     assert "ses_X" not in agent._active_runs  # cleaned up by finally
 
     await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_abort_session_does_not_wait_on_agent_lock():
+    """OpenCode abort must reach interrupt() while a stream still holds agent_lock."""
+    ...
 ```
 
 ### Existing Tests to Update
 
 | Test | Change |
 |------|--------|
-| `test_interrupt_without_run_ctx_*` | Use `session_id` parameter or ensure single-run fallback |
+| `test_interrupt_without_run_ctx_*` | Pass `session_id` explicitly or update expectations to no-op |
 | `test_subsequent_run_after_interrupt` | Remove `fast_agent._cancelled = False` manual reset |
 | `test_interrupt_then_run_stream` | Verify `_cancelled` flag no longer needed |
 
