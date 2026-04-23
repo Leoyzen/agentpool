@@ -5,12 +5,12 @@
 ---
 rfc_id: RFC-0023
 title: Session-Scoped Interrupt Routing for Concurrent Agent Safety
-status: DRAFT
+status: IMPLEMENTED
 author: yuchen.liu
 reviewers: []
 created: 2026-04-18
 last_updated: 2026-04-23
-decision_date:
+decision_date: 2026-04-23
 related_documents:
   - RFC-0021-agent-concurrent-execution-safety.md (Parent RFC — per-run context isolation)
   - RFC-0021-PRE-FLIGHT-ANALYSIS.md (State inventory and audit)

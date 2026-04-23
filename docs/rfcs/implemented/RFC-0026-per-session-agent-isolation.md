@@ -1,12 +1,12 @@
 ---
 rfc_id: RFC-0026
 title: "Per-Session Agent Instances — Remove agent_lock"
-status: DRAFT
+status: IMPLEMENTED
 author: yuchen.liu
 reviewers: []
 created: 2026-04-20
 last_updated: 2026-04-23
-decision_date:
+decision_date: 2026-04-23
 related_rfcs:
   - RFC-0021 (Agent Concurrent Execution Safety)
   - RFC-0024 (Agent Stateless Refactor — Phase 2)
