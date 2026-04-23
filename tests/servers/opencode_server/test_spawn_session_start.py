@@ -108,7 +108,8 @@ async def test_spawn_start_before_content(server_state: ServerState) -> None:
 
     # Verify at least one ToolPart exists in parent session
     tool_parts = [
-        e for e in part_updated_events
+        e
+        for e in part_updated_events
         if hasattr(e.properties.part, "tool") and e.properties.part.tool == "task"
     ]
     assert len(tool_parts) >= 1, "Should have at least 1 ToolPart for task"
@@ -640,6 +641,3 @@ async def test_spawn_start_toolpart_uses_source_name_as_subagent_type(
         f"subagent_type should be source_name 'explore', not source_type 'agent'. "
         f"Got: {tool_input.get('subagent_type')!r}"
     )
-
-
-

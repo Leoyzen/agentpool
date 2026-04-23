@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
@@ -139,27 +138,6 @@ def _process_skill_template(template: str, arguments: str | None) -> str:
     return result
 
 
-def _create_command_context(state: ServerState) -> CommandContext[Any]:
-    """Create a CommandContext for executing slash commands.
-
-    Args:
-        state: The current server state with agent and working directory info.
-
-    Returns:
-        A CommandContext configured with the agent context, output capture, and command store.
-    """
-    from agentpool.agents.context import AgentContext
-
-    assert state.command_store is not None, "Command store must be initialized"
-
-    agent_ctx = AgentContext(node=state.agent, data=None)
-    return CommandContext(
-        output=_CommandOutputCapture(),
-        data=agent_ctx,
-        command_store=state.command_store,
-    )
-
-
 async def _execute_slashed_command(
     state: ServerState,
     session_id: str,
@@ -236,9 +214,10 @@ async def _execute_slashed_command(
 
         # Create command context with output capture
         output_capture = _CommandOutputCapture()
+        session_agent = await state.get_or_create_agent(session_id)
         cmd_ctx = CommandContext(
             output=output_capture,
-            data=state.agent.get_context(),
+            data=session_agent.get_context(),
             command_store=state.command_store,
         )
 
@@ -281,14 +260,13 @@ async def _execute_slashed_command(
             )
 
             # Run agent with prompt to use the skill context
-            async with state.agent_lock:
-                agent = state.bind_agent_to_session(session_id)
-                iterator = agent.run_stream(
-                    agent_prompt,
-                    session_id=session_id,
-                )
-                async for oc_event in adapter.process_stream(iterator):
-                    await state.broadcast_event(oc_event)
+            agent = await state.get_or_create_agent(session_id)
+            iterator = agent.run_stream(
+                agent_prompt,
+                session_id=session_id,
+            )
+            async for oc_event in adapter.process_stream(iterator):
+                await state.broadcast_event(oc_event)
             # Append adapter's response to text_part
             if adapter.response_text:
                 text_part.text = f"{output_text}\n\n{adapter.response_text}"
@@ -389,11 +367,10 @@ async def _execute_skill_command(
             SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
         )
 
-        # Load session into agent to ensure conversation history is restored
+        # Load session into session agent to ensure conversation history is restored
         # This ensures agent sees all previous messages during this run
-        async with state.agent_lock:
-            agent = state.bind_agent_to_session(session_id)
-            await agent.load_session(session_id)
+        agent = await state.get_or_create_agent(session_id)
+        await agent.load_session(session_id)
 
         # Create USER message (not assistant!)
         user_msg_id = identifier.ascending("message")
@@ -456,11 +433,10 @@ async def _execute_skill_command(
             )
 
             # Run agent with the user prompt
-            async with state.agent_lock:
-                agent = state.bind_agent_to_session(session_id)
-                iterator = agent.run_stream(user_prompt, session_id=session_id)
-                async for oc_event in adapter.process_stream(iterator):
-                    await state.broadcast_event(oc_event)
+            agent = await state.get_or_create_agent(session_id)
+            iterator = agent.run_stream(user_prompt, session_id=session_id)
+            async for oc_event in adapter.process_stream(iterator):
+                await state.broadcast_event(oc_event)
 
         except Exception as e:
             error_text = f"Error: {e}"
@@ -498,110 +474,66 @@ async def _execute_skill_command(
 
 
 async def get_or_load_session(state: ServerState, session_id: str) -> Session | None:
-    """Get session from cache or load via agent.
+    """Get session from cache or load via session-scoped agent.
 
     Returns None if session not found.
-    Uses agent.load_session() which handles loading from the appropriate
-    storage (pool storage, Claude storage, ACP server, Codex, etc.).
-
-    Important: This function ensures the agent's conversation history is always
-    synchronized with the requested session. Even if the session is cached,
-    if the agent currently has a different session loaded, the history will be
-    reloaded to prevent cross-session contamination.
+    Uses ``state.get_or_create_agent()`` to obtain a per-session agent, so
+    each session's conversation history is owned by its own agent instance —
+    no cross-session contamination and no ``agent_lock`` needed.
 
     For subagent sessions (child sessions), we prioritize the in-memory version
     because parts are streamed in real-time and may not be immediately persisted
     to storage. This ensures users see the latest message state when viewing
     subagent sessions.
     """
-    async with state.agent_lock:
-        # Check if session is cached AND agent has the correct session loaded
-        agent_has_correct_session = (
-            state.agent.session_id == session_id
-            and session_id in state.sessions
-            and session_id in state.messages
-        )
+    # For subagent/child sessions: prioritize in-memory messages if available.
+    # This is critical because subagent parts are streamed in real-time to memory
+    # but are only persisted at completion, not after each part update.
+    # A session is considered a subagent session if it has a parent_id.
+    cached_session = state.sessions.get(session_id)
+    is_subagent_session = cached_session is not None and cached_session.parent_id is not None
 
-        if agent_has_correct_session:
-            state.bind_agent_to_session(session_id)
-            return state.sessions[session_id]
+    if is_subagent_session and session_id in state.messages:
+        return cached_session
 
-        # For subagent/child sessions: prioritize in-memory messages if available
-        # This is critical because subagent parts are streamed in real-time to memory
-        # but are only persisted at completion, not after each part update
-        # A session is considered a subagent session if it has a parent_id
-        cached_session = state.sessions.get(session_id)
-        is_subagent_session = cached_session is not None and cached_session.parent_id is not None
+    # If the session is cached in memory (regardless of subagent status),
+    # we have it from create_session or a previous load. Since each session
+    # now has its own agent instance, we only need to reload history if the
+    # session is NOT in the messages cache at all (cold-start recovery after
+    # server restart). If messages are already present (even empty), the
+    # session agent already owns the correct conversation history.
+    if cached_session is not None and session_id in state.messages:
+        return cached_session
 
-        if is_subagent_session and session_id in state.messages:
-            state.bind_agent_to_session(session_id)
-            return cached_session
+    # Need to load/reload session history into the session agent
+    existing_messages = state.messages.get(session_id) if is_subagent_session else None
 
-        # If the session is cached in memory (regardless of subagent status),
-        # we have it from create_session or a previous load. Bind the agent
-        # and try to load conversation history. If the session hasn't been
-        # persisted to StorageManager yet (e.g., just created via create_session
-        # which saves to pool.sessions.store / MemorySessionStore but
-        # agent.load_session reads from StorageManager), we still return the
-        # cached session with whatever history we can get.
-        if cached_session is not None and session_id in state.messages:
-            existing_messages = state.messages[session_id]
-            agent = state.bind_agent_to_session(session_id)
-            # Try to load history — may return None if session is new
-            # and hasn't been persisted to StorageManager yet
-            data = await agent.load_session(session_id)
-            if data is not None:
-                # Reload history from storage
-                state.messages[session_id] = [
-                    chat_message_to_opencode(
-                        chat_msg,
-                        session_id=session_id,
-                        working_dir=state.working_dir,
-                        agent_name=agent.name,
-                        model_id=chat_msg.model_name or "sonnet",
-                        provider_id=chat_msg.provider_name or "claude-code",
-                    )
-                    for chat_msg in agent.conversation.chat_messages
-                ]
-                state.bind_agent_to_session(session_id, agent=agent)
-            else:
-                # Session exists in cache but not in StorageManager yet.
-                # This happens when create_session saves to MemorySessionStore
-                # but StorageManager uses a different backend (e.g., SQL).
-                # Bind agent to session with existing (possibly empty) history.
-                state.bind_agent_to_session(session_id, agent=agent)
-            return cached_session
+    agent = await state.get_or_create_agent(session_id)
+    data = await agent.load_session(session_id)
+    if data is None:
+        return None
 
-        # Need to load/reload session history into agent
-        existing_messages = state.messages.get(session_id) if is_subagent_session else None
+    session = session_data_to_opencode(data)
+    state.sessions[session_id] = session
+    state.ensure_runtime_session_state(session_id)
+    if session_id not in state.session_status:
+        await state.mark_session_idle(session_id)
 
-        agent = state.bind_agent_to_session(session_id)
-        data = await agent.load_session(session_id)
-        if data is None:
-            return None
+    if not (is_subagent_session and existing_messages):
+        state.messages[session_id] = [
+            chat_message_to_opencode(
+                chat_msg,
+                session_id=session_id,
+                working_dir=state.working_dir,
+                agent_name=agent.name,
+                model_id=chat_msg.model_name or "sonnet",
+                provider_id=chat_msg.provider_name or "claude-code",
+            )
+            for chat_msg in agent.conversation.chat_messages
+        ]
 
-        session = session_data_to_opencode(data)
-        state.sessions[session_id] = session
-        state.ensure_runtime_session_state(session_id)
-        if session_id not in state.session_status:
-            await state.mark_session_idle(session_id)
-
-        if not (is_subagent_session and existing_messages):
-            state.messages[session_id] = [
-                chat_message_to_opencode(
-                    chat_msg,
-                    session_id=session_id,
-                    working_dir=state.working_dir,
-                    agent_name=agent.name,
-                    model_id=chat_msg.model_name or "sonnet",
-                    provider_id=chat_msg.provider_name or "claude-code",
-                )
-                for chat_msg in agent.conversation.chat_messages
-            ]
-
-        state.bind_agent_to_session(session_id, agent=agent)
-        await state.broadcast_event(SessionUpdatedEvent.create(session))
-        return session
+    await state.broadcast_event(SessionUpdatedEvent.create(session))
+    return session
 
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -689,9 +621,8 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     state.messages[session_id] = []
     await state.mark_session_idle(session_id)
     state.todos[session_id] = []
-    async with state.agent_lock:
-        agent = state.bind_agent_to_session(session_id)
-        agent.conversation.chat_messages.clear()
+    agent = await state.get_or_create_agent(session_id)
+    agent.conversation.chat_messages.clear()
     await state.broadcast_event(SessionCreatedEvent.create(session))
     # Broadcast session.updated so the CLI TUI can upsert the session into
     # its SolidJS store.  The CLI TUI's sync.tsx event handler processes
@@ -719,9 +650,8 @@ async def get_session(session_id: str, state: StateDep) -> Session:
     Loads from storage if not in memory cache.
     """
     # Fast path for subagent/child sessions already in memory:
-    # Skip get_or_load_session (which acquires agent_lock) because the
-    # parent agent holds agent_lock while streaming, so the lock would
-    # block until the parent finishes.
+    # Skip get_or_load_session (which may load from storage) because the
+    # parent agent is streaming and subagent parts are in memory.
     cached_session = state.sessions.get(session_id)
     if cached_session is not None and cached_session.parent_id is not None:
         return cached_session
@@ -751,12 +681,14 @@ async def get_session_messages(
         List of messages with their parts
     """
     # Fast path for subagent/child sessions already in memory:
-    # Skip get_or_load_session (which acquires agent_lock) because the
-    # parent agent holds agent_lock while streaming, so the lock would
-    # block until the parent finishes — making child messages invisible
-    # during subagent execution.
+    # Skip get_or_load_session (which may load from storage) because the
+    # parent agent is streaming and subagent parts are in memory.
     cached_session = state.sessions.get(session_id)
-    if cached_session is not None and cached_session.parent_id is not None and session_id in state.messages:
+    if (
+        cached_session is not None
+        and cached_session.parent_id is not None
+        and session_id in state.messages
+    ):
         messages = state.messages[session_id]
         if limit is not None and limit > 0:
             messages = messages[-limit:]
@@ -851,11 +783,17 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     if input_provider := state.input_providers.pop(session_id, None):
         input_provider.cancel_all_pending()
 
+    # Tear down the per-session agent (calls __aexit__, removes from registry).
+    # Safe even if the session was never fully initialized —
+    # remove_session_agent is a no-op for unregistered session_ids.
+    await state.remove_session_agent(session_id)
+
     # Remove from cache
     state.sessions.pop(session_id, None)
     state.messages.pop(session_id, None)
     state.session_status.pop(session_id, None)
     state.todos.pop(session_id, None)
+    state.reverted_messages.pop(session_id, None)
     # Delete from storage
     if state.pool.sessions.store:
         await state.pool.sessions.store.delete(session_id)
@@ -873,9 +811,10 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     # Stop any in-flight prompt worker for this session before interrupting the agent.
     await state.cancel_session_background_tasks(session_id)
 
-    # Interrupt the agent to cancel any ongoing stream
+    # Interrupt the correct session agent to cancel any ongoing stream
     try:
-        await state.agent.interrupt()
+        session_agent = state._session_agents.get(session_id, state.agent)
+        await session_agent.interrupt()
         # Give a moment for the cancellation to propagate
         await asyncio.sleep(0.1)
     except Exception:  # noqa: BLE001
@@ -946,7 +885,6 @@ async def fork_session(  # noqa: D417
         version="1",
         time=TimeCreatedUpdated(created=now, updated=now),
         parent_id=session_id,  # Link to original session
-
     )
 
     # Persist the forked session to storage
@@ -975,6 +913,11 @@ async def fork_session(  # noqa: D417
     state.messages[new_session_id] = copied_messages
     input_provider = OpenCodeInputProvider(state, new_session_id)
     state.input_providers[new_session_id] = input_provider
+    # Create a dedicated session agent for the forked session.
+    # Load the copied conversation history into it so the fork starts
+    # with the same context as the original session.
+    fork_agent = await state.get_or_create_agent(new_session_id)
+    fork_agent.conversation.chat_messages.clear()
     # Broadcast session created event
     await state.broadcast_event(SessionCreatedEvent.create(forked_session))
     # Also broadcast session.updated so the CLI TUI upserts the forked
@@ -1052,29 +995,26 @@ async def init_session(  # noqa: D417
 
     # Run the agent in the background
     async def run_init() -> None:
-        original_model: str | None = None
-        async with state.agent_lock:
-            agent = state.bind_agent_to_session(session_id)
-            try:
-                if request and request.model_id and request.provider_id:
-                    requested_model = f"{request.provider_id}:{request.model_id}"
-                    try:
-                        available_models = await agent.get_available_models()
-                        if available_models:
-                            valid_ids = [
-                                m.id_override if m.id_override else m.id for m in available_models
-                            ]
-                            if requested_model in valid_ids:
-                                original_model = agent.model_name
-                                await agent.set_model(requested_model)
-                    except Exception:  # noqa: BLE001
-                        pass
+        agent = await state.get_or_create_agent(session_id)
+        try:
+            if request and request.model_id and request.provider_id:
+                requested_model = f"{request.provider_id}:{request.model_id}"
+                try:
+                    available_models = await agent.get_available_models()
+                    if available_models:
+                        valid_ids = [
+                            m.id_override if m.id_override else m.id for m in available_models
+                        ]
+                        if requested_model in valid_ids:
+                            await agent.set_model(requested_model)
+                except Exception:  # noqa: BLE001
+                    pass
 
-                await agent.run(init_prompt)
-            finally:
-                if original_model is not None:
-                    with contextlib.suppress(Exception):
-                        await agent.set_model(original_model)
+            await agent.run(init_prompt)
+        finally:
+            # Per-session agent: model changes are session-local, no need
+            # to restore the original model.
+            pass
 
     state.create_background_task(run_init(), name=f"init_{session_id}")
 
@@ -1088,9 +1028,8 @@ async def get_session_todos(session_id: str, state: StateDep) -> list[Todo]:
     Returns todos from the agent pool's TodoTracker.
     """
     # Fast path for subagent/child sessions already in memory:
-    # Skip get_or_load_session (which acquires agent_lock) because the
-    # parent agent holds agent_lock while streaming, so the lock would
-    # block until the parent finishes.
+    # Skip get_or_load_session (which may load from storage) because the
+    # parent agent is streaming and subagent parts are in memory.
     cached_session = state.sessions.get(session_id)
     if cached_session is not None and cached_session.parent_id is not None:
         tracker = state.pool.todos
@@ -1123,9 +1062,8 @@ async def get_session_diff(
     Optionally filter to changes since a specific message.
     """
     # Fast path for subagent/child sessions already in memory:
-    # Skip get_or_load_session (which acquires agent_lock) because the
-    # parent agent holds agent_lock while streaming, so the lock would
-    # block until the parent finishes.
+    # Skip get_or_load_session (which may load from storage) because the
+    # parent agent is streaming and subagent parts are in memory.
     cached_session = state.sessions.get(session_id)
     if cached_session is not None and cached_session.parent_id is not None:
         file_ops = state.pool.file_ops
@@ -1357,54 +1295,51 @@ async def summarize_session(  # noqa: PLR0915
         cost = 0.0
         text_part: TextPart | None = None
         try:
-            async with state.agent_lock:
-                agent = state.bind_agent_to_session(session_id)
-                # Stream events from the agent with the summarization prompt
-                # This runs with FULL history - the summary is based on complete context
-                async for event in agent.run_stream(SUMMARIZE_PROMPT, session_id=session_id):
-                    match event:
-                        # Text streaming start
-                        case PartStartEvent(part=PydanticTextPart(content=delta)):
-                            response_text = delta
+            agent = await state.get_or_create_agent(session_id)
+            # Stream events from the agent with the summarization prompt
+            # This runs with FULL history - the summary is based on complete context
+            async for event in agent.run_stream(SUMMARIZE_PROMPT, session_id=session_id):
+                match event:
+                    # Text streaming start
+                    case PartStartEvent(part=PydanticTextPart(content=delta)):
+                        response_text = delta
+                        text_part = TextPart(
+                            id=identifier.ascending("part"),
+                            message_id=assistant_msg_id,
+                            session_id=session_id,
+                            text=delta,
+                        )
+                        assistant_msg_with_parts.parts.append(text_part)
+                        await state.broadcast_event(PartUpdatedEvent.create(text_part))
+
+                    # Text streaming delta
+                    case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if delta:
+                        response_text += delta
+                        if text_part is not None:
                             text_part = TextPart(
-                                id=identifier.ascending("part"),
+                                id=text_part.id,
                                 message_id=assistant_msg_id,
                                 session_id=session_id,
-                                text=delta,
+                                text=response_text,
                             )
-                            assistant_msg_with_parts.parts.append(text_part)
-                            await state.broadcast_event(PartUpdatedEvent.create(text_part))
-
-                        # Text streaming delta
-                        case PydanticPartDeltaEvent(delta=TextPartDelta(content_delta=delta)) if (
-                            delta
-                        ):
-                            response_text += delta
-                            if text_part is not None:
-                                text_part = TextPart(
-                                    id=text_part.id,
-                                    message_id=assistant_msg_id,
+                            # Update in parts list
+                            for i, p in enumerate(assistant_msg_with_parts.parts):
+                                if isinstance(p, TextPart) and p.id == text_part.id:
+                                    assistant_msg_with_parts.parts[i] = text_part
+                                    break
+                            await state.broadcast_event(
+                                PartDeltaEvent.create(
                                     session_id=session_id,
-                                    text=response_text,
+                                    message_id=assistant_msg_id,
+                                    part_id=text_part.id,
+                                    delta=delta,
                                 )
-                                # Update in parts list
-                                for i, p in enumerate(assistant_msg_with_parts.parts):
-                                    if isinstance(p, TextPart) and p.id == text_part.id:
-                                        assistant_msg_with_parts.parts[i] = text_part
-                                        break
-                                await state.broadcast_event(
-                                    PartDeltaEvent.create(
-                                        session_id=session_id,
-                                        message_id=assistant_msg_id,
-                                        part_id=text_part.id,
-                                        delta=delta,
-                                    )
-                                )
+                            )
 
-                        # Stream complete - extract token usage
-                        case StreamCompleteEvent(message=msg) if msg and msg.usage:
-                            usage = msg.usage
-                            cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
+                    # Stream complete - extract token usage
+                    case StreamCompleteEvent(message=msg) if msg and msg.usage:
+                        usage = msg.usage
+                        cost = float(msg.cost_info.total_cost) if msg.cost_info else 0
 
         except Exception as e:  # noqa: BLE001
             response_text = f"Error generating summary: {e}"
@@ -1426,19 +1361,18 @@ async def summarize_session(  # noqa: PLR0915
         # Final state will be: [compacted history] + [summary message]
         # The compacted history becomes the cached prefix for future LLM calls.
         try:
-            async with state.agent_lock:
-                agent = state.bind_agent_to_session(session_id)
-                pipeline = None
-                if agent.agent_pool is not None:
-                    pipeline = agent.agent_pool.compaction_pipeline
-                if pipeline is None:
-                    pipeline = summarizing_context()
+            agent = await state.get_or_create_agent(session_id)
+            pipeline = None
+            if agent.agent_pool is not None:
+                pipeline = agent.agent_pool.compaction_pipeline
+            if pipeline is None:
+                pipeline = summarizing_context()
 
-                await compact_conversation(pipeline, agent.conversation)
-                if state.storage is not None:
-                    compacted_history = agent.conversation.get_history()
-                    await state.storage.replace_conversation_messages(session_id, compacted_history)
-                state.messages[session_id] = [assistant_msg_with_parts]
+            await compact_conversation(pipeline, agent.conversation)
+            if state.storage is not None:
+                compacted_history = agent.conversation.get_history()
+                await state.storage.replace_conversation_messages(session_id, compacted_history)
+            state.messages[session_id] = [assistant_msg_with_parts]
 
         except Exception:  # noqa: BLE001
             # Compaction failure is not fatal - we still have the summary
@@ -1707,7 +1641,8 @@ async def execute_command(  # noqa: PLR0915
     # Check CommandStore first (slashed commands take priority)
     if state.command_store and state.command_store.get_command(request.command) is not None:
         # Check for collision with MCP prompts
-        prompts = await state.agent.tools.list_prompts()
+        session_agent = await state.get_or_create_agent(session_id)
+        prompts = await session_agent.tools.list_prompts()
         if any(p.name == request.command for p in prompts):
             logger.warning(
                 "Both slashed command and prompt exist for '%s'. Using slashed command.",
@@ -1726,7 +1661,8 @@ async def execute_command(  # noqa: PLR0915
         return await _execute_skill_command(state, session_id, request)
 
     # Fall back to MCP prompts (existing code remains unchanged)
-    prompts = await state.agent.tools.list_prompts()
+    session_agent = await state.get_or_create_agent(session_id)
+    prompts = await session_agent.tools.list_prompts()
     # Find matching prompt by name
     prompt = next((p for p in prompts if p.name == request.command), None)
     if prompt is None:
@@ -1791,8 +1727,9 @@ async def execute_command(  # noqa: PLR0915
                             elif isinstance(item, str):
                                 prompt_texts.append(item)
             prompt_text = "\n".join(prompt_texts)
-            # Run the expanded prompt through the agent
-            result = await state.agent.run(prompt_text)
+            # Run the expanded prompt through the session agent
+            agent = await state.get_or_create_agent(session_id)
+            result = await agent.run(prompt_text)
             output_text = str(result.data)
 
         except Exception as e:  # noqa: BLE001

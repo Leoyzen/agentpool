@@ -123,8 +123,7 @@ class Model(OpenCodeBaseModel):
             name=model.name,
             capabilities=ProviderCapabilities(
                 attachment=False,
-                reasoning="reasoning" in output_mods
-                or "thinking" in model.name.lower(),
+                reasoning="reasoning" in output_mods or "thinking" in model.name.lower(),
                 temperature=True,
                 input=ProviderModalities(
                     text=True,

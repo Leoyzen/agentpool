@@ -782,9 +782,7 @@ class EventProcessor:
                 parent_id=user_msg_id,
                 provider_id="agentpool",
                 path=MessagePath(cwd=ctx.working_dir, root=ctx.working_dir),
-                mode=(
-                    subagent_event.mode or source_name
-                ) if source_name else "default",
+                mode=(subagent_event.mode or source_name) if source_name else "default",
             )
 
             child_ctx = EventProcessorContext(
@@ -961,9 +959,7 @@ class EventProcessor:
             parent_id=user_msg_id,
             provider_id="agentpool",
             path=MessagePath(cwd=ctx.working_dir, root=ctx.working_dir),
-            mode=(
-                event.mode or event.source_name
-            ) if event.source_name else "default",
+            mode=(event.mode or event.source_name) if event.source_name else "default",
         )
 
         child_ctx = EventProcessorContext(

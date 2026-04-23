@@ -295,9 +295,9 @@ async def get_config(state: StateDep) -> Config:
     # Set a default model if not already configured
     if state.config.model is None:
         try:
-            # Get available models
-            async with state.agent_lock:
-                toko_models = await state.agent.get_available_models()
+            # Get available models — no agent_lock needed: per-session agents
+            # make global serialization unnecessary for read-only queries.
+            toko_models = await state.agent.get_available_models()
             if toko_models:
                 providers = _build_providers(toko_models)
 
@@ -327,17 +327,29 @@ async def update_config(state: StateDep, config_update: Config) -> Config:
     # Update only the fields that were provided
     update_data = config_update.model_dump(exclude_unset=True)
 
-    # Sync model change to agent if provided
+    # Sync model change to agents if provided
     if "model" in update_data and update_data["model"] is not None:
         new_model = update_data["model"]
         logger.info("PATCH /config received model update", model=new_model)
         if state.agent is not None:
             try:
+                # Update the shared/template agent — no agent_lock needed with
+                # per-session agents: each session has its own agent instance.
                 logger.info("Calling agent.set_model", model=new_model)
-                async with state.agent_lock:
-                    await state.agent.set_model(new_model)
+                await state.agent.set_model(new_model)
+                # Also propagate the model change to all active per-session
+                # agents so they stay in sync with the global config.
+                for _sid, session_agent in state._session_agents.items():
+                    try:
+                        await session_agent.set_model(new_model)
+                    except Exception as sa_err:  # noqa: BLE001
+                        logger.warning(
+                            "Failed to update session agent model",
+                            session_id=_sid,
+                            error=str(sa_err),
+                        )
                 logger.info("Agent model successfully updated", model=new_model)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.warning("Failed to update agent model", error=str(e))
                 logger.exception("Traceback while updating agent model")
         else:

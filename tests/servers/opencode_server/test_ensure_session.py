@@ -304,12 +304,10 @@ async def test_ensure_session_child_inherits_parent_project_and_directory(
         child = await mock_state.ensure_session(child_id, parent_id=parent_id)
 
     assert child.project_id == parent_session.project_id, (
-        f"Child project_id should be {parent_session.project_id!r}, "
-        f"got {child.project_id!r}"
+        f"Child project_id should be {parent_session.project_id!r}, got {child.project_id!r}"
     )
     assert child.directory == parent_session.directory, (
-        f"Child directory should be {parent_session.directory!r}, "
-        f"got {child.directory!r}"
+        f"Child directory should be {parent_session.directory!r}, got {child.directory!r}"
     )
 
 
