@@ -404,6 +404,14 @@ async def _process_message_locked(  # noqa: PLR0915
     # from the default session agent.  A request.agent value of "default"
     # (or any name that matches the session agent) means "use my session
     # agent" — no delegation needed.
+    #
+    # NOTE: Subagents from state.pool.all_agents are shared singleton
+    # instances.  Mutating session_id/_input_provider on them is safe ONLY
+    # because same-session serialization (via get_session_lock) prevents
+    # concurrent access.  Per-session subagent instances are NOT feasible
+    # due to MCP subprocess overhead.  If OpenCode ever supports direct
+    # multi-agent selection, this must be redesigned via AgentPool's
+    # delegation/team mechanism instead.
     if request.agent and state.pool is not None:
         all_agents = state.pool.all_agents
         if request.agent in all_agents and all_agents[request.agent] is not agent:

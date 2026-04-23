@@ -298,6 +298,20 @@ class ServerState:
             if session_id in self._session_agents:
                 return self._session_agents[session_id]
             agent = self._create_session_agent(session_id)
+            # Initialize the agent's async context (MCP subprocesses, tool
+            # schemas, etc.) so it is ready for run_stream().  Without this,
+            # per-session agents miss __aenter__ initialization that the
+            # shared pool agent receives via AgentPool.__aenter__().
+            # Only enter the context for agents created from config — the
+            # fallback path (test mocks, shared agent) is already initialized.
+            if self._agent_config is not None:
+                try:
+                    await agent.__aenter__()
+                except Exception:
+                    # If init fails, remove the partially-created agent so a
+                    # retry can attempt creation again.
+                    self._session_agents.pop(session_id, None)
+                    raise
             self._session_agents[session_id] = agent
             return agent
 

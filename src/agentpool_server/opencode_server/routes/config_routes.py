@@ -339,7 +339,7 @@ async def update_config(state: StateDep, config_update: Config) -> Config:
                 await state.agent.set_model(new_model)
                 # Also propagate the model change to all active per-session
                 # agents so they stay in sync with the global config.
-                for _sid, session_agent in state._session_agents.items():
+                for _sid, session_agent in list(state._session_agents.items()):
                     try:
                         await session_agent.set_model(new_model)
                     except Exception as sa_err:  # noqa: BLE001

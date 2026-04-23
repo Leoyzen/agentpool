@@ -933,6 +933,15 @@ async def fork_session(  # noqa: D417
     # with the same context as the original session.
     fork_agent = await state.get_or_create_agent(new_session_id)
     fork_agent.conversation.chat_messages.clear()
+    # Populate the agent's conversation with the forked history so the
+    # LLM sees the full context on the next message.  Without this the
+    # agent starts with an empty conversation despite state.messages
+    # having the copied messages (UI shows history but LLM does not).
+    from agentpool_server.opencode_server.converters import opencode_to_chat_message
+
+    for msg_with_parts in copied_messages:
+        chat_msg = opencode_to_chat_message(msg_with_parts, session_id=new_session_id)
+        fork_agent.conversation.chat_messages.append(chat_msg)
     # Broadcast session created event
     await state.broadcast_event(SessionCreatedEvent.create(forked_session))
     # Also broadcast session.updated so the CLI TUI upserts the forked
