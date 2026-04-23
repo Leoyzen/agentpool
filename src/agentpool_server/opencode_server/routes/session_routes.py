@@ -815,6 +815,11 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     # Stop any in-flight prompt worker for this session.
     await state.cancel_session_background_tasks(session_id)
 
+    # Cancel the active message processing task (covers the sync
+    # send_message path where the stream runs in the request handler
+    # task, which is NOT tracked in background_tasks).
+    await state.cancel_active_message_task(session_id)
+
     # Interrupt the correct session agent to cancel any ongoing stream
     try:
         session_agent = state._session_agents.get(session_id, state.agent)
@@ -823,6 +828,12 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
         await asyncio.sleep(0.1)
     except Exception:  # noqa: BLE001
         pass
+
+    # Re-cancel pending questions after interrupt to catch any questions
+    # that were created AFTER the initial cancel but BEFORE the interrupt
+    # took effect (TOCTOU race — the agent may ask questions between
+    # cancel_session_pending_questions and interrupt taking effect).
+    state.cancel_session_pending_questions(session_id)
 
     # Update and broadcast session status to notify clients
     state.session_status[session_id] = SessionStatus(type="idle")

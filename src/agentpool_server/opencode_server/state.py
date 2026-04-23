@@ -120,6 +120,10 @@ class ServerState:
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     # Per-session async prompt queue owned by the server runtime.
     pending_async_prompts: dict[str, list[QueuedAsyncPrompt]] = field(default_factory=dict)
+    # Per-session active message processing tasks (session_id -> task).
+    # Tracks BOTH sync send_message tasks (which run in the request handler)
+    # and async prompt worker tasks so abort_session can cancel either.
+    _active_message_tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
     # Event managers for subagent event routing (session_id -> event_manager)
     event_managers: dict[str, Any] = field(default_factory=dict)
     # Provider authentication service
@@ -439,6 +443,36 @@ class ServerState:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def register_active_message_task(self, session_id: str, task: asyncio.Task[Any]) -> None:
+        """Register the active message processing task for a session.
+
+        Called by ``_process_message_locked`` so that ``abort_session`` can
+        cancel the task even when it runs in the sync ``send_message`` path
+        (which is NOT tracked in ``background_tasks``).
+        """
+        self._active_message_tasks[session_id] = task
+
+    def unregister_active_message_task(self, session_id: str) -> None:
+        """Remove the active message processing task for a session.
+
+        Called in the ``finally`` block of ``_process_message_locked`` to
+        clean up the registration when processing completes (normally or
+        on cancellation).
+        """
+        self._active_message_tasks.pop(session_id, None)
+
+    async def cancel_active_message_task(self, session_id: str) -> None:
+        """Cancel the active message processing task for a session.
+
+        This handles both the sync ``send_message`` path (where the stream
+        runs in the request handler task) and the async prompt worker path.
+        """
+        task = self._active_message_tasks.get(session_id)
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
     def cancel_session_pending_questions(self, session_id: str) -> list[str]:
         """Cancel pending questions for a specific session and return their IDs.

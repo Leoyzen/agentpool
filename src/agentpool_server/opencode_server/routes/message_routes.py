@@ -335,6 +335,11 @@ async def _process_message_locked(  # noqa: PLR0915
         mark_busy: Whether to emit a busy transition before processing.
         mark_idle: Whether to emit an idle transition when processing completes.
     """
+    # --- Register active message task so abort_session can cancel it ---
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        state.register_active_message_task(session_id, current_task)
+
     # --- Mark session busy ---
     if mark_busy:
         busy = SessionStatus(type="busy")
@@ -539,6 +544,8 @@ async def _process_message_locked(  # noqa: PLR0915
         chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
         agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
+        # --- Unregister active message task ---
+        state.unregister_active_message_task(session_id)
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:
