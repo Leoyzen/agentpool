@@ -890,6 +890,13 @@ class EventProcessor:
             # from overriding the error state
             child_ctx.is_errored = True
 
+            # Persist final child assistant message to storage even on error
+            with contextlib.suppress(Exception):
+                chat_msg = opencode_to_chat_message(
+                    child_ctx.assistant_msg, session_id=child_ctx.session_id
+                )
+                await ctx.state.storage.log_message(chat_msg)
+
         # 9. Handle StreamCompleteEvent - finalize child session and update parent
         # Skip if the subagent already errored (RunErrorEvent was processed)
         if isinstance(wrapped_event, StreamCompleteEvent) and wrapped_event.message and not child_ctx.is_errored:
