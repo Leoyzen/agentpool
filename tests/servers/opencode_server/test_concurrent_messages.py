@@ -113,6 +113,7 @@ def slow_mock_agent():
     storage.save_session = AsyncMock(side_effect=save_session)
     storage.log_session = AsyncMock()
     storage.log_message = AsyncMock()
+    storage.load_session = AsyncMock(return_value=None)
     pool.storage = storage
 
     pool.todos = Mock()

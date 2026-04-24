@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.delegation import AgentPool
     from agentpool.models.agents import NativeAgentConfig
+    from agentpool.sessions.models import SessionData
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
     from agentpool_server.opencode_server.models import (
@@ -585,6 +586,23 @@ class ServerState:
 
         await self.broadcast_event(SessionIdleEvent.create(session_id))
 
+    def _session_from_session_data(self, session_data: SessionData) -> Session:
+        """Convert persisted SessionData to a UI Session model.
+
+        Delegates to ``session_data_to_opencode`` in converters.py for the
+        actual field mapping.  This wrapper exists so ``ensure_session`` can
+        call it as a method without importing the converter at module level.
+
+        Args:
+            session_data: Persisted session data loaded from the store.
+
+        Returns:
+            A UI ``Session`` suitable for the in-memory cache and SSE events.
+        """
+        from agentpool_server.opencode_server.converters import session_data_to_opencode
+
+        return session_data_to_opencode(session_data)
+
     async def ensure_session(
         self,
         session_id: str,
@@ -592,9 +610,26 @@ class ServerState:
     ) -> Session:
         """Ensure a session exists with the given ID.
 
-        Returns the existing session if it already exists in memory,
-        otherwise creates a new session following the same pattern as
-        create_session in session_routes.py.
+        Resolution order (store-first, non-overwriting):
+
+        1. **In-memory hit** — if the session already exists in
+           ``self.sessions``, return it immediately (broadcasts
+           ``session.updated`` so the TUI can upsert).
+
+        2. **Store hit** — if the session is absent from memory but present
+           in the session store, convert the stored ``SessionData`` to a UI
+           ``Session``, register all in-memory runtime state (messages,
+           status, input-provider), mark idle, and broadcast
+           ``session.created`` + ``session.updated``.  **Does NOT** call
+           ``store.save()`` because the data is already persisted.  **Does
+           NOT** call ``bind_agent_to_session`` for child sessions.
+
+        3. **Store miss** — fall back to creating a brand-new session and
+           persisting it (original behaviour).
+
+        Concurrent calls for the same ``session_id`` are serialized by a
+        per-session lock so that only one in-memory ``Session`` object is
+        created.
 
         Args:
             session_id: Unique identifier for the session
@@ -603,7 +638,7 @@ class ServerState:
         Returns:
             The Session object (existing or newly created)
         """
-        # Check if session already exists in memory
+        # --- Fast path: already in memory -----------------------------------
         if session_id in self.sessions:
             session = self.sessions[session_id]
             from agentpool_server.opencode_server.models import SessionUpdatedEvent
@@ -611,7 +646,77 @@ class ServerState:
             await self.broadcast_event(SessionUpdatedEvent.create(session))
             return session
 
-        # Import here to avoid circular imports at module load time
+        # --- Serialise concurrent callers for the same session_id -----------
+        # Ensure a lock exists before the first await so that coroutines
+        # racing for the same ID are properly queued.
+        if session_id not in self.session_locks:
+            self.session_locks[session_id] = asyncio.Lock()
+        async with self.session_locks[session_id]:
+            # Double-check after acquiring the lock (another coroutine may
+            # have populated the session while we waited).
+            if session_id in self.sessions:
+                session = self.sessions[session_id]
+                from agentpool_server.opencode_server.models import SessionUpdatedEvent
+
+                await self.broadcast_event(SessionUpdatedEvent.create(session))
+                return session
+
+            # --- Store-first path ------------------------------------------
+            store = self.pool.sessions.store
+            if store is not None:
+                session_data = await store.load(session_id)
+            else:
+                session_data = await self.pool.storage.load_session(session_id)
+
+            if session_data is not None:
+                session = self._session_from_session_data(session_data)
+
+                # Register in-memory runtime state
+                self.sessions[session_id] = session
+                self.ensure_runtime_session_state(session_id)
+                self.ensure_input_provider(session_id)
+                await self.mark_session_idle(session_id)
+
+                # Do NOT call store.save() — data is already persisted.
+                # Do NOT call bind_agent_to_session for child sessions.
+                if session_data.parent_id is None:
+                    async with self.agent_lock:
+                        self.bind_agent_to_session(session_id)
+
+                from agentpool_server.opencode_server.models import (
+                    SessionCreatedEvent,
+                    SessionUpdatedEvent,
+                )
+
+                await self.broadcast_event(SessionCreatedEvent.create(session))
+                await self.broadcast_event(SessionUpdatedEvent.create(session))
+                logger.info(
+                    "ensure_session: loaded from store",
+                    session_id=session_id,
+                    parent_id=session_data.parent_id,
+                )
+                return session
+
+            # --- Store-miss fallback: create new session -------------------
+            return await self._create_and_persist_session(session_id, parent_id)
+
+    async def _create_and_persist_session(
+        self,
+        session_id: str,
+        parent_id: str | None,
+    ) -> Session:
+        """Create a brand-new session and persist it (store-miss fallback).
+
+        This preserves the original ``ensure_session`` creation logic for
+        sessions that are absent from both memory and the session store.
+
+        Args:
+            session_id: Unique identifier for the session.
+            parent_id: Optional parent session ID.
+
+        Returns:
+            The newly created and persisted ``Session``.
+        """
         from agentpool_server.opencode_server.converters import opencode_to_session_data
         from agentpool_server.opencode_server.models import (
             Session,
@@ -672,7 +777,7 @@ class ServerState:
         # the store is empty and messages cannot be rendered.
         await self.broadcast_event(SessionUpdatedEvent.create(session))
         logger.info(
-            "ensure_session: completed successfully",
+            "ensure_session: created new session",
             session_id=session_id,
             parent_id=parent_id,
         )

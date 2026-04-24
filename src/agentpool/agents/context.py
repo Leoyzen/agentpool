@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, Literal
 import uuid
+import warnings
 
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
@@ -27,6 +28,57 @@ ConfirmationResult = Literal["allow", "skip", "abort_run", "abort_chain"]
 logger = get_logger(__name__)
 
 
+class _DeprecatedField:
+    """Descriptor that emits a DeprecationWarning when the field is accessed.
+
+    The value is stored in the instance ``__dict__`` under a private key
+    (``_deprecated_<name>``) so that ``dataclasses.asdict()`` — which calls
+    ``getattr()`` — continues to work correctly.
+
+    Because this is a *data descriptor* (it defines both ``__get__`` and
+    ``__set__``), it takes precedence over the instance ``__dict__`` entry
+    that the dataclass ``__init__`` would normally create.
+
+    Args:
+        default_factory: Callable that produces the default value when the
+            field has not been set yet.
+        msg: Custom deprecation message.  When *None* a generic message is
+            constructed from the owning class and field names.
+    """
+
+    def __init__(
+        self,
+        default_factory: Any,
+        *,
+        msg: str | None = None,
+    ) -> None:
+        self._default_factory = default_factory
+        self._msg = msg
+        self._name: str = ""
+        self._private_key: str = ""
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self._name = name
+        self._private_key = f"_deprecated_{name}"
+
+    def __get__(self, instance: Any, owner: type | None = None) -> Any:
+        if instance is None:
+            # Class-level access (e.g. introspection) — return the descriptor.
+            return self
+        value = instance.__dict__.get(self._private_key)
+        if value is None and self._private_key not in instance.__dict__:
+            value = self._default_factory()
+            instance.__dict__[self._private_key] = value
+        msg = self._msg or f"{type(instance).__name__}.{self._name} is deprecated"
+        warnings.warn(msg, DeprecationWarning, stacklevel=2)
+        return value
+
+    def __set__(self, instance: Any, value: Any) -> None:
+        msg = self._msg or f"{type(instance).__name__}.{self._name} is deprecated"
+        warnings.warn(msg, DeprecationWarning, stacklevel=2)
+        instance.__dict__[self._private_key] = value
+
+
 @dataclass(kw_only=True)
 class AgentRunContext:
     """Per-execution isolated state container for agent runs.
@@ -35,13 +87,19 @@ class AgentRunContext:
     ensuring isolation between concurrent runs. It is separate from AgentContext
     which is the PydanticAI context passed to tools.
 
+    !!! warning "Deprecated"
+        ``session_id`` is deprecated.  Session IDs are now managed by
+        ``SessionManager`` / ``ensure_session`` on the agent itself.  Accessing
+        or setting ``session_id`` on ``AgentRunContext`` emits a
+        ``DeprecationWarning``.
+
     Attributes:
         cancelled: Whether the run has been cancelled.
         current_task: The asyncio.Task for the current run, if any.
         depth: Current delegation depth (0 = top-level run).
         event_queue: Queue for streaming events from this run.
         injection_manager: Manages prompt injection and queuing for this run.
-        session_id: Unique identifier for this run session.
+        session_id: **Deprecated** — use agent-level ``session_id`` instead.
         deps: Optional dependencies passed to the run.
         start_time: Timestamp when the run started (for metrics).
     """
@@ -61,14 +119,31 @@ class AgentRunContext:
     injection_manager: PromptInjectionManager = field(default_factory=PromptInjectionManager)
     """Manages prompt injection and queuing for this run."""
 
+    # DEPRECATED: session_id on AgentRunContext is a dead field.  Session IDs
+    # are now managed by SessionManager / ensure_session on the agent.  The
+    # _DeprecatedField descriptor (assigned after the class body) emits
+    # DeprecationWarning on every access but preserves full backward
+    # compatibility (including dataclasses.asdict()).
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    """Unique identifier for this run session."""
+    """**Deprecated** — session IDs are managed by SessionManager."""
 
     deps: Any = None
     """Optional dependencies passed to the run."""
 
     start_time: float = field(default_factory=time.perf_counter)
     """Timestamp when the run started (for metrics)."""
+
+
+# Replace the plain dataclass attribute with a data descriptor that intercepts
+# all reads and writes.  The dataclass machinery has already registered
+# ``session_id`` in ``AgentRunContext.__dataclass_fields__`` so asdict() and
+# other introspection continue to work.  Because _DeprecatedField defines both
+# __get__ and __set__ it is a *data descriptor* and takes precedence over the
+# instance __dict__ entry — guaranteeing that every access emits the warning.
+AgentRunContext.session_id = _DeprecatedField(  # type: ignore[assignment]
+    default_factory=lambda: uuid.uuid4().hex,
+    msg="AgentRunContext.session_id is deprecated — use agent-level session_id instead",
+)
 
 
 @dataclass(kw_only=True)
@@ -165,6 +240,49 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             In-memory filesystem for this agent
         """
         return self.agent.internal_fs
+
+    async def create_child_session(
+        self,
+        agent_name: str,
+        agent_type: str,
+        parent_session_id: str | None = None,
+    ) -> str:
+        """Create a child session for a subagent delegation.
+
+        When the agent pool and its session manager are available, the child
+        session is persisted via ``SessionManager.create_child_session()`` so
+        that parent-child relationships, project context, and working directory
+        are inherited automatically.  When no pool is present (e.g. during
+        standalone or test runs) a new session ID is generated without
+        persistence.
+
+        Args:
+            agent_name: Name of the child agent.
+            agent_type: Type of the child agent (``"native"``, ``"claude"``, etc.).
+            parent_session_id: Explicit parent session ID.  When *None* the
+                current node's ``session_id`` is used as the parent.
+
+        Returns:
+            The child session ID string.
+        """
+        pool = self.node.agent_pool
+        if pool is not None and pool.sessions is not None:
+            effective_parent = parent_session_id or self.node.session_id
+            # pool.sessions is SessionManager — create_child_session requires
+            # a non-None parent_session_id; fall back gracefully.
+            if effective_parent is None:
+                from agentpool.utils.identifiers import generate_session_id
+
+                return generate_session_id()
+            return await pool.sessions.create_child_session(
+                parent_session_id=effective_parent,
+                agent_name=agent_name,
+                agent_type=agent_type,
+            )
+        # No pool available — generate an ephemeral ID without persistence.
+        from agentpool.utils.identifiers import generate_session_id
+
+        return generate_session_id()
 
     @property
     def overlay_fs(self) -> OverlayFileSystem:
