@@ -12,7 +12,7 @@ import anyio
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import SpawnSessionStart, SubAgentEvent
-from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
+from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.delegation.base_team import BaseTeam
 from agentpool.log import get_logger
 from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
@@ -202,9 +202,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         # Resolve the parent session id for this team execution.
         # The caller's parent_session_id takes priority, then session_id (for
         # backward compat), then the team's own session.
-        parent_sid: str | None = (
-            parent_session_id_kwarg or session_id_kwarg or self.session_id
-        )
+        parent_sid: str | None = parent_session_id_kwarg or session_id_kwarg or self.session_id
 
         # Get nodes to run
         all_nodes = list(self.nodes)
@@ -284,9 +282,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                         parent_session_id=parent_sid,
                     )
 
-        streams = [
-            wrap_stream(node, child_session_ids[node.name]) for node in all_nodes
-        ]
+        streams = [wrap_stream(node, child_session_ids[node.name]) for node in all_nodes]
         # Merge all streams
         async for event in as_generated(streams):
             yield event

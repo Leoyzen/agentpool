@@ -18,7 +18,7 @@ from agentpool.agents.events import (
     SubAgentEvent,
 )
 from agentpool.agents.events.processors import batch_stream_deltas
-from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
+from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.tools.exceptions import ToolError

@@ -10,7 +10,7 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     SubAgentEvent,
 )
-from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
+from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
 from agentpool.tools.exceptions import ToolError

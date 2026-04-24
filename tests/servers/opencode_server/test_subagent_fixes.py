@@ -65,6 +65,7 @@ async def test_task_tool_return_format():
 
     # Mock context
     ctx = MagicMock()
+    ctx.run_ctx.depth = 0
 
     # Mock node (agent) using a class to satisfy runtime_checkable Protocol
     class MockStreamingAgent:
@@ -81,6 +82,7 @@ async def test_task_tool_return_format():
     ctx.pool.nodes = {"child_agent": mock_agent}
     ctx.node.session_id = "parent_session"
     ctx.events.emit_event = AsyncMock()
+    ctx.create_child_session = AsyncMock(return_value="child_session_123")
 
     # Execute task
     result = await tools.task(
@@ -104,6 +106,7 @@ async def test_task_tool_async_mode_return_format():
 
     # Mock context
     ctx = MagicMock()
+    ctx.run_ctx.depth = 0
     ctx.node.session_id = "parent_session"
 
     # Mock node
@@ -119,6 +122,7 @@ async def test_task_tool_async_mode_return_format():
 
     # Mock events.emit_event (needed for SpawnSessionStart emission)
     ctx.events.emit_event = AsyncMock()
+    ctx.create_child_session = AsyncMock(return_value="child_session_123")
 
     # Execute task in async mode
     result = await tools.task(
