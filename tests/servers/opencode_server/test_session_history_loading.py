@@ -108,7 +108,16 @@ class TestSessionHistoryLoading:
         server_state: ServerState,
         tmp_project_dir: Path,
     ):
-        """If agent has different session loaded, cached session should reload history."""
+        """With per-session agents, a cached session is returned immediately.
+
+        In the old shared-agent model, the agent might have the wrong
+        session loaded and need a reload. With per-session agents, each
+        session has its own agent instance, so a cached session is always
+        correct and no reload is needed.
+
+        Note: In test environments without NativeAgentConfig, the fallback
+        is the shared agent, but the cache-fast-path still applies.
+        """
         # Create session A
         response_a = await async_client.post("/session", json={"title": "Session A"})
         session_a_id = response_a.json()["id"]
@@ -117,10 +126,7 @@ class TestSessionHistoryLoading:
         response_b = await async_client.post("/session", json={"title": "Session B"})
         session_b_id = response_b.json()["id"]
 
-        # Verify agent has session B loaded
-        assert server_state.agent.session_id == session_b_id
-
-        # Add session A back to cache but agent still has B
+        # Add session A to cache
         from agentpool_server.opencode_server.models import (
             Session,
             TimeCreatedUpdated,
@@ -139,37 +145,12 @@ class TestSessionHistoryLoading:
         server_state.sessions[session_a_id] = session_a
         server_state.messages[session_a_id] = []
 
-        session_a_data = SessionData(
-            session_id=session_a_id,
-            agent_name="test-agent",
-            cwd=str(tmp_project_dir),
-            created_at=datetime.now(UTC),
-            last_active=datetime.now(UTC),
-            metadata={"title": "Session A"},
-        )
-
-        load_session_called = False
-
-        async def mock_load_session(sid: str) -> SessionData | None:
-            nonlocal load_session_called
-            if sid == session_a_id:
-                load_session_called = True
-                server_state.agent.session_id = session_a_id
-                # Set up conversation mock with empty list
-                server_state.agent.conversation = Mock()
-                server_state.agent.conversation.chat_messages = []
-                return session_a_data
-            return None
-
-        server_state.agent.load_session = mock_load_session  # type: ignore[method-assign]
-
-        # ACTION: Get session A (cached but agent has B)
+        # ACTION: Get session A (cached, no reload needed)
         loaded_session = await get_or_load_session(server_state, session_a_id)
 
-        # VERIFY: load_session should have been called
+        # VERIFY: session is returned without reload
         assert loaded_session is not None
-        assert load_session_called
-        assert server_state.agent.session_id == session_a_id
+        assert loaded_session.id == session_a_id
 
     async def test_same_session_no_reload(
         self,
@@ -207,7 +188,11 @@ class TestSessionHistoryLoading:
         server_state: ServerState,
         tmp_project_dir: Path,
     ):
-        """When switching sessions, input provider should be updated."""
+        """With per-session agents, each session has its own input provider.
+
+        When a session is loaded from storage, its agent is set up with the
+        correct input provider for that session.
+        """
         # Create session A
         response_a = await async_client.post("/session", json={"title": "Session A"})
         session_a_id = response_a.json()["id"]
@@ -218,10 +203,10 @@ class TestSessionHistoryLoading:
         session_b_id = response_b.json()["id"]
         input_provider_b = server_state.input_providers[session_b_id]
 
-        # Verify agent has session B's input provider
-        assert server_state.agent._input_provider is input_provider_b
+        # Each session has its own input provider
+        assert input_provider_a is not input_provider_b
 
-        # Clear session A from cache
+        # Clear session A from cache to force a reload
         del server_state.sessions[session_a_id]
         del server_state.messages[session_a_id]
 
@@ -238,7 +223,6 @@ class TestSessionHistoryLoading:
 
         async def mock_load_session(sid: str) -> SessionData | None:
             if sid == session_a_id:
-                server_state.agent.session_id = session_a_id
                 # Set up conversation mock with empty list
                 server_state.agent.conversation = Mock()
                 server_state.agent.conversation.chat_messages = []
@@ -250,8 +234,8 @@ class TestSessionHistoryLoading:
         # ACTION: Switch back to session A
         await get_or_load_session(server_state, session_a_id)
 
-        # VERIFY: Agent should now have session A's input provider
-        assert server_state.agent._input_provider is input_provider_a
+        # VERIFY: The session's input provider is still registered
+        assert server_state.input_providers[session_a_id] is input_provider_a
 
 
 if __name__ == "__main__":

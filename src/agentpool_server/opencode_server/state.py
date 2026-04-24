@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.delegation import AgentPool
+    from agentpool.models.agents import NativeAgentConfig
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
     from agentpool_server.opencode_server.models import (
@@ -119,6 +120,10 @@ class ServerState:
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     # Per-session async prompt queue owned by the server runtime.
     pending_async_prompts: dict[str, list[QueuedAsyncPrompt]] = field(default_factory=dict)
+    # Per-session active message processing tasks (session_id -> task).
+    # Tracks BOTH sync send_message tasks (which run in the request handler)
+    # and async prompt worker tasks so abort_session can cancel either.
+    _active_message_tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
     # Event managers for subagent event routing (session_id -> event_manager)
     event_managers: dict[str, Any] = field(default_factory=dict)
     # Provider authentication service
@@ -127,11 +132,37 @@ class ServerState:
     skill_bridge: Any = field(default=None)
     # Command store for slash commands
     command_store: CommandStore | None = field(default=None)
+    # Per-session agent registry (session_id -> dedicated agent instance).
+    # Each session gets its own agent so concurrent sessions don't share
+    # mutable per-run state (session_id, input_provider, etc.).
+    _session_agents: dict[str, BaseAgent[Any, Any]] = field(default_factory=dict)
+    # Per-session locks for agent creation (prevents duplicate creation under
+    # concurrent get_or_create_agent calls for the same session_id).
+    _session_agent_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
         self.lsp_manager = LSPManager(env=self.agent.env)
         self.lsp_manager.register_defaults()
+        # Cache non-session-scoped dependencies directly so they remain
+        # accessible even after the shared ``self.agent`` is removed in a
+        # later migration step.
+        self._pool: AgentPool[Any] | None = self.agent.agent_pool
+        self._storage: StorageManager | None = self.agent.storage
+        # Resolve and cache the agent config used to create new per-session
+        # agent instances.  Fallback to None if the agent name cannot be
+        # resolved in the pool manifest (e.g., mock agents in tests).
+        self._agent_config: NativeAgentConfig | None = None
+        if self._pool is not None:
+            from agentpool.models.agents import NativeAgentConfig
+
+            cfg = self._pool.manifest.agents.get(self.agent.name)
+            if isinstance(cfg, NativeAgentConfig):
+                # Pool init may leave cfg.name=None (set from dict key, not YAML);
+                # ensure name matches the dict key so per-session agents get correct name.
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": self.agent.name})
+                self._agent_config = cfg
 
     def get_event_factory(self) -> GlobalEventFactory:
         """Get or lazily create the GlobalEventFactory for event wrapping.
@@ -187,11 +218,16 @@ class ServerState:
 
     @property
     def pool(self) -> AgentPool[Any]:
-        """Get the agent pool from the agent."""
-        if self.agent.agent_pool is None:
+        """Get the agent pool.
+
+        Returns the cached pool reference that was resolved from
+        ``self.agent.agent_pool`` during ``__post_init__``.  This avoids
+        depending on the shared agent for non-session-scoped access.
+        """
+        if self._pool is None:
             msg = "Agent has no agent_pool set"
             raise RuntimeError(msg)
-        return self.agent.agent_pool
+        return self._pool
 
     def get_session_lock(self, session_id: str) -> asyncio.Lock:
         """Get or create a lock for the given session.
@@ -236,9 +272,138 @@ class ServerState:
         target_agent.session_id = session_id
         return target_agent
 
+    async def get_or_create_agent(self, session_id: str) -> BaseAgent[Any, Any]:
+        """Get or create a dedicated agent for the given session.
+
+        Uses double-check locking to ensure only one agent is created per
+        session even when multiple concurrent callers race for the same
+        session_id.
+
+        New agent instances are created via ``NativeAgentConfig.get_agent()``
+        which returns fresh objects (not cached).  If no agent config is
+        available (e.g., mock agents in tests), falls back to the shared
+        ``self.agent``.
+
+        Args:
+            session_id: The session to get or create an agent for.
+
+        Returns:
+            A ``BaseAgent`` dedicated to the given session.
+        """
+        # Fast path: already registered
+        if session_id in self._session_agents:
+            return self._session_agents[session_id]
+        # Ensure a lock exists for this session
+        if session_id not in self._session_agent_locks:
+            self._session_agent_locks[session_id] = asyncio.Lock()
+        async with self._session_agent_locks[session_id]:
+            # Re-check after acquiring lock (another coroutine may have
+            # created the agent while we waited)
+            if session_id in self._session_agents:
+                return self._session_agents[session_id]
+            agent = self._create_session_agent(session_id)
+            # Initialize the agent's async context (MCP subprocesses, tool
+            # schemas, etc.) so it is ready for run_stream().  Without this,
+            # per-session agents miss __aenter__ initialization that the
+            # shared pool agent receives via AgentPool.__aenter__().
+            # Only enter the context for agents created from config — the
+            # fallback path (test mocks, shared agent) is already initialized.
+            if self._agent_config is not None:
+                try:
+                    await agent.__aenter__()
+                except Exception:
+                    # If init fails, remove the partially-created agent so a
+                    # retry can attempt creation again.
+                    self._session_agents.pop(session_id, None)
+                    raise
+            self._session_agents[session_id] = agent
+            return agent
+
+    def _create_session_agent(self, session_id: str) -> BaseAgent[Any, Any]:
+        """Create a new agent instance for a session.
+
+        Uses the stored ``_agent_config`` (derived from the original agent's
+        config in the pool manifest) to create a fresh agent.  Falls back to
+        the shared ``self.agent`` when no config is available.
+
+        Args:
+            session_id: The session this agent will serve.
+
+        Returns:
+            A new ``BaseAgent`` instance bound to the given session.
+        """
+        if self._agent_config is not None:
+            from agentpool_config.context import ConfigContextManager
+
+            pool = self.pool
+            # Re-enter the config context so that relative paths (e.g., tool
+            # schema files) can be resolved during provider instantiation.
+            # The ConfigContextManager may have been exited by the time a
+            # request handler runs, so _config_dir_global is None.
+            with ConfigContextManager(self._agent_config.config_file_path):
+                agent = self._agent_config.get_agent(
+                    input_provider=self.ensure_input_provider(session_id),
+                    pool=pool,
+                )
+            agent.session_id = session_id
+            return agent
+        # Fallback for test environments where no config is available.
+        # Bind the shared agent and return it.
+        return self.bind_agent_to_session(session_id)
+
+    async def cleanup_all_session_agents(self) -> None:
+        """Clean up all per-session agents and clear the registry.
+
+        Called during server shutdown to release resources held by session
+        agents.  Each agent's async context manager is exited if it is still
+        active.
+        """
+        for _session_id, agent in list(self._session_agents.items()):
+            await self._cleanup_agent(agent)
+        self._session_agents.clear()
+        self._session_agent_locks.clear()
+
+    async def remove_session_agent(self, session_id: str) -> None:
+        """Remove and clean up a single session's agent.
+
+        Safe to call even if the session_id has no registered agent
+        (no ``KeyError`` is raised).
+
+        Args:
+            session_id: The session whose agent should be removed.
+        """
+        agent = self._session_agents.pop(session_id, None)
+        if agent is not None:
+            await self._cleanup_agent(agent)
+        # Also remove the creation lock — it won't be needed again
+        self._session_agent_locks.pop(session_id, None)
+
+    async def _cleanup_agent(self, agent: BaseAgent[Any, Any]) -> None:
+        """Clean up a single agent instance.
+
+        Calls ``agent.__aexit__()`` to release resources held by the agent
+        (MCP connections, subprocesses, etc.).  Exceptions during cleanup
+        are logged but not raised.
+
+        Args:
+            agent: The agent to clean up.
+        """
+        try:
+            await agent.__aexit__(None, None, None)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to clean up session agent",
+                agent_name=agent.name,
+                exc_info=True,
+            )
+
     @property
     def storage(self) -> StorageManager:
-        """Get the storage manager from the agent's pool.
+        """Get the storage manager for session persistence.
+
+        Returns the cached storage reference that was resolved from
+        ``self.agent.storage`` during ``__post_init__``.  This avoids
+        depending on the shared agent for non-session-scoped access.
 
         Returns:
             StorageManager: The storage manager for session persistence.
@@ -246,8 +411,10 @@ class ServerState:
         Raises:
             RuntimeError: If agent storage is not initialized.
         """
-        assert self.agent.storage is not None, "Agent storage is not initialized"
-        return self.agent.storage
+        if self._storage is None:
+            msg = "Agent storage is not initialized"
+            raise RuntimeError(msg)
+        return self._storage
 
     def create_background_task(self, coro: Any, *, name: str | None = None) -> asyncio.Task[Any]:
         """Create and track a background task."""
@@ -294,6 +461,59 @@ class ServerState:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def register_active_message_task(self, session_id: str, task: asyncio.Task[Any]) -> None:
+        """Register the active message processing task for a session.
+
+        Called by ``_process_message_locked`` so that ``abort_session`` can
+        cancel the task even when it runs in the sync ``send_message`` path
+        (which is NOT tracked in ``background_tasks``).
+        """
+        self._active_message_tasks[session_id] = task
+
+    def unregister_active_message_task(self, session_id: str) -> None:
+        """Remove the active message processing task for a session.
+
+        Called in the ``finally`` block of ``_process_message_locked`` to
+        clean up the registration when processing completes (normally or
+        on cancellation).
+        """
+        self._active_message_tasks.pop(session_id, None)
+
+    async def cancel_active_message_task(self, session_id: str) -> None:
+        """Cancel the active message processing task for a session.
+
+        This handles both the sync ``send_message`` path (where the stream
+        runs in the request handler task) and the async prompt worker path.
+        """
+        task = self._active_message_tasks.get(session_id)
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    def cancel_session_pending_questions(self, session_id: str) -> list[str]:
+        """Cancel pending questions for a specific session and return their IDs.
+
+        Called by ``abort_session`` so the agent does not resume after the user
+        answers a question that was already in-flight when the abort was
+        requested.  When a question's Future is cancelled, the agent's
+        ``get_elicitation()`` handler catches ``CancelledError`` and returns
+        ``ElicitResult(action="cancel")``, which causes ``question_for_user``
+        to raise ``RunAbortedError``.  This propagates through
+        ``process_stream`` and ``_process_message_locked``'s except handler,
+        properly finalizing the assistant message and releasing
+        ``agent_lock``.
+
+        Returns:
+            List of cancelled question IDs.
+        """
+        cancelled_ids: list[str] = []
+        for question_id, pending in list(self.pending_questions.items()):
+            if pending.session_id == session_id and not pending.future.done():
+                pending.future.cancel()
+                cancelled_ids.append(question_id)
+        return cancelled_ids
 
     def cancel_all_pending_questions(self) -> list[str]:
         """Cancel all pending questions and return their IDs.

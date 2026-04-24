@@ -835,6 +835,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         run_id = str(uuid4())
         start_time = time.perf_counter()
         history_list = message_history.get_history()
+        # The user message was pre-added to conversation history by _run_stream_once()
+        # before calling this method, but it's also passed via `prompts` below.
+        # Exclude the last message from history if it matches the user message
+        # to prevent the LLM from seeing the same content twice.
+        if history_list and history_list[-1] is user_msg:
+            history_list = history_list[:-1]
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         yield RunStartedEvent(
             session_id=self.session_id,

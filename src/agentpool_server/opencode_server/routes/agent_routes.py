@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -39,7 +38,6 @@ from agentpool_server.opencode_server.models import (
     WorktreeRemoveRequest,
     WorktreeResetRequest,
 )
-from agentpool_server.opencode_server.state import ServerState
 
 
 router = APIRouter(tags=["agent"])

@@ -284,7 +284,10 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         state.on_first_subscriber = check_for_updates
         # Pool context is managed externally (by the caller)
         yield
-        # Shutdown - clean up
+        # Shutdown - clean up per-session agents and background tasks first
+        await state.cleanup_all_session_agents()
+        await state.cleanup_tasks()
+        # Then tear down watchers and shared infrastructure
         state.pool.todos.on_change = None
         if branch_watcher:
             await branch_watcher.stop()

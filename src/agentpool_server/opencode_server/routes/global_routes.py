@@ -351,7 +351,5 @@ async def get_routing_check(
         project_directory if project_directory is not None else state.working_dir
     )
     event = GlobalEvent(directory=directory, payload={})
-    would_pass, reason = tui_event_filter(
-        event, effective_project_dir
-    )
+    would_pass, reason = tui_event_filter(event, effective_project_dir)
     return RoutingCheckResponse(would_pass=would_pass, reason=reason)

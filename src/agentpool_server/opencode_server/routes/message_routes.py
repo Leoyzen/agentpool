@@ -11,8 +11,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic_ai import UserContent
 
 from agentpool.common_types import PathReference
-from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.log import get_logger
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import (
@@ -73,7 +73,7 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
         """Start LSP servers for each file path."""
         logger.info("warmup_files task started")
 
-        servers_started = False
+        _servers_started = False
         for path in file_paths:
             # Find appropriate server for this file
             server_info = lsp_manager.get_server_for_file(path)
@@ -85,7 +85,7 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
                 continue
 
             # Start server for workspace root
-            root_uri = f"file://{state.working_dir}"
+            _root_uri = f"file://{state.working_dir}"
             logger.info("Starting server...", server_id=server_id)
 
     async def warmup() -> None:
@@ -151,9 +151,12 @@ async def _maybe_generate_title(
         prompt_text = " ".join(prompt_text_parts) if prompt_text_parts else ""
 
         # Trigger title generation via log_session with initial_prompt
+        # Use the session agent's name if available, fallback to template agent name
+        session_agent = state._session_agents.get(session_id)
+        node_name = session_agent.name if session_agent else state.agent.name
         await storage.log_session(
             session_id=session_id,
-            node_name=state.agent.name,
+            node_name=node_name,
             initial_prompt=prompt_text,
             on_title_generated=lambda title: _update_session_title(state, session_id, title),
         )
@@ -227,7 +230,11 @@ async def list_messages(
     # block until the parent finishes — making child messages invisible
     # during subagent execution.
     cached_session = state.sessions.get(session_id)
-    if cached_session is not None and cached_session.parent_id is not None and session_id in state.messages:
+    if (
+        cached_session is not None
+        and cached_session.parent_id is not None
+        and session_id in state.messages
+    ):
         messages = state.messages[session_id]
         return messages[-limit:] if limit else messages
 
@@ -328,6 +335,11 @@ async def _process_message_locked(  # noqa: PLR0915
         mark_busy: Whether to emit a busy transition before processing.
         mark_idle: Whether to emit an idle transition when processing completes.
     """
+    # --- Register active message task so abort_session can cancel it ---
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        state.register_active_message_task(session_id, current_task)
+
     # --- Mark session busy ---
     if mark_busy:
         busy = SessionStatus(type="busy")
@@ -383,97 +395,109 @@ async def _process_message_locked(  # noqa: PLR0915
     )
 
     response_time: int | None = None
-    # Resolve agent before entering agent_lock so the except handler can always
-    # reference `agent` — even if CancelledError fires before the lock is acquired.
-    # Without this, `agent` is a local defined only inside `async with agent_lock:`
-    # and UnboundLocalError occurs when the except clause at line ~518 accesses it.
-    agent = state.agent
+    # Per-session agent: each session has its own agent instance,
+    # so no global agent_lock is needed. Same-session serialization
+    # is handled by get_session_lock() in _process_message().
+    agent = await state.get_or_create_agent(session_id)
+    # Delegate agent resolution (for subagent requests).
+    # Only resolve a delegate when the request names a *different* agent
+    # from the default session agent.  A request.agent value of "default"
+    # (or any name that matches the session agent) means "use my session
+    # agent" — no delegation needed.
+    #
+    # NOTE: Subagents from state.pool.all_agents are shared singleton
+    # instances.  Mutating session_id/_input_provider on them is safe ONLY
+    # because same-session serialization (via get_session_lock) prevents
+    # concurrent access.  Per-session subagent instances are NOT feasible
+    # due to MCP subprocess overhead.  If OpenCode ever supports direct
+    # multi-agent selection, this must be redesigned via AgentPool's
+    # delegation/team mechanism instead.
+    if request.agent and state.pool is not None:
+        all_agents = state.pool.all_agents
+        # Only delegate to a different agent from the pool — if the request
+        # names the same agent as the session's default, the per-session
+        # instance is already the right one.
+        if request.agent in all_agents and all_agents[request.agent] is not agent:
+            if state._agent_config is not None and request.agent == state._agent_config.name:
+                pass  # Use per-session agent, don't replace with pool singleton
+            else:
+                agent = all_agents[request.agent]
+    # Ensure agent is bound to this session
+    if agent.session_id != session_id:
+        agent.session_id = session_id
+        agent._input_provider = state.ensure_input_provider(session_id)
+
     try:
-        async with state.agent_lock:
-            if request.agent and state.agent.agent_pool is not None:
-                agent = state.agent.agent_pool.all_agents.get(request.agent, state.agent)
-            agent = state.bind_agent_to_session(session_id, agent=agent)
+        request_variant = request.model.variant if request.model else None
+        if request_variant:
+            # set_mode raises ValueError (or its subclasses UnknownModeError/
+            # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
+            try:
+                await agent.set_mode(request_variant, category_id="thought_level")
+            except ValueError:
+                logger.debug("Variant mode not applicable", variant=request_variant)
 
-            request_variant = request.model.variant if request.model else None
-            if request_variant:
-                # set_mode raises ValueError (or its subclasses UnknownModeError/
-                # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
-                try:
-                    await agent.set_mode(request_variant, category_id="thought_level")
-                except ValueError:
-                    logger.debug("Variant mode not applicable", variant=request_variant)
+        # Handle model selection if requested — no save/restore needed
+        # because each session has its own agent instance.
+        if request.model and request.model.model_id and request.model.provider_id:
+            provider_id = request.model.provider_id
+            model_id = request.model.model_id
 
-            # Handle model selection if requested
-            original_model: str | None = None
-            if request.model and request.model.model_id and request.model.provider_id:
-                provider_id = request.model.provider_id
-                model_id = request.model.model_id
+            # Strategy: First try to use model_id as a variant name
+            # OpenCode TUI sends variant names as model_id (e.g., "ack-dev", "qwen35")
+            # The provider_id is the first part of the identifier (e.g., "openai-chat")
+            requested_model = model_id  # Try variant name first
 
-                # Strategy: First try to use model_id as a variant name
-                # OpenCode TUI sends variant names as model_id (e.g., "ack-dev", "qwen35")
-                # The provider_id is the first part of the identifier (e.g., "openai-chat")
-                requested_model = model_id  # Try variant name first
-
-                logger.info("Model selection requested", provider=provider_id, model_id=model_id)
-
-                try:
-                    available_models = await agent.get_available_models()
-                    is_valid = False
-
-                    # Check 1: Is model_id a variant name in manifest?
-                    if state.pool and model_id in state.pool.manifest.model_variants:
-                        is_valid = True
-                        logger.info("Model found as manifest variant", model_id=model_id)
-                    # Check 2: Is it in tokonomics models?
-                    elif available_models:
-                        valid_ids = [
-                            m.id_override if m.id_override else m.id for m in available_models
-                        ]
-                        # Try both "provider:model" format and just model_id
-                        full_id = f"{provider_id}:{model_id}"
-                        if full_id in valid_ids:
-                            is_valid = True
-                            requested_model = full_id
-                            logger.info("Model found in available models", model_id=full_id)
-                        elif model_id in valid_ids:
-                            is_valid = True
-                            logger.info("Model found in available models", model_id=model_id)
-
-                    if is_valid:
-                        # Store original model to restore later
-                        original_model = agent.model_name
-                        logger.info(
-                            "Switching model for OpenCode request",
-                            original_model=original_model,
-                            requested_model=requested_model,
-                        )
-                        await agent.set_model(requested_model)
-                        logger.info("Switched to requested model", model=requested_model)
-                    else:
-                        logger.warning(
-                            "Requested model is not valid",
-                            model_id=model_id,
-                            provider_id=provider_id,
-                        )
-                        if state.pool:
-                            logger.warning(
-                                "Available manifest variants",
-                                variants=list(state.pool.manifest.model_variants.keys()),
-                            )
-                except Exception as e:  # noqa: BLE001
-                    # Broad catch: agents differ on how they signal
-                    # unsupported/invalid model switching.
-                    # Keep behavior stable for OpenCode (see PR #10 review iterations).
-                    logger.warning("Failed to switch model", error=str(e))
+            logger.info("Model selection requested", provider=provider_id, model_id=model_id)
 
             try:
-                iterator = agent.run_stream(*user_prompt, session_id=session_id)
-                async for oc_event in adapter.process_stream(iterator):
-                    await state.broadcast_event(oc_event)
-            finally:
-                if original_model is not None:
-                    with contextlib.suppress(Exception):
-                        await agent.set_model(original_model)
+                available_models = await agent.get_available_models()
+                is_valid = False
+
+                # Check 1: Is model_id a variant name in manifest?
+                if state.pool and model_id in state.pool.manifest.model_variants:
+                    is_valid = True
+                    logger.info("Model found as manifest variant", model_id=model_id)
+                # Check 2: Is it in tokonomics models?
+                elif available_models:
+                    valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
+                    # Try both "provider:model" format and just model_id
+                    full_id = f"{provider_id}:{model_id}"
+                    if full_id in valid_ids:
+                        is_valid = True
+                        requested_model = full_id
+                        logger.info("Model found in available models", model_id=full_id)
+                    elif model_id in valid_ids:
+                        is_valid = True
+                        logger.info("Model found in available models", model_id=model_id)
+
+                if is_valid:
+                    logger.info(
+                        "Switching model for session",
+                        requested_model=requested_model,
+                    )
+                    await agent.set_model(requested_model)
+                    logger.info("Switched to requested model", model=requested_model)
+                else:
+                    logger.warning(
+                        "Requested model is not valid",
+                        model_id=model_id,
+                        provider_id=provider_id,
+                    )
+                    if state.pool:
+                        logger.warning(
+                            "Available manifest variants",
+                            variants=list(state.pool.manifest.model_variants.keys()),
+                        )
+            except Exception as e:  # noqa: BLE001
+                # Broad catch: agents differ on how they signal
+                # unsupported/invalid model switching.
+                # Keep behavior stable for OpenCode (see PR #10 review iterations).
+                logger.warning("Failed to switch model", error=str(e))
+
+        iterator = agent.run_stream(*user_prompt, session_id=session_id)
+        async for oc_event in adapter.process_stream(iterator):
+            await state.broadcast_event(oc_event)
 
         for oc_event in adapter.finalize():
             await state.broadcast_event(oc_event)
@@ -528,13 +552,14 @@ async def _process_message_locked(  # noqa: PLR0915
         # reloading because agent.session_id matches, so the LLM receives
         # incomplete history — it doesn't know it already (partially) responded.
         #
-        # NOTE: This mutates the shared agent's conversation. In the current
-        # single-session server architecture this is safe, but if multi-session
-        # support is added, the agent instance should be per-session to avoid
-        # history contamination between concurrent sessions.
+        # This is safe because the agent is a per-session instance — concurrent
+        # sessions each have their own agent, so there is no history contamination
+        # between sessions.
         chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
         agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
+        # --- Unregister active message task ---
+        state.unregister_active_message_task(session_id)
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:

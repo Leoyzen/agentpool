@@ -819,6 +819,7 @@ async def test_mixed_events_correct_wrapping_sequence() -> None:
     assert events[5]["payload"]["sessionId"] == "mix3"
     assert events[5]["directory"] == state.working_dir
 
+
 # =============================================================================
 # Cross-cutting: sessionId consistency between top level and properties
 # =============================================================================

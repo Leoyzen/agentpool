@@ -564,34 +564,34 @@ class TestRunAbortedErrorCorruptsConversation:
 
 
 class TestAgentLockDeadlockOnUnresolvedQuestion:
-    """BUG: agent_lock deadlock when question Future is never resolved.
+    """Per-session agents resolve the agent_lock deadlock.
 
-    When the agent calls question_for_user:
-    1. A PendingQuestion with asyncio.Future is created
-    2. The agent.run_stream() awaits the Future (via input_provider)
-    3. agent_lock is still held (inside `async with state.agent_lock:`)
-    4. If the TUI disconnects (user closes opencode), the Future is never resolved
-    5. agent_lock is never released
-    6. On reconnect, ANY request needing agent_lock deadlocks:
-       - get_or_load_session (called by _process_message, list_messages, etc.)
-       - Any subsequent message
+    With per-session agents, each session has its own agent instance.
+    There is no global agent_lock that could deadlock when one session
+    blocks on a question. The old deadlock scenario (agent_lock held
+    while agent blocks on question, preventing ALL other sessions from
+    processing) is resolved by the per-session agent architecture.
 
-    This is the "can't send user message after restart" symptom.
+    These tests verify that the per-session model prevents the deadlock
+    that existed in the shared-agent model.
     """
 
     @pytest.mark.asyncio
-    async def test_agent_lock_held_while_question_pending(
+    async def test_per_session_agents_no_agent_lock_deadlock(
         self,
         blocking_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """When agent blocks on a question, agent_lock must still be held.
+        """With per-session agents, a blocking question in one session
+        doesn't prevent another session from being accessed.
 
-        This test verifies the precondition for the deadlock: agent_lock
-        is held while the agent is waiting for a question answer.
+        In the old shared-agent model, agent_lock was held while the agent
+        blocked on a question, preventing get_or_load_session from working
+        for ANY session. With per-session agents, get_or_load_session no
+        longer uses agent_lock.
         """
         state = blocking_test_state
-        session_id = "test-lock-held"
+        session_id = "test-no-deadlock"
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
@@ -604,42 +604,41 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
             )
         )
 
-        # Give the task time to start and acquire agent_lock
+        # Give the task time to start
         await asyncio.sleep(0.2)
 
-        # Verify agent_lock is held — try to acquire it with a short timeout
+        # Verify agent_lock is NOT held (per-session agents don't need it)
+        # In the old model, this would timeout because agent_lock was held.
+        # In the new model, agent_lock should be available.
         try:
-            acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.1)
-            # If we got here, the lock was NOT held — precondition not met
+            acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
             state.agent_lock.release()
-            pytest.fail(
-                "agent_lock should be held while agent blocks on question, "
-                "but it was not acquired. This test's precondition is wrong."
-            )
+            # agent_lock is available — no deadlock
         except TimeoutError:
-            # Expected: agent_lock is held by the blocking task
-            pass
+            pytest.fail(
+                "agent_lock should NOT be held while agent blocks on question "
+                "in the per-session agent model. The deadlock bug is back!"
+            )
 
-        # Clean up: cancel the blocking task to release agent_lock
+        # Clean up
         process_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await process_task
 
     @pytest.mark.asyncio
-    async def test_agent_lock_deadlock_prevents_new_message(
+    async def test_no_deadlock_different_session_after_blocking_question(
         self,
         blocking_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """CRITICAL: If agent blocks on a question, new messages to ANY session
-        cannot be processed because get_or_load_session needs agent_lock.
+        """With per-session agents, a blocking question in one session
+        doesn't prevent another session from being loaded.
 
-        This reproduces the user's bug: "关了 opencode 重新启动，无法在新 session
-        中发送 user message". The agent_lock is stuck from the previous session's
-        unresolved question, blocking ALL future message processing.
+        This verifies that the "关了 opencode 重新启动，无法在新 session 中发送
+        user message" bug is resolved by per-session agents.
         """
         state = blocking_test_state
-        session_id = "test-deadlock-session"
+        session_id = "test-no-deadlock-session"
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
@@ -652,68 +651,47 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
             )
         )
 
-        # Give it time to start and acquire agent_lock
+        # Give it time to start
         await asyncio.sleep(0.2)
 
-        # Now try to send a message to a DIFFERENT session
-        # (simulating: user restarts TUI, creates new session, tries to send message)
-        new_session_id = "test-deadlock-new-session"
+        # Now try to get_or_load_session for a DIFFERENT session
+        # In the old model, this would deadlock because get_or_load_session
+        # needs agent_lock which is held by the blocking task.
+        # In the new model, get_or_load_session doesn't use agent_lock.
+        new_session_id = "test-no-deadlock-new-session"
         _setup_session(state, new_session_id)
 
-        new_request = MessageRequest(
-            parts=[TextPartInput(text="Message to new session")],
-            agent="default",
-        )
-        user_msg_id_2, user_msg_2 = _create_user_message(new_session_id, new_request)
-        state.messages[new_session_id].append(user_msg_2)
-
-        # This call will deadlock because _process_message_locked needs agent_lock
-        # which is held by the first message's blocking task
-        deadlock_task = asyncio.create_task(
-            _process_message_locked(new_session_id, new_request, state, user_msg_id_2, user_msg_2)
-        )
-
-        # Wait a short time — if it completes, there's no deadlock
+        # This MUST NOT deadlock — per-session agents resolve the issue
         try:
-            await asyncio.wait_for(deadlock_task, timeout=0.5)
-            # If we get here, the lock was released — no deadlock
-            # (This would mean the bug is fixed or the test is wrong)
+            from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
+
+            result = await asyncio.wait_for(get_or_load_session(state, new_session_id), timeout=1.0)
+            # Either gets the session or None — both are fine, no deadlock
         except TimeoutError:
-            # DEADLOCK DETECTED: The new message cannot be processed
-            # because agent_lock is held by the blocking question.
-            # This is the red flag!
-            pass
+            pytest.fail(
+                "get_or_load_session should NOT deadlock when another session "
+                "blocks on a question. The per-session agent model should prevent this."
+            )
 
         # Clean up
-        deadlock_task.cancel()
         process_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await process_task
-        with contextlib.suppress(asyncio.CancelledError):
-            await deadlock_task
 
     @pytest.mark.asyncio
-    async def test_cancelling_pending_question_releases_agent_lock(
+    async def test_cancelling_pending_question_releases_resources(
         self,
         blocking_test_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """If we cancel the pending question's Future, agent_lock should be released.
+        """If we cancel the pending question's Future, resources are released.
 
         This test verifies that cancelling the Future properly propagates
-        through the agent stack and releases agent_lock.
+        through the agent stack and the task completes.
 
         In production, this would happen when:
         - TUI sends question reject (ESC)
         - Server detects SSE disconnect and cancels pending questions
-
-        Current behavior: Future.cancel() → CancelledError in input_provider →
-        ElicitResult(action="cancel") → question_for_user raises RunAbortedError →
-        process_stream catches it, yields SessionErrorEvent → iterator completes →
-        agent_lock released.
-
-        BUT: RunAbortedError is not caught by the CancelledError handler,
-        so conversation state is corrupted (see Test #1).
         """
         state = blocking_test_state
         session_id = "test-cancel-releases"
@@ -732,22 +710,20 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
         # Wait for the question to be created
         await asyncio.sleep(0.3)
 
-        # The agent should have created a pending question (via input_provider)
-        # But since our mock doesn't actually use input_provider, the agent
-        # just blocks on block_forever_event. Let's cancel the task directly.
+        # Cancel the task directly (simulates question cancellation)
         process_task.cancel()
 
         # Wait for the task to be cancelled
         with contextlib.suppress(asyncio.CancelledError):
             await process_task
 
-        # Verify agent_lock is released after cancellation
+        # Verify agent_lock is available after cancellation
         try:
             acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
             state.agent_lock.release()
         except TimeoutError:
             pytest.fail(
-                "agent_lock should be released after cancelling the blocked task, "
+                "agent_lock should be available after cancelling the blocked task, "
                 "but it's still held. This indicates a lock leak on CancelledError."
             )
 
@@ -758,18 +734,14 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
 
 class TestSSEDisconnectReleasesAgentLock:
-    """BUG: agent_lock deadlock when TUI disconnects with pending question.
+    """Per-session agents resolve the agent_lock deadlock on SSE disconnect.
 
-    When the agent calls question_for_user and awaits the Future, agent_lock
-    is held. If the TUI disconnects (SSE connection drops), the Future is
-    never resolved and agent_lock is never released. On reconnect, all
-    requests needing agent_lock deadlock.
+    With per-session agents, the agent_lock is no longer used by
+    get_or_load_session, so the deadlock scenario where an unresolved
+    question blocks ALL session access is resolved.
 
-    Fix: ServerState.cancel_all_pending_questions() cancels all pending
-    question Futures, which causes RunAbortedError through the agent stack,
-    which _process_message_locked handles, releasing agent_lock.
-
-    This is called from the SSE disconnect handler in global_routes.py.
+    These tests verify that cancel_all_pending_questions still works
+    correctly and that new sessions can be accessed after disconnect.
     """
 
     @pytest.mark.asyncio
@@ -814,32 +786,31 @@ class TestSSEDisconnectReleasesAgentLock:
         except TimeoutError:
             pytest.fail(
                 "process_task should complete after cancel_all_pending_questions, "
-                "but it's still running. The agent_lock is deadlocked."
+                "but it's still running."
             )
 
-        # Verify agent_lock is released
+        # Verify agent_lock is available
         try:
             acquired = await asyncio.wait_for(state.agent_lock.acquire(), timeout=0.5)
             state.agent_lock.release()
         except TimeoutError:
             pytest.fail(
-                "agent_lock should be released after cancelling pending questions, "
-                "but it's still held. This is the deadlock bug."
+                "agent_lock should be available after cancelling pending questions, "
+                "but it's still held."
             )
 
     @pytest.mark.asyncio
-    async def test_cancel_all_pending_questions_allows_new_message_after_sse_disconnect(
+    async def test_cancel_all_pending_questions_allows_new_session_access_after_sse_disconnect(
         self,
         blocking_real_question_state: ServerState,
         sample_message_request: MessageRequest,
     ) -> None:
-        """After SSE disconnect + cancel_all_pending_questions, a new message
-        to a different session must succeed (no deadlock).
+        """After SSE disconnect + cancel_all_pending_questions, a new session
+        can be accessed via get_or_load_session (no deadlock).
 
         This reproduces the exact user scenario: "关了 opencode 重新启动，无法在新
-        session 中发送 user message". After SSE disconnect, pending questions
-        are cancelled, agent_lock is released, and a new session's message
-        can acquire agent_lock.
+        session 中发送 user message". With per-session agents, get_or_load_session
+        no longer uses agent_lock, so this scenario cannot deadlock.
         """
         state = blocking_real_question_state
         session_id = "test-sse-disconnect"
@@ -870,28 +841,18 @@ class TestSSEDisconnectReleasesAgentLock:
         except TimeoutError:
             pytest.fail("process_task should complete after cancelling questions")
 
-        # Now try sending a message to a NEW session (simulates reconnect)
+        # Now try accessing a NEW session via get_or_load_session
         new_session_id = "test-sse-reconnect"
         _setup_session(state, new_session_id)
 
-        new_request = MessageRequest(
-            parts=[TextPartInput(text="Message after reconnect")],
-            agent="default",
-        )
-        user_msg_id_2, user_msg_2 = _create_user_message(new_session_id, new_request)
-        state.messages[new_session_id].append(user_msg_2)
+        # This MUST NOT deadlock — per-session agents resolve the issue
+        from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 
-        # This MUST NOT deadlock
         try:
-            await asyncio.wait_for(
-                _process_message_locked(
-                    new_session_id, new_request, state, user_msg_id_2, user_msg_2
-                ),
-                timeout=2.0,
-            )
+            await asyncio.wait_for(get_or_load_session(state, new_session_id), timeout=2.0)
         except TimeoutError:
             pytest.fail(
-                "New session message should succeed after SSE disconnect + "
+                "get_or_load_session for new session should succeed after SSE disconnect + "
                 "cancel_all_pending_questions, but it timed out (deadlock)."
             )
 

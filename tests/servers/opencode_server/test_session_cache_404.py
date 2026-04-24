@@ -147,12 +147,14 @@ class TestGetOrLoadSessionCacheHit:
         self,
         server_state: ServerState,
     ) -> None:
-        """When a cached session exists AND agent.load_session succeeds,
-        conversation history should be reloaded from storage.
-        """
-        from agentpool.sessions.models import SessionData
-        from datetime import UTC, datetime
+        """When a cached session exists with messages in memory, it is
+        returned directly without calling load_session.
 
+        With per-session agents, each session has its own agent instance
+        that already owns the correct conversation history. If a session
+        is cached in memory (in state.sessions and state.messages), it
+        doesn't need to be reloaded from storage.
+        """
         state = server_state
         session_id = "ses_cached_with_history"
 
@@ -160,28 +162,14 @@ class TestGetOrLoadSessionCacheHit:
         state.sessions[session_id] = session
         state.messages[session_id] = []
 
-        # Agent is bound to a different session
-        state.agent.session_id = "ses_other"
-
-        # Simulate agent.load_session succeeding
-        mock_data = SessionData(
-            session_id=session_id,
-            agent_name="test-agent",
-            cwd="/tmp/test",
-            created_at=datetime.now(UTC),
-            last_active=datetime.now(UTC),
-            metadata={"title": "Test Session"},
-        )
-        state.agent.load_session = AsyncMock(return_value=mock_data)  # type: ignore[method-assign]
-        state.agent.conversation = Mock()
-        state.agent.conversation.chat_messages = []
-
         result = await get_or_load_session(state, session_id)
         assert result is not None
         assert result.id == session_id
 
-        # agent.load_session should have been called
-        state.agent.load_session.assert_called_once_with(session_id)
+        # With per-session agents, cached sessions are returned directly
+        # without calling load_session — the session agent already has
+        # the correct history.
+        state.agent.load_session.assert_not_called()
 
 
 class TestConcurrentSessionCreation:
