@@ -4,7 +4,7 @@ from agentpool.messaging.chat_filesystem import ChatMessageFileSystem
 from agentpool.messaging.messages import ChatMessage, TokenCost, AgentResponse, TeamResponse
 from agentpool.messaging.message_container import ChatMessageList
 from agentpool.messaging.event_manager import EventManager
-from agentpool.messaging.messagenode import MessageNode
+from agentpool.messaging.messagenode import MessageNode, SourceType, get_source_type
 from agentpool.messaging.message_history import MessageHistory
 from agentpool.messaging.compaction import (
     CompactionPipeline,
@@ -45,6 +45,7 @@ __all__ = [
     "KeepLastMessages",
     "MessageHistory",
     "MessageNode",
+    "SourceType",
     "Summarize",
     "TeamResponse",
     "TokenBudget",
@@ -53,6 +54,7 @@ __all__ = [
     "TruncateToolOutputs",
     "WhenMessageCountExceeds",
     "balanced_context",
+    "get_source_type",
     "minimal_context",
     "summarizing_context",
 ]

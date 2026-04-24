@@ -2,47 +2,37 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.sessions import SessionData
+from agentpool.sessions import SessionData, SessionManager
 from agentpool.sessions.store import MemorySessionStore
-
-# SessionManager not yet implemented in agentpool.sessions
-SessionManager = None
-
 from agentpool_storage.session_store import SQLSessionStore
 from agentpool_config.storage import SQLStorageConfig
 
-pytestmark = pytest.mark.skipif(SessionManager is None, reason="SessionManager not implemented")
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
-def mock_pool():
-    """Create a mock pool with all_agents attribute."""
+def mock_pool() -> MagicMock:
+    """Create a mock pool with manifest."""
     pool = MagicMock()
-    pool.all_agents = [
-        "coordinator",
-        "coder",
-        "root_agent",
-        "parent_agent",
-        "child_agent",
-        "child_agent2",
-        "agent",
-        "other_agent",
-    ]
+    pool.manifest.name = "test_pool"
     return pool
 
 
 @pytest.fixture
-def memory_store():
+def memory_store() -> MemorySessionStore:
     """Create a memory session store for testing."""
     return MemorySessionStore()
 
 
 @pytest.fixture
-def sql_store(tmp_path):
+def sql_store(tmp_path: Path) -> SQLSessionStore:
     """Create a SQL session store with temp database."""
     db_path = tmp_path / "test_hierarchy.db"
     config = SQLStorageConfig(url=f"sqlite:///{db_path}")
@@ -52,122 +42,155 @@ def sql_store(tmp_path):
 class TestSessionHierarchy:
     """Tests for session parent-child hierarchy."""
 
-    async def test_create_with_parent_id(self, mock_pool) -> None:
-        """Test that parent_id is persisted correctly."""
-        manager = SessionManager(mock_pool)
+    async def test_create_with_parent_id(self, mock_pool: MagicMock, memory_store: MemorySessionStore) -> None:
+        """Test that parent_id is persisted correctly via create_child_session."""
+        manager = SessionManager(pool=mock_pool, store=memory_store)
 
         async with manager:
-            # Create parent session
-            parent = await manager.create(agent_name="coordinator")
+            # Create parent session directly in store
+            parent = SessionData(session_id="parent_1", agent_name="coordinator")
+            await memory_store.save(parent)
 
-            # Create child session
-            child = await manager.create(
+            # Create child session via manager
+            child_id = await manager.create_child_session(
+                parent_session_id="parent_1",
                 agent_name="coder",
-                parent_id=parent.session_id,
             )
 
             # Verify child has parent_id
-            assert child.parent_id == parent.session_id
+            child = await memory_store.load(child_id)
+            assert child is not None
+            assert child.parent_id == "parent_1"
 
-            # Verify when loaded
-            loaded = await manager.get(child.session_id)
-            assert loaded.parent_id == parent.session_id
+            # Verify when loaded again
+            loaded = await memory_store.load(child_id)
+            assert loaded is not None
+            assert loaded.parent_id == "parent_1"
 
-    async def test_list_by_parent_id_memory(self, mock_pool) -> None:
+    async def test_list_by_parent_id_memory(self, mock_pool: MagicMock, memory_store: MemorySessionStore) -> None:
         """Test filtering sessions by parent_id with memory store."""
-        manager = SessionManager(mock_pool)
+        manager = SessionManager(pool=mock_pool, store=memory_store)
 
         async with manager:
-            # Create sessions
-            root = await manager.create(agent_name="root_agent")
-            parent = await manager.create(agent_name="parent_agent")
-            child1 = await manager.create(agent_name="child_agent", parent_id=parent.session_id)
-            child2 = await manager.create(agent_name="child_agent2", parent_id=parent.session_id)
+            # Create root and parent sessions directly
+            root = SessionData(session_id="root_1", agent_name="root_agent")
+            await memory_store.save(root)
 
-            # List children of parent
-            children = await manager.list_sessions(parent_id=parent.session_id)
+            parent = SessionData(session_id="parent_1", agent_name="parent_agent")
+            await memory_store.save(parent)
+
+            # Create child sessions via manager
+            child1_id = await manager.create_child_session(
+                parent_session_id="parent_1", agent_name="child_agent",
+            )
+            child2_id = await manager.create_child_session(
+                parent_session_id="parent_1", agent_name="child_agent2",
+            )
+
+            # List children of parent via store
+            children = await memory_store.list_sessions(parent_id="parent_1")
 
             # Verify only children of parent are returned
             assert len(children) == 2
-            assert child1.session_id in children
-            assert child2.session_id in children
-            assert root.session_id not in children
-            assert parent.session_id not in children
+            assert child1_id in children
+            assert child2_id in children
+            assert "root_1" not in children
+            assert "parent_1" not in children
 
-    async def test_list_by_parent_id_sql(self, mock_pool, sql_store) -> None:
+    async def test_list_by_parent_id_sql(self, mock_pool: MagicMock, sql_store: SQLSessionStore) -> None:
         """Test filtering sessions by parent_id with SQL store."""
-        manager = SessionManager(mock_pool, store=sql_store)
+        manager = SessionManager(pool=mock_pool, store=sql_store)
 
-        async with manager:
-            # Create sessions
-            root = await manager.create(agent_name="root_agent")
-            parent = await manager.create(agent_name="parent_agent")
-            child1 = await manager.create(agent_name="child_agent", parent_id=parent.session_id)
-            child2 = await manager.create(agent_name="child_agent2", parent_id=parent.session_id)
+        async with sql_store:
+            async with manager:
+                # Create root and parent sessions directly
+                root = SessionData(session_id="root_1", agent_name="root_agent")
+                await sql_store.save(root)
 
-            # List children of parent
-            children = await manager.list_sessions(parent_id=parent.session_id)
+                parent = SessionData(session_id="parent_1", agent_name="parent_agent")
+                await sql_store.save(parent)
 
-            # Verify only children of parent are returned
-            assert len(children) == 2
-            assert child1.session_id in children
-            assert child2.session_id in children
-            assert root.session_id not in children
-            assert parent.session_id not in children
+                # Create child sessions via manager
+                child1_id = await manager.create_child_session(
+                    parent_session_id="parent_1", agent_name="child_agent",
+                )
+                child2_id = await manager.create_child_session(
+                    parent_session_id="parent_1", agent_name="child_agent2",
+                )
 
-    async def test_create_with_invalid_parent(self, mock_pool) -> None:
+                # List children of parent via store
+                children = await sql_store.list_sessions(parent_id="parent_1")
+
+                # Verify only children of parent are returned
+                assert len(children) == 2
+                assert child1_id in children
+                assert child2_id in children
+                assert "root_1" not in children
+                assert "parent_1" not in children
+
+    async def test_create_with_invalid_parent(self, mock_pool: MagicMock, memory_store: MemorySessionStore) -> None:
         """Test that creating with non-existent parent_id succeeds (permissive)."""
-        manager = SessionManager(mock_pool)
+        manager = SessionManager(pool=mock_pool, store=memory_store)
 
         async with manager:
             # Create child with fake parent_id
-            session = await manager.create(
+            child_id = await manager.create_child_session(
+                parent_session_id="nonexistent_parent_id",
                 agent_name="agent",
-                parent_id="nonexistent_parent_id",
             )
 
             # Should succeed (permissive validation)
-            assert session.parent_id == "nonexistent_parent_id"
+            child = await memory_store.load(child_id)
+            assert child is not None
+            assert child.parent_id == "nonexistent_parent_id"
 
             # Verify persisted correctly
-            loaded = await manager.get(session.session_id)
+            loaded = await memory_store.load(child_id)
+            assert loaded is not None
             assert loaded.parent_id == "nonexistent_parent_id"
 
-    async def test_list_by_parent_id_with_no_children(self, mock_pool) -> None:
+    async def test_list_by_parent_id_with_no_children(self, mock_pool: MagicMock, memory_store: MemorySessionStore) -> None:
         """Test filtering by parent_id returns empty list when no children exist."""
-        manager = SessionManager(mock_pool)
+        manager = SessionManager(pool=mock_pool, store=memory_store)
 
         async with manager:
             # Create parent but no children
-            await manager.create(agent_name="root_agent", session_id="parent_1")
-            await manager.create(agent_name="other_agent")
+            await memory_store.save(SessionData(session_id="parent_1", agent_name="root_agent"))
+            await memory_store.save(SessionData(session_id="other_1", agent_name="other_agent"))
 
-            # List children of non-existent parent
-            children = await manager.list_sessions(parent_id="nonexistent_parent")
+            # List children of non-existent parent via manager
+            children = await manager.get_child_sessions("nonexistent_parent")
 
             # Should return empty list
             assert len(children) == 0
 
-    async def test_nested_hierarchy(self, mock_pool) -> None:
+    async def test_nested_hierarchy(self, mock_pool: MagicMock, memory_store: MemorySessionStore) -> None:
         """Test multi-level hierarchy (grandparent -> parent -> child)."""
-        manager = SessionManager(mock_pool)
+        manager = SessionManager(pool=mock_pool, store=memory_store)
 
         async with manager:
-            # Create three levels
-            grandparent = await manager.create(agent_name="root_agent")
-            parent = await manager.create(
-                agent_name="parent_agent", parent_id=grandparent.session_id
+            # Create grandparent session directly
+            grandparent = SessionData(session_id="gp_1", agent_name="root_agent")
+            await memory_store.save(grandparent)
+
+            # Create parent as child of grandparent
+            parent_id = await manager.create_child_session(
+                parent_session_id="gp_1", agent_name="parent_agent",
             )
-            child = await manager.create(agent_name="child_agent", parent_id=parent.session_id)
+
+            # Create child as child of parent
+            child_id = await manager.create_child_session(
+                parent_session_id=parent_id, agent_name="child_agent",
+            )
 
             # Verify hierarchy through list operations
-            grandparent_children = await manager.list_sessions(parent_id=grandparent.session_id)
+            grandparent_children = await memory_store.list_sessions(parent_id="gp_1")
             assert len(grandparent_children) == 1
-            assert parent.session_id in grandparent_children
+            assert parent_id in grandparent_children
 
-            parent_children = await manager.list_sessions(parent_id=parent.session_id)
+            parent_children = await memory_store.list_sessions(parent_id=parent_id)
             assert len(parent_children) == 1
-            assert child.session_id in parent_children
+            assert child_id in parent_children
 
-            child_children = await manager.list_sessions(parent_id=child.session_id)
+            child_children = await memory_store.list_sessions(parent_id=child_id)
             assert len(child_children) == 0

@@ -16,6 +16,7 @@ from agentpool.agents.context import AgentContext
 from agentpool.agents.interactions import Interactions
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.agents.sys_prompts import SystemPrompts
+from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
 
 
 __all__ = [
@@ -25,7 +26,9 @@ __all__ = [
     "AgentContext",
     "ClaudeCodeAgent",
     "CodexAgent",
+    "DelegationDepthError",
     "Interactions",
+    "MAX_DELEGATION_DEPTH",
     "PromptInjectionManager",
     "SystemPrompts",
     "detailed_print_handler",

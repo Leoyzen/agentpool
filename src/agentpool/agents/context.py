@@ -38,6 +38,7 @@ class AgentRunContext:
     Attributes:
         cancelled: Whether the run has been cancelled.
         current_task: The asyncio.Task for the current run, if any.
+        depth: Current delegation depth (0 = top-level run).
         event_queue: Queue for streaming events from this run.
         injection_manager: Manages prompt injection and queuing for this run.
         session_id: Unique identifier for this run session.
@@ -50,6 +51,9 @@ class AgentRunContext:
 
     current_task: asyncio.Task[Any] | None = None
     """The asyncio.Task for the current run, if any."""
+
+    depth: int = 0
+    """Current delegation depth (0 = top-level run)."""
 
     event_queue: asyncio.Queue[Any] = field(default_factory=asyncio.Queue)
     """Queue for streaming events from this run."""

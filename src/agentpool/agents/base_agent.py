@@ -614,6 +614,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
+        depth: int = 0,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run agent with streaming output.
 
@@ -633,6 +634,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             wait_for_connections: Whether to wait for connected agents
             deps: Optional dependencies
             event_handlers: Optional event handlers
+            depth: Current delegation depth (0 = top-level run)
 
         Yields:
             Stream events during execution
@@ -653,7 +655,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self.parent_session_id = parent_session_id
 
         # Create per-run context for state isolation
-        run_ctx = AgentRunContext(deps=deps)
+        run_ctx = AgentRunContext(deps=deps, depth=depth)
         # Reset cancellation state and track current task
         run_ctx.cancelled = False
         self._cancelled = False
@@ -1151,6 +1153,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         input_provider: InputProvider | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         wait_for_connections: bool | None = None,
+        depth: int = 0,
     ) -> ChatMessage[TResult]:
         """Run agent with prompt and get response.
 
@@ -1172,6 +1175,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             input_provider: Optional input provider for the agent
             event_handlers: Optional event handlers for this run (overrides agent's handlers)
             wait_for_connections: Whether to wait for connected agents to complete
+            depth: Current delegation depth (0 = top-level run)
 
         Returns:
             ChatMessage containing response and run information
@@ -1194,6 +1198,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             input_provider=input_provider,
             event_handlers=event_handlers,
             wait_for_connections=wait_for_connections,
+            depth=depth,
         ):
             if isinstance(event, StreamCompleteEvent):
                 final_message = event.message

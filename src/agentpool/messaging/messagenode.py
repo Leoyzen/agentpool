@@ -42,6 +42,42 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+SourceType = Literal["agent", "team_parallel", "team_sequential"]
+"""Type alias for source_type values used in event streaming.
+
+Distinguishes the origin of a subagent event:
+- ``"agent"``: a single agent (native, ACP, Claude Code, etc.)
+- ``"team_parallel"``: a parallel team (:class:`Team`)
+- ``"team_sequential"``: a sequential team (:class:`TeamRun`)
+"""
+
+
+def get_source_type(node: MessageNode[Any, Any]) -> SourceType:
+    """Return the source-type tag for *node* used in event streaming.
+
+    Uses ``isinstance`` checks with **local** (deferred) imports so that
+    calling this function never creates a circular import between
+    ``messagenode`` ↔ ``team`` / ``teamrun``.
+
+    Args:
+        node: Any :class:`MessageNode` instance.
+
+    Returns:
+        The corresponding :data:`SourceType` value.
+    """
+    from agentpool.delegation.base_team import BaseTeam
+    from agentpool.delegation.team import Team
+
+    if isinstance(node, Team):
+        return "team_parallel"
+    if isinstance(node, BaseTeam):
+        # BaseTeam but not Team → TeamRun (or any future sequential subclass)
+        return "team_sequential"
+    # Check it's at least a MessageNode — unknown subclasses get a warning
+    if type(node) is not MessageNode and not isinstance(node, MessageNode):
+        logger.warning("Unexpected node type %s, defaulting to 'agent'", type(node).__name__)
+    return "agent"
+
 
 class MessageNode[TDeps, TResult](ABC):
     """Base class for all message processing nodes."""
@@ -206,6 +242,22 @@ class MessageNode[TDeps, TResult](ABC):
     def display_name(self) -> str:
         """Get human-readable display name, falls back to name."""
         return self._display_name or self._name
+
+    @property
+    def agent_type(self) -> str:
+        """Return the agent-type string used for persistence.
+
+        This is the *persistence-domain* identifier (stored in
+        ``SessionData.agent_type``).  It differs from :data:`SourceType`
+        which is the *event-domain* identifier used during streaming.
+
+        Subclasses may override this to provide a more specific type
+        string (e.g. ``"native"``, ``"acp"``, ``"claude_code"``).
+
+        Returns:
+            A string identifying the agent type for storage purposes.
+        """
+        return get_source_type(self)
 
     def to_tool(
         self, *, name: str | None = None, description: str | None = None, **kwargs: Any

@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 
     from agentpool import MessageNode
     from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool.agents.events.events import SubAgentType
     from agentpool.common_types import PromptCompatible
     from agentpool.talk import Talk
 
@@ -186,15 +185,9 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             node: MessageNode[Any, Any],
         ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
             """Wrap a node's stream events in SubAgentEvent."""
-            match node:
-                case Team():
-                    source_type: SubAgentType = "team_parallel"
-                case TeamRun():
-                    source_type = "team_sequential"
-                case BaseAgent():
-                    source_type = "agent"
-                case _:
-                    raise ValueError(f"Unexpected node type: {type(node)}")
+            from agentpool.messaging.messagenode import get_source_type
+
+            source_type = get_source_type(node)
 
             # Extract model_id from BaseAgent nodes
             node_model_id: str | None = None

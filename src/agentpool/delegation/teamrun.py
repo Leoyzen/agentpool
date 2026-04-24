@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
     from agentpool import MessageNode
     from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool.agents.events.events import SubAgentType
     from agentpool.common_types import PromptCompatible
     from agentpool.delegation import AgentPool
     from agentpool_config.mcp_server import MCPServerConfig
@@ -271,17 +270,11 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         """
         from agentpool.agents.base_agent import BaseAgent
         from agentpool.agents.events import StreamCompleteEvent, SubAgentEvent
-        from agentpool.delegation.team import Team
+        from agentpool.messaging.messagenode import get_source_type
 
         current_message = prompts
         for node in self.nodes:
-            match node:
-                case Team():
-                    source_type: SubAgentType = "team_parallel"
-                case BaseTeam():
-                    source_type = "team_sequential"
-                case _:
-                    source_type = "agent"
+            source_type = get_source_type(node)
 
             try:
                 if not isinstance(node, SupportsRunStream):
