@@ -158,6 +158,10 @@ class ServerState:
 
             cfg = self._pool.manifest.agents.get(self.agent.name)
             if isinstance(cfg, NativeAgentConfig):
+                # Pool init may leave cfg.name=None (set from dict key, not YAML);
+                # ensure name matches the dict key so per-session agents get correct name.
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": self.agent.name})
                 self._agent_config = cfg
 
     def get_event_factory(self) -> GlobalEventFactory:
@@ -328,7 +332,6 @@ class ServerState:
         Returns:
             A new ``BaseAgent`` instance bound to the given session.
         """
-        logger.warning("DIAG: _create_session_agent session_id=%s has_config=%s is_shared_fallback=%s", session_id, self._agent_config is not None, self._agent_config is None)  # noqa: E501
         if self._agent_config is not None:
             from agentpool_config.context import ConfigContextManager
 
@@ -343,11 +346,9 @@ class ServerState:
                     pool=pool,
                 )
             agent.session_id = session_id
-            logger.warning("DIAG: _create_session_agent NEW agent id=%d conv_size=%d", id(agent), len(agent.conversation.chat_messages))  # noqa: E501
             return agent
         # Fallback for test environments where no config is available.
         # Bind the shared agent and return it.
-        logger.warning("DIAG: _create_session_agent FALLBACK shared agent id=%d conv_size=%d conv_contents=%s", id(self.agent), len(self.agent.conversation.chat_messages), [str(m.content)[:80] for m in self.agent.conversation.chat_messages])  # noqa: E501
         return self.bind_agent_to_session(session_id)
 
     async def cleanup_all_session_agents(self) -> None:

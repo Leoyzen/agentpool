@@ -399,7 +399,6 @@ async def _process_message_locked(  # noqa: PLR0915
     # so no global agent_lock is needed. Same-session serialization
     # is handled by get_session_lock() in _process_message().
     agent = await state.get_or_create_agent(session_id)
-    logger.warning("DIAG: agent resolved session_id=%s agent_id=%d is_shared=%s conv_size=%d conv_contents=%s", session_id, id(agent), agent is state.agent, len(agent.conversation.chat_messages), [str(m.content)[:80] for m in agent.conversation.chat_messages])  # noqa: E501
     # Delegate agent resolution (for subagent requests).
     # Only resolve a delegate when the request names a *different* agent
     # from the default session agent.  A request.agent value of "default"
@@ -415,8 +414,14 @@ async def _process_message_locked(  # noqa: PLR0915
     # delegation/team mechanism instead.
     if request.agent and state.pool is not None:
         all_agents = state.pool.all_agents
+        # Only delegate to a different agent from the pool — if the request
+        # names the same agent as the session's default, the per-session
+        # instance is already the right one.
         if request.agent in all_agents and all_agents[request.agent] is not agent:
-            agent = all_agents[request.agent]
+            if state._agent_config is not None and request.agent == state._agent_config.name:
+                pass  # Use per-session agent, don't replace with pool singleton
+            else:
+                agent = all_agents[request.agent]
     # Ensure agent is bound to this session
     if agent.session_id != session_id:
         agent.session_id = session_id
