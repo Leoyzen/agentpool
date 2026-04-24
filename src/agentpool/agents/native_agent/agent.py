@@ -835,6 +835,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         run_id = str(uuid4())
         start_time = time.perf_counter()
         history_list = message_history.get_history()
+        self.log.warning("DIAG: _stream_events history_len=%d prompts_len=%d history_last3=%s prompts_preview=%s", len(history_list), len(prompts), [str(m.content)[:80] for m in (history_list[-3:] if len(history_list) > 3 else history_list)], [str(p)[:80] for p in prompts])  # noqa: E501, PLR2004
         assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
         yield RunStartedEvent(
             session_id=self.session_id,

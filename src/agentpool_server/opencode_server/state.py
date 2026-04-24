@@ -328,6 +328,7 @@ class ServerState:
         Returns:
             A new ``BaseAgent`` instance bound to the given session.
         """
+        logger.warning("DIAG: _create_session_agent session_id=%s has_config=%s is_shared_fallback=%s", session_id, self._agent_config is not None, self._agent_config is None)  # noqa: E501
         if self._agent_config is not None:
             from agentpool_config.context import ConfigContextManager
 
@@ -342,9 +343,11 @@ class ServerState:
                     pool=pool,
                 )
             agent.session_id = session_id
+            logger.warning("DIAG: _create_session_agent NEW agent id=%d conv_size=%d", id(agent), len(agent.conversation.chat_messages))  # noqa: E501
             return agent
         # Fallback for test environments where no config is available.
         # Bind the shared agent and return it.
+        logger.warning("DIAG: _create_session_agent FALLBACK shared agent id=%d conv_size=%d conv_contents=%s", id(self.agent), len(self.agent.conversation.chat_messages), [str(m.content)[:80] for m in self.agent.conversation.chat_messages])  # noqa: E501
         return self.bind_agent_to_session(session_id)
 
     async def cleanup_all_session_agents(self) -> None:
