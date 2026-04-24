@@ -18,10 +18,10 @@ from agentpool.agents.events import (
     SubAgentEvent,
 )
 from agentpool.agents.events.processors import batch_stream_deltas
+from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool.tools.exceptions import ToolError
-from agentpool.utils import identifiers as identifier
 
 
 if TYPE_CHECKING:
@@ -61,14 +61,17 @@ async def _stream_task(
     *,
     batch_deltas: bool = False,
     depth: int = 1,
-    child_session_id: str | None = None,
-    parent_session_id: str | None = None,
+    child_session_id: str,
+    parent_session_id: str,
     tool_call_id: str | None = None,
-    prompt: str | None = None,
     model_id: str | None = None,
     mode: str | None = None,
 ) -> dict[str, Any]:
     """Stream a task's execution, emitting SubAgentEvents into parent stream.
+
+    The SpawnSessionStart event must already have been emitted by the caller
+    (``task()``) before this function is invoked.  This function only wraps
+    stream events as ``SubAgentEvent`` instances.
 
     Args:
         ctx: Agent context for emitting events
@@ -77,36 +80,14 @@ async def _stream_task(
         stream: Async iterator of stream events from agent.run_stream()
         batch_deltas: If True, batch consecutive text/thinking deltas for fewer UI updates
         depth: Nesting depth for nested task delegation
-        child_session_id: ID of the child session
-        parent_session_id: ID of the parent session
+        child_session_id: ID of the child session (must be provided by caller)
+        parent_session_id: ID of the parent session (must be provided by caller)
         tool_call_id: ID of the tool call
-        prompt: The task prompt (for metadata)
         model_id: Model identifier for the subagent (e.g., 'openai:gpt-4o')
         mode: Mode identifier for the subagent (e.g., 'code', 'ask')
     """
     if batch_deltas:
         stream = batch_stream_deltas(stream)
-
-    # Ensure we have valid IDs (generate fallbacks as needed)
-    _child_session_id = child_session_id or identifier.ascending("session")
-    _parent_session_id = parent_session_id or ctx.node.session_id or identifier.ascending("session")
-    _tool_call_id = tool_call_id or ctx.tool_call_id
-
-    # Emit SpawnSessionStart before streaming begins
-    spawn_event = SpawnSessionStart(
-        child_session_id=_child_session_id,
-        parent_session_id=_parent_session_id,
-        tool_call_id=_tool_call_id,
-        spawn_mechanism="task",
-        source_name=source_name,
-        source_type=source_type,
-        depth=getattr(ctx, "current_depth", 0) + 1,
-        description=f"Run {source_name} task",
-        metadata={"prompt": prompt[:200]} if prompt else {},
-        model_id=model_id,
-        mode=mode,
-    )
-    await ctx.events.emit_event(spawn_event)
 
     final_content: str = ""
     async for event in stream:
@@ -336,16 +317,28 @@ class SubagentTools(StaticResourceProvider):
             async_mode=async_mode,
         )
 
-        # Generate unique session ID for the subagent run
-        child_session_id = identifier.ascending("session")
-        parent_session_id = ctx.node.session_id or identifier.ascending("session")
+        # Compute current delegation depth
+        current_depth = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
 
-        # Emit SpawnSessionStart for both sync and async modes
+        # Guard against excessive nesting before creating any resources
+        if current_depth >= MAX_DELEGATION_DEPTH:
+            raise DelegationDepthError(current_depth)
+
+        # Create and persist child session via SessionManager (or generate
+        # ephemeral ID when no pool / sessions are available).
+        parent_session_id = ctx.node.session_id or ""
+        child_session_id = await ctx.create_child_session(
+            agent_name=agent_or_team,
+            agent_type="native",
+        )
+        child_depth = current_depth + 1
+
         # Extract model_id from node if it's a BaseAgent
         node_model_id: str | None = None
         if isinstance(node, BaseAgent):
             node_model_id = node.model_name
 
+        # Emit exactly one SpawnSessionStart for both sync and async modes
         spawn_event = SpawnSessionStart(
             child_session_id=child_session_id,
             parent_session_id=parent_session_id,
@@ -353,7 +346,7 @@ class SubagentTools(StaticResourceProvider):
             spawn_mechanism="task",
             source_name=agent_or_team,
             source_type=source_type,
-            depth=getattr(ctx, "current_depth", 0) + 1,
+            depth=child_depth,
             description=f"Run {agent_or_team} task",
             metadata={"prompt": prompt[:200]} if prompt else {},
             model_id=node_model_id,
@@ -377,7 +370,10 @@ class SubagentTools(StaticResourceProvider):
                     task_id=task_id,
                     source_name=agent_or_team,
                     stream=node.run_stream(
-                        prompt, session_id=child_session_id, parent_session_id=parent_session_id
+                        prompt,
+                        session_id=child_session_id,
+                        parent_session_id=parent_session_id,
+                        depth=child_depth,
                     ),
                 ),
                 name=f"async_task_{task_id}",
@@ -406,12 +402,14 @@ class SubagentTools(StaticResourceProvider):
             source_name=agent_or_team,
             source_type=source_type,
             stream=node.run_stream(
-                prompt, session_id=child_session_id, parent_session_id=parent_session_id
+                prompt,
+                session_id=child_session_id,
+                parent_session_id=parent_session_id,
+                depth=child_depth,
             ),
             batch_deltas=self._batch_stream_deltas,
             child_session_id=child_session_id,
             parent_session_id=parent_session_id,
             tool_call_id=ctx.tool_call_id,
-            prompt=prompt,
             model_id=node_model_id,
         )

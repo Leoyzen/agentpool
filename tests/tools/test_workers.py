@@ -8,6 +8,7 @@ import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
 from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent, SubAgentEvent
+from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
 
 
 if TYPE_CHECKING:
@@ -379,6 +380,141 @@ teams:
     assert len(spawn_events) == 1
     assert spawn_events[0].source_name == "my_team"
     assert spawn_events[0].source_type == "team_parallel"
+
+
+async def test_worker_spawn_depth_equals_parent_depth_plus_one(tmp_path: Path):
+    """Test that worker spawn depth equals parent depth + 1."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        # Set up test model to trigger worker tool at depth 0 (top-level)
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        # Collect SpawnSessionStart events via run_stream
+        async for event in main_agent.run_stream("Ask worker: do something"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    # Verify depth is 1 when parent runs at depth 0
+    assert len(spawn_events) == 1
+    assert spawn_events[0].depth == 1
+
+
+async def test_worker_child_session_has_correct_parent(tmp_path: Path):
+    """Test that worker child sessions are created with correct parent session."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        # Collect events through run_stream
+        async for event in main_agent.run_stream("Ask worker: do something"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    assert len(spawn_events) == 1
+    spawn = spawn_events[0]
+    # Child session ID must be distinct from parent
+    assert spawn.child_session_id != spawn.parent_session_id
+    # Both session IDs must be valid (start with ses_)
+    assert spawn.child_session_id.startswith("ses_")
+    assert spawn.parent_session_id.startswith("ses_")
+
+
+async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
+    """Test that DelegationDepthError is raised when max delegation depth is exceeded."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        # Simulate running at max depth by setting run_ctx.depth directly
+        async with main_agent:
+            # Run at max depth — the worker tool should raise DelegationDepthError
+            from agentpool.agents.context import AgentRunContext
+
+            # Create a run context at MAX_DELEGATION_DEPTH
+            max_depth_ctx = AgentRunContext(depth=MAX_DELEGATION_DEPTH)
+
+            # Use run_stream which sets up run_ctx internally
+            # We need to directly test the tool's behavior at max depth.
+            # The easiest way is to patch the depth via the agent's run.
+            depth_exceeded = False
+            try:
+                # Run at max depth by providing a pre-configured depth
+                async for event in main_agent.run_stream(
+                    "Ask worker: do something", depth=MAX_DELEGATION_DEPTH
+                ):
+                    if isinstance(event, SpawnSessionStart):
+                        pass  # Should not reach here
+            except DelegationDepthError:
+                depth_exceeded = True
+
+        assert depth_exceeded, "Expected DelegationDepthError when running at max depth"
+
+
+async def test_subagent_event_depth_propagation(tmp_path: Path):
+    """Test that SubAgentEvent depth matches SpawnSessionStart depth."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    spawn_events: list[SpawnSessionStart] = []
+    subagent_events: list[SubAgentEvent] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        async for event in main_agent.run_stream("Ask worker: do something"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+            elif isinstance(event, SubAgentEvent):
+                subagent_events.append(event)
+
+    # Verify SpawnSessionStart and SubAgentEvent have consistent depth
+    assert len(spawn_events) == 1
+    assert len(subagent_events) > 0
+    expected_depth = spawn_events[0].depth
+    for sa_event in subagent_events:
+        assert sa_event.depth == expected_depth
 
 
 if __name__ == "__main__":

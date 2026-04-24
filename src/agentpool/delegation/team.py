@@ -11,11 +11,12 @@ from anyenv.async_run import as_generated
 import anyio
 
 from agentpool.agents.base_agent import BaseAgent
-from agentpool.agents.events import SubAgentEvent
+from agentpool.agents.events import SpawnSessionStart, SubAgentEvent
+from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
 from agentpool.delegation.base_team import BaseTeam
-from agentpool.delegation.teamrun import TeamRun
 from agentpool.log import get_logger
 from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
+from agentpool.messaging.messagenode import get_source_type
 from agentpool.messaging.processing import finalize_message, prepare_prompts
 from agentpool.utils.time_utils import get_now
 
@@ -166,35 +167,100 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
     async def run_stream(
         self,
         *prompts: PromptCompatible,
+        depth: int = 0,
         **kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         """Stream responses from all team members in parallel.
 
         Args:
             prompts: Input prompts to process in parallel
-            kwargs: Additional arguments passed to each agent
+            depth: Current delegation depth (0 = top-level run)
+            kwargs: Additional arguments passed to each agent.
+                ``session_id`` and ``depth`` are popped before forwarding
+                to prevent duplicate-keyword ``TypeError``.
 
         Yields:
             RichAgentStreamEvent, with member events wrapped in SubAgentEvent
         """
+        from agentpool.common_types import SupportsRunStream
+        from agentpool.utils.identifiers import generate_session_id
+
+        # Pop session_id/depth/parent_session_id from kwargs to avoid duplicate
+        # keyword errors when forwarding to members.  The explicit *depth*
+        # parameter is the source of truth; the popped session_id and
+        # parent_session_id determine the parent session for child-session
+        # creation.
+        session_id_kwarg: str | None = kwargs.pop("session_id", None)
+        kwargs.pop("depth", None)
+        parent_session_id_kwarg: str | None = kwargs.pop("parent_session_id", None)
+
+        # Compute child depth and guard against excessive nesting
+        child_depth = depth + 1
+        if child_depth > MAX_DELEGATION_DEPTH:
+            raise DelegationDepthError(child_depth)
+
+        # Resolve the parent session id for this team execution.
+        # The caller's parent_session_id takes priority, then session_id (for
+        # backward compat), then the team's own session.
+        parent_sid: str | None = (
+            parent_session_id_kwarg or session_id_kwarg or self.session_id
+        )
+
         # Get nodes to run
         all_nodes = list(self.nodes)
 
-        # Create list of streams
+        # Pre-create child sessions for each member so that SpawnSessionStart
+        # can be emitted *before* the member's stream begins.
+        child_session_ids: dict[str, str] = {}
+        for node in all_nodes:
+            if self.agent_pool and self.agent_pool.sessions:
+                pool_parent = parent_sid or self.session_id
+                if pool_parent:
+                    child_sid = await self.agent_pool.sessions.create_child_session(
+                        parent_session_id=pool_parent,
+                        agent_name=node.name,
+                        agent_type=node.agent_type,
+                    )
+                else:
+                    child_sid = generate_session_id()
+            else:
+                child_sid = generate_session_id()
+            child_session_ids[node.name] = child_sid
+
+        # Create list of streams — one per member, prefixed by SpawnSessionStart
         async def wrap_stream(
             node: MessageNode[Any, Any],
+            child_sid: str,
         ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
-            """Wrap a node's stream events in SubAgentEvent."""
-            from agentpool.messaging.messagenode import get_source_type
-
+            """Wrap a node's stream events, prefixed with SpawnSessionStart."""
             source_type = get_source_type(node)
+
+            # Emit SpawnSessionStart before the member's stream begins
+            yield SpawnSessionStart(
+                child_session_id=child_sid,
+                parent_session_id=parent_sid or "",
+                source_type=source_type,
+                source_name=node.name,
+                depth=child_depth,
+                description=f"Spawning {node.name} as team member",
+                spawn_mechanism="spawn",
+            )
+
+            if not isinstance(node, SupportsRunStream):
+                return
 
             # Extract model_id from BaseAgent nodes
             node_model_id: str | None = None
             if isinstance(node, BaseAgent):
                 node_model_id = node.model_name
 
-            async for event in node.run_stream(*prompts, **kwargs):
+            async for event in node.run_stream(
+                *prompts,
+                session_id=child_sid,
+                parent_session_id=parent_sid,
+                depth=child_depth,
+                **kwargs,
+            ):
                 # Handle already-wrapped SubAgentEvents (nested teams)
                 if isinstance(event, SubAgentEvent):
                     yield SubAgentEvent(
@@ -204,17 +270,23 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                         depth=event.depth + 1,
                         model_id=event.model_id,
                         mode=event.mode,
+                        child_session_id=event.child_session_id,
+                        parent_session_id=event.parent_session_id,
                     )
                 else:
                     yield SubAgentEvent(
                         source_name=node.name,
                         source_type=source_type,
                         event=event,
-                        depth=1,
+                        depth=child_depth,
                         model_id=node_model_id,
+                        child_session_id=child_sid,
+                        parent_session_id=parent_sid,
                     )
 
-        streams = [wrap_stream(node) for node in all_nodes]
+        streams = [
+            wrap_stream(node, child_session_ids[node.name]) for node in all_nodes
+        ]
         # Merge all streams
         async for event in as_generated(streams):
             yield event
