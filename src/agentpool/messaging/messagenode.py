@@ -74,7 +74,7 @@ def get_source_type(node: MessageNode[Any, Any]) -> SourceType:
         # BaseTeam but not Team → TeamRun (or any future sequential subclass)
         return "team_sequential"
     # Check it's at least a MessageNode — unknown subclasses get a warning
-    if type(node) is not MessageNode and not isinstance(node, MessageNode):
+    if not isinstance(node, MessageNode):
         logger.warning("Unexpected node type %s, defaulting to 'agent'", type(node).__name__)
     return "agent"
 

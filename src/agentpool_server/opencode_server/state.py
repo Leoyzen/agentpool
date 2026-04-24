@@ -651,54 +651,64 @@ class ServerState:
         # racing for the same ID are properly queued.
         if session_id not in self.session_locks:
             self.session_locks[session_id] = asyncio.Lock()
-        async with self.session_locks[session_id]:
-            # Double-check after acquiring the lock (another coroutine may
-            # have populated the session while we waited).
-            if session_id in self.sessions:
-                session = self.sessions[session_id]
-                from agentpool_server.opencode_server.models import SessionUpdatedEvent
+        try:
+            async with self.session_locks[session_id]:
+                # Double-check after acquiring the lock (another coroutine may
+                # have populated the session while we waited).
+                if session_id in self.sessions:
+                    session = self.sessions[session_id]
+                    from agentpool_server.opencode_server.models import SessionUpdatedEvent
 
-                await self.broadcast_event(SessionUpdatedEvent.create(session))
-                return session
+                    await self.broadcast_event(SessionUpdatedEvent.create(session))
+                    return session
 
-            # --- Store-first path ------------------------------------------
-            store = self.pool.sessions.store
-            if store is not None:
-                session_data = await store.load(session_id)
-            else:
-                session_data = await self.pool.storage.load_session(session_id)
+                # --- Store-first path ------------------------------------------
+                if self.pool.sessions is not None:
+                    store = self.pool.sessions.store
+                    if store is not None:
+                        session_data = await store.load(session_id)
+                    else:
+                        session_data = None
+                else:
+                    session_data = None
+                if session_data is None:
+                    session_data = await self.pool.storage.load_session(session_id)
 
-            if session_data is not None:
-                session = self._session_from_session_data(session_data)
+                if session_data is not None:
+                    session = self._session_from_session_data(session_data)
 
-                # Register in-memory runtime state
-                self.sessions[session_id] = session
-                self.ensure_runtime_session_state(session_id)
-                self.ensure_input_provider(session_id)
-                await self.mark_session_idle(session_id)
+                    # Register in-memory runtime state
+                    self.sessions[session_id] = session
+                    self.ensure_runtime_session_state(session_id)
+                    self.ensure_input_provider(session_id)
+                    await self.mark_session_idle(session_id)
 
-                # Do NOT call store.save() — data is already persisted.
-                # Do NOT call bind_agent_to_session for child sessions.
-                if session_data.parent_id is None:
-                    async with self.agent_lock:
-                        self.bind_agent_to_session(session_id)
+                    # Do NOT call store.save() — data is already persisted.
+                    # Do NOT call bind_agent_to_session for child sessions.
+                    if session_data.parent_id is None:
+                        async with self.agent_lock:
+                            self.bind_agent_to_session(session_id)
 
-                from agentpool_server.opencode_server.models import (
-                    SessionCreatedEvent,
-                    SessionUpdatedEvent,
-                )
+                    from agentpool_server.opencode_server.models import (
+                        SessionCreatedEvent,
+                        SessionUpdatedEvent,
+                    )
 
-                await self.broadcast_event(SessionCreatedEvent.create(session))
-                await self.broadcast_event(SessionUpdatedEvent.create(session))
-                logger.info(
-                    "ensure_session: loaded from store",
-                    session_id=session_id,
-                    parent_id=session_data.parent_id,
-                )
-                return session
+                    await self.broadcast_event(SessionCreatedEvent.create(session))
+                    await self.broadcast_event(SessionUpdatedEvent.create(session))
+                    logger.info(
+                        "ensure_session: loaded from store",
+                        session_id=session_id,
+                        parent_id=session_data.parent_id,
+                    )
+                    return session
 
-            # --- Store-miss fallback: create new session -------------------
-            return await self._create_and_persist_session(session_id, parent_id)
+                # --- Store-miss fallback: create new session -------------------
+                return await self._create_and_persist_session(session_id, parent_id)
+        finally:
+            # Clean up lock to prevent unbounded growth of session_locks dict.
+            # Locks are cheap to create on demand, so removing idle ones is safe.
+            self.session_locks.pop(session_id, None)
 
     async def _create_and_persist_session(
         self,
