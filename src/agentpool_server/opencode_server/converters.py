@@ -46,6 +46,7 @@ from agentpool_server.opencode_server.models import (
     ToolPart,
     ToolStateCompleted,
     ToolStateError,
+    ToolStatePending,
     ToolStateRunning,
     UserMessage,
 )
@@ -487,6 +488,14 @@ def opencode_to_chat_message(
                                     tool_name=tool_name,
                                     tool_call_id=call_id,
                                     content={"error": error},
+                                )
+                            )
+                        case ToolStatePending() | ToolStateRunning():
+                            tool_returns.append(
+                                PydanticToolReturnPart(
+                                    tool_name=tool_name,
+                                    tool_call_id=call_id,
+                                    content="Tool call was aborted before completion",
                                 )
                             )
 
