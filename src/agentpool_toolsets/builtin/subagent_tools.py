@@ -319,10 +319,11 @@ class SubagentTools(StaticResourceProvider):
 
         # Compute current delegation depth
         current_depth = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
+        child_depth = current_depth + 1
 
         # Guard against excessive nesting before creating any resources
-        if current_depth >= MAX_DELEGATION_DEPTH:
-            raise DelegationDepthError(current_depth)
+        if child_depth > MAX_DELEGATION_DEPTH:
+            raise DelegationDepthError(child_depth)
 
         # Create and persist child session via SessionManager (or generate
         # ephemeral ID when no pool / sessions are available).

@@ -225,7 +225,7 @@ agents:
                 description="Depth overflow",
             )
 
-        assert exc_info.value.current_depth == MAX_DELEGATION_DEPTH
+        assert exc_info.value.current_depth == MAX_DELEGATION_DEPTH + 1
 
 
 # ---------------------------------------------------------------------------

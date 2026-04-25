@@ -95,9 +95,9 @@ class WorkersTools(ResourceProvider):
 
             # Compute delegation depth from current run context
             current_depth: int = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
-            if current_depth >= MAX_DELEGATION_DEPTH:
-                raise DelegationDepthError(current_depth)
             child_depth = current_depth + 1
+            if child_depth > MAX_DELEGATION_DEPTH:
+                raise DelegationDepthError(child_depth)
 
             # Handle conversation history only for agents (not teams)
             old_history = None
@@ -208,9 +208,9 @@ class WorkersTools(ResourceProvider):
 
             # Compute delegation depth from current run context
             current_depth: int = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
-            if current_depth >= MAX_DELEGATION_DEPTH:
-                raise DelegationDepthError(current_depth)
             child_depth = current_depth + 1
+            if child_depth > MAX_DELEGATION_DEPTH:
+                raise DelegationDepthError(child_depth)
 
             # Create child session via AgentContext (RFC-0028)
             from agentpool.utils.identifiers import generate_session_id
