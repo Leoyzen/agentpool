@@ -663,14 +663,9 @@ class ServerState:
                     return session
 
                 # --- Store-first path ------------------------------------------
-                if self.pool.sessions is not None:
-                    store = self.pool.sessions.store
-                    if store is not None:
-                        session_data = await store.load(session_id)
-                    else:
-                        session_data = None
-                else:
-                    session_data = None
+                session_data = None
+                if self.pool.sessions is not None and self.pool.sessions.store is not None:
+                    session_data = await self.pool.sessions.store.load(session_id)
                 if session_data is None:
                     session_data = await self.pool.storage.load_session(session_id)
 

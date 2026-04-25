@@ -114,7 +114,7 @@ class WorkersTools(ResourceProvider):
             parent_session_id = ctx.node.session_id or generate_session_id()
             child_session_id = await ctx.create_child_session(
                 agent_name=agent_name,
-                agent_type="native",
+                agent_type=worker.agent_type,
                 parent_session_id=parent_session_id,
             )
 

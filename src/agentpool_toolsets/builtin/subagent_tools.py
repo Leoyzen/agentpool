@@ -330,7 +330,7 @@ class SubagentTools(StaticResourceProvider):
         parent_session_id = ctx.node.session_id or ""
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
-            agent_type="native",
+            agent_type=node.agent_type,
         )
         child_depth = current_depth + 1
 
