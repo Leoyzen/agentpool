@@ -451,11 +451,9 @@ class ToolManagerBridge:
                     self._bridge.tool_metadata[tc_id] = result.metadata
 
                 # Consume pending injection from node's run context (isolated per-call)
-                injection_manager = (
-                    self._bridge.node._current_run_ctx.injection_manager
-                    if self._bridge.node._current_run_ctx
-                    else None
-                )
+                # Fall back to _active_run_ctx for cross-task access (see interrupt() pattern)
+                run_ctx = self._bridge.node._current_run_ctx or self._bridge.node._active_run_ctx
+                injection_manager = run_ctx.injection_manager if run_ctx else None
                 if injection_manager and (injection := await injection_manager.consume()):
                     result = _append_injection_to_result(result, injection)
 
