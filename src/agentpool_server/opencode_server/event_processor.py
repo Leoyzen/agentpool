@@ -56,6 +56,7 @@ from agentpool_server.opencode_server.models import (
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
+    SessionIdleEvent,
     SessionStatusEvent,
     TimeCreated,
     TokenCache,
@@ -947,9 +948,21 @@ class EventProcessor:
                         call_id=existing.call_id,
                         state=completed_state,
                     )
-            ctx.add_subagent_tool_part(subagent_key, updated)
-            ctx.assistant_msg.update_part(updated)
-            yield PartUpdatedEvent.create(updated)
+                    ctx.add_subagent_tool_part(subagent_key, updated)
+                    ctx.assistant_msg.update_part(updated)
+                    yield PartUpdatedEvent.create(updated)
+
+            # Emit idle events for the child session so the TUI updates
+            # the subagent card from "running" to "completed".
+            # This mirrors what mark_session_idle() does for parent sessions
+            # in message_routes.py, but here we only yield the events
+            # (broadcast is handled by the caller).
+            if child_session_id:
+                from agentpool_server.opencode_server.models import SessionStatus
+
+                ctx.state.session_status[child_session_id] = SessionStatus(type="idle")
+                yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
+                yield SessionIdleEvent.create(child_session_id)
 
     async def _process_spawn_start(
         self,
