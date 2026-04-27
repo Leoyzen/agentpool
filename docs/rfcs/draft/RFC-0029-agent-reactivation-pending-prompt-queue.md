@@ -448,7 +448,14 @@ async def _run_async_prompt_queue(
     session_id: str,
     state: ServerState,
 ) -> None:
-    """Drain both server request queue and agent mailbox."""
+    """Drain both server request queue and agent mailbox.
+
+    Drain ordering: server requests first, then agent mailbox.
+    This ensures user-typed messages always preempt background task
+    notices. Be aware this creates a fairness implication — a flood
+    of user messages could starve background task notices. This is
+    intentional: user-facing responsiveness takes priority.
+    """
     while True:
         # 1. Process any pending server requests first (full metadata)
         while state.pending_async_prompts:
@@ -462,14 +469,20 @@ async def _run_async_prompt_queue(
             )
 
         # 2. Check agent mailbox for injected prompts
+        #    Use pop_pending_prompt() directly (not has_pending_prompts + pop)
+        #    to avoid TOCTOU race between empty() check and get_nowait().
         agent = state.sessions.get(session_id)
-        if agent is not None and agent.has_pending_prompts():
-            prompt = agent.pop_pending_prompt()
+        if agent is not None:
+            prompt = agent.pop_pending_prompt()  # Returns None if empty
             if prompt is not None:
-                # Injected prompt becomes a new run_stream with the notice as input
+                # Adapt string notice to MessageRequest for _process_message_locked.
+                # The server must construct a minimal MessageRequest wrapping the
+                # injected prompt string. This adaptation layer is required because
+                # _process_message_locked expects MessageRequest, not raw str.
+                request = MessageRequest.from_injected_prompt(prompt)
                 await self._process_message_locked(
                     session_id=session_id,
-                    request=prompt,  # string notice from inject_prompt()
+                    request=request,
                     state=state,
                     user_msg_id=None,
                     user_msg_with_parts=None,
@@ -486,7 +499,7 @@ async def _run_async_prompt_queue(
             break
 ```
 
-This preserves the server's `QueuedAsyncPrompt` queue for full request routing while using the agent's mailbox as a lightweight reactivation signal. The `_process_message_locked()` function receives the correct number and type of arguments for each path.
+This preserves the server's `QueuedAsyncPrompt` queue for full request routing while using the agent's mailbox as a lightweight reactivation signal. A `MessageRequest.from_injected_prompt()` factory method (or equivalent adapter) is required to bridge the string mailbox content to the server's `MessageRequest`-based API.
 
 ### 7. ACP / AG-UI Server Integration
 
@@ -527,7 +540,8 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 - `_pending_prompts` queue is unbounded (memory only). Acceptable for typical use cases where prompt volume is low (background task completions, user messages).
 - `_pending_prompt_event` is lightweight — no task allocation, no timer.
 - No long-lived `asyncio.Task` is created by the agent — the caller decides when to start `run_stream()`.
-- `clear_pending_prompts()` provided for cleanup during agent shutdown.
+- `clear_pending_prompts()` provided for cleanup during agent shutdown. Should be wired into `__aexit__` or `stop()` (Phase 4).
+- **Event loop affinity**: `asyncio.Queue` and `asyncio.Event` are not thread-safe. All callers must be in the same event loop. This matches current agentpool architecture where all agent operations are asyncio-based.
 
 ---
 
@@ -552,15 +566,17 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 
 ### Phase 1.5: Continuous Mode Injection Consumption (1-2h)
 
-1. Modify `_continuous()` loop (base_agent.py L472-504) to drain `injection_manager` at the start of each iteration
+1. Modify `_continuous()` loop (base_agent.py L472-504) to drain `self._background_run_ctx.injection_manager` at the start of each iteration (note: continuous mode uses `_background_run_ctx`, not `_active_run_ctx`)
 2. This ensures `inject_prompt()` delivered to `_background_run_ctx.injection_manager` during continuous mode is actually consumed
 3. Write unit test for continuous mode injection consumption
 
 ### Phase 2: OpenCode Server Integration (2-4h)
 
 1. Modify `_run_async_prompt_queue()` to use `wait_for_pending_prompt()` as reactivation signal
-2. Retain `ServerState.pending_async_prompts` for full user request routing (mailbox vs request routing separation)
-3. Test integration with OpenCode server test fixtures
+2. Add `MessageRequest.from_injected_prompt()` factory method (or equivalent adapter) to wrap injected string prompts as `MessageRequest` for `_process_message_locked()`
+3. Retain `ServerState.pending_async_prompts` for full user request routing (mailbox vs request routing separation)
+4. Use `pop_pending_prompt()` directly instead of `has_pending_prompts()` + `pop` to avoid TOCTOU race
+5. Test integration with OpenCode server test fixtures
 
 ### Phase 3: ACP/AG-UI Server Integration (4-8h)
 
@@ -572,7 +588,8 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 
 1. Update docstrings for modified methods
 2. Add pending prompt behavior to agent usage guide
-3. Verify all existing tests still pass
+3. Wire `clear_pending_prompts()` into `__aexit__` or `stop()` for clean shutdown
+4. Verify all existing tests still pass
 
 ---
 
@@ -588,6 +605,8 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 
 5. **Should `inject_prompt()` return a boolean indicating delivery path?** This would help callers distinguish "delivered to active run" vs "queued for later". Could be useful for logging but adds API surface.
 
+6. **Multi-protocol event contention**: If the same agent is exposed via multiple servers (e.g., ACP + OpenCode simultaneously), both could `await wait_for_pending_prompt()` on the same agent. The first caller wins the prompt — the second gets nothing. Is this acceptable, or should we add per-server event dispatching? (Likely acceptable for now — multi-protocol exposure is uncommon.)
+
 ---
 
 ## Decision Record
@@ -597,8 +616,10 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 | 2026-04-26 | Option D (Pending Prompt Queue) selected | Minimal change, backward compatible, solves core problem |
 | 2026-04-26 | Caller-driven reactivation chosen over self-reactivation | Agent can't safely start its own run_stream() — needs caller for async iteration |
 | 2026-04-26 | Unbounded queue accepted for initial implementation | Typical use case is low-volume; bounded queue can be added later |
-| 2026-04-26 | Agent mailbox vs server request routing separation (PR review) | Agent's `_pending_prompts` is string-only mailbox for `inject_prompt()` notices; server retains `QueuedAsyncPrompt` queue for full user request routing with model/agent metadata |
-| 2026-04-26 | `_continuous()` loop needs injection consumption (PR review) | `_continuous()` loop does not consume `injection_manager`, causing injections delivered to `_background_run_ctx` to be stuck; added Phase 1.5 to implementation plan |
+| 2026-04-27 | Agent mailbox vs server request routing separation (PR review) | Agent's `_pending_prompts` is string-only mailbox for `inject_prompt()` notices; server retains `QueuedAsyncPrompt` queue for full user request routing with model/agent metadata |
+| 2026-04-27 | `_continuous()` loop needs injection consumption (PR review) | `_continuous()` loop does not consume `injection_manager`, causing injections delivered to `_background_run_ctx` to be stuck; added Phase 1.5 to implementation plan |
+| 2026-04-27 | `MessageRequest.from_injected_prompt()` adapter required (Oracle review) | `_process_message_locked` expects `MessageRequest`, not `str`; server integration needs adaptation layer to wrap injected string prompts |
+| 2026-04-27 | Server request drain ordering: user requests preempt mailbox (Oracle review) | Intentional design for user-facing responsiveness; documented fairness implication |
 
 ---
 
