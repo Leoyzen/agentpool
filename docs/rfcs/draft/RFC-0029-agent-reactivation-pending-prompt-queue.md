@@ -5,7 +5,7 @@ status: DRAFT
 author: yuchen.liu
 reviewers: []
 created: 2026-04-26
-last_updated: 2026-04-26
+last_updated: 2026-04-27 (Rev 2 — PR review feedback)
 decision_date:
 related_rfcs:
   - RFC-0021 (Agent Concurrent Execution Safety — per-run context isolation)
@@ -86,11 +86,12 @@ OpenCode solves this with a **Runner state machine**:
 
 | Term | Definition |
 |------|------------|
-| **Pending Prompt Queue** | Agent-level `asyncio.Queue[str]` that receives prompts when no active run context exists |
+| **Pending Prompt Queue** | Agent-level `asyncio.Queue[str]` that receives injected prompts when no active run context exists (mailbox pattern) |
 | **Pending Prompt Event** | `asyncio.Event` that fires when a prompt is added to the pending queue |
 | **Reactivation** | Starting a new `run_stream()` call to process prompts that arrived while the agent was idle |
 | **Caller-driven reactivation** | The caller (server or direct user) provides the reactivation loop; the agent provides the notification |
-| **Mailbox pattern** | Prompts are queued and remain until the next `run_stream()` call drains them |
+| **Mailbox pattern** | Agent's pending queue for `inject_prompt()` notices — string-only, consumed by the agent at `run_stream()` startup |
+| **Request routing** | Server-level queue for full user requests (e.g., `QueuedAsyncPrompt` with model/agent metadata) — separate from the agent mailbox |
 
 ---
 
@@ -123,7 +124,7 @@ OpenCode solves this with a **Runner state machine**:
 1. **No silent drops**: `inject_prompt()` / `queue_prompt()` always deliver — either to active run or to pending queue
 2. **Reactivation signal**: Agent provides notification mechanism for callers to detect pending prompts
 3. **Backward compatible**: Existing `run_stream()` calls behave identically when no pending prompts exist
-4. **Server consolidation**: OpenCode server's duplicate `pending_async_prompts` dict replaced by agent-level queue
+4. **Server consolidation**: OpenCode server can use `wait_for_pending_prompt()` as a reactivation signal, while retaining its own request queue for full user request routing
 5. **Minimal change**: Preserve `run_stream()` semantics (starts, processes, completes) — no "awaiting forever" mode
 
 ### Non-Goals
@@ -432,25 +433,60 @@ def has_pending_injections(self) -> bool:
 
 ### 6. OpenCode Server Integration
 
-Simplify `_run_async_prompt_queue()` to use agent-level queue:
+The agent's pending prompt queue serves as a **mailbox** for `inject_prompt()` notices (string-only). The OpenCode server retains its own `QueuedAsyncPrompt` queue for full user request routing (which includes model selection, agent name, and message metadata that cannot be reduced to a string).
+
+The two queues serve different concerns:
+- **Agent mailbox** (`_pending_prompts`): Async notifications from background tasks, system events, etc.
+- **Server request queue** (`pending_async_prompts`): Full user requests with routing metadata
+
+`wait_for_pending_prompt()` acts as a **reactivation signal** — the server awaits it to know when something needs processing, then checks both queues:
 
 ```python
-# BEFORE: Server manages its own prompt queue
-async def _run_async_prompt_queue(self, state: ServerState):
-    while state.pending_async_prompts:
-        prompt = state.pending_async_prompts.pop(0)
-        await self._process_message_locked(prompt, state)
-
-# AFTER: Agent provides the queue, server awaits notification
-async def _run_async_prompt_queue(self, state: ServerState):
+# REVISED: Agent mailbox as signal, server retains its own request queue
+async def _run_async_prompt_queue(
+    self,
+    session_id: str,
+    state: ServerState,
+) -> None:
+    """Drain both server request queue and agent mailbox."""
     while True:
-        prompt = await state.agent.wait_for_pending_prompt(timeout=3600)
-        if prompt is None:
+        # 1. Process any pending server requests first (full metadata)
+        while state.pending_async_prompts:
+            queued = state.pending_async_prompts.pop(0)
+            await self._process_message_locked(
+                session_id=session_id,
+                request=queued.request,
+                state=state,
+                user_msg_id=queued.user_msg_id,
+                user_msg_with_parts=queued.user_msg_with_parts,
+            )
+
+        # 2. Check agent mailbox for injected prompts
+        agent = state.sessions.get(session_id)
+        if agent is not None and agent.has_pending_prompts():
+            prompt = agent.pop_pending_prompt()
+            if prompt is not None:
+                # Injected prompt becomes a new run_stream with the notice as input
+                await self._process_message_locked(
+                    session_id=session_id,
+                    request=prompt,  # string notice from inject_prompt()
+                    state=state,
+                    user_msg_id=None,
+                    user_msg_with_parts=None,
+                )
+
+        # 3. Wait for next signal (agent mailbox or server queue)
+        agent = state.sessions.get(session_id)
+        if agent is not None:
+            result = await agent.wait_for_pending_prompt(timeout=3600)
+            if result is None:
+                break  # timeout — no more activity
+            # Loop back to process both queues
+        else:
             break
-        await self._process_message_locked(prompt, state)
 ```
 
-This eliminates the duplicate `pending_async_prompts` dict in `ServerState` and uses the agent's single source of truth.
+This preserves the server's `QueuedAsyncPrompt` queue for full request routing while using the agent's mailbox as a lightweight reactivation signal. The `_process_message_locked()` function receives the correct number and type of arguments for each path.
 
 ### 7. ACP / AG-UI Server Integration
 
@@ -514,10 +550,16 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 5. Modify `has_queued_prompts()` and `has_pending_injections()` to check pending queue
 6. Write unit tests in `test_inject_prompt_cross_task.py`
 
+### Phase 1.5: Continuous Mode Injection Consumption (1-2h)
+
+1. Modify `_continuous()` loop (base_agent.py L472-504) to drain `injection_manager` at the start of each iteration
+2. This ensures `inject_prompt()` delivered to `_background_run_ctx.injection_manager` during continuous mode is actually consumed
+3. Write unit test for continuous mode injection consumption
+
 ### Phase 2: OpenCode Server Integration (2-4h)
 
-1. Simplify `_run_async_prompt_queue()` to use `agent.wait_for_pending_prompt()`
-2. Remove `ServerState.pending_async_prompts` dict (replace with agent queue)
+1. Modify `_run_async_prompt_queue()` to use `wait_for_pending_prompt()` as reactivation signal
+2. Retain `ServerState.pending_async_prompts` for full user request routing (mailbox vs request routing separation)
 3. Test integration with OpenCode server test fixtures
 
 ### Phase 3: ACP/AG-UI Server Integration (4-8h)
@@ -542,7 +584,7 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 
 3. **Should pending prompts be persisted?** If the process restarts while prompts are in the pending queue, they are lost. For production reliability, should prompts be written to `SessionStore`? (Likely no for this RFC — follow-up if needed.)
 
-4. **How does this interact with `_background_run_ctx`?** The existing fallback chain is `_current_run_ctx → _active_run_ctx → _background_run_ctx → _pending_prompts`. If an agent has `run_continuous()` active, prompts go to `_background_run_ctx` (not pending queue). Is this correct? (Likely yes — continuous mode already has its own loop.)
+4. **How does this interact with `_background_run_ctx`?** The existing fallback chain is `_current_run_ctx → _active_run_ctx → _background_run_ctx → _pending_prompts`. If an agent has `run_in_background()` active, prompts go to `_background_run_ctx` (not pending queue). **However**, the `_continuous()` loop (base_agent.py L472-504) does NOT currently consume from `injection_manager` — it only processes the initial `prompt` argument. This means injections delivered to `_background_run_ctx.injection_manager` during continuous mode will be stuck and never consumed. **Resolution**: The `_continuous()` loop should drain `injection_manager` at the start of each iteration (similar to the proposed `run_stream()` change). This is added to the implementation plan as Phase 1.5.
 
 5. **Should `inject_prompt()` return a boolean indicating delivery path?** This would help callers distinguish "delivered to active run" vs "queued for later". Could be useful for logging but adds API surface.
 
@@ -555,6 +597,8 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 | 2026-04-26 | Option D (Pending Prompt Queue) selected | Minimal change, backward compatible, solves core problem |
 | 2026-04-26 | Caller-driven reactivation chosen over self-reactivation | Agent can't safely start its own run_stream() — needs caller for async iteration |
 | 2026-04-26 | Unbounded queue accepted for initial implementation | Typical use case is low-volume; bounded queue can be added later |
+| 2026-04-26 | Agent mailbox vs server request routing separation (PR review) | Agent's `_pending_prompts` is string-only mailbox for `inject_prompt()` notices; server retains `QueuedAsyncPrompt` queue for full user request routing with model/agent metadata |
+| 2026-04-26 | `_continuous()` loop needs injection consumption (PR review) | `_continuous()` loop does not consume `injection_manager`, causing injections delivered to `_background_run_ctx` to be stuck; added Phase 1.5 to implementation plan |
 
 ---
 
