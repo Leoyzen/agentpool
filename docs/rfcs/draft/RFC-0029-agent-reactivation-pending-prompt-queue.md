@@ -345,17 +345,30 @@ def queue_prompt(self, message: str) -> None:
 
 ```python
 async def wait_for_pending_prompt(self, timeout: float = 3600.0) -> str | None:
-    """Wait for a pending prompt to arrive. Returns None on timeout.
+    """Wait for a pending prompt to arrive. Returns None on timeout or if stolen.
 
-    Callers (servers) use this to detect when reactivation is needed.
-    The event is cleared before returning to prevent race conditions.
+    Callers (servers) use this as a reactivation signal. The method
+    waits for the event, then attempts a non-blocking get from the queue.
+    If the queue was drained by another consumer (e.g., a concurrent
+    run_stream startup) between the event firing and the get, returns None.
+
+    NOTE: This method only signals that a prompt *was* available. The
+    caller should treat it as a wakeup signal and then drain the queue
+    separately, rather than relying on the returned prompt value for
+    processing. This avoids the "signal-then-get" race condition where
+    an item could be stolen between event.wait() and queue.get().
     """
     try:
         await asyncio.wait_for(self._pending_prompt_event.wait(), timeout=timeout)
     except TimeoutError:
         return None
-    # Drain one prompt from the queue
-    prompt = await self._pending_prompts.get()
+    # Use get_nowait() instead of await get() to avoid blocking if
+    # another consumer drained the queue between event.wait() and here.
+    try:
+        prompt = self._pending_prompts.get_nowait()
+    except asyncio.QueueEmpty:
+        # Queue was drained by another consumer (e.g., concurrent run_stream)
+        return None
     # Re-set event if more prompts remain
     if not self._pending_prompts.empty():
         self._pending_prompt_event.set()
@@ -396,6 +409,10 @@ async def run_stream(self, *prompts, ...):
     token = _current_run_ctx_var.set(run_ctx)
 
     # NEW: Drain any pending prompts from idle state
+    # NOTE: This drain loop and the event.clear() below are synchronous
+    # (no await between them), so in single-threaded asyncio there is no
+    # race condition with inject_prompt() — it cannot interleave between
+    # the drain loop and the clear() call.
     while True:
         try:
             pending = self._pending_prompts.get_nowait()
@@ -468,17 +485,16 @@ async def _run_async_prompt_queue(
                 user_msg_with_parts=queued.user_msg_with_parts,
             )
 
-        # 2. Check agent mailbox for injected prompts
-        #    Use pop_pending_prompt() directly (not has_pending_prompts + pop)
-        #    to avoid TOCTOU race between empty() check and get_nowait().
+        # 2. Drain agent mailbox for injected prompts
+        #    Use pop_pending_prompt() directly to avoid TOCTOU race
+        #    between has_pending_prompts() and pop.
         agent = state.sessions.get(session_id)
         if agent is not None:
-            prompt = agent.pop_pending_prompt()  # Returns None if empty
-            if prompt is not None:
+            while True:
+                prompt = agent.pop_pending_prompt()  # Returns None if empty
+                if prompt is None:
+                    break
                 # Adapt string notice to MessageRequest for _process_message_locked.
-                # The server must construct a minimal MessageRequest wrapping the
-                # injected prompt string. This adaptation layer is required because
-                # _process_message_locked expects MessageRequest, not raw str.
                 request = MessageRequest.from_injected_prompt(prompt)
                 await self._process_message_locked(
                     session_id=session_id,
@@ -488,13 +504,19 @@ async def _run_async_prompt_queue(
                     user_msg_with_parts=None,
                 )
 
-        # 3. Wait for next signal (agent mailbox or server queue)
+        # 3. Wait for next signal from agent mailbox.
+        #    wait_for_pending_prompt() is used as a WAKEUP SIGNAL only —
+        #    its return value may be None (e.g., if another consumer
+        #    drained the queue). The actual prompt consumption happens
+        #    in step 2 above via pop_pending_prompt().
         agent = state.sessions.get(session_id)
         if agent is not None:
             result = await agent.wait_for_pending_prompt(timeout=3600)
             if result is None:
                 break  # timeout — no more activity
-            # Loop back to process both queues
+            # result may contain a prompt, but we loop back to steps 1+2
+            # which drain both queues properly. Don't process result here
+            # to avoid duplicate processing or missing the server queue.
         else:
             break
 ```
@@ -620,6 +642,8 @@ Solution: First caller gets the prompt (queue.get() is atomic). Second caller se
 | 2026-04-27 | `_continuous()` loop needs injection consumption (PR review) | `_continuous()` loop does not consume `injection_manager`, causing injections delivered to `_background_run_ctx` to be stuck; added Phase 1.5 to implementation plan |
 | 2026-04-27 | `MessageRequest.from_injected_prompt()` adapter required (Oracle review) | `_process_message_locked` expects `MessageRequest`, not `str`; server integration needs adaptation layer to wrap injected string prompts |
 | 2026-04-27 | Server request drain ordering: user requests preempt mailbox (Oracle review) | Intentional design for user-facing responsiveness; documented fairness implication |
+| 2026-04-27 | `wait_for_pending_prompt()` uses `get_nowait()` instead of `await get()` (PR review) | Avoids "signal-then-get" race where another consumer could drain the queue between `event.wait()` and `queue.get()`, causing indefinite blocking |
+| 2026-04-27 | `wait_for_pending_prompt()` is wakeup signal only, not prompt consumer (PR review) | Server integration uses it as a trigger to loop back and drain both queues via `pop_pending_prompt()`, avoiding lost prompts from the previous "signal returns prompt" pattern |
 
 ---
 
