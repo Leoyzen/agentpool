@@ -52,6 +52,9 @@ class _TeamGraphState:
     shared_prompt: str | None = None
     """Optional prompt prepended to all member inputs."""
 
+    member_prompts: dict[str, list[Any]] = field(default_factory=dict)
+    """Resolved prompt list per member name."""
+
     execution_talks: list[Talk[Any]] = field(default_factory=list)
     """Talk connections for tracking execution stats."""
 
@@ -82,8 +85,10 @@ def _make_member_step(
         ctx: StepContext[_TeamGraphState, None, Any],
     ) -> _MemberOutput:
         state = ctx.state
-        final_prompt = list(state.prompts)
-        if state.shared_prompt:
+        final_prompt = state.member_prompts.get(node.name)
+        if final_prompt is None:
+            final_prompt = list(state.prompts)
+        if state.shared_prompt and node.name not in state.member_prompts:
             final_prompt.insert(0, state.shared_prompt)
 
         try:

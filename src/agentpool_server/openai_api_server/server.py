@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Any
 
 import anyenv
+from fastapi import Header
 
 from agentpool.log import get_logger
 from agentpool.orchestrator.core import EventEnvelope
@@ -12,25 +13,38 @@ from agentpool_server import BaseServer
 from agentpool_server.mixins import ProtocolEventConsumerMixin
 from agentpool_server.openai_api_server.completions.helpers import stream_response
 from agentpool_server.openai_api_server.completions.models import (
+    ChatCompletionRequest,
+    CompletionUsage,
     ChatCompletionResponse,
     Choice,
     OpenAIMessage,
     OpenAIModelInfo,
 )
 from agentpool_server.openai_api_server.responses.helpers import handle_request
+from agentpool_server.openai_api_server.responses.models import (
+    Response as ResponsesResponse,
+    ResponseRequest,
+)
 
 
 if TYPE_CHECKING:
-    from fastapi import Header, Response
+    from fastapi import Response
 
     from agentpool import AgentPool
     from agentpool.orchestrator.core import EventBus
-    from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
-    from agentpool_server.openai_api_server.responses.models import (
-        Response as ResponsesResponse,
-        ResponseRequest,
-    )
 logger = get_logger(__name__)
+
+
+def _serialize_completion_usage(token_usage: Any | None) -> CompletionUsage | None:
+    """Convert AgentPool token usage objects into OpenAI response format."""
+    if token_usage is None:
+        return None
+
+    return CompletionUsage(
+        input_tokens=token_usage.input_tokens,
+        output_tokens=token_usage.output_tokens,
+        total_tokens=token_usage.total_tokens,
+    )
 
 
 class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
@@ -181,7 +195,9 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
                 created=int(response.timestamp.timestamp()),
                 model=request.model,
                 choices=[Choice(message=message)],
-                usage=response.cost_info.token_usage if response.cost_info else None,  # pyright: ignore
+                usage=_serialize_completion_usage(
+                    response.cost_info.token_usage if response.cost_info else None
+                ),
             )
             json = completion_response.model_dump_json()
             return Response(content=json, media_type="application/json")

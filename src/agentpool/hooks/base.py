@@ -35,6 +35,9 @@ class HookInput(TypedDict, total=False):
     prompt: str
     result: Any
 
+    # Agent context (available in tool-use hooks when running inside an agent)
+    agent_context: Any
+
 
 class HookResult(TypedDict, total=False):
     """Result returned from hook execution."""
@@ -50,6 +53,14 @@ class HookResult(TypedDict, total=False):
 
     additional_context: str
     """Context to inject into conversation."""
+
+    modified_output: Any
+    """Replacement for tool output in post_tool_use hooks.
+
+    When set, the tool's return value is replaced entirely (not appended).
+    Symmetric with ``modified_input`` for pre_tool_use hooks.
+    Takes precedence over ``additional_context``.
+    """
 
     continue_: bool
     """Whether to continue execution. False = stop."""

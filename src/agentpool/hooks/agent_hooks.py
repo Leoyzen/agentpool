@@ -130,6 +130,7 @@ class AgentHooks:
         tool_input: dict[str, Any],
         session_id: str | None = None,
         env: ExecutionEnvironment | None = None,
+        agent_context: Any | None = None,
     ) -> HookResult:
         """Execute pre-tool-use hooks.
 
@@ -139,6 +140,7 @@ class AgentHooks:
             tool_input: Input arguments for the tool.
             session_id: Optional conversation identifier.
             env: Agent's execution environment, passed to command hooks.
+            agent_context: Optional AgentContext for hooks that need pool access.
 
         Returns:
             Combined hook result. If any hook denies, the tool call should be blocked.
@@ -150,6 +152,7 @@ class AgentHooks:
             tool_name=tool_name,
             tool_input=tool_input,
             session_id=session_id,
+            agent_context=agent_context,
         )
         return await self._run_hooks(self.pre_tool_use, input_data, env=env)
 
@@ -163,6 +166,7 @@ class AgentHooks:
         duration_ms: float,
         session_id: str | None = None,
         env: ExecutionEnvironment | None = None,
+        agent_context: Any | None = None,
     ) -> HookResult:
         """Execute post-tool-use hooks.
 
@@ -174,6 +178,7 @@ class AgentHooks:
             duration_ms: How long the tool took to execute.
             session_id: Optional conversation identifier.
             env: Agent's execution environment, passed to command hooks.
+            agent_context: Optional AgentContext for hooks that need pool access.
 
         Returns:
             Combined hook result. May include additional_context to inject.
@@ -186,6 +191,7 @@ class AgentHooks:
             tool_output=tool_output,
             duration_ms=duration_ms,
             session_id=session_id,
+            agent_context=agent_context,
         )
         return await self._run_hooks(self.post_tool_use, input_data, env=env)
 
@@ -217,15 +223,41 @@ class AgentHooks:
         if not hooks:
             return HookResult(decision="allow")
 
+        hook_event = input_data.get("event", "?")
+        tool_name = input_data.get("tool_name", "")
+        logger.debug(
+            "Running hooks",
+            hook_event=hook_event,
+            tool_name=tool_name,
+            hook_count=len(hooks),
+        )
+
         # Filter to matching hooks
         matching = [h for h in hooks if h.matches(input_data)]
         if not matching:
+            logger.debug("No matching hooks", hook_event=hook_event, tool_name=tool_name)
             return HookResult(decision="allow")
+
+        logger.debug(
+            "Matched hooks will execute",
+            hook_event=hook_event,
+            tool_name=tool_name,
+            matched_count=len(matching),
+            hooks=[repr(h) for h in matching],
+        )
 
         # Run all matching hooks in parallel
         raw_results = await asyncio.gather(
             *(hook.execute(input_data, env=env) for hook in matching),
             return_exceptions=True,
+        )
+
+        logger.debug(
+            "Hook execution completed",
+            hook_event=hook_event,
+            tool_name=tool_name,
+            result_count=len(raw_results),
+            errors=[str(r) for r in raw_results if isinstance(r, BaseException)],
         )
 
         # Combine results
@@ -255,6 +287,10 @@ class AgentHooks:
                 if "modified_input" not in combined:
                     combined["modified_input"] = {}
                 combined["modified_input"].update(modified)
+
+            # modified_output: last writer wins (symmetric with modified_input)
+            if "modified_output" in result:
+                combined["modified_output"] = result["modified_output"]
 
             # Collect additional context
             if ctx := result.get("additional_context"):

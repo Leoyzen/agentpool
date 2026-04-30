@@ -203,6 +203,7 @@ class NativeAgentHookManager:
         tool_input: dict[str, Any],
         session_id: str | None = None,
         env: ExecutionEnvironment | None = None,
+        agent_context: Any | None = None,
     ) -> HookResult:
         """Execute pre-tool-use hooks.
 
@@ -212,6 +213,7 @@ class NativeAgentHookManager:
             tool_input: Input arguments for the tool.
             session_id: Optional conversation identifier.
             env: Agent's execution environment, passed to command hooks.
+            agent_context: Optional AgentContext for hooks that need pool access.
 
         Returns:
             Hook result. If decision is "deny", the tool call should be blocked.
@@ -224,6 +226,7 @@ class NativeAgentHookManager:
                 tool_input=tool_input,
                 session_id=session_id,
                 env=env,
+                agent_context=agent_context,
             )
         return HookResult(decision="allow")
 
@@ -237,6 +240,7 @@ class NativeAgentHookManager:
         duration_ms: float,
         session_id: str | None = None,
         env: ExecutionEnvironment | None = None,
+        agent_context: Any | None = None,
     ) -> HookResult:
         """Execute post-tool-use hooks and consume pending injection.
 
@@ -254,6 +258,7 @@ class NativeAgentHookManager:
             duration_ms: How long the tool took to execute.
             session_id: Optional conversation identifier.
             env: Agent's execution environment, passed to command hooks.
+            agent_context: Optional AgentContext for hooks that need pool access.
 
         Returns:
             Combined hook result. May include additional_context from hooks
@@ -269,6 +274,7 @@ class NativeAgentHookManager:
                 duration_ms=duration_ms,
                 session_id=session_id,
                 env=env,
+                agent_context=agent_context,
             )
         else:
             result = HookResult(decision="allow")

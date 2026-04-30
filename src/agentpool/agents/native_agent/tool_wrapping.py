@@ -12,11 +12,13 @@ from pydantic_ai import RunContext
 from pydantic_ai.messages import ToolReturn
 
 from agentpool.agents.context import AgentContext
+from agentpool.log import get_logger
 from agentpool.tasks import ChainAbortedError, RunAbortedError, ToolSkippedError
 from agentpool.tools.base import ToolResult
 from agentpool.utils.inspection import execute, get_argument_key
 from agentpool.utils.signatures import create_modified_signature, update_signature
 
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -91,17 +93,26 @@ def wrap_tool[TReturn](  # noqa: PLR0915
         execute_fn: Callable[..., Awaitable[TReturn]],
         tool_input: dict[str, Any],
         *args: Any,
+        hook_ctx: AgentContext | None = None,
         **kwargs: Any,
     ) -> TReturn | None | ToolReturn:
         """Execute tool with pre/post hooks."""
+        ctx_for_hooks = hook_ctx or agent_ctx
+        logger.debug(
+            "Tool call",
+            agent=ctx_for_hooks.node_name,
+            tool=tool.name,
+            input_keys=list(tool_input.keys()),
+        )
         # Pre-tool hooks
         if hooks:
             pre_result = await hooks.run_pre_tool_hooks(
-                agent_name=agent_ctx.node_name,
+                agent_name=ctx_for_hooks.node_name,
                 tool_name=tool.name,
                 tool_input=tool_input,
                 session_id=None,  # Could be passed through if needed
-                env=agent_ctx.agent.env,
+                env=ctx_for_hooks.agent.env,
+                agent_context=ctx_for_hooks,
             )
             if pre_result["decision"] == "deny":
                 reason = pre_result.get("reason", "Blocked by pre-tool hook")
@@ -122,17 +133,20 @@ def wrap_tool[TReturn](  # noqa: PLR0915
         # Post-tool hooks
         if hooks:
             post_result = await hooks.run_post_tool_hooks(
-                agent_name=agent_ctx.node_name,
+                agent_name=ctx_for_hooks.node_name,
                 tool_name=tool.name,
                 tool_input=tool_input,
                 tool_output=result,
                 duration_ms=duration_ms,
                 session_id=None,
-                env=agent_ctx.agent.env,
+                env=ctx_for_hooks.agent.env,
+                agent_context=ctx_for_hooks,
             )
 
-            # Inject additional context if provided by hooks
-            if additional := post_result.get("additional_context"):
+            # modified_output replaces the tool result entirely
+            if "modified_output" in post_result:
+                result = post_result["modified_output"]
+            elif additional := post_result.get("additional_context"):
                 result = _inject_additional_context(result, additional)
 
         return result
@@ -154,6 +168,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                 if agent_ctx.data is None:
                     agent_ctx.data = ctx.deps
 
+                call_ctx_for_hooks = agent_ctx
                 if agent_ctx_key:  # inject AgentContext
                     # Build model_name from RunContext's model (provider:model_name format)
                     model_name = f"{ctx.model.system}:{ctx.model.model_name}" if ctx.model else None
@@ -168,6 +183,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                         run_ctx=ctx.deps.run_ctx if ctx.deps else None,
                     )
                     kwargs[agent_ctx_key] = call_ctx
+                    call_ctx_for_hooks = call_ctx
 
                 tool_input = kwargs.copy()
                 if run_ctx_key:
@@ -176,6 +192,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                         lambda *a, **kw: execute(fn, ctx, *a, **kw),
                         tool_input,
                         *args,
+                        hook_ctx=call_ctx_for_hooks,
                         **kwargs,
                     )
                 # Don't pass RunContext to original function since it didn't expect it
@@ -183,6 +200,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                     lambda *a, **kw: execute(fn, *a, **kw),
                     tool_input,
                     *args,
+                    hook_ctx=call_ctx_for_hooks,
                     **kwargs,
                 )
             await _handle_confirmation_result(result, tool.name)

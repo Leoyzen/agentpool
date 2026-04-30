@@ -52,7 +52,24 @@ def api_command(
         raise t.BadParameter(msg) from e
     with ConfigContextManager(config_path):
         manifest = AgentsManifest.from_file(config_path)
-    pool = AgentPool(manifest)
+        if config_path:
+            def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    name: node_config.model_copy(update={"config_file_path": config_path})
+                    for name, node_config in nodes.items()
+                }
+
+            manifest = manifest.model_copy(
+                update={
+                    "config_file_path": config_path,
+                    "agents": update_with_path(manifest.agents),
+                    "teams": update_with_path(manifest.teams),
+                }
+            )
+
+        # Keep AgentPool initialization inside the config context so custom
+        # providers can resolve relative schema/prompt paths against the YAML directory.
+        pool = AgentPool(manifest)
 
     if show_messages:
         for agent in pool.all_agents.values():

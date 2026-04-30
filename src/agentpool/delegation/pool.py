@@ -753,18 +753,19 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         empty_teams: dict[str, BaseTeam[Any, Any]] = {}
         for name, config in self.manifest.teams.items():
             empty_teams[name] = config.get_team([], name=name)
-        # Phase 2: Resolve members
+        # Phase 2: Resolve members (supports both str and TeamMemberConfig)
         for name, config in self.manifest.teams.items():
             team = empty_teams[name]
             members: list[MessageNode[Any, Any]] = []
             agents = self.all_agents
             for member in config.members:
-                if member in agents:
-                    members.append(agents[member])
-                elif member in empty_teams:
-                    members.append(empty_teams[member])
+                member_name = config.get_member_name(member)
+                if member_name in agents:
+                    members.append(agents[member_name])
+                elif member_name in empty_teams:
+                    members.append(empty_teams[member_name])
                 else:
-                    raise ValueError(f"Unknown team member: {member}")
+                    raise ValueError(f"Unknown team member: {member_name}")
             team.nodes.extend(members)
             self[name] = team
 

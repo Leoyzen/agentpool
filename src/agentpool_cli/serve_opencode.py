@@ -118,7 +118,10 @@ def opencode_command(
             log_dir = user_log_path("agentpool", appauthor=False)
             log_dir.mkdir(parents=True, exist_ok=True)
             log_file = log_dir / "opencode.log"
-            ap_log.configure_logging(force=True, log_file=str(log_file))
+            import click
+            ctx = click.get_current_context(silent=True)
+            log_level = (ctx.obj or {}).get("log_level", "info") if ctx else "info"
+            ap_log.configure_logging(level=log_level.upper(), force=True, log_file=str(log_file))
             logger.info("Configured file logging with rollover", log_file=str(log_file))
 
             # Log which config layers were used

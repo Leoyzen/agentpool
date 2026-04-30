@@ -38,29 +38,71 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
     _error_mode: Literal["fail_all", "collect_exceptions"] = "collect_exceptions"
 
     async def execute(self, *prompts: PromptCompatible | None, **kwargs: Any) -> TeamResponse:
-        """Run all agents in parallel via pydantic-graph Fork + Join."""
+        """Run all agents in parallel via pydantic-graph Fork + Join.
+
+        Keyword Args:
+            template_vars: Extra variables available as ``{{ extra.<key> }}``
+                inside per-member ``prompt_template`` Jinja2 strings.
+        """
         from agentpool.delegation.graph_team import _TeamGraphState, run_team_graph
         from agentpool.talk.talk import Talk
 
         self._team_talk.clear()
+        default_prompt = list(prompts)
+        if self.shared_prompt:
+            default_prompt.insert(0, self.shared_prompt)
+
+        template_vars: dict[str, Any] = kwargs.pop("template_vars", {})
+
         all_nodes = list(self.nodes)
-        # Create Talk connections for monitoring this execution
         execution_talks: list[Talk[Any]] = []
         for node in all_nodes:
-            # No actual forwarding, just for tracking
             talk = Talk[Any](node, [], connection_type="run", queued=True, queue_strategy="latest")
             execution_talks.append(talk)
-            self._team_talk.append(talk)  # Add to base class's TeamTalk
+            self._team_talk.append(talk)
 
+        member_prompts = {
+            node.name: self._resolve_member_prompt(
+                node.name,
+                default_prompt,
+                prompts,
+                template_vars,
+            )
+            for node in all_nodes
+        }
         state = _TeamGraphState(
             prompts=prompts,
             kwargs=kwargs,
             shared_prompt=self.shared_prompt,
+            member_prompts=member_prompts,
             execution_talks=execution_talks,
             error_mode=self._error_mode,
         )
 
         return await run_team_graph(all_nodes, state)
+
+    def _resolve_member_prompt(
+        self,
+        member_name: str,
+        default_prompt: list[PromptCompatible | None],
+        raw_prompts: tuple[PromptCompatible | None, ...],
+        template_vars: dict[str, Any],
+    ) -> list[PromptCompatible | None]:
+        """Return per-member prompt if a template is configured, else the default."""
+        cfg = self.member_prompt_templates.get(member_name)
+        if cfg is None or cfg.prompt_template is None:
+            return default_prompt
+
+        from jinja2 import BaseLoader, Environment
+
+        env = Environment(loader=BaseLoader(), autoescape=False)  # noqa: S701
+        prompt_str = " ".join(str(p) for p in raw_prompts if p is not None)
+        rendered = env.from_string(cfg.prompt_template).render(
+            prompt=prompt_str,
+            shared_prompt=self.shared_prompt or "",
+            extra=template_vars,
+        )
+        return [rendered]
 
     def __prompt__(self) -> str:
         """Format team info for prompts."""

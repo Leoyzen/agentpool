@@ -347,6 +347,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             agent=self,
             agent_hooks=hooks,
         )
+        logger.info(
+            "NativeAgent hooks initialized",
+            agent_name=name,
+            has_hooks=hooks is not None,
+            hooks_repr=repr(hooks) if hooks else "None",
+        )
         self._default_usage_limits = usage_limits
         self._providers = list(providers) if providers else None  # model discovery
         self._resolved_history_processors: list[Callable[..., Any]] | None = None

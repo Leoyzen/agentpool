@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentpool_config.nodes import NodeConfig
 
@@ -17,6 +17,29 @@ if TYPE_CHECKING:
 
 
 ExecutionMode = Literal["parallel", "sequential"]
+
+
+class TeamMemberConfig(BaseModel):
+    """Configuration for a single team member with optional prompt template.
+
+    When ``prompt_template`` is set, the member receives a Jinja2-rendered
+    prompt instead of the team's shared prompt.  Available template variables:
+
+    - ``prompt``: the caller-supplied prompt (stringified)
+    - ``shared_prompt``: the team-level ``shared_prompt`` value
+    - ``extra``: a dict of additional variables passed via ``template_vars`` kwarg
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(title="Member name")
+    """Name of the agent or team to include."""
+
+    prompt_template: str | None = Field(
+        default=None,
+        title="Per-member Jinja2 prompt template",
+    )
+    """Optional Jinja2 template.  ``None`` means use the default shared prompt."""
 
 
 class TeamConfig(NodeConfig):
@@ -38,11 +61,14 @@ class TeamConfig(NodeConfig):
     mode: ExecutionMode = Field(examples=["parallel", "sequential"], title="Execution mode")
     """Execution mode for team members."""
 
-    members: list[str] = Field(
-        examples=[["agent1", "agent2"], ["web_searcher", "data_analyzer", "reporter"]],
+    members: list[str | TeamMemberConfig] = Field(
+        examples=[
+            ["agent1", "agent2"],
+            [{"name": "reviewer_a"}, {"name": "reviewer_b", "prompt_template": "{{ prompt }}"}],
+        ],
         title="Team members",
     )
-    """Names of agents or other teams that are part of this team."""
+    """Names of agents/teams, or ``TeamMemberConfig`` objects with per-member prompt templates."""
 
     shared_prompt: str | None = Field(
         default=None,
@@ -51,12 +77,19 @@ class TeamConfig(NodeConfig):
     )
     """Optional shared prompt for this team."""
 
-    # Future extensions:
-    # tools: list[str] | None = None
-    # """Tools available to all team members."""
+    def get_member_name(self, member: str | TeamMemberConfig) -> str:
+        """Extract the member name from a plain string or config object."""
+        if isinstance(member, str):
+            return member
+        return member.name
 
-    # knowledge: Knowledge | None = None
-    # """Knowledge sources shared by all team members."""
+    def get_member_configs(self) -> dict[str, TeamMemberConfig]:
+        """Build a name → config mapping for members that have prompt templates."""
+        return {
+            m.name: m
+            for m in self.members
+            if isinstance(m, TeamMemberConfig) and m.prompt_template is not None
+        }
 
     def get_team(
         self,
@@ -66,6 +99,8 @@ class TeamConfig(NodeConfig):
         """Create a team based on config."""
         from agentpool import Team, TeamRun
 
+        member_configs = self.get_member_configs()
+
         if self.mode == "parallel":
             return Team(
                 nodes,
@@ -73,6 +108,7 @@ class TeamConfig(NodeConfig):
                 display_name=self.display_name,
                 shared_prompt=self.shared_prompt,
                 mcp_servers=self.get_mcp_servers(),
+                member_prompt_templates=member_configs or None,
             )
         return TeamRun(
             nodes,
