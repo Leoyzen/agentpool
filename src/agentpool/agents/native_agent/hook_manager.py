@@ -201,9 +201,9 @@ class NativeAgentHookManager:
             result = HookResult(decision="allow")
 
         # Consume pending injection from run context (isolated per-call)
-        injection_manager = (
-            self._agent._current_run_ctx.injection_manager if self._agent._current_run_ctx else None
-        )
+        # Fall back to _active_run_ctx for cross-task access (see interrupt() pattern)
+        run_ctx = self._agent._current_run_ctx or self._agent._active_run_ctx
+        injection_manager = run_ctx.injection_manager if run_ctx else None
         if injection_manager:
             injection = await injection_manager.consume()
             if injection:

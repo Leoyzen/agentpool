@@ -54,3 +54,18 @@ class PromptResolutionError(RuntimeError):
 
     def __init__(self, detail: str):
         super().__init__(f"Prompt resolution failed: {detail}")
+
+
+MAX_DELEGATION_DEPTH: int = 10
+"""Maximum allowed nesting depth for agent delegation."""
+
+
+class DelegationDepthError(RuntimeError):
+    """Raised when delegation nesting exceeds the maximum allowed depth."""
+
+    def __init__(self, current_depth: int, max_depth: int = MAX_DELEGATION_DEPTH) -> None:
+        self.current_depth = current_depth
+        self.max_depth = max_depth
+        super().__init__(
+            f"Delegation depth {current_depth} exceeds maximum allowed depth {max_depth}"
+        )

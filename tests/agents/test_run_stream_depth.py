@@ -1,0 +1,57 @@
+"""Tests for depth parameter plumbing in AgentRunContext and BaseAgent.run_stream()."""
+
+from __future__ import annotations
+
+from agentpool.agents.context import AgentRunContext
+
+
+def test_agent_run_context_depth_default() -> None:
+    """AgentRunContext should default depth to 0."""
+    ctx = AgentRunContext()
+    assert ctx.depth == 0
+
+
+def test_agent_run_context_depth_explicit() -> None:
+    """AgentRunContext should accept explicit depth value."""
+    ctx = AgentRunContext(depth=3)
+    assert ctx.depth == 3
+
+
+def test_agent_run_context_depth_with_deps() -> None:
+    """AgentRunContext should accept depth alongside deps."""
+    ctx = AgentRunContext(deps="some_deps", depth=1)
+    assert ctx.depth == 1
+    assert ctx.deps == "some_deps"
+
+
+def test_agent_run_context_depth_zero_explicit() -> None:
+    """AgentRunContext should accept depth=0 explicitly."""
+    ctx = AgentRunContext(depth=0)
+    assert ctx.depth == 0
+
+
+def test_run_stream_accepts_depth_param() -> None:
+    """BaseAgent.run_stream() should accept depth parameter without TypeError.
+
+    We verify the method signature accepts depth by inspecting the parameter.
+    A full integration test would require an agent with a model, which is
+    covered by integration tests.
+    """
+    import inspect
+
+    from agentpool.agents.base_agent import BaseAgent
+
+    sig = inspect.signature(BaseAgent.run_stream)
+    assert "depth" in sig.parameters
+    assert sig.parameters["depth"].default == 0
+
+
+def test_run_accepts_depth_param() -> None:
+    """BaseAgent.run() should accept depth parameter without TypeError."""
+    import inspect
+
+    from agentpool.agents.base_agent import BaseAgent
+
+    sig = inspect.signature(BaseAgent.run)
+    assert "depth" in sig.parameters
+    assert sig.parameters["depth"].default == 0

@@ -10,10 +10,10 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     SubAgentEvent,
 )
+from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
 from agentpool.tools.exceptions import ToolError
-from agentpool.utils import identifiers as identifier
 
 
 if TYPE_CHECKING:
@@ -93,6 +93,12 @@ class WorkersTools(ResourceProvider):
                 msg = f"Agent {agent_name!r} not found in pool. Available: {available}"
                 raise ToolError(msg)
 
+            # Compute delegation depth from current run context
+            current_depth: int = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
+            child_depth = current_depth + 1
+            if child_depth > MAX_DELEGATION_DEPTH:
+                raise DelegationDepthError(child_depth)
+
             # Handle conversation history only for agents (not teams)
             old_history = None
             if isinstance(worker, BaseAgent):
@@ -102,9 +108,15 @@ class WorkersTools(ResourceProvider):
                 elif reset_history_on_run:
                     await worker.conversation.clear()
 
-            # Generate unique session ID for the worker run (RFC-0015)
-            child_session_id = identifier.ascending("session")
-            parent_session_id = ctx.node.session_id or identifier.ascending("session")
+            # Create child session via AgentContext (RFC-0028)
+            from agentpool.utils.identifiers import generate_session_id
+
+            parent_session_id = ctx.node.session_id or generate_session_id()
+            child_session_id = await ctx.create_child_session(
+                agent_name=agent_name,
+                agent_type=worker.agent_type,
+                parent_session_id=parent_session_id,
+            )
 
             # Determine source type for events
             source_type: Literal["agent", "team_parallel", "team_sequential"] = "agent"
@@ -127,7 +139,7 @@ class WorkersTools(ResourceProvider):
                 spawn_mechanism="task",
                 source_name=agent_name,
                 source_type=source_type,
-                depth=1,
+                depth=child_depth,
                 description=f"Run {agent_name} worker",
                 metadata={"prompt": prompt[:200]} if prompt else {},
             )
@@ -139,6 +151,7 @@ class WorkersTools(ResourceProvider):
                     prompt,
                     session_id=child_session_id,
                     parent_session_id=parent_session_id,
+                    depth=child_depth,
                 )
 
                 final_content = ""
@@ -148,7 +161,7 @@ class WorkersTools(ResourceProvider):
                         source_name=agent_name,
                         source_type=source_type,
                         event=event,
-                        depth=1,
+                        depth=child_depth,
                         child_session_id=child_session_id,
                         parent_session_id=parent_session_id,
                         tool_call_id=ctx.tool_call_id,
@@ -193,9 +206,21 @@ class WorkersTools(ResourceProvider):
                 msg = f"Worker {node_name!r} not found in pool. Available: {available}"
                 raise ToolError(msg)
 
-            # Generate unique session ID for the worker run (RFC-0015)
-            child_session_id = identifier.ascending("session")
-            parent_session_id = ctx.node.session_id or identifier.ascending("session")
+            # Compute delegation depth from current run context
+            current_depth: int = ctx.run_ctx.depth if ctx.run_ctx is not None else 0
+            child_depth = current_depth + 1
+            if child_depth > MAX_DELEGATION_DEPTH:
+                raise DelegationDepthError(child_depth)
+
+            # Create child session via AgentContext (RFC-0028)
+            from agentpool.utils.identifiers import generate_session_id
+
+            parent_session_id = ctx.node.session_id or generate_session_id()
+            child_session_id = await ctx.create_child_session(
+                agent_name=node_name,
+                agent_type=worker.agent_type,
+                parent_session_id=parent_session_id,
+            )
 
             # Determine source type for events
             source_type: Literal["agent", "team_parallel", "team_sequential"] = "agent"
@@ -218,7 +243,7 @@ class WorkersTools(ResourceProvider):
                 spawn_mechanism="task",
                 source_name=node_name,
                 source_type=source_type,
-                depth=1,
+                depth=child_depth,
                 description=f"Run {node_name} worker",
                 metadata={"prompt": prompt[:200]} if prompt else {},
             )
@@ -229,6 +254,7 @@ class WorkersTools(ResourceProvider):
                 prompt,
                 session_id=child_session_id,
                 parent_session_id=parent_session_id,
+                depth=child_depth,
             )
 
             final_content = ""
@@ -238,7 +264,7 @@ class WorkersTools(ResourceProvider):
                     source_name=node_name,
                     source_type=source_type,
                     event=event,
-                    depth=1,
+                    depth=child_depth,
                     child_session_id=child_session_id,
                     parent_session_id=parent_session_id,
                     tool_call_id=ctx.tool_call_id,

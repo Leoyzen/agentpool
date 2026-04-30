@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
     from agentpool import MessageNode
     from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool.agents.events.events import SubAgentType
     from agentpool.common_types import PromptCompatible
     from agentpool.delegation import AgentPool
     from agentpool_config.mcp_server import MCPServerConfig
@@ -256,6 +255,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         self,
         *prompts: PromptCompatible,
         require_all: bool = True,
+        depth: int = 0,
         **kwargs: Any,
     ) -> AsyncIterator[RichAgentStreamEvent[Any]]:
         """Stream responses through the chain of team members.
@@ -264,35 +264,80 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
             prompts: Input prompts to process through the chain
             require_all: If True, fail if any agent fails. If False,
                          continue with remaining agents.
+            depth: Current delegation nesting depth (0 = top-level).
             kwargs: Additional arguments passed to each agent
 
         Yields:
             RichAgentStreamEvent, with member events wrapped in SubAgentEvent
         """
         from agentpool.agents.base_agent import BaseAgent
-        from agentpool.agents.events import StreamCompleteEvent, SubAgentEvent
-        from agentpool.delegation.team import Team
+        from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent, SubAgentEvent
+        from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
+        from agentpool.messaging.messagenode import get_source_type
+        from agentpool.utils.identifiers import generate_session_id
+
+        # Pop session_id, depth, and parent_session_id from kwargs to avoid
+        # duplicate keyword args when forwarding to child nodes.  The explicit
+        # ``depth`` parameter takes precedence over any ``depth`` key in
+        # **kwargs; the popped session_id / parent_session_id are used for
+        # child-session creation.
+        session_id_kwarg: str | None = kwargs.pop("session_id", None)
+        kwargs.pop("depth", None)  # explicit parameter wins
+        parent_session_id_kwarg: str | None = kwargs.pop("parent_session_id", None)
+
+        # Resolve the parent session id for this team execution.
+        # The caller's parent_session_id takes priority, then session_id (for
+        # backward compat), then the team's own session.
+        parent_session_id: str | None = (
+            parent_session_id_kwarg or session_id_kwarg or self.session_id
+        )
+
+        child_depth = depth + 1
+        if child_depth > MAX_DELEGATION_DEPTH:
+            raise DelegationDepthError(child_depth)
 
         current_message = prompts
         for node in self.nodes:
-            match node:
-                case Team():
-                    source_type: SubAgentType = "team_parallel"
-                case BaseTeam():
-                    source_type = "team_sequential"
-                case _:
-                    source_type = "agent"
+            source_type = get_source_type(node)
 
             try:
                 if not isinstance(node, SupportsRunStream):
                     raise TypeError(f"Node {node.name} does not support streaming")  # noqa: TRY301
+
+                # Create child session for this member
+                pool = self.agent_pool
+                if pool is not None and pool.sessions is not None and parent_session_id is not None:
+                    child_sid = await pool.sessions.create_child_session(
+                        parent_session_id=parent_session_id,
+                        agent_name=node.name,
+                        agent_type=node.agent_type,
+                    )
+                else:
+                    child_sid = generate_session_id()
+
+                # Emit spawn lifecycle event
+                yield SpawnSessionStart(
+                    child_session_id=child_sid,
+                    parent_session_id=parent_session_id or "",
+                    spawn_mechanism="spawn",
+                    source_type=source_type,
+                    source_name=node.name,
+                    depth=child_depth,
+                    description=f"Sequential team member {node.name!r}",
+                )
 
                 # Extract model_id from BaseAgent nodes
                 node_model_id: str | None = None
                 if isinstance(node, BaseAgent):
                     node_model_id = node.model_name
 
-                async for event in node.run_stream(*current_message, **kwargs):
+                async for event in node.run_stream(
+                    *current_message,
+                    session_id=child_sid,
+                    parent_session_id=parent_session_id,
+                    depth=child_depth,
+                    **kwargs,
+                ):
                     # Handle already-wrapped SubAgentEvents (nested teams)
                     if isinstance(event, SubAgentEvent):
                         yield SubAgentEvent(
@@ -300,6 +345,8 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                             source_type=event.source_type,
                             event=event.event,
                             depth=event.depth + 1,
+                            child_session_id=event.child_session_id,
+                            parent_session_id=event.parent_session_id,
                             model_id=event.model_id,
                             mode=event.mode,
                         )
@@ -308,6 +355,9 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                             source_name=node.name,
                             source_type=source_type,
                             event=event,
+                            depth=child_depth,
+                            child_session_id=child_sid,
+                            parent_session_id=parent_session_id,
                             model_id=node_model_id,
                         )
 

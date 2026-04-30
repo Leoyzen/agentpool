@@ -553,8 +553,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.queue_prompt("Now analyze the results")
                 return "Initial work done"
         """
-        # Use current run context if available, otherwise background context
-        run_ctx = self._current_run_ctx or self._background_run_ctx
+        # Use current run context if available, otherwise fall back to
+        # _active_run_ctx (cross-task accessible) or _background_run_ctx.
+        # We need _active_run_ctx because these methods may be called from
+        # a different async task than run_stream() (e.g. background task
+        # completion callbacks), and _current_run_ctx is a ContextVar that
+        # is only visible within the run_stream task.
+        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         if run_ctx is not None:
             run_ctx.injection_manager.queue(*prompts)
 
@@ -575,28 +580,30 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.inject_prompt("Also check the test coverage")
                 return "Changes made"
         """
-        # Use current run context if available, otherwise background context
-        run_ctx = self._current_run_ctx or self._background_run_ctx
+        # Use current run context if available, otherwise fall back to
+        # _active_run_ctx (cross-task accessible) or _background_run_ctx.
+        # Same rationale as queue_prompt — see interrupt() for the same pattern.
+        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         if run_ctx is not None:
             run_ctx.injection_manager.inject(message)
 
     def has_queued_prompts(self) -> bool:
         """Check if there are queued prompts waiting to be processed."""
-        run_ctx = self._current_run_ctx or self._background_run_ctx
+        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         if run_ctx is not None:
             return run_ctx.injection_manager.has_queued()
         return False
 
     def has_pending_injections(self) -> bool:
         """Check if there are pending injections."""
-        run_ctx = self._current_run_ctx or self._background_run_ctx
+        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         if run_ctx is not None:
             return run_ctx.injection_manager.has_pending()
         return False
 
     def clear_queued_prompts(self) -> None:
         """Clear all queued prompts and pending injections."""
-        run_ctx = self._current_run_ctx or self._background_run_ctx
+        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         if run_ctx is not None:
             run_ctx.injection_manager.clear()
 
@@ -614,6 +621,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
+        depth: int = 0,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run agent with streaming output.
 
@@ -633,6 +641,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             wait_for_connections: Whether to wait for connected agents
             deps: Optional dependencies
             event_handlers: Optional event handlers
+            depth: Current delegation depth (0 = top-level run)
 
         Yields:
             Stream events during execution
@@ -653,7 +662,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self.parent_session_id = parent_session_id
 
         # Create per-run context for state isolation
-        run_ctx = AgentRunContext(deps=deps)
+        run_ctx = AgentRunContext(deps=deps, depth=depth)
         # Reset cancellation state and track current task
         run_ctx.cancelled = False
         self._cancelled = False
@@ -903,8 +912,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Temporarily set event handler on command store
         old_handler = self._command_store.event_handler
         self._command_store.event_handler = event_queue.put
-        # Use current run_ctx if available (for event queue isolation)
-        run_ctx = self._current_run_ctx or self._background_run_ctx
+        # Use current run_ctx if available, otherwise fall back to _active_run_ctx
+        # or _background_run_ctx (see inject_prompt/queue_prompt for same pattern)
+        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         cmd_ctx = self._command_store.create_context(data=self.get_context(run_ctx=run_ctx))
         command_str = f"{cmd_name} {args}".strip()
         try:
@@ -1151,6 +1161,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         input_provider: InputProvider | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         wait_for_connections: bool | None = None,
+        depth: int = 0,
     ) -> ChatMessage[TResult]:
         """Run agent with prompt and get response.
 
@@ -1172,6 +1183,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             input_provider: Optional input provider for the agent
             event_handlers: Optional event handlers for this run (overrides agent's handlers)
             wait_for_connections: Whether to wait for connected agents to complete
+            depth: Current delegation depth (0 = top-level run)
 
         Returns:
             ChatMessage containing response and run information
@@ -1194,6 +1206,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             input_provider=input_provider,
             event_handlers=event_handlers,
             wait_for_connections=wait_for_connections,
+            depth=depth,
         ):
             if isinstance(event, StreamCompleteEvent):
                 final_message = event.message
