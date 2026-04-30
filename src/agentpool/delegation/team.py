@@ -209,7 +209,9 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
 
         # Pre-create child sessions for each member so that SpawnSessionStart
         # can be emitted *before* the member's stream begins.
-        child_session_ids: dict[str, str] = {}
+        # Use id(node) as key instead of node.name to avoid collisions
+        # when multiple team members share the same name.
+        child_session_ids: dict[int, str] = {}
         for node in all_nodes:
             if self.agent_pool and self.agent_pool.sessions:
                 pool_parent = parent_sid or self.session_id
@@ -223,7 +225,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                     child_sid = generate_session_id()
             else:
                 child_sid = generate_session_id()
-            child_session_ids[node.name] = child_sid
+            child_session_ids[id(node)] = child_sid
 
         # Create list of streams — one per member, prefixed by SpawnSessionStart
         async def wrap_stream(
@@ -282,7 +284,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                         parent_session_id=parent_sid,
                     )
 
-        streams = [wrap_stream(node, child_session_ids[node.name]) for node in all_nodes]
+        streams = [wrap_stream(node, child_session_ids[id(node)]) for node in all_nodes]
         # Merge all streams
         async for event in as_generated(streams):
             yield event
