@@ -8,6 +8,7 @@ Covers:
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -255,6 +256,203 @@ class TestOpenCodeStorageProviderPathHandling:
         # Verify all sessions are listed
         for session_id in session_ids:
             assert session_id in result
+
+
+
+def _init_git_repo(directory: str) -> None:
+    """Initialize a minimal git repo so compute_project_id returns a commit SHA."""
+    subprocess.run(["git", "init"], cwd=directory, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=directory,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=directory,
+        capture_output=True,
+        check=True,
+    )
+    dummy = Path(directory) / "README.md"
+    dummy.write_text("init", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=directory, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=directory,
+        capture_output=True,
+        check=True,
+    )
+
+
+class TestOpenCodeListSessionIdsCwdParameter:
+    """Regression tests for OpenCodeStorageProvider.list_session_ids() missing 'cwd' parameter.
+
+    Bug: When the TUI calls GET /session?directory=<dir>, the call chain is:
+        session_routes.list_sessions()
+          → NativeAgent.list_sessions(cwd=effective_cwd)
+            → StorageManager.list_session_ids(cwd=cwd)
+              → OpenCodeStorageProvider.list_session_ids(cwd=cwd)
+                → TypeError: unexpected keyword argument 'cwd'
+
+    The base class StorageProvider.list_session_ids() and all other providers
+    (SQLModelProvider, MemoryProvider) accept 'cwd', but OpenCodeStorageProvider
+    overrides the method WITHOUT the 'cwd' parameter, causing a TypeError that
+    is silently caught by NativeAgent.list_sessions() (line 1220), returning [].
+    """
+
+    @pytest.fixture
+    async def provider(self):
+        """Create an OpenCode provider with temp directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = OpenCodeStorageConfig(path=tmpdir)
+            prov = OpenCodeStorageProvider(config)
+            async with prov:
+                yield prov
+
+    async def test_list_session_ids_accepts_cwd_parameter(
+        self, provider: OpenCodeStorageProvider
+    ) -> None:
+        """list_session_ids must accept 'cwd' keyword argument (base class contract).
+
+        The base class StorageProvider.list_session_ids() defines cwd: str | None = None.
+        OpenCodeStorageProvider overrides this method but omits the cwd parameter,
+        causing TypeError when called with cwd= via StorageManager.
+        """
+        # This should NOT raise TypeError — it must accept cwd like the base class
+        result = await provider.list_session_ids(cwd="/some/path")
+        assert isinstance(result, list)
+
+    async def test_list_session_ids_cwd_filters_by_directory(
+        self, provider: OpenCodeStorageProvider
+    ) -> None:
+        """list_session_ids(cwd=...) should filter sessions by their directory field.
+
+        Uses real git repos so compute_project_id() returns a valid project_id
+        that matches the session storage layout, mirroring production behavior.
+        """
+        from agentpool_server.opencode_server.models import (
+            Session,
+            TimeCreatedUpdated,
+        )
+        from agentpool_storage.opencode_provider.helpers import compute_project_id
+
+        import anyenv
+
+        # Create two separate git repos (simulating two different projects)
+        alpha_dir = provider.base_path / "alpha_project"
+        alpha_dir.mkdir(parents=True, exist_ok=True)
+        _init_git_repo(str(alpha_dir))
+
+        beta_dir = provider.base_path / "beta_project"
+        beta_dir.mkdir(parents=True, exist_ok=True)
+        _init_git_repo(str(beta_dir))
+
+        alpha_project_id = compute_project_id(str(alpha_dir))
+        beta_project_id = compute_project_id(str(beta_dir))
+
+        # Create session in alpha project
+        alpha_id = ascending("session")
+        alpha_project_dir = provider.sessions_path / alpha_project_id
+        alpha_project_dir.mkdir(parents=True, exist_ok=True)
+        alpha_session = Session(
+            id=alpha_id,
+            project_id=alpha_project_id,
+            directory=str(alpha_dir),
+            title="Alpha Session",
+            version="1.1.7",
+            time=TimeCreatedUpdated(created=1000, updated=1000),
+        )
+        (alpha_project_dir / f"{alpha_id}.json").write_text(
+            anyenv.dump_json(alpha_session.model_dump(by_alias=True), indent=True)
+        )
+        (provider.messages_path / alpha_id).mkdir(parents=True, exist_ok=True)
+
+        # Create session in beta project
+        beta_id = ascending("session")
+        beta_project_dir = provider.sessions_path / beta_project_id
+        beta_project_dir.mkdir(parents=True, exist_ok=True)
+        beta_session = Session(
+            id=beta_id,
+            project_id=beta_project_id,
+            directory=str(beta_dir),
+            title="Beta Session",
+            version="1.1.7",
+            time=TimeCreatedUpdated(created=2000, updated=2000),
+        )
+        (beta_project_dir / f"{beta_id}.json").write_text(
+            anyenv.dump_json(beta_session.model_dump(by_alias=True), indent=True)
+        )
+        (provider.messages_path / beta_id).mkdir(parents=True, exist_ok=True)
+
+        # Filter by cwd — should only return matching project's session
+        alpha_only = await provider.list_session_ids(cwd=str(alpha_dir))
+        assert alpha_id in alpha_only
+        assert beta_id not in alpha_only
+
+        beta_only = await provider.list_session_ids(cwd=str(beta_dir))
+        assert beta_id in beta_only
+        assert alpha_id not in beta_only
+
+    async def test_list_session_ids_cwd_none_returns_all(
+        self, provider: OpenCodeStorageProvider
+    ) -> None:
+        """list_session_ids(cwd=None) should return all sessions (no filtering)."""
+        from agentpool_server.opencode_server.models import (
+            Session,
+            TimeCreatedUpdated,
+        )
+
+        import anyenv
+
+        project_id = "test_project"
+        project_dir = provider.sessions_path / project_id
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        session_id = ascending("session")
+        session = Session(
+            id=session_id,
+            project_id=project_id,
+            directory="/some/dir",
+            title="Test Session",
+            version="1.1.7",
+            time=TimeCreatedUpdated(created=1000, updated=1000),
+        )
+        (project_dir / f"{session_id}.json").write_text(
+            anyenv.dump_json(session.model_dump(by_alias=True), indent=True)
+        )
+        (provider.messages_path / session_id).mkdir(parents=True, exist_ok=True)
+
+        # No cwd filter — should return all sessions
+        all_sessions = await provider.list_session_ids(cwd=None)
+        assert session_id in all_sessions
+
+    async def test_list_session_ids_signature_matches_base_class(
+        self, provider: OpenCodeStorageProvider
+    ) -> None:
+        """OpenCodeStorageProvider.list_session_ids must have the same signature as base class.
+
+        This is a static check: the override's signature must include all keyword
+        parameters defined in StorageProvider.list_session_ids().
+        """
+        import inspect
+
+        from agentpool_storage.base import StorageProvider
+
+        base_params = inspect.signature(StorageProvider.list_session_ids).parameters
+        override_params = inspect.signature(
+            OpenCodeStorageProvider.list_session_ids
+        ).parameters
+
+        for param_name in base_params:
+            if param_name == "self":
+                continue
+            assert param_name in override_params, (
+                f"OpenCodeStorageProvider.list_session_ids() missing parameter "
+                f"'{param_name}' that exists in base class StorageProvider.list_session_ids(). "
+                f"Base has: {list(base_params.keys())}, "
+                f"Override has: {list(override_params.keys())}"
+            )
 
 
 class TestSerialization:

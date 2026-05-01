@@ -1337,18 +1337,34 @@ class OpenCodeStorageProvider(StorageProvider):
         *,
         pool_id: str | None = None,
         agent_name: str | None = None,
+        cwd: str | None = None,
     ) -> list[str]:
         """List session IDs, optionally filtered.
 
         Args:
             pool_id: Filter by pool/manifest ID (not used in OpenCode storage)
             agent_name: Filter by agent name
+            cwd: Filter by working directory. Uses compute_project_id() to narrow
+                 to the project directory first, then verifies the session's
+                 ``directory`` field matches.
 
         Returns:
             List of session IDs
         """
+        # When cwd is provided, narrow search to the project directory for efficiency.
+        # OpenCode organizes sessions under storage/session/{project_id}/, so
+        # computing the project_id from cwd avoids scanning all project dirs.
+        filter_project_id: str | None = None
+        if cwd is not None:
+            filter_project_id = helpers.compute_project_id(cwd)
+
         session_ids: list[str] = []
-        for session_id, _session_path in self._list_sessions():
+        for session_id, session_path in self._list_sessions(project_id=filter_project_id):
+            # Check cwd filter by reading session's directory field
+            if cwd is not None:
+                session = helpers.read_session(session_path)
+                if session is not None and session.directory != cwd:
+                    continue
             # Check agent filter if specified
             # Note: OpenCode session files don't store agent name directly,
             # so we need to check the first message's agent
