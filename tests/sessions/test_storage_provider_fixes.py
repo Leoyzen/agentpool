@@ -427,6 +427,59 @@ class TestOpenCodeListSessionIdsCwdParameter:
         all_sessions = await provider.list_session_ids(cwd=None)
         assert session_id in all_sessions
 
+    async def test_list_session_ids_cwd_excludes_corrupted_session(
+        self, provider: OpenCodeStorageProvider
+    ) -> None:
+        """Corrupted session files (read_session returns None) must be excluded when cwd filter is active.
+
+        Regression test: previously, if read_session returned None (corrupted JSON / I/O error),
+        the cwd filter was bypassed and the session was incorrectly included in results.
+        """
+        from agentpool_storage.opencode_provider.helpers import compute_project_id
+
+        # Create a real git repo so compute_project_id returns a valid project_id
+        workdir = provider.base_path / "corrupt_project"
+        workdir.mkdir(parents=True, exist_ok=True)
+        _init_git_repo(str(workdir))
+
+        project_id = compute_project_id(str(workdir))
+        project_dir = provider.sessions_path / project_id
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a valid session
+        valid_id = ascending("session")
+        from agentpool_server.opencode_server.models import (
+            Session,
+            TimeCreatedUpdated,
+        )
+
+        import anyenv
+
+        valid_session = Session(
+            id=valid_id,
+            project_id=project_id,
+            directory=str(workdir),
+            title="Valid Session",
+            version="1.1.7",
+            time=TimeCreatedUpdated(created=1000, updated=1000),
+        )
+        (project_dir / f"{valid_id}.json").write_text(
+            anyenv.dump_json(valid_session.model_dump(by_alias=True), indent=True)
+        )
+        (provider.messages_path / valid_id).mkdir(parents=True, exist_ok=True)
+
+        # Create a corrupted session (invalid JSON)
+        corrupt_id = ascending("session")
+        (project_dir / f"{corrupt_id}.json").write_text(
+            "{invalid json!!!", encoding="utf-8"
+        )
+        (provider.messages_path / corrupt_id).mkdir(parents=True, exist_ok=True)
+
+        # Filter by cwd — corrupted session must be excluded
+        result = await provider.list_session_ids(cwd=str(workdir))
+        assert valid_id in result
+        assert corrupt_id not in result
+
     async def test_list_session_ids_signature_matches_base_class(
         self, provider: OpenCodeStorageProvider
     ) -> None:

@@ -1363,7 +1363,7 @@ class OpenCodeStorageProvider(StorageProvider):
             # Check cwd filter by reading session's directory field
             if cwd is not None:
                 session = helpers.read_session(session_path)
-                if session is not None and session.directory != cwd:
+                if session is None or session.directory != cwd:
                     continue
             # Check agent filter if specified
             # Note: OpenCode session files don't store agent name directly,
