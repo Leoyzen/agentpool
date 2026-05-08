@@ -81,6 +81,27 @@ class AgentsManifest(Schema):
     INHERIT: str | list[str] | None = None
     """Inheritance references."""
 
+    include_packages: list[str] | None = Field(
+        default=None,
+        examples=[
+            ["rebuttal_agent.config:agents.yaml"],
+            ["myapp.defaults:base.yaml", "myapp.extras:tools.yaml"],
+        ],
+        title="Package config includes",
+    )
+    """Load and merge agent/team declarations from installed Python packages.
+
+    Each entry uses colon-separated ``package.path:resource.yaml`` format
+    (following the Python entry-point convention).  Uses ``importlib.resources``
+    to locate the YAML file inside the installed package, then deep-merges it
+    as a base layer (host config wins on conflicts).
+
+    Example::
+
+        include_packages:
+          - "rebuttal_agent.config:agents.yaml"
+    """
+
     name: str | None = None
     """Optional name for this manifest.
 

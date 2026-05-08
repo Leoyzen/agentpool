@@ -208,5 +208,125 @@ async def test_multiple_hooks_one_denies():
             await agent.run("Hello")
 
 
+# Tests for input_match
+
+
+def test_input_match_matches_when_field_present():
+    """input_match should match when the specified field value satisfies the regex."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+        input_match={"task_tag": "^diagnosis_planning$"},
+    )
+    data = {
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "libarian", "task_tag": "diagnosis_planning"},
+    }
+    assert hook.matches(data) is True
+
+
+def test_input_match_rejects_wrong_value():
+    """input_match should reject when the field value doesn't match."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+        input_match={"task_tag": "^diagnosis_planning$"},
+    )
+    data = {
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "libarian", "task_tag": "general_research"},
+    }
+    assert hook.matches(data) is False
+
+
+def test_input_match_rejects_missing_field():
+    """input_match should reject when the field is absent from tool_input."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+        input_match={"task_tag": "^diagnosis_planning$"},
+    )
+    data = {
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "libarian"},
+    }
+    assert hook.matches(data) is False
+
+
+def test_input_match_multiple_fields_all_must_match():
+    """All input_match patterns must match for the hook to trigger."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+        input_match={"task_tag": "^diagnosis_planning$", "mode": "^libarian$"},
+    )
+    # Both match
+    assert hook.matches({
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "libarian", "task_tag": "diagnosis_planning"},
+    }) is True
+    # One mismatch
+    assert hook.matches({
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "rebuttal_agent", "task_tag": "diagnosis_planning"},
+    }) is False
+
+
+def test_input_match_with_tool_name_mismatch():
+    """Hook should not match when tool_name doesn't match even if input_match does."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+        input_match={"task_tag": "^diagnosis_planning$"},
+    )
+    data = {
+        "event": "post_tool_use",
+        "tool_name": "other_tool",
+        "tool_input": {"task_tag": "diagnosis_planning"},
+    }
+    assert hook.matches(data) is False
+
+
+def test_no_input_match_matches_all():
+    """Without input_match, hook should match based on tool_name alone."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+    )
+    data = {
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "anything", "task_tag": "whatever"},
+    }
+    assert hook.matches(data) is True
+
+
+def test_input_match_no_recursive_trigger():
+    """Hook on new_task+diagnosis_planning must NOT match quality_review."""
+    hook = CallableHook(
+        event="post_tool_use",
+        fn=allow_hook,
+        matcher="new_task",
+        input_match={"task_tag": "^diagnosis_planning$"},
+    )
+    data = {
+        "event": "post_tool_use",
+        "tool_name": "new_task",
+        "tool_input": {"mode": "rebuttal_agent", "task_tag": "quality_review"},
+    }
+    assert hook.matches(data) is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -431,6 +431,7 @@ class NativeAgentConfig(BaseAgentConfig):
             FilePromptConfig,
             FunctionPromptConfig,
             LibraryPromptConfig,
+            PackagePromptConfig,
             StaticPromptConfig,
         )
 
@@ -471,6 +472,18 @@ class NativeAgentConfig(BaseAgentConfig):
                         messages=[PromptMessage(role="system", content=content)],
                     )
                     prompts.append(static_prompt)
+                case PackagePromptConfig(package=pkg, resource=resource):
+                    from importlib.resources import files as pkg_files
+
+                    template_content = (
+                        pkg_files(pkg) / resource
+                    ).read_text(encoding="utf-8")
+                    static_prompt = StaticPrompt(
+                        name="system",
+                        description=f"Package prompt: {pkg}/{resource}",
+                        messages=[PromptMessage(role="system", content=template_content)],
+                    )
+                    prompts.append(static_prompt)
                 case _ as unreachable:
                     assert_never(unreachable)  # ty: ignore[type-assertion-failure]
         return prompts
@@ -481,6 +494,7 @@ class NativeAgentConfig(BaseAgentConfig):
             FilePromptConfig,
             FunctionPromptConfig,
             LibraryPromptConfig,
+            PackagePromptConfig,
             StaticPromptConfig,
         )
 
@@ -509,6 +523,16 @@ class NativeAgentConfig(BaseAgentConfig):
                     # Import and call the function to get prompt content
                     content = function(**arguments)
                     rendered_prompts.append(render_prompt(content, {"agent": context}))
+                case PackagePromptConfig(
+                    package=pkg, resource=resource, variables=variables,
+                ):
+                    from importlib.resources import files as pkg_files
+
+                    template_content = (
+                        pkg_files(pkg) / resource
+                    ).read_text(encoding="utf-8")
+                    template_ctx = {"agent": context, **variables}
+                    rendered_prompts.append(render_prompt(template_content, template_ctx))
 
         return rendered_prompts
 

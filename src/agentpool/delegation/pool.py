@@ -223,6 +223,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 )
                 self.register(name, agent)
 
+            logger.debug("AgentPool: registered %d agents: %s", len(self.all_agents), list(self.all_agents.keys()))
             self._create_teams()
             if connect_nodes:
                 self._connect_nodes()

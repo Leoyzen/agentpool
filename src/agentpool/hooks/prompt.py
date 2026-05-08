@@ -50,6 +50,7 @@ class PromptHook(Hook):
         timeout: float = 30.0,
         enabled: bool = True,
         model: str | None = None,
+        input_match: dict[str, str] | None = None,
     ):
         """Initialize prompt hook.
 
@@ -60,8 +61,12 @@ class PromptHook(Hook):
             timeout: Maximum execution time in seconds.
             enabled: Whether this hook is active.
             model: Model to use for evaluation. Defaults to a fast model.
+            input_match: Optional regex patterns to match ``tool_input`` fields.
         """
-        super().__init__(event=event, matcher=matcher, timeout=timeout, enabled=enabled)
+        super().__init__(
+            event=event, matcher=matcher, timeout=timeout,
+            enabled=enabled, input_match=input_match,
+        )
         self.prompt_template = prompt
         self.model = model or DEFAULT_HOOK_MODEL
 

@@ -120,9 +120,16 @@ class MCPResourceProvider(ResourceProvider):
         try:
             await self.exit_stack.enter_async_context(self.client)
         except Exception as e:
-            # Clean up in case of error
+            logger.warning(
+                "MCP server connection failed: %s (%s): %s",
+                self.server.display_name,
+                self.server.client_id,
+                e,
+            )
             await self.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError("Failed to initialize MCP manager") from e
+            raise RuntimeError(
+                f"Failed to connect MCP server '{self.server.display_name}'"
+            ) from e
 
         self._client_connected = True
         return self
@@ -181,6 +188,7 @@ class MCPResourceProvider(ResourceProvider):
         """Callback when resources change on the MCP server."""
         logger.info("MCP resource list changed, refreshing provider cache")
         self._resources_cache = None
+        self._skills_cache = None
         # Notify subscribers via signal
         await self.resources_changed.emit(self.create_change_event("resources"))
 
@@ -464,6 +472,13 @@ class MCPResourceProvider(ResourceProvider):
         skills: list[Skill] = []
         try:
             resources = await self.get_resources()
+            skill_uris = [r.uri for r in resources if r.uri.startswith("skill://")]
+            logger.debug(
+                "MCP resource skill discovery",
+                server=self.name,
+                total_resources=len(resources),
+                skill_resources=len(skill_uris),
+            )
             for resource in resources:
                 try:
                     # Check if this is a skill:// resource

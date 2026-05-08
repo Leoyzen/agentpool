@@ -116,8 +116,49 @@ class FunctionPromptConfig(BaseSystemPrompt):
     """Arguments to pass to the function."""
 
 
+class PackagePromptConfig(BaseSystemPrompt):
+    """Configuration for loading a prompt template from an installed Python package.
+
+    Uses ``importlib.resources`` to locate the file, so the package does not
+    need to be on the config search path — only installed in the environment.
+
+    Example YAML::
+
+        system_prompt:
+          - type: package
+            package: "rebuttal_agent.prompts"
+            resource: "rebuttal_orchestrator.j2"
+            variables:
+              num_rounds: 3
+    """
+
+    model_config = ConfigDict(json_schema_extra={"x-doc-title": "Package Prompt"})
+
+    type: Literal["package"] = Field("package", init=False)
+    """Package prompt reference."""
+
+    package: str = Field(
+        examples=["rebuttal_agent.prompts", "myapp.templates"],
+        title="Package path",
+    )
+    """Dotted Python package containing the template resource."""
+
+    resource: str = Field(
+        examples=["rebuttal_orchestrator.j2", "system_prompt.j2"],
+        title="Resource filename",
+    )
+    """Filename of the template within the package."""
+
+    variables: dict[str, Any] = Field(default_factory=dict, title="Template variables")
+    """Variables to pass to the Jinja template."""
+
+
 PromptConfig = Annotated[
-    StaticPromptConfig | FilePromptConfig | LibraryPromptConfig | FunctionPromptConfig,
+    StaticPromptConfig
+    | FilePromptConfig
+    | LibraryPromptConfig
+    | FunctionPromptConfig
+    | PackagePromptConfig,
     Field(discriminator="type"),
 ]
 """Union type for different prompt configuration types."""

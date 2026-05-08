@@ -88,8 +88,16 @@ class MCPManager:
             if tasks := [self.setup_server(server) for server in self.servers]:
                 await asyncio.gather(*tasks)
         except Exception as e:
+            server_names = [s.display_name for s in self.servers]
+            logger.warning(
+                "MCP manager initialization failed (servers: %s): %s",
+                server_names,
+                e,
+            )
             await self.__aexit__(type(e), e, e.__traceback__)
-            raise RuntimeError("Failed to initialize MCP manager") from e
+            raise RuntimeError(
+                f"Failed to initialize MCP manager (servers: {server_names})"
+            ) from e
 
         return self
 

@@ -139,6 +139,47 @@ class WorktreeResetRequest(OpenCodeBaseModel):
     """Worktree directory path to reset."""
 
 
+class WorkspaceInfo(OpenCodeBaseModel):
+    """Workspace information matching OpenCode's experimental workspace API."""
+
+    id: str
+    """Workspace identifier."""
+
+    type: str
+    """Workspace backend type, such as ``worktree``."""
+
+    branch: str | None = None
+    """Workspace branch name."""
+
+    name: str | None = None
+    """Human-readable workspace name."""
+
+    directory: str | None = None
+    """Workspace directory path."""
+
+    extra: object | None = None
+    """Backend-specific metadata."""
+
+    project_id: str
+    """Project identifier owning this workspace."""
+
+
+class WorkspaceCreateRequest(OpenCodeBaseModel):
+    """Request to create a workspace through OpenCode's experimental API."""
+
+    id: str | None = None
+    """Optional workspace identifier."""
+
+    type: str = "worktree"
+    """Workspace backend type. AgentPool currently supports ``worktree``."""
+
+    branch: str | None = None
+    """Optional branch name requested by the client."""
+
+    extra: object | None = None
+    """Backend-specific metadata."""
+
+
 class AuthInfo(OpenCodeBaseModel):
     """Authentication credential info."""
 

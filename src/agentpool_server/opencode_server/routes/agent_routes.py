@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import re
 from typing import Any
 
@@ -37,6 +38,8 @@ from agentpool_server.opencode_server.models import (
     WorktreeInfo,
     WorktreeRemoveRequest,
     WorktreeResetRequest,
+    WorkspaceCreateRequest,
+    WorkspaceInfo,
 )
 
 
@@ -119,24 +122,24 @@ async def list_agents(state: StateDep) -> list[Agent]:
 
     Returns all agents with their configurations, suitable for the agent
     switcher UI. All agents are marked as primary (visible in switcher).
+    The default agent is always first in the returned list.
     """
     pool = state.agent.agent_pool
     assert pool is not None, "AgentPool is not initialized"
+    default_name = pool.main_agent.name
     agents = [
         Agent(
             name=name,
             description=agent.description or f"Agent: {name}",
-            # model=ModelRef(model_id=agent.model_name or "unknown", provider_id=""),
             mode="primary",
-            default=(name == pool.main_agent.name),  # Default agent from pool
+            default=(name == default_name),
         )
         for name, agent in pool.all_agents.items()
     ]
-    return (
-        agents
-        if agents
-        else [Agent(name="default", description="Default agent", mode="primary", default=True)]
-    )
+    if not agents:
+        return [Agent(name="default", description="Default agent", mode="primary", default=True)]
+    agents.sort(key=lambda a: (not a.default, a.name))
+    return agents
 
 
 @router.get("/skill")
@@ -528,6 +531,89 @@ async def reset_worktree(request: WorktreeResetRequest, state: StateDep) -> bool
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return True
+
+
+async def _get_project_id(state: StateDep) -> str:
+    """Return the current OpenCode project ID for compatibility responses."""
+    from agentpool_storage.project_store import ProjectStore
+
+    project = await ProjectStore(state.storage).get_or_create(state.working_dir)
+    return project.project_id
+
+
+def _workspace_from_worktree(
+    directory: str,
+    *,
+    branch: str | None,
+    project_id: str,
+) -> WorkspaceInfo:
+    """Map AgentPool worktree data to OpenCode's workspace shape."""
+    name = Path(directory).name
+    return WorkspaceInfo(
+        id=name,
+        type="worktree",
+        branch=branch,
+        name=name,
+        directory=directory,
+        extra=None,
+        project_id=project_id,
+    )
+
+
+@router.get("/experimental/workspace")
+async def list_workspaces(state: StateDep) -> list[WorkspaceInfo]:
+    """List worktree-backed workspaces for OpenCode TUI compatibility."""
+    from agentpool.utils.worktree import list_worktrees
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    project_id = await _get_project_id(state)
+    return [
+        _workspace_from_worktree(directory, branch=None, project_id=project_id)
+        for directory in await list_worktrees(repo_dir)
+    ]
+
+
+@router.post("/experimental/workspace")
+async def create_workspace(request: WorkspaceCreateRequest, state: StateDep) -> WorkspaceInfo:
+    """Create a worktree-backed workspace through OpenCode's workspace API."""
+    from agentpool.utils.worktree import create_worktree
+
+    if request.type != "worktree":
+        raise HTTPException(status_code=400, detail="Only worktree workspaces are supported")
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    try:
+        _, branch, directory = await create_worktree(repo_dir, request.id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return _workspace_from_worktree(
+        directory,
+        branch=branch,
+        project_id=await _get_project_id(state),
+    )
+
+
+@router.delete("/experimental/workspace/{workspace_id}")
+async def remove_workspace(workspace_id: str, state: StateDep) -> WorkspaceInfo | None:
+    """Remove a worktree-backed workspace by OpenCode workspace ID."""
+    from agentpool.utils.worktree import list_worktrees, remove_worktree
+
+    repo_dir = state.agent.env.cwd or state.working_dir
+    project_id = await _get_project_id(state)
+    directory = next(
+        (item for item in await list_worktrees(repo_dir) if Path(item).name == workspace_id),
+        None,
+    )
+    if directory is None:
+        return None
+
+    workspace = _workspace_from_worktree(directory, branch=None, project_id=project_id)
+    try:
+        await remove_worktree(repo_dir, directory)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return workspace
 
 
 @router.get("/experimental/session")

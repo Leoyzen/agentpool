@@ -39,6 +39,18 @@ class BaseHookConfig(Schema):
     enabled: bool = Field(default=True, title="Hook enabled")
     """Whether this hook is active."""
 
+    input_match: dict[str, str] | None = Field(
+        default=None,
+        examples=[{"mode": "^libarian$"}, {"task_tag": "^diagnosis_planning$"}],
+        title="Input field matchers",
+    )
+    """Regex patterns matched against ``tool_input`` fields on tool-use hooks.
+
+    All patterns must match for the hook to trigger.  Complements ``matcher``
+    (which filters by tool name) with field-level filtering so hooks can
+    react to specific parameter values rather than just tool names.
+    """
+
     def get_hook(self, event: HookEvent) -> Hook:
         """Create runtime hook from this config.
 
@@ -109,6 +121,7 @@ class CommandHookConfig(BaseHookConfig):
             enabled=self.enabled,
             env=self.env,
             execution_env=self._resolve_execution_env(),
+            input_match=self.input_match,
         )
 
     def _resolve_execution_env(self) -> ExecutionEnvironment | None:
@@ -168,6 +181,7 @@ class CallableHookConfig(BaseHookConfig):
             timeout=self.timeout,
             enabled=self.enabled,
             arguments=self.arguments,
+            input_match=self.input_match,
         )
 
 
@@ -210,6 +224,7 @@ class PromptHookConfig(BaseHookConfig):
             timeout=self.timeout,
             enabled=self.enabled,
             model=self.model,
+            input_match=self.input_match,
         )
 
 

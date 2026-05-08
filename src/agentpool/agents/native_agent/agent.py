@@ -471,6 +471,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             FilePromptConfig,
             FunctionPromptConfig,
             LibraryPromptConfig,
+            PackagePromptConfig,
             StaticPromptConfig,
         )
         from agentpool_toolsets.builtin.workers import WorkersTools
@@ -512,6 +513,21 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             raise ValueError(msg) from e
                     case FunctionPromptConfig(function=function, arguments=arguments):
                         content = function(**arguments)
+                        sys_prompts.append(content)
+                    case PackagePromptConfig(
+                        package=pkg, resource=resource, variables=variables,
+                    ):
+                        from importlib.resources import files as pkg_files
+
+                        template_content = (
+                            pkg_files(pkg) / resource
+                        ).read_text(encoding="utf-8")
+                        if variables:
+                            from jinja2 import Template
+
+                            content = Template(template_content).render(**variables)
+                        else:
+                            content = template_content
                         sys_prompts.append(content)
 
         # Prepare toolsets list
@@ -1178,6 +1194,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             except asyncio.CancelledError:
                 self.log.info("Agent iteration task cancelled")
             except BaseException as e:
+                self.log.warning(
+                    "Agent iteration failed",
+                    agent=self.name,
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
                 iteration_error = e
             finally:
                 await event_queue.put(None)

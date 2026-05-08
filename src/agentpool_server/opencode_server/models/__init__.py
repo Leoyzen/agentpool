@@ -137,6 +137,8 @@ from agentpool_server.opencode_server.models.agent import (
     WorktreeInfo,
     WorktreeRemoveRequest,
     WorktreeResetRequest,
+    WorkspaceCreateRequest,
+    WorkspaceInfo,
 )
 from agentpool_server.opencode_server.models.diagnostics import (
     FormatterStatus,

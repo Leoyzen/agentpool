@@ -43,6 +43,7 @@ class CommandHook(Hook):
         enabled: bool = True,
         env: dict[str, str] | None = None,
         execution_env: ExecutionEnvironment | None = None,
+        input_match: dict[str, str] | None = None,
     ):
         """Initialize command hook.
 
@@ -55,8 +56,12 @@ class CommandHook(Hook):
             env: Additional environment variables.
             execution_env: Per-hook execution environment override.
                 If set, this takes priority over the agent's environment.
+            input_match: Optional regex patterns to match ``tool_input`` fields.
         """
-        super().__init__(event=event, matcher=matcher, timeout=timeout, enabled=enabled)
+        super().__init__(
+            event=event, matcher=matcher, timeout=timeout,
+            enabled=enabled, input_match=input_match,
+        )
         self.command = command
         self.env = env or {}
         self._execution_env = execution_env
