@@ -36,6 +36,7 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     SessionStatus,
     SessionStatusEvent,
+    SessionUpdatedEvent,
     StepStartPart,
     SubtaskPartInput,
     TextPartInput,
@@ -339,6 +340,20 @@ async def _process_message_locked(  # noqa: PLR0915
     current_task = asyncio.current_task()
     if current_task is not None:
         state.register_active_message_task(session_id, current_task)
+
+    # --- Clear revert marker (mirrors opencode-native's revert.cleanup()) ---
+    # When a user does /undo then sends a new message, the session.revert
+    # marker must be cleared so the frontend stops filtering messages with
+    # ``message.id >= revert.messageID``.  Without this, ALL new messages
+    # are hidden because their ascending IDs are always >= revert.messageID.
+    session = state.sessions.get(session_id)
+    if session is not None and session.revert is not None:
+        updated_session = session.model_copy(update={"revert": None})
+        state.sessions[session_id] = updated_session
+        # Discard any stored reverted messages for this session
+        state.reverted_messages.pop(session_id, None)
+        # Broadcast so the frontend removes the revert filter immediately
+        await state.broadcast_event(SessionUpdatedEvent.create(updated_session))
 
     # --- Mark session busy ---
     if mark_busy:
