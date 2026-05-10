@@ -77,6 +77,19 @@ class TeamConfig(NodeConfig):
     )
     """Optional shared prompt for this team."""
 
+    member_timeout: float | None = Field(
+        default=None,
+        examples=[60.0, 120.0, 300.0],
+        title="Per-member timeout (seconds)",
+    )
+    """Maximum seconds each member may run before being cancelled.
+
+    When set, members that exceed this deadline are cancelled and recorded
+    in ``TeamResponse.errors`` as ``TimeoutError``.  Members that finish
+    in time are **not** affected — their results are preserved even when
+    siblings time out.  ``None`` (default) means no timeout.
+    """
+
     def get_member_name(self, member: str | TeamMemberConfig) -> str:
         """Extract the member name from a plain string or config object."""
         if isinstance(member, str):
@@ -109,6 +122,7 @@ class TeamConfig(NodeConfig):
                 shared_prompt=self.shared_prompt,
                 mcp_servers=self.get_mcp_servers(),
                 member_prompt_templates=member_configs or None,
+                member_timeout=self.member_timeout,
             )
         return TeamRun(
             nodes,

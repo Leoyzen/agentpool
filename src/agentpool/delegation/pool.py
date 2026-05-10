@@ -609,6 +609,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         name: str | None = None,
         description: str | None = None,
         shared_prompt: str | None = None,
+        member_timeout: float | None = None,
     ) -> Team[TDeps]: ...
 
     @overload
@@ -619,6 +620,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         name: str | None = None,
         description: str | None = None,
         shared_prompt: str | None = None,
+        member_timeout: float | None = None,
     ) -> Team[Any]: ...
 
     def create_team(
@@ -628,6 +630,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         name: str | None = None,
         description: str | None = None,
         shared_prompt: str | None = None,
+        member_timeout: float | None = None,
     ) -> Team[Any]:
         """Create a group from agent names or instances.
 
@@ -636,10 +639,14 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             name: Optional name for the team
             description: Optional description for the team
             shared_prompt: Optional prompt for all agents
+            member_timeout: Per-member timeout in seconds (``None`` = no limit)
         """
         from agentpool.delegation.team import Team
 
-        team = Team(agents, name=name, description=description, shared_prompt=shared_prompt)
+        team = Team(
+            agents, name=name, description=description,
+            shared_prompt=shared_prompt, member_timeout=member_timeout,
+        )
         if name:
             self[name] = team
         return team

@@ -59,6 +59,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         event_configs: Sequence[EventConfig] | None = None,
         agent_pool: AgentPool | None = None,
         member_prompt_templates: dict[str, TeamMemberConfig] | None = None,
+        member_timeout: float | None = None,
     ) -> None:
         """Common variables only for typing."""
         from agentpool.delegation.teamrun import ExtendedTeamTalk
@@ -78,6 +79,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
         self._team_talk = ExtendedTeamTalk()
         self.shared_prompt = shared_prompt
         self.member_prompt_templates = member_prompt_templates or {}
+        self.member_timeout = member_timeout
         self._main_task: asyncio.Task[ChatMessage[Any] | None] | None = None
         self._infinite = False
 

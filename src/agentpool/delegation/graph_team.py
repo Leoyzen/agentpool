@@ -7,6 +7,7 @@ nodes to run team members in parallel and collect their outputs.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal
@@ -55,6 +56,9 @@ class _TeamGraphState:
     member_prompts: dict[str, list[Any]] = field(default_factory=dict)
     """Resolved prompt list per member name."""
 
+    member_timeout: float | None = None
+    """Maximum seconds a member may run before being cancelled."""
+
     execution_talks: list[Talk[Any]] = field(default_factory=list)
     """Talk connections for tracking execution stats."""
 
@@ -93,7 +97,12 @@ def _make_member_step(
 
         try:
             start = perf_counter()
-            message = await node.run(*final_prompt, **state.kwargs)
+            coro = node.run(*final_prompt, **state.kwargs)
+            message = (
+                await asyncio.wait_for(coro, timeout=state.member_timeout)
+                if state.member_timeout is not None
+                else await coro
+            )
             timing = perf_counter() - start
             response = AgentResponse(agent_name=node.name, message=message, timing=timing)
 
@@ -107,6 +116,20 @@ def _make_member_step(
 
             return _MemberOutput(agent_name=node.name, response=response)
 
+        except TimeoutError:
+            logger.warning(
+                "Team member timed out",
+                member=node.name,
+                timeout=state.member_timeout,
+            )
+            if state.error_mode == "fail_all":
+                raise
+            return _MemberOutput(
+                agent_name=node.name,
+                exception=TimeoutError(
+                    f"Member {node.name!r} exceeded {state.member_timeout}s deadline"
+                ),
+            )
         except Exception as exc:
             if state.error_mode == "fail_all":
                 raise

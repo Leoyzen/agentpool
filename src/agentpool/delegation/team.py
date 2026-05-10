@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
@@ -34,6 +35,46 @@ if TYPE_CHECKING:
     from agentpool.talk import Talk
 
 
+async def _timeout_stream[T](
+    stream: AsyncIterator[T],
+    timeout: float | None,
+    member_name: str,
+    team_name: str,
+) -> AsyncIterator[T]:
+    """Wrap an async iterator with an overall deadline.
+
+    Each ``__anext__`` is bounded by the remaining budget so a single hung
+    call cannot block forever.  If ``timeout`` is ``None`` the stream is
+    yielded through unchanged.
+    """
+    if timeout is None:
+        async for item in stream:
+            yield item
+        return
+
+    deadline = perf_counter() + timeout
+    it = stream.__aiter__()
+    while True:
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            logger.warning(
+                "Team member stream timed out",
+                member=member_name, team=team_name, timeout=timeout,
+            )
+            return
+        try:
+            item = await asyncio.wait_for(it.__anext__(), timeout=remaining)
+        except StopAsyncIteration:
+            return
+        except TimeoutError:
+            logger.warning(
+                "Team member stream timed out",
+                member=member_name, team=team_name, timeout=timeout,
+            )
+            return
+        yield item
+
+
 class Team[TDeps = None](BaseTeam[TDeps, Any]):
     """Group of agents that can execute together."""
 
@@ -55,6 +96,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             default_prompt.insert(0, self.shared_prompt)
 
         template_vars: dict[str, Any] = kwargs.pop("template_vars", {})
+        timeout = self.member_timeout
 
         all_nodes = list(self.nodes)
         execution_talks: list[Talk[Any]] = []
@@ -77,6 +119,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             kwargs=kwargs,
             shared_prompt=self.shared_prompt,
             member_prompts=member_prompts,
+            member_timeout=timeout,
             execution_talks=execution_talks,
             error_mode=self._error_mode,
         )
@@ -117,15 +160,31 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         """Yield messages as they arrive from parallel execution."""
         queue: asyncio.Queue[ChatMessage[Any] | None] = asyncio.Queue()
         failures: dict[str, Exception] = {}
+        timeout = self.member_timeout
 
         async def _run(node: MessageNode[TDeps, Any]) -> None:
             try:
-                message = await node.run(*prompts, **kwargs)
+                coro = node.run(*prompts, **kwargs)
+                message = (
+                    await asyncio.wait_for(coro, timeout=timeout)
+                    if timeout is not None
+                    else await coro
+                )
                 await queue.put(message)
+            except TimeoutError:
+                logger.warning(
+                    "Team member timed out",
+                    member=node.name,
+                    team=self.name,
+                    timeout=timeout,
+                )
+                failures[node.name] = TimeoutError(
+                    f"Member {node.name!r} exceeded {timeout}s deadline"
+                )
+                await queue.put(None)
             except Exception as e:
                 logger.exception("Error executing node", name=node.name)
                 failures[node.name] = e
-                # Put None to maintain queue count
                 await queue.put(None)
 
         # Get nodes to run
@@ -235,6 +294,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
 
         # Get nodes to run
         all_nodes = list(self.nodes)
+        timeout = self.member_timeout
 
         # Pre-create child sessions for each member so that SpawnSessionStart
         # can be emitted *before* the member's stream begins.
@@ -284,13 +344,14 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             if isinstance(node, BaseAgent):
                 node_model_id = node.model_name
 
-            async for event in node.run_stream(
+            stream = node.run_stream(
                 *prompts,
                 session_id=child_sid,
                 parent_session_id=parent_sid,
                 depth=child_depth,
                 **kwargs,
-            ):
+            )
+            async for event in _timeout_stream(stream, timeout, node.name, self.name):
                 # Handle already-wrapped SubAgentEvents (nested teams)
                 if isinstance(event, SubAgentEvent):
                     yield SubAgentEvent(
