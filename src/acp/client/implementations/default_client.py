@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from acp.client import Client
-from acp.schema import ReadTextFileResponse, RequestPermissionResponse, WriteTextFileResponse
+from acp.schema import (
+    ElicitationCreateResponse,
+    ReadTextFileResponse,
+    RequestPermissionResponse,
+    WriteTextFileResponse,
+)
 
 
 if TYPE_CHECKING:
@@ -21,6 +26,7 @@ if TYPE_CHECKING:
         CreateTerminalRequest,
         CreateTerminalResponse,
         DeniedOutcome,
+        ElicitationCreateRequest,
         KillTerminalCommandRequest,
         KillTerminalCommandResponse,
         ReadTextFileRequest,
@@ -66,6 +72,7 @@ class DefaultACPClient(Client):
         self.ext_calls: list[tuple[str, dict[str, Any]]] = []
         self.ext_notes: list[tuple[str, dict[str, Any]]] = []
         self.notifications: list[SessionNotification] = []
+        self.elicitation_calls: list[ElicitationCreateRequest] = []
 
     async def request_permission(
         self, params: RequestPermissionRequest
@@ -86,6 +93,14 @@ class DefaultACPClient(Client):
 
         # No options - deny
         return RequestPermissionResponse.denied()
+
+    async def elicitation_create(
+        self, params: ElicitationCreateRequest
+    ) -> ElicitationCreateResponse:
+        """Default elicitation handler - logs and auto-accepts."""
+        logger.info("Elicitation requested", message=params.message)
+        self.elicitation_calls.append(params)
+        return ElicitationCreateResponse(action="accept", content={})
 
     async def session_update(self, params: SessionNotification) -> None:
         """Handle session update notifications."""

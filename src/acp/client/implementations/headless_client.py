@@ -17,6 +17,7 @@ import structlog
 from acp.client.protocol import Client
 from acp.schema import (
     CreateTerminalResponse,
+    ElicitationCreateResponse,
     KillTerminalCommandResponse,
     ReadTextFileResponse,
     ReleaseTerminalResponse,
@@ -30,6 +31,7 @@ from acp.schema import (
 if TYPE_CHECKING:
     from acp.schema import (
         CreateTerminalRequest,
+        ElicitationCreateRequest,
         KillTerminalCommandRequest,
         ReadTextFileRequest,
         ReleaseTerminalRequest,
@@ -76,6 +78,7 @@ class HeadlessACPClient(Client):
         # Tracking for testing/debugging
         self.notifications: list[SessionNotification] = []
         self.permission_requests: list[RequestPermissionRequest] = []
+        self.elicitation_requests: list[ElicitationCreateRequest] = []
 
     async def request_permission(
         self, params: RequestPermissionRequest
@@ -91,6 +94,18 @@ class HeadlessACPClient(Client):
             return RequestPermissionResponse.allowed(option_id)
         logger.debug("Denying permission", tool_name=tool_name)
         return RequestPermissionResponse.denied()
+
+    async def elicitation_create(
+        self, params: ElicitationCreateRequest
+    ) -> ElicitationCreateResponse:
+        """Handle elicitation requests. Accepts if auto_grant_permissions is True."""
+        self.elicitation_requests.append(params)
+        logger.info("Elicitation requested", message=params.message)
+        if self.auto_grant_permissions:
+            logger.debug("Auto-accepting elicitation", message=params.message)
+            return ElicitationCreateResponse(action="accept", content={})
+        logger.debug("Declining elicitation", message=params.message)
+        return ElicitationCreateResponse(action="decline")
 
     async def session_update(self, params: SessionNotification) -> None:
         """Handle session update notifications."""

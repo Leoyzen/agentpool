@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from acp.schema import (
         CreateTerminalRequest,
         CreateTerminalResponse,
+        ElicitationCreateRequest,
+        ElicitationCreateResponse,
         KillTerminalCommandRequest,
         KillTerminalCommandResponse,
         ReadTextFileRequest,
@@ -50,6 +52,14 @@ class NoOpClient(Client):
         from acp.schema import AllowedOutcome, RequestPermissionResponse
 
         return RequestPermissionResponse(outcome=AllowedOutcome(option_id="allow"))
+
+    async def elicitation_create(
+        self, params: ElicitationCreateRequest
+    ) -> ElicitationCreateResponse:
+        """Decline all elicitation requests."""
+        from acp.schema import ElicitationCreateResponse
+
+        return ElicitationCreateResponse(action="cancel")
 
     async def session_update(self, params: SessionNotification) -> None:
         """Ignore session updates."""
