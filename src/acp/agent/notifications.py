@@ -169,6 +169,23 @@ class ACPNotifications:
         notification = SessionNotification(session_id=self.id, update=update)
         await self.client.session_update(notification)  # pyright: ignore[reportArgumentType]
 
+    async def send_elicitation_complete(
+        self,
+        elicitation_id: str,
+    ) -> None:
+        """Send an elicitation complete notification.
+
+        Informs the client that an out-of-band URL-mode elicitation
+        has completed. The client MAY use this to retry failed requests.
+        """
+        from acp.schema import ElicitationCompleteNotification
+
+        notification = ElicitationCompleteNotification(
+            session_id=self.id,
+            elicitation_id=elicitation_id,
+        )
+        await self.client.elicitation_complete(notification)
+
     async def tool_call_progress(
         self,
         tool_call_id: str,

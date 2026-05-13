@@ -31,6 +31,7 @@ from acp.schema import (
 if TYPE_CHECKING:
     from acp.schema import (
         CreateTerminalRequest,
+        ElicitationCompleteNotification,
         ElicitationCreateRequest,
         KillTerminalCommandRequest,
         ReadTextFileRequest,
@@ -106,6 +107,13 @@ class HeadlessACPClient(Client):
             return ElicitationCreateResponse(action="accept", content={})
         logger.debug("Declining elicitation", message=params.message)
         return ElicitationCreateResponse(action="decline")
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Handle elicitation completion notification from agent."""
+        logger.debug(
+            "Elicitation complete notification received",
+            elicitation_id=params.elicitation_id,
+        )
 
     async def session_update(self, params: SessionNotification) -> None:
         """Handle session update notifications."""

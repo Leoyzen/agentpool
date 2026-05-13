@@ -95,6 +95,7 @@ from acp.schema.elicitation import (
     ElicitationCompleteNotification,
     ElicitationCreateRequest,
     ElicitationCreateResponse,
+    ElicitationItem,
     URLElicitationRequiredError,
 )
 from acp.schema.mcp import (
@@ -213,6 +214,7 @@ __all__ = [
     "ElicitationCompleteNotification",
     "ElicitationCreateRequest",
     "ElicitationCreateResponse",
+    "ElicitationItem",
     "EmbeddedResourceContentBlock",
     "EnvVariable",
     "ExtNotification",

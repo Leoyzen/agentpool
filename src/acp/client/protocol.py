@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from acp.schema import (
         CreateTerminalRequest,
         CreateTerminalResponse,
+        ElicitationCompleteNotification,
         ElicitationCreateRequest,
         ElicitationCreateResponse,
         KillTerminalCommandRequest,
@@ -37,6 +38,8 @@ class Client(Protocol):
     async def elicitation_create(
         self, params: ElicitationCreateRequest
     ) -> ElicitationCreateResponse: ...
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None: ...
 
     async def session_update(self, params: SessionNotification) -> None: ...
 

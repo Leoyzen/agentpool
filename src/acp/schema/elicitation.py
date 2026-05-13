@@ -35,6 +35,9 @@ class ElicitationCreateRequest(Request):
     the elicitation externally, then signal completion via notification.
     """
 
+    elicitation_id: str | None = Field(default=None, alias="elicitationId")
+    """Unique identifier for this elicitation request. Required for URL mode."""
+
 
 class ElicitationCreateResponse(Response):
     """Response to an elicitation request.
@@ -64,36 +67,42 @@ class ElicitationCreateResponse(Response):
 class ElicitationCompleteNotification(AnnotatedObject):
     """Notification signaling completion of a URL-based elicitation.
 
-    Sent by the client when the user has completed an external elicitation
-    flow (e.g., finished OAuth in the browser). This is a fire-and-forget
-    notification - the agent does not wait for or expect a response.
+    Sent by the agent to inform the client that an out-of-band URL
+    interaction has completed. The client MAY use this to automatically
+    retry requests or update UI.
 
-    See protocol docs: [Elicitation](https://agentclientprotocol.com/protocol/elicitation)
+    See: https://agentclientprotocol.com/rfds/elicitation.md
     """
 
     session_id: str
     """The session ID this elicitation belongs to."""
 
-    action: Literal["accept", "decline", "cancel"]
-    """The user's decision after completing the external elicitation."""
+    elicitation_id: str = Field(alias="elicitationId")
+    """The ID of the elicitation that was completed."""
 
-    content: dict[str, Any] | None = None
-    """The structured content resulting from the elicitation.
 
-    Only present when action is 'accept'.
-    """
+class ElicitationItem(Schema):
+    """A single URL-mode elicitation requirement."""
+
+    mode: Literal["url"] = "url"
+    elicitation_id: str = Field(alias="elicitationId")
+    url: str
+    message: str
 
 
 class URLElicitationRequiredError(Schema):
     """Error indicating that URL-based elicitation is required.
 
-    Returned when the agent requests elicitation but the client does not
-    support the `elicitation/create` method. The client can use the
-    provided URL to complete the elicitation externally.
+    Error code: -32042
+    Returned when a request cannot be processed until a URL-mode
+    elicitation is completed (e.g., OAuth authorization needed).
     """
 
-    url: str
-    """The URL the user should visit to complete the elicitation."""
+    code: int = -32042
+    """The JSON-RPC error code for URL elicitation required."""
 
     message: str
-    """A human-readable message explaining what the user needs to do."""
+    """A human-readable error message."""
+
+    elicitations: list[ElicitationItem] = Field(default_factory=list)
+    """URL-mode elicitations that must be completed before retrying."""

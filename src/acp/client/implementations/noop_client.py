@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from acp.schema import (
         CreateTerminalRequest,
         CreateTerminalResponse,
+        ElicitationCompleteNotification,
         ElicitationCreateRequest,
         ElicitationCreateResponse,
         KillTerminalCommandRequest,
@@ -60,6 +61,9 @@ class NoOpClient(Client):
         from acp.schema import ElicitationCreateResponse
 
         return ElicitationCreateResponse(action="cancel")
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Ignore elicitation completion notifications."""
 
     async def session_update(self, params: SessionNotification) -> None:
         """Ignore session updates."""

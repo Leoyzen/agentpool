@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         CreateTerminalRequest,
         CreateTerminalResponse,
         DeniedOutcome,
+        ElicitationCompleteNotification,
         ElicitationCreateRequest,
         KillTerminalCommandRequest,
         KillTerminalCommandResponse,
@@ -101,6 +102,13 @@ class DefaultACPClient(Client):
         logger.info("Elicitation requested", message=params.message)
         self.elicitation_calls.append(params)
         return ElicitationCreateResponse(action="accept", content={})
+
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Handle elicitation completion notification from agent."""
+        logger.debug(
+            "Elicitation complete notification received",
+            elicitation_id=params.elicitation_id,
+        )
 
     async def session_update(self, params: SessionNotification) -> None:
         """Handle session update notifications."""

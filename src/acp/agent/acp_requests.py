@@ -216,6 +216,7 @@ class ACPRequests:
         *,
         requested_schema: dict[str, Any],
         url: str | None = None,
+        elicitation_id: str | None = None,
     ) -> ElicitationCreateResponse:
         """Elicit structured input from the user.
 
@@ -223,6 +224,7 @@ class ACPRequests:
             message: Human-readable message describing what input is being requested
             requested_schema: JSON Schema object describing the expected input structure
             url: Optional URL for URL-based elicitation (e.g., OAuth flows)
+            elicitation_id: Optional unique identifier for this elicitation request
 
         Returns:
             Elicitation response with user's decision and optional content
@@ -232,5 +234,6 @@ class ACPRequests:
             message=message,
             requested_schema=requested_schema,
             url=url,
+            elicitation_id=elicitation_id,
         )
         return await self.client.elicitation_create(request)

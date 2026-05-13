@@ -12,9 +12,9 @@ from acp.schema.base import Schema
 from acp.schema.client_requests import ClientRequest  # noqa: TC001
 from acp.schema.client_responses import ClientResponse  # noqa: TC001
 from acp.schema.common import Error  # noqa: TC001
+from acp.schema.elicitation import ElicitationCompleteNotification  # noqa: TC001
 from acp.schema.notifications import (  # noqa: TC001
     CancelNotification,
-    ElicitationCompleteNotification,
     SessionNotification,
 )
 
@@ -66,8 +66,8 @@ class ClientNotificationMessage(JsonRPCMessage):
     method: ClientMethod | str
     """Method name."""
 
-    params: CancelNotification | ElicitationCompleteNotification | Any | None = None
-    """Agent notification parameters."""
+    params: CancelNotification | Any | None = None
+    """Client notification parameters."""
 
 
 class ClientResponseMessage(JsonRPCMessage):
@@ -155,7 +155,7 @@ class AgentNotificationMessage(JsonRPCMessage):
     method: AgentMethod | str
     """Method name."""
 
-    params: SessionNotification | Any | None = None
+    params: SessionNotification | ElicitationCompleteNotification | Any | None = None
     """Agent notification parameters."""
 
 

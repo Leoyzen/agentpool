@@ -268,6 +268,7 @@ class ACPInputProvider(InputProvider):
                 message=params.message,
                 requested_schema={"type": "object"},
                 url=params.url,
+                elicitation_id=elicit_id,
             )
             return self._map_elicitation_create_response(response)
 

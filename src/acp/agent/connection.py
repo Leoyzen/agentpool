@@ -17,7 +17,6 @@ from acp.schema import (
     CancelNotification,
     CreateTerminalRequest,
     CreateTerminalResponse,
-    ElicitationCompleteNotification,
     ElicitationCreateResponse,
     InitializeRequest,
     KillTerminalCommandRequest,
@@ -57,6 +56,7 @@ if TYPE_CHECKING:
     from acp.schema import (
         AgentMethod,
         CreateTerminalRequest,
+        ElicitationCompleteNotification,
         ElicitationCreateRequest,
         InitializeResponse,
         KillTerminalCommandRequest,
@@ -180,6 +180,11 @@ class AgentSideConnection(Client):
         """Send an extension notification to the client."""
         await self._conn.send_notification(f"_{method}", params)
 
+    async def elicitation_complete(self, params: ElicitationCompleteNotification) -> None:
+        """Send elicitation complete notification to the client."""
+        dct = params.model_dump(by_alias=True, exclude_none=True)
+        await self._conn.send_notification("elicitation/complete", dct)
+
     async def terminal_output(self, params: TerminalOutputRequest) -> TerminalOutputResponse:
         """Show terminal output on the client."""
         dct = params.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
@@ -264,14 +269,6 @@ async def _agent_handler(  # noqa: PLR0911
         case "session/cancel":
             cancel_notification = CancelNotification.model_validate(params)
             await agent.cancel(cancel_notification)
-            return None
-        case "elicitation/complete":
-            notification = ElicitationCompleteNotification.model_validate(params)
-            log.info(
-                "Received elicitation/complete notification",
-                session_id=notification.session_id,
-                action=notification.action,
-            )
             return None
         case "session/set_model":
             set_model_request = SetSessionModelRequest.model_validate(params)
