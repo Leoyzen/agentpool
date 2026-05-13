@@ -15,6 +15,7 @@ from agentpool.ui.base import InputProvider
 
 if TYPE_CHECKING:
     from acp import RequestPermissionResponse
+    from acp.schema.elicitation import ElicitationCreateResponse
     from agentpool import AgentContext
     from agentpool.agents.context import ConfirmationResult
     from agentpool_server.acp_server.session import ACPSession
@@ -195,14 +196,35 @@ class ACPInputProvider(InputProvider):
                 logger.warning("Unknown permission option", option_id=option_id)
                 return "abort_run"
 
-    async def get_elicitation(  # noqa: PLR0911
+    def _client_supports_elicitation(self) -> bool:
+        """Check if the client supports the elicitation/create method."""
+        caps = self.session.client_capabilities
+        return caps.elicitation is not None and bool(caps.elicitation.create)
+
+    @staticmethod
+    def _map_elicitation_create_response(
+        response: ElicitationCreateResponse,
+    ) -> types.ElicitResult:
+        """Map elicitation/create response action to ElicitResult."""
+        match response.action:
+            case "accept":
+                return types.ElicitResult(action="accept", content=response.content or {})
+            case "decline":
+                return types.ElicitResult(action="decline")
+            case "cancel":
+                return types.ElicitResult(action="cancel")
+            case _ as unreachable:
+                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+
+    async def get_elicitation(
         self,
         params: types.ElicitRequestParams,
     ) -> types.ElicitResult | types.ErrorData:
-        """Get user response to elicitation request with basic schema support.
+        """Get user response to elicitation request with capability-gated dual path.
 
-        Currently supports boolean schemas via ACP permission options.
-        Other schemas fall back to accept/decline options.
+        When the client declares the ``elicitation.create`` capability, uses the
+        native ``elicitation/create`` protocol method.  Otherwise falls back to
+        the legacy ``request_permission`` approach for backward compatibility.
 
         Args:
             params: MCP elicit request parameters
@@ -211,80 +233,119 @@ class ACPInputProvider(InputProvider):
             Elicit result with user's response or error data
         """
         try:
-            # Handle URL mode elicitation (OAuth, credentials, payments)
             if isinstance(params, types.ElicitRequestURLParams):
-                msg = "URL elicitation request"
-                elicit_id = params.elicitationId
-                logger.info(msg, message=params.message, url=params.url, elicitation_id=elicit_id)
-                tool_call_id = f"elicit_url_{elicit_id}"
-                title = f"URL Authorization: {params.message}"
-                url_options = [
-                    PermissionOption(option_id="accept", name="Open URL", kind="allow_once"),
-                    PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
-                ]
-                response = await self.session.requests.request_permission(
-                    tool_call_id=tool_call_id,
-                    title=title,
-                    options=url_options,
-                )
-                match response.outcome:
-                    case AllowedOutcome(option_id="accept"):
-                        webbrowser.open(params.url)
-                        return types.ElicitResult(action="accept")
-                    case AllowedOutcome():
-                        return types.ElicitResult(action="decline")
-                    case DeniedOutcome():
-                        return types.ElicitResult(action="cancel")
-                    case _ as unreachable:
-                        assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+                return await self._get_url_elicitation(params)
+            return await self._get_form_elicitation(params)
+        except Exception as e:
+            logger.exception("Failed to handle elicitation")
+            return types.ErrorData(code=types.INTERNAL_ERROR, message=f"Elicitation failed: {e}")
 
-            # Form mode elicitation
-            schema = params.requestedSchema
-            logger.info("Elicitation request", message=params.message, schema=schema)
-            tool_call_id = f"elicit_{hash(params.message)}"
-            title = f"Elicitation: {params.message}"
+    async def _get_url_elicitation(
+        self,
+        params: types.ElicitRequestURLParams,
+    ) -> types.ElicitResult:
+        """Handle URL-mode elicitation (OAuth, credentials, payments).
 
-            if _is_boolean_schema(schema):
-                options: list[PermissionOption] | None = _create_boolean_elicitation_options()
-                response = await self.session.requests.request_permission(
-                    tool_call_id=tool_call_id,
-                    title=title,
-                    options=options,
-                )
-                return self._handle_boolean_elicitation_response(response, schema)
-            if _is_enum_schema(schema) and (options := _create_enum_elicitation_options(schema)):
-                response = await self.session.requests.request_permission(
-                    tool_call_id=tool_call_id,
-                    title=title,
-                    options=options,
-                )
-                return _handle_enum_elicitation_response(response, schema)
+        Uses ``elicitation/create`` when the client supports it, otherwise
+        falls back to ``request_permission``.
+        """
+        elicit_id = params.elicitationId
+        logger.info(
+            "URL elicitation request",
+            message=params.message,
+            url=params.url,
+            elicitation_id=elicit_id,
+        )
 
-            options = [
-                PermissionOption(option_id="accept", name="Accept", kind="allow_once"),
-                PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
-            ]
-            response = await self.session.requests.request_permission(
+        if self._client_supports_elicitation():
+            response = await self.session.requests.elicitation_create(
+                message=params.message,
+                requested_schema={"type": "object"},
+                url=params.url,
+            )
+            return self._map_elicitation_create_response(response)
+
+        # Fallback: request_permission
+        tool_call_id = f"elicit_url_{elicit_id}"
+        title = f"URL Authorization: {params.message}"
+        url_options = [
+            PermissionOption(option_id="accept", name="Open URL", kind="allow_once"),
+            PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
+        ]
+        perm_response = await self.session.requests.request_permission(
+            tool_call_id=tool_call_id,
+            title=title,
+            options=url_options,
+        )
+        match perm_response.outcome:
+            case AllowedOutcome(option_id="accept"):
+                webbrowser.open(params.url)
+                return types.ElicitResult(action="accept")
+            case AllowedOutcome():
+                return types.ElicitResult(action="decline")
+            case DeniedOutcome():
+                return types.ElicitResult(action="cancel")
+            case _ as unreachable:
+                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+
+    async def _get_form_elicitation(
+        self,
+        params: types.ElicitRequestFormParams,
+    ) -> types.ElicitResult | types.ErrorData:
+        """Handle form-mode elicitation with schema support.
+
+        Uses ``elicitation/create`` when the client supports it, otherwise
+        falls back to ``request_permission`` with boolean/enum/generic handling.
+        """
+        schema = params.requestedSchema
+        logger.info("Elicitation request", message=params.message, schema=schema)
+
+        if self._client_supports_elicitation():
+            response = await self.session.requests.elicitation_create(
+                message=params.message,
+                requested_schema=schema,
+            )
+            return self._map_elicitation_create_response(response)
+
+        # Fallback: request_permission with schema-specific handling
+        tool_call_id = f"elicit_{hash(params.message)}"
+        title = f"Elicitation: {params.message}"
+
+        if _is_boolean_schema(schema):
+            options: list[PermissionOption] | None = _create_boolean_elicitation_options()
+            perm_response = await self.session.requests.request_permission(
                 tool_call_id=tool_call_id,
                 title=title,
                 options=options,
             )
+            return self._handle_boolean_elicitation_response(perm_response, schema)
+        if _is_enum_schema(schema) and (options := _create_enum_elicitation_options(schema)):
+            perm_response = await self.session.requests.request_permission(
+                tool_call_id=tool_call_id,
+                title=title,
+                options=options,
+            )
+            return _handle_enum_elicitation_response(perm_response, schema)
 
-            # Convert permission response to elicitation result
-            match response.outcome:
-                case AllowedOutcome(option_id="accept"):
-                    # For non-boolean schemas, return empty content
-                    return types.ElicitResult(action="accept", content={})
-                case AllowedOutcome():
-                    return types.ElicitResult(action="decline")
-                case DeniedOutcome():
-                    return types.ElicitResult(action="cancel")
-                case _ as unreachable:
-                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+        options = [
+            PermissionOption(option_id="accept", name="Accept", kind="allow_once"),
+            PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
+        ]
+        perm_response = await self.session.requests.request_permission(
+            tool_call_id=tool_call_id,
+            title=title,
+            options=options,
+        )
 
-        except Exception as e:
-            logger.exception("Failed to handle elicitation")
-            return types.ErrorData(code=types.INTERNAL_ERROR, message=f"Elicitation failed: {e}")
+        match perm_response.outcome:
+            case AllowedOutcome(option_id="accept"):
+                return types.ElicitResult(action="accept", content={})
+            case AllowedOutcome():
+                return types.ElicitResult(action="decline")
+            case DeniedOutcome():
+                return types.ElicitResult(action="cancel")
+            case _ as unreachable:
+                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
 
     def _handle_boolean_elicitation_response(
         self, response: RequestPermissionResponse, schema: dict[str, Any]
