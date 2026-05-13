@@ -6,6 +6,7 @@ from pydantic import Field
 
 from acp.schema.base import Request
 from acp.schema.common import EnvVariable  # noqa: TC001
+from acp.schema.elicitation import ElicitationCreateRequest
 from acp.schema.tool_call import PermissionOption, ToolCall  # noqa: TC001
 
 
@@ -112,9 +113,6 @@ class RequestPermissionRequest(BaseAgentRequest):
 
     tool_call: ToolCall
     """Details about the tool call requiring permission."""
-
-
-from acp.schema.elicitation import ElicitationCreateRequest  # noqa: TC001
 
 
 AgentRequest = (

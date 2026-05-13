@@ -7,7 +7,7 @@ from typing import Self
 from pydantic import Field
 
 from acp.schema.base import AnnotatedObject
-from acp.schema.slash_commands import AvailableCommand
+from acp.schema.slash_commands import AvailableCommand  # noqa: TC001
 
 
 class FileSystemCapability(AnnotatedObject):
@@ -91,6 +91,7 @@ class ClientCapabilities(AnnotatedObject):
             write_text_file: Whether the Client supports `fs/write_text_file` requests.
             terminal: Whether the Client supports all `terminal/*` methods.
             auth: Authentication capabilities supported by the client.
+            elicitation: Elicitation capabilities supported by the client.
 
         Returns:
             A new instance of ClientCapabilities.

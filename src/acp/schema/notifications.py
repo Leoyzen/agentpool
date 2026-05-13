@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Generic, TypeVar
 
 from acp.schema.base import AnnotatedObject
-from acp.schema.elicitation import ElicitationCompleteNotification  # noqa: TC001
+from acp.schema.elicitation import ElicitationCompleteNotification
 from acp.schema.session_updates import SessionUpdate
 
 

@@ -91,7 +91,7 @@ from acp.schema.content_blocks import (
     TextContentBlock,
     TextResourceContents,
 )
-from acp.schema.elicitation import (  # noqa: TC001
+from acp.schema.elicitation import (
     ElicitationCompleteNotification,
     ElicitationCreateRequest,
     ElicitationCreateResponse,
@@ -296,10 +296,10 @@ __all__ = [
     "ToolCallProgress",
     "ToolCallStart",
     "ToolCallStatus",
+    "URLElicitationRequiredError",
     "Usage",
     "UsageUpdate",
     "UserMessageChunk",
-    "URLElicitationRequiredError",
     "WaitForTerminalExitRequest",
     "WaitForTerminalExitResponse",
     "WriteTextFileRequest",
