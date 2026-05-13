@@ -17,6 +17,7 @@ from acp.schema import (
     CancelNotification,
     CreateTerminalRequest,
     CreateTerminalResponse,
+    ElicitationCreateResponse,
     InitializeRequest,
     KillTerminalCommandRequest,
     KillTerminalCommandResponse,
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from acp.schema import (
         AgentMethod,
         CreateTerminalRequest,
+        ElicitationCreateRequest,
         InitializeResponse,
         KillTerminalCommandRequest,
         ListSessionsResponse,
@@ -138,6 +140,15 @@ class AgentSideConnection(Client):
         method = "session/request_permission"
         resp = await self._conn.send_request(method, dct)
         return RequestPermissionResponse.model_validate(resp)
+
+    async def elicitation_create(
+        self, params: ElicitationCreateRequest
+    ) -> ElicitationCreateResponse:
+        """Elicit input from the client."""
+        dct = params.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True)
+        method = "elicitation/create"
+        resp = await self._conn.send_request(method, dct)
+        return ElicitationCreateResponse.model_validate(resp)
 
     async def read_text_file(self, params: ReadTextFileRequest) -> ReadTextFileResponse:
         """Read text file from the client."""

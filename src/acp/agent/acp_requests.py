@@ -9,6 +9,7 @@ import structlog
 
 from acp.schema import (
     CreateTerminalRequest,
+    ElicitationCreateRequest,
     EnvVariable,
     KillTerminalCommandRequest,
     PermissionOption,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
         TerminalOutputResponse,
         WaitForTerminalExitResponse,
     )
+    from acp.schema import ElicitationCreateResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -207,3 +209,28 @@ class ACPRequests:
         tool_call = ToolCall(tool_call_id=tool_call_id, title=title, raw_input=raw_input)
         request = RequestPermissionRequest(session_id=self.id, tool_call=tool_call, options=options)
         return await self.client.request_permission(request)
+
+    async def elicitation_create(
+        self,
+        message: str,
+        *,
+        requested_schema: dict[str, Any],
+        url: str | None = None,
+    ) -> ElicitationCreateResponse:
+        """Elicit structured input from the user.
+
+        Args:
+            message: Human-readable message describing what input is being requested
+            requested_schema: JSON Schema object describing the expected input structure
+            url: Optional URL for URL-based elicitation (e.g., OAuth flows)
+
+        Returns:
+            Elicitation response with user's decision and optional content
+        """
+        request = ElicitationCreateRequest(
+            session_id=self.id,
+            message=message,
+            requested_schema=requested_schema,
+            url=url,
+        )
+        return await self.client.elicitation_create(request)
