@@ -420,15 +420,12 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                 if isinstance(node, BaseAgent):
                     node_model_id = node.model_name
 
-                from agentpool.talk.message_history import MessageHistory
-
-                run_kwargs = {**kwargs, "message_history": MessageHistory()}
                 async for event in node.run_stream(
                     *current_message,
                     session_id=child_sid,
                     parent_session_id=parent_session_id,
                     depth=child_depth,
-                    **run_kwargs,
+                    **kwargs,
                 ):
                     # Handle already-wrapped SubAgentEvents (nested teams)
                     if isinstance(event, SubAgentEvent):
