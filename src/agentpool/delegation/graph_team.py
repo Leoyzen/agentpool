@@ -96,8 +96,11 @@ def _make_member_step(
             final_prompt.insert(0, state.shared_prompt)
 
         try:
+            from agentpool.talk.message_history import MessageHistory
+
             start = perf_counter()
-            coro = node.run(*final_prompt, **state.kwargs)
+            run_kwargs = {**state.kwargs, "message_history": MessageHistory()}
+            coro = node.run(*final_prompt, **run_kwargs)
             message = (
                 await asyncio.wait_for(coro, timeout=state.member_timeout)
                 if state.member_timeout is not None

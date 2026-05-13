@@ -24,6 +24,8 @@ async def stream_response(
     agent: SupportsRunStream[Any],
     content: str,
     request: ChatCompletionRequest,
+    *,
+    message_history: Any | None = None,
 ) -> AsyncGenerator[str]:
     """Generate streaming response chunks."""
     response_id = f"chatcmpl-{int(time.time() * 1000)}"
@@ -40,7 +42,10 @@ async def stream_response(
             "choices": [choice],
         }
         yield f"data: {anyenv.dump_json(first_chunk)}\n\n"
-        async for event in agent.run_stream(content):
+        stream_kwargs: dict[str, Any] = {}
+        if message_history is not None:
+            stream_kwargs["message_history"] = message_history
+        async for event in agent.run_stream(content, **stream_kwargs):
             match event:
                 case PartDeltaEvent(delta=TextPartDelta(content_delta=chunk)):
                     # Skip empty chunks

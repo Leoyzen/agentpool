@@ -35,12 +35,21 @@ def api_command(
     through a standard completions API interface.
     """
     import uvicorn
+    from platformdirs import user_log_path
 
     from agentpool import AgentPool, AgentsManifest
+    from agentpool.log import configure_logging as configure_ap_logging
     from agentpool_config.context import ConfigContextManager
     from agentpool_server.openai_api_server.server import OpenAIAPIServer
 
+    log_level = ctx.obj.get("log_level", "info") if ctx.obj else "info"
+    log_dir = user_log_path("agentpool", appauthor=False)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "serve-api.log"
+    configure_ap_logging(level=log_level.upper(), force=True, log_file=str(log_file))
+
     logger.info("Server PID", pid=os.getpid())
+    logger.info("Log file", log_file=str(log_file))
 
     def on_message(message: ChatMessage[Any]) -> None:
         print(message.format(style="simple"))
@@ -51,21 +60,7 @@ def api_command(
         msg = str(e)
         raise t.BadParameter(msg) from e
     with ConfigContextManager(config_path):
-        manifest = AgentsManifest.from_file(config_path)
-        if config_path:
-            def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
-                return {
-                    name: node_config.model_copy(update={"config_file_path": config_path})
-                    for name, node_config in nodes.items()
-                }
-
-            manifest = manifest.model_copy(
-                update={
-                    "config_file_path": config_path,
-                    "agents": update_with_path(manifest.agents),
-                    "teams": update_with_path(manifest.teams),
-                }
-            )
+        manifest = AgentsManifest.from_resolved(explicit_path=config_path)
 
         # Keep AgentPool initialization inside the config context so custom
         # providers can resolve relative schema/prompt paths against the YAML directory.
@@ -77,8 +72,6 @@ def api_command(
 
     server = OpenAIAPIServer(pool, cors=cors, docs=docs)
 
-    # Get log level from the global context
-    log_level = ctx.obj.get("log_level", "info") if ctx.obj else "info"
     uvicorn.run(server.app, host=host, port=port, log_level=log_level.lower())
 
 
