@@ -17,6 +17,7 @@ from acp.schema import (
     CancelNotification,
     CreateTerminalRequest,
     CreateTerminalResponse,
+    ElicitationCompleteNotification,
     ElicitationCreateResponse,
     InitializeRequest,
     KillTerminalCommandRequest,
@@ -263,6 +264,14 @@ async def _agent_handler(  # noqa: PLR0911
         case "session/cancel":
             cancel_notification = CancelNotification.model_validate(params)
             await agent.cancel(cancel_notification)
+            return None
+        case "elicitation/complete":
+            notification = ElicitationCompleteNotification.model_validate(params)
+            log.info(
+                "Received elicitation/complete notification",
+                session_id=notification.session_id,
+                action=notification.action,
+            )
             return None
         case "session/set_model":
             set_model_request = SetSessionModelRequest.model_validate(params)

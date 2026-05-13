@@ -258,6 +258,12 @@ class ACPInputProvider(InputProvider):
         )
 
         if self._client_supports_elicitation():
+            # TODO: URL-mode elicitation currently returns the immediate response
+            # from ``elicitation/create``. For full URL flows where the user
+            # completes an external action (OAuth, payments), the result arrives
+            # asynchronously via ``ElicitationCompleteNotification``. Implementing
+            # the async Future + notification registry to wait for completion is
+            # deferred to a future PR.
             response = await self.session.requests.elicitation_create(
                 message=params.message,
                 requested_schema={"type": "object"},

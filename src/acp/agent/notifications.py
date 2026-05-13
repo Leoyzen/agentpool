@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Any, assert_never
 
 from pydantic_ai import ModelRequest, ModelResponse, ToolReturnPart, UserPromptPart
 import structlog
@@ -625,33 +625,6 @@ class ACPNotifications:
             audience=audience,
         )
         await self.send_update(update)
-
-    async def send_elicitation_complete(
-        self,
-        action: Literal["accept", "decline", "cancel"],
-        *,
-        content: dict[str, Any] | None = None,
-    ) -> None:
-        """Send an elicitation complete notification.
-
-        Signals that a URL-based elicitation flow has completed.
-        This is a fire-and-forget notification — the agent does not
-        wait for a response.
-
-        Args:
-            action: The user's decision after completing the elicitation
-            content: The structured content resulting from the elicitation
-        """
-        from acp.schema import ElicitationCompleteNotification
-
-        notification = ElicitationCompleteNotification(
-            session_id=self.id,
-            action=action,
-            content=content,
-        )
-        await self.client.session_update(
-            SessionNotification(session_id=self.id, update=notification)  # type: ignore[arg-type]
-        )
 
     async def send_agent_resource(
         self,
