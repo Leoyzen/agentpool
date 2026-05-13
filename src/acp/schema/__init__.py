@@ -33,6 +33,7 @@ from acp.schema.capabilities import (
     AgentCapabilities,
     AuthCapabilities,
     ClientCapabilities,
+    ElicitationCapabilities,
     FileSystemCapability,
     McpCapabilities,
     PromptCapabilities,
@@ -89,6 +90,12 @@ from acp.schema.content_blocks import (
     ResourceContentBlock,
     TextContentBlock,
     TextResourceContents,
+)
+from acp.schema.elicitation import (  # noqa: TC001
+    ElicitationCompleteNotification,
+    ElicitationCreateRequest,
+    ElicitationCreateResponse,
+    URLElicitationRequiredError,
 )
 from acp.schema.mcp import (
     HttpHeader,
@@ -202,6 +209,10 @@ __all__ = [
     "CustomRequest",
     "CustomResponse",
     "DeniedOutcome",
+    "ElicitationCapabilities",
+    "ElicitationCompleteNotification",
+    "ElicitationCreateRequest",
+    "ElicitationCreateResponse",
     "EmbeddedResourceContentBlock",
     "EnvVariable",
     "ExtNotification",
@@ -288,6 +299,7 @@ __all__ = [
     "Usage",
     "UsageUpdate",
     "UserMessageChunk",
+    "URLElicitationRequiredError",
     "WaitForTerminalExitRequest",
     "WaitForTerminalExitResponse",
     "WriteTextFileRequest",

@@ -34,6 +34,19 @@ class AuthCapabilities(AnnotatedObject):
     """Whether the client supports ``terminal`` authentication methods."""
 
 
+class ElicitationCapabilities(AnnotatedObject):
+    """Elicitation capabilities supported by the client.
+
+    Advertised during initialization to inform the agent whether
+    the client supports the `elicitation/create` method.
+
+    See protocol docs: [Elicitation](https://agentclientprotocol.com/protocol/elicitation)
+    """
+
+    create: bool | None = False
+    """Whether the Client supports `elicitation/create` requests."""
+
+
 class ClientCapabilities(AnnotatedObject):
     """Capabilities supported by the client.
 
@@ -55,6 +68,13 @@ class ClientCapabilities(AnnotatedObject):
     terminal: bool | None = False
     """Whether the Client support all `terminal/*` methods."""
 
+    elicitation: ElicitationCapabilities | None = None
+    """Elicitation capabilities supported by the client.
+
+    Determines whether the agent can use `elicitation/create` for
+    structured user input, or must fall back to `request_permission`.
+    """
+
     @classmethod
     def create(
         cls,
@@ -62,6 +82,7 @@ class ClientCapabilities(AnnotatedObject):
         write_text_file: bool | None = False,
         terminal: bool | None = False,
         auth: AuthCapabilities | None = None,
+        elicitation: ElicitationCapabilities | None = None,
     ) -> Self:
         """Create a new instance of ClientCapabilities.
 
@@ -75,7 +96,7 @@ class ClientCapabilities(AnnotatedObject):
             A new instance of ClientCapabilities.
         """
         fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
-        return cls(fs=fs, terminal=terminal, auth=auth)
+        return cls(fs=fs, terminal=terminal, auth=auth, elicitation=elicitation)
 
 
 class PromptCapabilities(AnnotatedObject):

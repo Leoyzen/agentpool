@@ -14,6 +14,7 @@ from acp.schema.client_responses import ClientResponse  # noqa: TC001
 from acp.schema.common import Error  # noqa: TC001
 from acp.schema.notifications import (  # noqa: TC001
     CancelNotification,
+    ElicitationCompleteNotification,
     SessionNotification,
 )
 
@@ -34,6 +35,7 @@ AgentMethod = Literal[
 ]
 
 ClientMethod = Literal[
+    "elicitation/create",
     "fs/read_text_file",
     "fs/write_text_file",
     "session/request_permission",
@@ -64,7 +66,7 @@ class ClientNotificationMessage(JsonRPCMessage):
     method: ClientMethod | str
     """Method name."""
 
-    params: CancelNotification | Any | None = None
+    params: CancelNotification | ElicitationCompleteNotification | Any | None = None
     """Agent notification parameters."""
 
 

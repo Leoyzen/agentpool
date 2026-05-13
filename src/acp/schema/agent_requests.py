@@ -114,10 +114,14 @@ class RequestPermissionRequest(BaseAgentRequest):
     """Details about the tool call requiring permission."""
 
 
+from acp.schema.elicitation import ElicitationCreateRequest  # noqa: TC001
+
+
 AgentRequest = (
     WriteTextFileRequest
     | ReadTextFileRequest
     | RequestPermissionRequest
+    | ElicitationCreateRequest
     | CreateTerminalRequest
     | TerminalOutputRequest
     | ReleaseTerminalRequest
