@@ -275,6 +275,47 @@ def _get_dummy_providers() -> list[Provider]:
     return [dummy_provider]
 
 
+def _infer_default_model(state: StateDep) -> str | None:
+    """Derive the default ``provider/model`` string from the manifest.
+
+    Looks up the ``default_agent``'s model in the manifest.  If the model is
+    a variant name defined in ``model_variants``, returns
+    ``"<provider_id>/<variant_name>"`` so the TUI selects the right entry.
+    """
+    try:
+        manifest = state.pool.manifest
+    except (AttributeError, RuntimeError):
+        return None
+    if not manifest or not manifest.model_variants:
+        return None
+
+    # Find the default agent's model setting.
+    default_name = manifest.default_agent
+    agent_cfg = (manifest.agents or {}).get(default_name or "")
+    if agent_cfg is None:
+        return None
+
+    # agent_cfg.model is either a variant name (str) or a structured config.
+    agent_model = agent_cfg.model
+    variant_name: str | None = None
+
+    if isinstance(agent_model, str) and agent_model in manifest.model_variants:
+        variant_name = agent_model
+    elif hasattr(agent_model, "identifier"):
+        # Structured config — check if any variant has the same identifier.
+        identifier = str(agent_model.identifier)
+        for vname, vcfg in manifest.model_variants.items():
+            if hasattr(vcfg, "identifier") and str(vcfg.identifier) == identifier:
+                variant_name = vname
+                break
+
+    if variant_name is None:
+        return None
+
+    provider_id = _extract_provider(manifest.model_variants[variant_name])
+    return f"{provider_id}/{variant_name}"
+
+
 @router.get("/config")
 async def get_config(state: StateDep) -> Config:
     """Get server configuration."""
@@ -292,23 +333,23 @@ async def get_config(state: StateDep) -> Config:
     if state.config.watcher is None:
         state.config.watcher = WatcherConfig(ignore=DEFAULT_IGNORE)
 
-    # Set a default model if not already configured
+    # Set a default model if not already configured.
+    # Priority: default agent's model variant > tokonomics discovery.
     if state.config.model is None:
-        try:
-            # Get available models — no agent_lock needed: per-session agents
-            # make global serialization unnecessary for read-only queries.
-            toko_models = await state.agent.get_available_models()
-            if toko_models:
-                providers = _build_providers(toko_models)
+        state.config.model = _infer_default_model(state)
 
-                # Find first connected provider and use its first model
-                for provider in providers:
-                    if any(os.environ.get(env) for env in provider.env) and provider.models:
-                        first_model = next(iter(provider.models.keys()))
-                        state.config.model = f"{provider.id}/{first_model}"
-                        break
-        except Exception:  # noqa: BLE001
-            pass  # If we can't set a default, that's okay
+        if state.config.model is None:
+            try:
+                toko_models = await state.agent.get_available_models()
+                if toko_models:
+                    providers = _build_providers(toko_models)
+                    for provider in providers:
+                        if any(os.environ.get(env) for env in provider.env) and provider.models:
+                            first_model = next(iter(provider.models.keys()))
+                            state.config.model = f"{provider.id}/{first_model}"
+                            break
+            except Exception:  # noqa: BLE001
+                pass
 
     return state.config
 
