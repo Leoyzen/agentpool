@@ -241,8 +241,6 @@ class SubagentTools(StaticResourceProvider):
             fs = ctx.internal_fs
             fs.mkdirs(f"/tasks/{task_id}", exist_ok=True)
 
-            from agentpool.messaging.message_history import MessageHistory
-
             async def _background_run() -> None:
                 """Run task through SessionPool and write final result to filesystem."""
                 final_content = ""
@@ -251,7 +249,6 @@ class SubagentTools(StaticResourceProvider):
                         child_session_id,
                         prompt,
                         input_provider=input_provider,
-                        message_history=MessageHistory(),
                     ):
                         if isinstance(event, StreamCompleteEvent):
                             content = event.message.content
@@ -290,14 +287,11 @@ class SubagentTools(StaticResourceProvider):
             }
 
         # Synchronous mode — block until completion and return final result
-        from agentpool.messaging.message_history import MessageHistory
-
         final_content = ""
         async for event in session_pool.run_stream(
             child_session_id,
             prompt,
             input_provider=input_provider,
-            message_history=MessageHistory(),
         ):
             if isinstance(event, StreamCompleteEvent):
                 content = event.message.content

@@ -182,22 +182,13 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
 
         # Just take the last message content - let agent handle history
         content = request.messages[-1].content or ""
-        # TEMP: log the full prompt for debugging batch tests
-        logger.info("create_chat_completion model=%s prompt:\n%s", request.model, content)
-
-        # Each HTTP request is an independent task — use a fresh MessageHistory
-        # to prevent context accumulation across requests on the shared agent.
-        from agentpool.messaging.message_history import MessageHistory
-
-        request_history = MessageHistory()
-
         if request.stream:
             return StreamingResponse(
-                stream_response(agent, content, request, message_history=request_history),
+                stream_response(agent, content, request),
                 media_type="text/event-stream",
             )
         try:
-            response = await agent.run(content, message_history=request_history)
+            response = await agent.run(content)
             message = OpenAIMessage(role="assistant", content=str(response.content))
             completion_response = ChatCompletionResponse(
                 id=response.message_id,
