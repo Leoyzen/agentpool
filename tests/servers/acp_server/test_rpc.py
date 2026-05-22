@@ -326,6 +326,19 @@ async def test_method_not_found_results_in_error_response(
             AsyncioReaderAdapter(s.server_reader),
         )
 
+        # Initialize first
+        init_req = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": 1},
+        }
+        s.client_writer.write((anyenv.dump_json(init_req) + "\n").encode())
+        await s.client_writer.drain()
+        line = await asyncio.wait_for(s.client_reader.readline(), timeout=1)
+        init_resp = anyenv.load_json(line)
+        assert "result" in init_resp
+
         req = {"jsonrpc": "2.0", "id": 2, "method": "unknown/method", "params": {}}
         s.client_writer.write((anyenv.dump_json(req) + "\n").encode())
         await s.client_writer.drain()
@@ -357,6 +370,10 @@ async def test_set_session_mode_and_extensions(
             AsyncioWriterAdapter(s.server_writer),
             AsyncioReaderAdapter(s.server_reader),
         )
+
+        # Initialize first
+        init_resp = await agent_conn.initialize(InitializeRequest(protocol_version=1))
+        assert init_resp.protocol_version == 1
 
         # set_session_mode
         request = SetSessionModeRequest(session_id="sess", mode_id="yolo")

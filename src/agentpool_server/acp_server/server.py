@@ -10,11 +10,12 @@ import asyncio
 import functools
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from acp import serve
+from acp import ACPWebSocketTransport, StdioTransport, serve
 from agentpool import AgentPool
 from agentpool.log import get_logger
 from agentpool.models.manifest import AgentsManifest
 from agentpool_config.context import ConfigContextManager
+from agentpool_config.pool_server import ACPPoolServerConfig
 from agentpool_server import BaseServer
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 
@@ -131,6 +132,23 @@ class ACPServer(BaseServer):
         else:
             resolved_display_mode = "tool_box"
 
+        # Resolve transport with priority: argument > config > default
+        resolved_transport: Transport
+        if transport != "stdio":
+            # Explicit transport argument overrides config
+            resolved_transport = transport
+        elif isinstance(config, AgentsManifest) and isinstance(
+            config.pool_server, ACPPoolServerConfig
+        ):
+            if config.pool_server.transport == "streamable-http":
+                resolved_transport = ACPWebSocketTransport(
+                    host=config.pool_server.host, port=config.pool_server.port
+                )
+            else:
+                resolved_transport = StdioTransport()
+        else:
+            resolved_transport = StdioTransport()
+
         server = cls(
             pool,
             debug_messages=debug_messages,
@@ -139,7 +157,7 @@ class ACPServer(BaseServer):
             agent=agent,
             load_skills=load_skills,
             config_path=config_path,
-            transport=transport,
+            transport=resolved_transport,
             subagent_display_mode=resolved_display_mode,
         )
         agent_names = list(server.pool.all_agents.keys())
@@ -204,6 +222,15 @@ class ACPServer(BaseServer):
             self.log.info("ACP server shutdown requested")
         except Exception:
             self.log.exception("ACP server error")
+
+    def stop(self) -> None:
+        """Stop the ACP server.
+
+        Sets the shutdown event before cancelling the server task
+        so the serving coroutine can observe it.
+        """
+        self._shutdown_event.set()
+        super().stop()
 
     async def swap_pool(
         self, config_path: str, agent_name: str | None = None

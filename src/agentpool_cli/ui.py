@@ -195,8 +195,8 @@ def _run_toad_websocket(config: str | None, port: int) -> None:
         "agentpool",
         "serve-acp",
         "--transport",
-        "websocket",
-        "--ws-port",
+        "streamable-http",
+        "--port",
         str(port),
     ]
     if config:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import TYPE_CHECKING, Annotated, Literal
+import warnings
 
 import anyenv
 from platformdirs import user_log_path
@@ -70,25 +71,41 @@ def acp_command(  # noqa: PLR0915
         ),
     ] = True,
     transport: Annotated[
-        Literal["stdio", "websocket"],
+        Literal["stdio", "websocket", "streamable-http"],
         t.Option(
             "--transport",
             "-t",
-            help="Transport type: stdio (default) or websocket",
+            help="Transport type: stdio (default), streamable-http, or websocket (deprecated)",
         ),
     ] = "stdio",
+    host: Annotated[
+        str,
+        t.Option(
+            "--host",
+            "-h",
+            help="Host to bind the server to (only used with --transport streamable-http)",
+        ),
+    ] = "localhost",
+    port: Annotated[
+        int,
+        t.Option(
+            "-p",
+            "--port",
+            help="Port for the server to listen on (only used with --transport streamable-http)",
+        ),
+    ] = 8080,
     ws_host: Annotated[
         str,
         t.Option(
             "--ws-host",
-            help="WebSocket host (only used with --transport websocket)",
+            help="WebSocket host (only used with --transport websocket, deprecated)",
         ),
     ] = "localhost",
     ws_port: Annotated[
         int,
         t.Option(
             "--ws-port",
-            help="WebSocket port (only used with --transport websocket)",
+            help="WebSocket port (only used with --transport websocket, deprecated)",
         ),
     ] = 8765,
     mcp_config: Annotated[
@@ -109,8 +126,8 @@ def acp_command(  # noqa: PLR0915
     r"""Run agents as an ACP (Agent Client Protocol) server.
 
     This creates an ACP-compatible JSON-RPC 2.0 server that communicates over stdio
-    streams, enabling your agents to work with desktop applications that support
-    the Agent Client Protocol.
+    streams or streamable HTTP/WebSocket, enabling your agents to work with desktop
+    applications that support the Agent Client Protocol.
 
     Configuration Layers (merged in order, later overrides earlier):
 
@@ -124,8 +141,18 @@ def acp_command(  # noqa: PLR0915
     Use --agent to specify which agent to use by name. Without this option,
     the pool's default agent is used (set via 'default_agent' in config,
     or falls back to the first agent).
+
+    Transport Options:
+        # Stdio transport (default, for IDE integration)
+        agentpool serve-acp agents.yml
+
+        # Streamable HTTP transport (recommended for Toad, web clients)
+        agentpool serve-acp agents.yml --transport streamable-http --port 8080
+
+        # Legacy WebSocket transport (deprecated)
+        agentpool serve-acp agents.yml --transport websocket --ws-port 8765
     """
-    from acp import StdioTransport, WebSocketTransport
+    from acp import ACPWebSocketTransport, StdioTransport, WebSocketTransport
     from agentpool import log
     from agentpool.config_resources import ACP_ASSISTANT
     from agentpool.models.manifest import AgentsManifest
@@ -134,12 +161,17 @@ def acp_command(  # noqa: PLR0915
     from agentpool_server.acp_server import ACPServer
 
     # Build transport config
-    if transport == "websocket":
-        transport_config: Transport = WebSocketTransport(host=ws_host, port=ws_port)
+    if transport == "streamable-http":
+        transport_config: Transport = ACPWebSocketTransport(host=host, port=port)
+    elif transport == "websocket":
+        warnings.warn(
+            "--transport websocket is deprecated; use --transport streamable-http instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        transport_config = WebSocketTransport(host=ws_host, port=ws_port)
     elif transport == "stdio":
         transport_config = StdioTransport()
-    else:
-        raise t.BadParameter(f"Unknown transport: {transport}. Use 'stdio' or 'websocket'.")
 
     # Always log to file with rollover
     log_dir = user_log_path("agentpool", appauthor=False)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
 from typing import TYPE_CHECKING, Any, Self
 
 import logfire
@@ -104,10 +103,32 @@ class AgentSideConnection(Client):
             debug_file: path to a file to write debug information to
         """
         agent = to_agent(self) if callable(to_agent) else to_agent  # ty: ignore[call-top-callable]
-        handler = partial(_agent_handler, agent)
+        self._initialized = False
+
+        async def _handler(
+            method: AgentMethod | str,
+            params: dict[str, Any] | None,
+            is_notification: bool,
+        ) -> (
+            NewSessionResponse
+            | InitializeResponse
+            | PromptResponse
+            | LoadSessionResponse
+            | ListSessionsResponse
+            | StopSessionResponse
+            | dict[str, Any]
+            | None
+        ):
+            if not self._initialized and method != "initialize" and not is_notification:
+                raise RequestError(-32002, "initialize required")
+            result = await _agent_handler(agent, method, params, is_notification)
+            if method == "initialize" and not is_notification:
+                self._initialized = True
+            return result
+
         store = DebuggingMessageStateStore(debug_file=debug_file) if debug_file else None
         self._conn = Connection(
-            handler,
+            _handler,
             input_stream,
             output_stream,
             state_store=store,

@@ -14,6 +14,8 @@ import logging
 import os
 import subprocess
 from typing import TYPE_CHECKING, Any, Literal, assert_never
+import uuid
+import warnings
 
 import anyio
 from anyio.abc import ByteReceiveStream, ByteSendStream
@@ -77,8 +79,31 @@ class StreamTransport:
     writer: ByteSendStream
 
 
+@dataclass
+class ACPWebSocketTransport:
+    """Configuration for ACP streamable HTTP WebSocket transport.
+
+    Runs an ACP agent as a Starlette-based WebSocket server at /acp
+    that accepts client connections. Each client connection gets its
+    own agent instance with a unique Acp-Connection-Id header.
+
+    Attributes:
+        host: Host to bind the WebSocket server to.
+        port: Port for the WebSocket server.
+    """
+
+    host: str = "localhost"
+    port: int = 8080
+
+
 # Type alias for all supported transports
-Transport = StdioTransport | WebSocketTransport | StreamTransport | Literal["stdio", "websocket"]
+Transport = (
+    StdioTransport
+    | WebSocketTransport
+    | StreamTransport
+    | ACPWebSocketTransport
+    | Literal["stdio", "websocket", "streamable-http"]
+)
 
 
 # =============================================================================
@@ -132,7 +157,15 @@ async def serve(
         case "stdio":
             transport = StdioTransport()
         case "websocket":
+            warnings.warn(
+                "WebSocketTransport is deprecated; use ACPWebSocketTransport "
+                "or 'streamable-http' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             transport = WebSocketTransport()
+        case "streamable-http":
+            transport = ACPWebSocketTransport()
 
     # Dispatch to appropriate runner
     match transport:
@@ -140,6 +173,8 @@ async def serve(
             await _serve_stdio(agent, shutdown_event, debug_file, **kwargs)
         case WebSocketTransport(host=host, port=port):
             await _serve_websocket(agent, host, port, shutdown_event, debug_file, **kwargs)
+        case ACPWebSocketTransport(host=host, port=port):
+            await _serve_streamable_http(agent, host, port, shutdown_event, debug_file, **kwargs)
         case StreamTransport(reader=reader, writer=writer):
             await _serve_streams(agent, reader, writer, shutdown_event, debug_file, **kwargs)
         case _ as unreachable:
@@ -258,6 +293,123 @@ async def _serve_websocket(
     # Clean up remaining connections
     for conn in connections:
         await conn.close()
+
+
+async def _serve_streamable_http(
+    agent: Agent | Callable[[AgentSideConnection], Agent],
+    host: str,
+    port: int,
+    shutdown_event: asyncio.Event | None,
+    debug_file: str | None,
+    **kwargs: Any,
+) -> None:
+    """Run agent as a streamable HTTP WebSocket server (Starlette-based)."""
+    from starlette.applications import Starlette
+    from starlette.routing import WebSocketRoute
+    import uvicorn
+
+    from acp.agent.connection import AgentSideConnection
+
+    agent_factory = _ensure_factory(agent)
+    shutdown = shutdown_event or asyncio.Event()
+    active_connections: set[AgentSideConnection] = set()
+
+    async def handle_acp(websocket: Any) -> None:
+        """Handle a single ACP WebSocket client connection."""
+        connection_id = uuid.uuid4().hex
+        await websocket.accept(
+            subprotocol=None,
+            headers=[(b"Acp-Connection-Id", connection_id.encode())],
+        )
+        logger.info("ACP WebSocket client connected (id=%s)", connection_id)
+
+        # Create stream adapters for WebSocket
+        ws_reader = _StarletteWebSocketReadStream(websocket)
+        ws_writer = _StarletteWebSocketWriteStream(websocket)
+
+        conn = AgentSideConnection(
+            agent_factory, ws_writer, ws_reader, debug_file=debug_file, **kwargs
+        )
+        active_connections.add(conn)
+
+        try:
+            # Wait for shutdown or for the receive loop to end (client disconnect)
+            recv_task = conn._conn._recv_task
+            waitables: list[asyncio.Future[Any]] = [
+                asyncio.create_task(shutdown.wait())
+            ]
+            if isinstance(recv_task, asyncio.Task) and not recv_task.done():
+                waitables.append(recv_task)
+            done, _pending = await asyncio.wait(
+                waitables, return_when=asyncio.FIRST_COMPLETED
+            )
+            # Cancel any remaining tasks
+            for w in waitables:
+                if isinstance(w, asyncio.Task) and w not in done:
+                    w.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await w
+        finally:
+            active_connections.discard(conn)
+            await conn.close()
+
+    app = Starlette(routes=[WebSocketRoute("/acp", handle_acp)])
+    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+
+    async def shutdown_watcher() -> None:
+        await shutdown.wait()
+        server.should_exit = True
+
+    watcher_task = asyncio.create_task(shutdown_watcher())
+
+    logger.info("Starting streamable HTTP server on http://%s:%d", host, port)
+    try:
+        await server.serve()
+    finally:
+        watcher_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher_task
+        # Clean up remaining connections
+        for conn in list(active_connections):
+            await conn.close()
+
+
+class _StarletteWebSocketReadStream(ByteReceiveStream):
+    """Adapter to read from Starlette WebSocket as a ByteReceiveStream."""
+
+    def __init__(self, websocket: Any) -> None:
+        self._websocket = websocket
+
+    async def receive(self, max_bytes: int = 65536) -> bytes:
+        try:
+            message: str = await self._websocket.receive_text()
+        except Exception as e:
+            raise anyio.EndOfStream from e
+        data = message.encode()
+        # Append trailing newline for JSON-RPC line protocol compatibility
+        if not data.endswith(b"\n"):
+            data += b"\n"
+        return data
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _StarletteWebSocketWriteStream(ByteSendStream):
+    """Adapter to write to Starlette WebSocket as a ByteSendStream."""
+
+    def __init__(self, websocket: Any) -> None:
+        self._websocket = websocket
+
+    async def send(self, item: bytes) -> None:
+        # Strip trailing newline, send complete text message via send_text()
+        message = item.decode().strip()
+        if message:
+            await self._websocket.send_text(message)
+
+    async def aclose(self) -> None:
+        pass
 
 
 class _WebSocketReadStream(ByteReceiveStream):

@@ -180,6 +180,30 @@ class ACPPoolServerConfig(BasePoolServerConfig):
     - "inline": Displays subagent output inline with the main agent's text
     """
 
+    transport: Literal["stdio", "streamable-http"] = Field(
+        default="stdio",
+        title="Transport type",
+        examples=["stdio", "streamable-http"],
+    )
+    """Transport type to use."""
+
+    host: str = Field(
+        default="localhost",
+        title="Server host",
+        examples=["localhost", "0.0.0.0", "127.0.0.1"],
+    )
+    """Host to bind server to (streamable-http only)."""
+
+    port: int = Field(
+        default=8080,
+        gt=0,
+        title="Server port",
+        examples=[8080, 9000],
+    )
+    """Port to listen on (streamable-http only)."""
+
+    model_config = ConfigDict(frozen=True)
+
 
 class AGUIPoolServerConfig(BasePoolServerConfig):
     """Configuration for AGUI (AG-UI) server."""

@@ -88,6 +88,7 @@ from acp.transports import (
     StdioTransport,
     WebSocketTransport,
     StreamTransport,
+    ACPWebSocketTransport,
     Transport,
 )
 from acp.exceptions import RequestError
@@ -202,5 +203,6 @@ __all__ = [  # noqa: RUF022
     "StdioTransport",
     "WebSocketTransport",
     "StreamTransport",
+    "ACPWebSocketTransport",
     "Transport",
 ]
