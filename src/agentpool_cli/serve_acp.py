@@ -201,21 +201,21 @@ def acp_command(  # noqa: PLR0915
     try:
         with ConfigContextManager(resolved.primary_path):
             manifest = AgentsManifest.model_validate(resolved.data)
-        if resolved.primary_path:
-            manifest = manifest.model_copy(update={"config_file_path": resolved.primary_path})
+            if resolved.primary_path:
+                manifest = manifest.model_copy(update={"config_file_path": resolved.primary_path})
+
+            acp_server = ACPServer.from_config(
+                manifest,
+                debug_messages=debug_messages,
+                debug_file=debug_file or "acp-debug.jsonl" if debug_messages else None,
+                debug_commands=debug_commands,
+                agent=agent,
+                load_skills=load_skills,
+                transport=transport_config,
+                subagent_display_mode=subagent_display_mode,
+            )
     except Exception as e:
         raise t.BadParameter(f"Invalid merged configuration: {e}") from e
-
-    acp_server = ACPServer.from_config(
-        manifest,
-        debug_messages=debug_messages,
-        debug_file=debug_file or "acp-debug.jsonl" if debug_messages else None,
-        debug_commands=debug_commands,
-        agent=agent,
-        load_skills=load_skills,
-        transport=transport_config,
-        subagent_display_mode=subagent_display_mode,
-    )
 
     # Inject MCP servers from --mcp-config if provided
     # TODO: Consider adding to specific agent's MCP manager instead of pool-level
