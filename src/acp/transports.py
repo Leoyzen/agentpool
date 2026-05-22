@@ -380,16 +380,28 @@ class _StarletteWebSocketReadStream(ByteReceiveStream):
 
     def __init__(self, websocket: Any) -> None:
         self._websocket = websocket
+        self._buffer = b""
 
     async def receive(self, max_bytes: int = 65536) -> bytes:
+        if self._buffer:
+            data = self._buffer[:max_bytes]
+            self._buffer = self._buffer[max_bytes:]
+            return data
+
         try:
             message: str = await self._websocket.receive_text()
         except Exception as e:
             raise anyio.EndOfStream from e
+
         data = message.encode()
         # Append trailing newline for JSON-RPC line protocol compatibility
         if not data.endswith(b"\n"):
             data += b"\n"
+
+        if len(data) > max_bytes:
+            self._buffer = data[max_bytes:]
+            return data[:max_bytes]
+
         return data
 
     async def aclose(self) -> None:
@@ -404,7 +416,7 @@ class _StarletteWebSocketWriteStream(ByteSendStream):
 
     async def send(self, item: bytes) -> None:
         # Strip trailing newline, send complete text message via send_text()
-        message = item.decode().strip()
+        message = item.rstrip(b"\n").decode()
         if message:
             await self._websocket.send_text(message)
 

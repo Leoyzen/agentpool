@@ -198,6 +198,28 @@ async def test_starlette_read_stream_aclose_is_noop() -> None:
     mock_ws.close.assert_not_called()
 
 
+@pytest.mark.unit
+async def test_starlette_read_stream_buffers_across_receives() -> None:
+    """_StarletteWebSocketReadStream should buffer data across receive calls."""
+    mock_ws = AsyncMock()
+    mock_ws.receive_text.return_value = "hello"
+    reader = _StarletteWebSocketReadStream(mock_ws)
+
+    # First receive gets 2 bytes
+    data1 = await reader.receive(max_bytes=2)
+    assert data1 == b"he"
+
+    # Second receive gets remaining 3 bytes + newline
+    data2 = await reader.receive(max_bytes=2)
+    assert data2 == b"ll"
+
+    # Third receive gets remaining 1 byte + newline
+    data3 = await reader.receive(max_bytes=2)
+    assert data3 == b"o\n"
+
+    mock_ws.receive_text.assert_awaited_once()
+
+
 # =============================================================================
 # Starlette WebSocket write stream adapter tests
 # =============================================================================
