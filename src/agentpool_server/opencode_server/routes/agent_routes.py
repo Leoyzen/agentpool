@@ -84,10 +84,24 @@ class AddMCPServerRequest(BaseModel):
     env: dict[str, str] | None = None
     """Environment variables for the server."""
 
+    session_id: str | None = None
+    """Optional session ID to bind the MCP server to (session-scoped)."""
 
-def _find_mcp_manager(state: Any) -> MCPManager | None:
-    """Find the MCPManager from the agent's tool providers."""
-    for provider in state.agent.tools.external_providers:
+
+def _find_mcp_manager(state: Any, session_id: str | None = None) -> MCPManager | None:
+    """Find the MCPManager from the agent's tool providers.
+
+    Args:
+        state: Server state
+        session_id: Optional session ID. If provided, looks up the session's
+            per-session agent instead of the shared pool-level agent.
+    """
+    agent = state.agent
+    if session_id is not None:
+        # Use per-session agent if available
+        agent = state._session_agents.get(session_id) or agent
+
+    for provider in agent.tools.external_providers:
         match provider:
             case MCPManager():
                 return provider
@@ -286,6 +300,7 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
     """Add an MCP server dynamically.
 
     Supports stdio servers (command + args) or HTTP/SSE servers (url).
+    If session_id is provided, the server is bound to that session only.
     """
     # Build the config based on request
     # Note: client_id is auto-generated for internal identification;
@@ -305,14 +320,7 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
         raise HTTPException(status_code=400, detail=detail)
 
     # Find the MCPManager and add the server
-    for provider in state.agent.tools.external_providers:
-        match provider:
-            case AggregatingResourceProvider():
-                manager = next((i for i in provider.providers if isinstance(i, MCPManager)), None)
-            case MCPManager():
-                manager = provider
-            case _:
-                manager = None
+    manager = _find_mcp_manager(state, session_id=request.session_id)
     if manager is None:
         raise HTTPException(status_code=400, detail="No MCP manager available")
 
@@ -326,12 +334,17 @@ async def add_mcp_server(request: AddMCPServerRequest, state: StateDep) -> MCPSt
 
 
 @router.post("/mcp/{name}/connect")
-async def connect_mcp_server(name: str, state: StateDep) -> bool:
+async def connect_mcp_server(
+    name: str,
+    state: StateDep,
+    session_id: str | None = None,
+) -> bool:
     """Connect (start) an MCP server by name.
 
     Finds the server config and sets up the connection via MCPManager.
+    If session_id is provided, operates on the session's agent.
     """
-    manager = _find_mcp_manager(state)
+    manager = _find_mcp_manager(state, session_id=session_id)
     if manager is None:
         raise HTTPException(status_code=400, detail="No MCP manager available")
     # Find matching server config
@@ -347,12 +360,17 @@ async def connect_mcp_server(name: str, state: StateDep) -> bool:
 
 
 @router.post("/mcp/{name}/disconnect")
-async def disconnect_mcp_server(name: str, state: StateDep) -> bool:
+async def disconnect_mcp_server(
+    name: str,
+    state: StateDep,
+    session_id: str | None = None,
+) -> bool:
     """Disconnect (stop) an MCP server by name.
 
     Removes the provider from the manager's active providers.
+    If session_id is provided, operates on the session's agent.
     """
-    manager = _find_mcp_manager(state)
+    manager = _find_mcp_manager(state, session_id=session_id)
     if manager is None:
         raise HTTPException(status_code=400, detail="No MCP manager available")
     # Find and remove the matching provider

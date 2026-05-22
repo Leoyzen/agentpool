@@ -26,6 +26,7 @@ from agentpool import Agent, AgentPool  # noqa: TC001
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
+from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
@@ -180,6 +181,9 @@ class ACPSession:
     mcp_servers: Sequence[McpServer] | None = None
     """Optional MCP server configurations"""
 
+    session_mcp_providers: list[MCPResourceProvider] = field(default_factory=list)
+    """Session-level MCP resource providers (isolated per session)"""
+
     client_capabilities: ClientCapabilities = field(default_factory=ClientCapabilities)
     """Client capabilities for tool registration"""
 
@@ -293,16 +297,39 @@ class ACPSession:
         await self.acp_env.__aenter__()
 
     async def initialize_mcp_servers(self) -> None:
-        """Initialize MCP servers if any are configured."""
+        """Initialize MCP servers if any are configured.
+
+        Session-level MCP servers are created and managed independently
+        from the pool-level agent's MCP manager to ensure isolation.
+        """
         if not self.mcp_servers:
             return
         self.log.info("Initializing MCP servers", server_count=len(self.mcp_servers))
-        # Add each MCP server to the current agent's MCP manager dynamically
+        # Create session-level MCP providers (isolated from pool-level agent)
         for server in self.mcp_servers:
             cfg = convert_acp_mcp_server_to_config(server)
             try:
-                await self.agent.mcp.setup_server(cfg)
-                self.log.info("Added MCP server", server_name=cfg.name, agent=self.agent.name)
+                # Skip if already registered for this session
+                if any(p.server.client_id == cfg.client_id for p in self.session_mcp_providers):
+                    self.log.debug(
+                        "MCP server already registered for session, skipping",
+                        server_name=cfg.name,
+                    )
+                    continue
+
+                provider = MCPResourceProvider(
+                    server=cfg,
+                    name=f"session_{self.session_id}_{cfg.display_name}",
+                    source="node",
+                    accessible_roots=getattr(self.agent.env, "accessible_roots", None),
+                )
+                provider = await provider.__aenter__()
+                self.session_mcp_providers.append(provider)
+                self.log.info(
+                    "Added session MCP server",
+                    server_name=cfg.name,
+                    session_id=self.session_id,
+                )
             except Exception:
                 self.log.exception("Failed to setup MCP server", server_name=cfg.name)
                 # Don't fail session creation, just log the error
@@ -413,34 +440,36 @@ class ACPSession:
 
             try:  # Use the session's persistent input provider
                 # Staged content is automatically injected by run_stream
-                async for event in self.agent.run_stream(
-                    *non_command_content,
-                    input_provider=self.input_provider,
-                    deps=self,
-                    session_id=self.session_id,  # Tie agent conversation to ACP session
-                ):
-                    if self._cancelled:
-                        self.log.info("Cancelled during event loop, cleaning up tool calls")
-                        # Send cancellation notifications for any pending tool calls
-                        # This happens in the same async context as the converter
-                        async for cancel_update in converter.cancel_pending_tools():
-                            await self.notifications.send_update(cancel_update)
-                        # CRITICAL: Allow time for client to process tool completion notifications
-                        # before sending PromptResponse. Without this delay, the client may receive
-                        # and process the PromptResponse before the tool notifications, causing UI
-                        # state desync where subsequent prompts appear stuck/unresponsive.
-                        # This is needed because even though send() awaits the write, the client
-                        # may process messages asynchronously or out of order.
-                        await anyio.sleep(0.05)
-                        self._current_converter = None
-                        return "cancelled"
+                # Inject session-level MCP providers for this run
+                async with self.agent.tools.with_session_providers(self.session_mcp_providers):
+                    async for event in self.agent.run_stream(
+                        *non_command_content,
+                        input_provider=self.input_provider,
+                        deps=self,
+                        session_id=self.session_id,  # Tie agent conversation to ACP session
+                    ):
+                        if self._cancelled:
+                            self.log.info("Cancelled during event loop, cleaning up tool calls")
+                            # Send cancellation notifications for any pending tool calls
+                            # This happens in the same async context as the converter
+                            async for cancel_update in converter.cancel_pending_tools():
+                                await self.notifications.send_update(cancel_update)
+                            # CRITICAL: Allow time for client to process tool completion notifications
+                            # before sending PromptResponse. Without this delay, the client may receive
+                            # and process the PromptResponse before the tool notifications, causing UI
+                            # state desync where subsequent prompts appear stuck/unresponsive.
+                            # This is needed because even though send() awaits the write, the client
+                            # may process messages asynchronously or out of order.
+                            await anyio.sleep(0.05)
+                            self._current_converter = None
+                            return "cancelled"
 
-                    event_count += 1
-                    async for update in converter.convert(event):
-                        await self.notifications.send_update(update)
-                    # Yield control to allow notifications to be sent immediately
-                    await anyio.sleep(0.01)
-                self.log.info("Streaming finished", events_processed=event_count)
+                        event_count += 1
+                        async for update in converter.convert(event):
+                            await self.notifications.send_update(update)
+                        # Yield control to allow notifications to be sent immediately
+                        await anyio.sleep(0.01)
+                    self.log.info("Streaming finished", events_processed=event_count)
 
             except asyncio.CancelledError:
                 # Task was cancelled (e.g., via interrupt()) - return proper stop reason
@@ -484,6 +513,16 @@ class ACPSession:
         """Close the session and cleanup resources."""
         try:
             await self.acp_env.__aexit__(None, None, None)
+            # Clean up session-level MCP providers
+            for provider in self.session_mcp_providers:
+                try:
+                    await provider.__aexit__(None, None, None)
+                except Exception:
+                    self.log.exception(
+                        "Error cleaning up session MCP provider",
+                        provider=provider.name,
+                    )
+            self.session_mcp_providers.clear()
             # Remove cwd context callable from all agents
             for agent in self.agent_pool.get_agents(Agent).values():
                 if self.get_cwd_context in agent.sys_prompts.prompts:

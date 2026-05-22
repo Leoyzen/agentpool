@@ -54,6 +54,7 @@ class ToolManager:
 
         super().__init__()
         self.external_providers: list[ResourceProvider] = []
+        self.session_providers: list[ResourceProvider] = []
         self.worker_provider = StaticResourceProvider(name="workers")
         self.builtin_provider = StaticResourceProvider(name="builtin")
         self.tool_mode = tool_mode
@@ -67,17 +68,23 @@ class ToolManager:
 
     @property
     def providers(self) -> list[ResourceProvider]:
-        """Get all providers: external + worker + builtin providers."""
+        """Get all providers: external + session + worker + builtin providers."""
         if self.tool_mode == "codemode":
             # Update the providers list with current providers
             self._codemode_provider.providers[:] = [
                 *self.external_providers,
+                *self.session_providers,
                 self.worker_provider,
                 self.builtin_provider,
             ]
             return [self._codemode_provider]
 
-        return [*self.external_providers, self.worker_provider, self.builtin_provider]
+        return [
+            *self.external_providers,
+            *self.session_providers,
+            self.worker_provider,
+            self.builtin_provider,
+        ]
 
     async def __prompt__(self) -> str:
         enabled_tools = [t.name for t in await self.get_tools() if t.enabled]
@@ -133,7 +140,7 @@ class ToolManager:
         names: str | list[str] | None = None,
     ) -> list[Tool]:
         """Get tool objects based on filters."""
-        tools: list[Tool] = []
+        tools_map: dict[str, Tool] = {}
         # Get tools from providers concurrently
         provider_coroutines = [provider.get_tools() for provider in self.providers]
         results = await asyncio.gather(*provider_coroutines, return_exceptions=True)
@@ -142,8 +149,13 @@ class ToolManager:
                 msg = "Failed to get tools from provider"
                 logger.warning(msg, provider=provider, result=result)
                 continue
-            tools.extend(t for t in result if t.matches_filter(state))
+            # Use dict to deduplicate by name; later providers (session-level)
+            # override earlier ones (pool-level)
+            for tool in result:
+                if tool.matches_filter(state):
+                    tools_map[tool.name] = tool
 
+        tools = list(tools_map.values())
         match names:
             case str():
                 tools = [t for t in tools if t.name == names]
@@ -234,6 +246,22 @@ class ToolManager:
         if not resource:
             raise ToolError(f"Resource not found: {name}")
         return resource
+
+    @asynccontextmanager
+    async def with_session_providers(
+        self,
+        providers: Sequence[ResourceProvider],
+    ) -> AsyncIterator[None]:
+        """Temporarily inject session-level providers for the duration of a run.
+
+        Args:
+            providers: Session-level resource providers to inject
+        """
+        self.session_providers[:] = list(providers)
+        try:
+            yield
+        finally:
+            self.session_providers.clear()
 
     @asynccontextmanager
     async def temporary_tools(

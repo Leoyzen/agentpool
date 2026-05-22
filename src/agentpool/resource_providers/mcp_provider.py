@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Self, assert_never
 from urllib.parse import unquote
-
-from upathtools import UPath
 
 from agentpool.common_types import MCPServerStatus
 from agentpool.log import get_logger
@@ -175,11 +173,17 @@ class MCPResourceProvider(ResourceProvider):
             self._tools_cache = []
 
     async def get_tools(self) -> Sequence[Tool]:
-        """Get cached tools, refreshing if necessary."""
+        """Get cached tools with server name prefix, refreshing if necessary."""
         if self._tools_cache is None:
             await self.refresh_tools_cache()
 
-        return self._tools_cache or []
+        tools = self._tools_cache or []
+        # Apply server name prefix to all tool names for isolation
+        prefix = f"{self.server.client_id}_"
+        for tool in tools:
+            if not tool.name.startswith(prefix):
+                tool.name = prefix + tool.name
+        return tools
 
     async def refresh_prompts_cache(self) -> None:
         """Refresh the prompts cache by fetching from client."""

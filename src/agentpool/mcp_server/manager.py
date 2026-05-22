@@ -132,6 +132,14 @@ class MCPManager:
         if add_to_config:
             self.add_server_config(config)
 
+        # Deduplication: skip if a provider with the same client_id already exists
+        if any(p.server.client_id == config.client_id for p in self.providers):
+            logger.debug(
+                "MCP server already registered, skipping",
+                client_id=config.client_id,
+            )
+            return None
+
         provider = MCPResourceProvider(
             server=config,
             name=f"{self.name}_{config.display_name}",
@@ -147,6 +155,29 @@ class MCPManager:
     def get_mcp_providers(self) -> list[MCPResourceProvider]:
         """Get all MCP resource providers managed by this manager."""
         return list(self.providers)
+
+    def remove_provider(self, client_id: str) -> bool:
+        """Remove a provider by its server config's client_id.
+
+        Args:
+            client_id: The client_id of the MCP server config to remove
+
+        Returns:
+            True if a provider was removed, False otherwise
+        """
+        for i, provider in enumerate(self.providers):
+            if provider.server.client_id == client_id:
+                # Note: We don't remove from exit_stack here because
+                # the provider was entered into the stack; cleanup() handles that
+                self.providers.pop(i)
+                return True
+        return False
+
+    async def disconnect_all(self) -> None:
+        """Disconnect all MCP providers without clearing the servers list."""
+        await self.cleanup()
+        # Re-initialize the exit stack for future connections
+        self.exit_stack = AsyncExitStack()
 
     def get_aggregating_provider(self) -> AggregatingResourceProvider:
         """Get the aggregating provider that contains all MCP providers."""
