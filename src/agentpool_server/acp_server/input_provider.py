@@ -229,9 +229,9 @@ class ACPInputProvider(InputProvider):
     ) -> types.ElicitResult | types.ErrorData:
         """Get user response to elicitation request with capability-gated dual path.
 
-        When the client declares elicitation capability for the requested mode,
-        uses the native ``elicitation/create`` protocol method.  Otherwise falls
-        back to the legacy ``request_permission`` approach for backward compatibility.
+        When the client declares the ``elicitation`` capability (form or url mode), uses the
+        native ``elicitation/create`` protocol method.  Otherwise falls back to
+        the legacy ``request_permission`` approach for backward compatibility.
 
         Args:
             params: MCP elicit request parameters

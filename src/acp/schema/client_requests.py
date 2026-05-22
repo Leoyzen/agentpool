@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence  # noqa: TC003
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field
 
@@ -12,6 +12,10 @@ from acp.schema.capabilities import AuthCapabilities, ClientCapabilities, FileSy
 from acp.schema.common import Implementation
 from acp.schema.content_blocks import ContentBlock  # noqa: TC001
 from acp.schema.mcp import McpServer  # noqa: TC001
+
+
+if TYPE_CHECKING:
+    from acp.schema.capabilities import ElicitationCapabilities
 
 
 class CustomRequest(Request):
@@ -219,12 +223,13 @@ class InitializeRequest(Request):
         write_text_file: bool = True,
         protocol_version: int = 1,
         terminal_auth: bool = False,
+        elicitation: ElicitationCapabilities | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Self:
         """Create a new InitializeRequest instance."""
         fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
         auth = AuthCapabilities(terminal=terminal_auth) if terminal_auth else None
-        caps = ClientCapabilities(terminal=terminal, fs=fs, auth=auth)
+        caps = ClientCapabilities(terminal=terminal, fs=fs, auth=auth, elicitation=elicitation)
         impl = Implementation(title=title, name=name, version=version)
         return cls(
             client_capabilities=caps,

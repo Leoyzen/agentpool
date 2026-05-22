@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Any, Self
 
 from pydantic import Field, field_validator
 
@@ -50,17 +50,21 @@ class ElicitationCapabilities(AnnotatedObject):
     """Whether the Client supports URL-mode `elicitation/create` requests."""
 
     @field_validator("form", "url", mode="before")
-    @classmethod
-    def convert_empty_object(cls, v):
-        """Convert empty object {} to True for compatibility.
+    def _coerce_object_to_bool(cls, v: Any) -> bool | None:  # noqa: N805
+        """Coerce ACP spec's {} or true to bool.
 
-        Some clients may send empty objects {} instead of booleans for optional fields.
-        If field is empty object {}, interpret as True.
-        Otherwise preserve original value (True/False/None).
+        The ACP spec represents capability presence as either an empty
+        object ``{}`` or ``true``.  Both indicate the mode is supported.
         """
-        if isinstance(v, dict) and len(v) == 0:
+        if v is None:
+            return None
+        if isinstance(v, dict):
             return True
-        return v
+        return bool(v)
+
+    def supports_elicitation(self) -> bool:
+        """Check if any elicitation mode is supported."""
+        return bool(self.form) or bool(self.url)
 
 
 class ClientCapabilities(AnnotatedObject):
