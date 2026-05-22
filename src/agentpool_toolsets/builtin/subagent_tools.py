@@ -293,15 +293,33 @@ class SubagentTools(StaticResourceProvider):
         from agentpool.messaging.message_history import MessageHistory
 
         final_content = ""
-        async for event in session_pool.run_stream(
-            child_session_id,
-            prompt,
-            input_provider=input_provider,
-            message_history=MessageHistory(),
-        ):
-            if isinstance(event, StreamCompleteEvent):
-                content = event.message.content
-                final_content = str(content) if content else ""
+        try:
+            async for event in session_pool.run_stream(
+                child_session_id,
+                prompt,
+                input_provider=input_provider,
+                message_history=MessageHistory(),
+            ):
+                if isinstance(event, StreamCompleteEvent):
+                    content = event.message.content
+                    final_content = str(content) if content else ""
+        except Exception as exc:
+            logger.exception(
+                "Subagent task failed",
+                source_name=agent_or_team,
+                child_session_id=child_session_id,
+            )
+            return {
+                "output": final_content,
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+                "metadata": {
+                    "sessionId": child_session_id,
+                    "failed": True,
+                },
+            }
 
         return {
             "output": final_content,
