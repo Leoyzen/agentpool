@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Self
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from acp.schema.base import AnnotatedObject
 from acp.schema.slash_commands import AvailableCommand  # noqa: TC001
@@ -37,14 +37,30 @@ class AuthCapabilities(AnnotatedObject):
 class ElicitationCapabilities(AnnotatedObject):
     """Elicitation capabilities supported by the client.
 
-    Advertised during initialization to inform the agent whether
-    the client supports the `elicitation/create` method.
+    Advertised during initialization to inform the agent which
+    elicitation modes the client supports.
 
     See protocol docs: [Elicitation](https://agentclientprotocol.com/protocol/elicitation)
     """
 
-    create: bool | None = False
-    """Whether the Client supports `elicitation/create` requests."""
+    form: bool | None = False
+    """Whether the Client supports form-mode `elicitation/create` requests."""
+
+    url: bool | None = False
+    """Whether the Client supports URL-mode `elicitation/create` requests."""
+
+    @field_validator("form", "url", mode="before")
+    @classmethod
+    def convert_empty_object(cls, v):
+        """Convert empty object {} to True for compatibility.
+
+        Some clients may send empty objects {} instead of booleans for optional fields.
+        If field is empty object {}, interpret as True.
+        Otherwise preserve original value (True/False/None).
+        """
+        if isinstance(v, dict) and len(v) == 0:
+            return True
+        return v
 
 
 class ClientCapabilities(AnnotatedObject):
@@ -59,7 +75,7 @@ class ClientCapabilities(AnnotatedObject):
     auth: AuthCapabilities | None = None
     """**UNSTABLE**: Authentication capabilities supported by the client."""
 
-    fs: FileSystemCapability | None = Field(default_factory=FileSystemCapability)
+    fs: FileSystemCapability | None = None
     """File system capabilities supported by the client.
 
     Determines which file operations the agent can request.
@@ -241,13 +257,13 @@ class AgentCapabilities(AnnotatedObject):
     load_session: bool | None = False
     """Whether the agent supports `session/load`."""
 
-    mcp_capabilities: McpCapabilities | None = Field(default_factory=McpCapabilities)
+    mcp_capabilities: McpCapabilities | None = None
     """MCP capabilities supported by the agent."""
 
-    prompt_capabilities: PromptCapabilities | None = Field(default_factory=PromptCapabilities)
+    prompt_capabilities: PromptCapabilities | None = None
     """Prompt capabilities supported by the agent."""
 
-    session_capabilities: SessionCapabilities | None = Field(default_factory=SessionCapabilities)
+    session_capabilities: SessionCapabilities | None = None
     """Session capabilities supported by the agent."""
 
     slash_commands: list[AvailableCommand] = Field(default_factory=list)

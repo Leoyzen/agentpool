@@ -25,6 +25,9 @@ class ElicitationCreateRequest(Request):
     message: str
     """A human-readable message describing what input is being requested."""
 
+    mode: Literal["form", "url"]
+    """The elicitation mode: ``form`` for schema-based input, ``url`` for external URL flows."""
+
     requested_schema: dict[str, Any] = Field(alias="requestedSchema")
     """A JSON Schema object describing the expected input structure."""
 
