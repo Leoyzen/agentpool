@@ -262,9 +262,9 @@ async def _serve_websocket(
 
         try:
             # Wait for shutdown or for the receive loop to end (client disconnect)
-            recv_task = conn._conn._recv_task
+            recv_task = getattr(getattr(conn, "_conn", None), "_recv_task", None)
             waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
-            if isinstance(recv_task, asyncio.Task) and not recv_task.done():
+            if isinstance(recv_task, asyncio.Task):
                 waitables.append(recv_task)
 
             done, _ = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
@@ -330,9 +330,9 @@ async def _serve_streamable_http(
 
         try:
             # Wait for shutdown or for the receive loop to end (client disconnect)
-            recv_task = conn._conn._recv_task
+            recv_task = getattr(getattr(conn, "_conn", None), "_recv_task", None)
             waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
-            if isinstance(recv_task, asyncio.Task) and not recv_task.done():
+            if isinstance(recv_task, asyncio.Task):
                 waitables.append(recv_task)
             done, _pending = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
             # Cancel any remaining tasks
