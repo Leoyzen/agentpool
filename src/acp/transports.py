@@ -261,24 +261,21 @@ async def _serve_websocket(
         connections.append(conn)
 
         try:
-            # Keep connection alive until client disconnects or shutdown
-            client_done = asyncio.Event()
+            # Wait for shutdown or for the receive loop to end (client disconnect)
+            _recv_conn = getattr(conn, "_conn", None)
+            recv_task = getattr(_recv_conn, "_recv_task", None) if _recv_conn else None
+            waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
+            if isinstance(recv_task, asyncio.Task):
+                waitables.append(recv_task)
 
-            async def monitor_websocket() -> None:
-                try:
-                    async for _ in websocket:
-                        pass  # Messages handled by ws_reader
-                except websockets.exceptions.ConnectionClosed:
-                    pass
-                finally:
-                    client_done.set()
+            done, _ = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
 
-            monitor_task = asyncio.create_task(monitor_websocket())
-            tasks = [asyncio.create_task(client_done.wait()), asyncio.create_task(shutdown.wait())]
-            _done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            monitor_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await monitor_task
+            # Cancel any remaining tasks
+            for w in waitables:
+                if isinstance(w, asyncio.Task) and w not in done:
+                    w.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await w
         except websockets.exceptions.ConnectionClosed:
             logger.info("WebSocket client disconnected")
         finally:
@@ -334,15 +331,12 @@ async def _serve_streamable_http(
 
         try:
             # Wait for shutdown or for the receive loop to end (client disconnect)
-            recv_task = conn._conn._recv_task
-            waitables: list[asyncio.Future[Any]] = [
-                asyncio.create_task(shutdown.wait())
-            ]
-            if isinstance(recv_task, asyncio.Task) and not recv_task.done():
+            _recv_conn = getattr(conn, "_conn", None)
+            recv_task = getattr(_recv_conn, "_recv_task", None) if _recv_conn else None
+            waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
+            if isinstance(recv_task, asyncio.Task):
                 waitables.append(recv_task)
-            done, _pending = await asyncio.wait(
-                waitables, return_when=asyncio.FIRST_COMPLETED
-            )
+            done, _pending = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
             # Cancel any remaining tasks
             for w in waitables:
                 if isinstance(w, asyncio.Task) and w not in done:

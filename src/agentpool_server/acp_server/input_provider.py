@@ -196,10 +196,17 @@ class ACPInputProvider(InputProvider):
                 logger.warning("Unknown permission option", option_id=option_id)
                 return "abort_run"
 
-    def _client_supports_elicitation(self) -> bool:
-        """Check if the client supports the elicitation/create method."""
+    def _client_supports_elicitation(self, mode: Literal["form", "url"]) -> bool:
+        """Check if the client supports the given elicitation mode."""
         caps = self.session.client_capabilities
-        return caps.elicitation is not None and bool(caps.elicitation.create)
+        if caps.elicitation is None:
+            return False
+        logger.info("Checking elicitation capability", mode=mode, capabilities=caps.elicitation)
+        match mode:
+            case "form":
+                return bool(caps.elicitation.form)
+            case "url":
+                return bool(caps.elicitation.url)
 
     @staticmethod
     def _map_elicitation_create_response(
@@ -222,9 +229,9 @@ class ACPInputProvider(InputProvider):
     ) -> types.ElicitResult | types.ErrorData:
         """Get user response to elicitation request with capability-gated dual path.
 
-        When the client declares the ``elicitation.create`` capability, uses the
-        native ``elicitation/create`` protocol method.  Otherwise falls back to
-        the legacy ``request_permission`` approach for backward compatibility.
+        When the client declares elicitation capability for the requested mode,
+        uses the native ``elicitation/create`` protocol method.  Otherwise falls
+        back to the legacy ``request_permission`` approach for backward compatibility.
 
         Args:
             params: MCP elicit request parameters
@@ -257,7 +264,7 @@ class ACPInputProvider(InputProvider):
             elicitation_id=elicit_id,
         )
 
-        if self._client_supports_elicitation():
+        if self._client_supports_elicitation("url"):
             # TODO: URL-mode elicitation currently returns the immediate response
             # from ``elicitation/create``. For full URL flows where the user
             # completes an external action (OAuth, payments), the result arrives
@@ -266,6 +273,7 @@ class ACPInputProvider(InputProvider):
             # deferred to a future PR.
             response = await self.session.requests.elicitation_create(
                 message=params.message,
+                mode="url",
                 requested_schema={"type": "object"},
                 url=params.url,
                 elicitation_id=elicit_id,
@@ -307,13 +315,13 @@ class ACPInputProvider(InputProvider):
         schema = params.requestedSchema
         logger.info("Elicitation request", message=params.message, schema=schema)
 
-        if self._client_supports_elicitation():
+        if self._client_supports_elicitation("form"):
             response = await self.session.requests.elicitation_create(
                 message=params.message,
+                mode="form",
                 requested_schema=schema,
             )
             return self._map_elicitation_create_response(response)
-
         # Fallback: request_permission with schema-specific handling
         tool_call_id = f"elicit_{hash(params.message)}"
         title = f"Elicitation: {params.message}"

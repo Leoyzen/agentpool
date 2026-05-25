@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
@@ -214,6 +214,7 @@ class ACPRequests:
         self,
         message: str,
         *,
+        mode: Literal["form", "url"],
         requested_schema: dict[str, Any],
         url: str | None = None,
         elicitation_id: str | None = None,
@@ -222,6 +223,7 @@ class ACPRequests:
 
         Args:
             message: Human-readable message describing what input is being requested
+            mode: Elicitation mode (``form`` or ``url``)
             requested_schema: JSON Schema object describing the expected input structure
             url: Optional URL for URL-based elicitation (e.g., OAuth flows)
             elicitation_id: Optional unique identifier for this elicitation request
@@ -232,6 +234,7 @@ class ACPRequests:
         request = ElicitationCreateRequest(
             session_id=self.id,
             message=message,
+            mode=mode,
             requested_schema=requested_schema,
             url=url,
             elicitation_id=elicitation_id,

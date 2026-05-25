@@ -261,7 +261,7 @@ class InitializeResponse(Response):
     See protocol docs: [Initialization](https://agentclientprotocol.com/protocol/initialization)
     """
 
-    agent_capabilities: AgentCapabilities | None = Field(default_factory=AgentCapabilities)
+    agent_capabilities: AgentCapabilities | None = None
     """Capabilities supported by the agent."""
 
     agent_info: Implementation | None = None
