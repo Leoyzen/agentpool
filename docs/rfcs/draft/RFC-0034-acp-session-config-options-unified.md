@@ -390,7 +390,7 @@ async def build_model_state_for_acp(
         except Exception:
             logger.exception("Failed to get available models from agent")
 
-    all_models = toko_models | configured  # configured 优先（Python 3.9+ dict merge）
+    all_models = configured if configured else toko_models  # strict fallback: configured 存在时只用 configured
 
     if not all_models:
         return None
@@ -465,7 +465,7 @@ async def get_agent_role_config_option(
         )
         for name, ag in all_agents.items()
     ]
-    current = pool.main_agent.name if pool.main_agent else (next(iter(all_agents)) if all_agents else "")
+    current = agent.name
 
     return SessionConfigOption(
         id="agent_role",
@@ -525,9 +525,8 @@ async def _swap_session_agent(
 ) -> None:
     """将指定 session 切换到不同的 agent 实例。
 
-    利用 RFC-0031 的 per-session agent 机制：
-    1. 关闭旧的 session agent
-    2. 创建新的 session agent（使用指定 agent_name）
+    利用 RFC-0031 的 per-session agent 机制，委托给 ACPSession.switch_active_agent()。
+    整个 swap 过程在 session 级锁保护下执行，防止并发竞态。
 
     Args:
         session_id: 目标 session ID
@@ -535,33 +534,40 @@ async def _swap_session_agent(
 
     Raises:
         ValueError: agent_name 不在 pool 中
-        RuntimeError: session 不存在
+        RuntimeError: session 不存在，或 swap 期间存在未完成的 prompt task
     """
     session = self.session_manager.get_session(session_id)
     if not session:
         raise RuntimeError(f"Session not found: {session_id}")
 
-    pool = self.agent_pool
-    if pool is None or agent_name not in pool.manifest.agents:
-        raise ValueError(f"Agent not found: {agent_name}")
+    # 获取或创建 session 级锁
+    if session_id not in self._session_agent_locks:
+        self._session_agent_locks[session_id] = asyncio.Lock()
 
-    # 关闭旧的 session agent（RFC-0031 per-session 隔离）
-    old_agent = session.agent
-    try:
-        await old_agent.__aexit__(None, None, None)
-    except Exception:
-        logger.warning("Failed to exit old session agent", agent=old_agent.name)
+    async with self._session_agent_locks[session_id]:
+        # 协调 session._task_lock：若当前有 active prompt，禁止 swap
+        if hasattr(session, "_task_lock") and session._task_lock.locked():
+            raise RuntimeError(
+                f"Cannot swap agent while a prompt is in progress (session={session_id})"
+            )
 
-    # 创建新的 session agent
-    new_agent = await self.get_or_create_session_agent(
-        session_id=session_id,
-        agent_name=agent_name,
-    )
-    session.agent = new_agent
+        pool = self.agent_pool
+        if pool is None or pool.manifest is None or agent_name not in pool.manifest.agents:
+            raise ValueError(f"Agent not found: {agent_name}")
 
-    # 更新 session_agents 注册表（强制替换）
-    self._session_agents[session_id] = new_agent
-    logger.info("Session agent swapped", session_id=session_id, new_agent=agent_name)
+        # 委托给 ACPSession.switch_active_agent() 处理完整的 swap 流程：
+        # 1. 断开旧 agent 的 state_updated 信号
+        # 2. 调用 remove_session_agent() 关闭旧 per-session agent（跳过 default_agent）
+        # 3. 创建新 per-session agent（get_or_create_session_agent）
+        # 4. 重新应用 session mutation（env, input_provider, sys_prompts, cwd context）
+        # 5. 重新连接 state_updated 信号
+        # 6. 持久化 agent 切换（session_manager.update_session_agent）
+        # 7. 发送 available commands update
+        await session.switch_active_agent(agent_name)
+
+        # 同步更新 ACP agent 层的 session_agents 注册表
+        self._session_agents[session_id] = session.agent
+        logger.info("Session agent swapped", session_id=session_id, new_agent=agent_name)
 ```
 
 ### Phase 3：OpenCode `/mode` 路由修复
@@ -572,6 +578,9 @@ async def _swap_session_agent(
 @router.get("/mode")
 async def list_modes(state: StateDep) -> list[Mode]:
     """List available modes from agent's mode category."""
+    if state.agent is None:
+        return [Mode(name="default", tools={})]
+
     try:
         mode_categories = await state.agent.get_modes()
         for category in mode_categories:
@@ -599,7 +608,7 @@ async def list_modes(state: StateDep) -> list[Mode]:
 |------|------|------|
 | `build_model_state_for_acp()` | `shared/model_utils.py` | ACP model state 构建，configured first |
 | `get_agent_role_config_option()` | `acp_server/acp_agent.py` | 构建 agent role config option |
-| `_swap_session_agent()` | `acp_server/acp_agent.py` | 切换 session 的 agent 实例 |
+| `_swap_session_agent()` | `acp_server/acp_agent.py` | 切换 session 的 agent 实例（委托 `session.switch_active_agent()` + 锁保护） |
 
 #### 修改函数
 
@@ -616,7 +625,7 @@ async def list_modes(state: StateDep) -> list[Mode]:
 session 初始化
     │
     ├─ NewSessionResponse.config_options 包含 agent_role option
-    │    current_value = pool.main_agent.name
+    │    current_value = session.agent.name  # 当前 session 实际运行的 agent
     │    options = [all pool agents]
     │
     └─ 用户在 IDE 中选择 agent
@@ -641,7 +650,7 @@ session 初始化
 | 机制 | 影响 | 兼容性 |
 |------|------|--------|
 | `NewSessionResponse.modes`（旧版） | tool permission，不变 | ✅ 完全兼容 |
-| `NewSessionResponse.models`（旧版） | model list，数据来源变更但格式不变 | ✅ 格式兼容，数据稍有差异（configured first） |
+| `NewSessionResponse.models`（旧版） | model list，数据来源统一为 configured first | ✅ 格式兼容，数据来源优先级与 OpenCode 一致 |
 | `NewSessionResponse.config_options`（新） | 追加 `agent_role`，现有 config_options 不变 | ✅ 新增字段，客户端忽略未知 config_id |
 | `session/set_mode` | tool permission 切换，不变 | ✅ 完全兼容 |
 | `session/set_config_option` | 新增 `agent_role` 处理，现有 config_id 不变 | ✅ 扩展，不破坏现有 |
@@ -669,19 +678,25 @@ session 初始化
 **目标**：G1、G5
 
 **范围**：
-- [ ] 在 `acp_server/acp_agent.py` 中新增 `get_agent_role_config_option()` 函数
+- [ ] 在 `acp_server/acp_agent.py` 中新增 `get_agent_role_config_option()` 函数（`current_value=agent.name`）
 - [ ] 修改 `get_session_config_options()` 追加 agent role option
 - [ ] 在 `AgentPoolACPAgent` 中新增 `_swap_session_agent()` 方法
+  - 获取 `_session_agent_locks[session_id]` 防止并发竞态
+  - 检查 `session._task_lock` 拒绝 active prompt 期间的 swap
+  - 验证 `pool.manifest` 非空且 `agent_name` 存在
+  - 委托 `session.switch_active_agent()` 处理完整 swap 流程（信号、env、input_provider、sys_prompts 重连）
+  - 同步更新 `_session_agents` 注册表
 - [ ] 修改 `set_session_config_option()` 处理 `agent_role` category
-- [ ] 处理 agent 切换时的异常：agent_name 不存在、agent `__aexit__` 失败
-- [ ] 确认 `get_or_create_session_agent()` 支持 `agent_name` 参数（RFC-0031 已实现）
+- [ ] 预验证：确认 Zed 能正确渲染 `category="other"` 的 config options（若不能，需回退到旧版 `SessionModeState.modes` 方案）
 - [ ] 编写单元测试：单一 agent 时 `get_agent_role_config_option()` 返回 None
-- [ ] 编写单元测试：多 agent 时正确枚举所有 agent
-- [ ] 编写集成测试：`session/set_config_option` 切换 agent 后，后续 `session/prompt` 使用新 agent
+- [ ] 编写单元测试：多 agent 时正确枚举所有 agent，且 `current_value` 为当前 session agent
+- [ ] 编写并发测试：两个同时的 `set_config_option("agent_role", ...)` 请求被序列化，不 corrupt registry
+- [ ] 编写集成测试：`session/set_config_option` 切换 agent 后，后续 `session/prompt` 使用新 agent 的 system prompt 和工具
 - [ ] 添加 ACP 快照测试：验证 `NewSessionResponse.config_options` 包含 `agent_role`
 
-**预估代码量**：~120 行新增
+**预估代码量**：~100 行新增
 **依赖**：无（可与 Phase 1 并行）
+**前置验证**：Zed 对 `category="other"` 的渲染行为（go/no-go 决策点）
 
 ---
 
@@ -706,9 +721,9 @@ session 初始化
 | Phase | 目标 | 工作量 |
 |-------|------|--------|
 | Phase 1 | 统一 model list 数据来源 | ~110 行 |
-| Phase 2 | Agent role config option | ~120 行 |
+| Phase 2 | Agent role config option | ~100 行 |
 | Phase 3 | OpenCode /mode 路由修复 | ~30 行 |
-| **合计** | | **~260 行** |
+| **合计** | | **~240 行** |
 
 Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
 
@@ -716,9 +731,13 @@ Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
 
 1. **tokonomics per-agent vs 全局的细微差异**：`build_model_state_for_acp()` 中 tokonomics 来源为 `agent.get_available_models()`（per-agent），而 OpenCode 使用 `get_all_models()`（全局 7 天缓存）。两者实际返回的模型列表是否完全一致？如果某个 agent 配置了特定的 `providers` 参数，per-agent 的返回集合可能是全局的子集。
 
-2. **Agent 切换时的对话历史**：切换 agent role 时，当前 session 的对话历史如何处理？新 agent 是否应继承旧 agent 的 `conversation`？当前 `_swap_session_agent()` 提案中新 agent 从空对话开始，这是否符合用户预期？
+2. **Agent 切换时的对话历史**：切换 agent role 时，新 agent **不继承**旧 agent 的对话历史。原因如下：
+   - 不同 agent 通常具有不同的 system prompt 和工具集，继承历史消息可能导致新 agent 对上下文的理解出现偏差
+   - ACP 协议层面没有定义 conversation 迁移的标准方式
+   - 若用户需要保持上下文，可通过显式的 session/prompt 将历史摘要传递给新 agent
+   **决策**：agent swap 后新 agent 从空对话开始；如需历史继承，将在后续 RFC 中专门设计 `conversation` 迁移协议。
 
-3. **Agent Role 的 `current_value` 初始值**：`get_agent_role_config_option()` 中，`current_value` 设为 `pool.main_agent.name`。但对于 per-session agent（RFC-0031），当前 session 的 agent 可能已通过其他机制切换。是否应读取 `session.agent.name` 作为 `current_value`？
+3. **Agent Role 的 `current_value` 初始值**（✅ 已解决）：修正为 `agent.name`（当前 session 实际运行的 agent 实例），而非 `pool.main_agent.name`。这样确保 per-session agent 被切换后，IDE 中显示的是正确的当前 agent。
 
 4. **OpenCode `/mode` 与 config_options 的关系**：`GET /mode` 修复后返回 `NativeAgent` 的 tool permission modes（always/never/per_tool），但 OpenCode TUI 的 mode 切换 UI 与 ACP 的 `config_options` 是独立的。两者是否需要在语义上对齐（即 `PATCH /config` 中修改 `mode` 是否等价于 ACP 的 `session/set_config_option` for `"mode"`）？
 
@@ -733,6 +752,10 @@ Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
 | 2026-05-26 | agent_role 使用 `category="other"` | 不修改 ACP schema，`"other"` category 可承载非标准配置项 |
 | 2026-05-26 | tokonomics 来源保持 per-agent 语义 | ACP per-session 协议与 per-agent model 语义一致，不强制对齐全局缓存 |
 | 2026-05-26 | 单一 agent 时不透出 agent_role | 单 agent 配置无需切换，减少无意义 UI 噪声 |
+| 2026-05-26 | `_swap_session_agent()` 委托 `session.switch_active_agent()` | 复用已有的完整 session mutation 逻辑（信号、env、input_provider、sys_prompts），避免重复实现和遗漏 |
+| 2026-05-26 | agent swap 在 `_session_agent_locks` 保护下执行 | 防止并发 `set_config_option` 请求导致竞态条件和 session corruption |
+| 2026-05-26 | agent swap 拒绝在 active prompt 期间执行 | 通过检查 `session._task_lock.locked()` 避免 mid-stream agent 切换导致 crash |
+| 2026-05-26 | agent swap 后新 agent 不继承对话历史 | 不同 agent 的 system prompt 和工具集可能不兼容；历史继承需单独 RFC 设计 |
 
 ## 参考
 
