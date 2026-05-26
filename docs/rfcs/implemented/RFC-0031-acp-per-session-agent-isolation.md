@@ -1,7 +1,7 @@
 ---
 rfc_id: RFC-0031
 title: "ACP Server Per-Session Agent Isolation"
-status: PROPOSED
+status: IMPLEMENTED
 author: yuchen.liu
 reviewers: [Oracle, Metis]
 created: 2026-05-26
