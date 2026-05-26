@@ -1,0 +1,80 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool
+configfile: pyproject.toml
+plugins: docker-3.2.5, cov-7.1.0, syrupy-5.1.0, xdist-3.8.0, devtools-0.12.2, timeout-2.4.0, typeguard-4.5.1, asyncio-1.3.0, braintrust-0.12.1, rerunfailures-16.1, logfire-4.31.0, anyio-4.13.0
+timeout: 180.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 65 items
+
+tests/integration/test_skill_resolution.py::TestEndToEndSkillLoading::test_skill_loading_by_bare_name PASSED [  1%]
+tests/integration/test_skill_resolution.py::TestEndToEndSkillLoading::test_bare_name_falls_back_to_skills_manager PASSED [  3%]
+tests/integration/test_skill_resolution.py::TestReferenceContentLoading::test_reference_path_resolution PASSED [  4%]
+tests/integration/test_skill_resolution.py::TestReferenceContentLoading::test_reference_file_loading PASSED [  6%]
+tests/integration/test_skill_resolution.py::TestArgumentSubstitution::test_positional_argument_substitution PASSED [  7%]
+tests/integration/test_skill_resolution.py::TestArgumentSubstitution::test_all_arguments_substitution PASSED [  9%]
+tests/integration/test_skill_resolution.py::TestArgumentSubstitution::test_mixed_argument_substitution PASSED [ 10%]
+tests/integration/test_skill_resolution.py::TestArgumentSubstitution::test_no_arguments_substitution PASSED [ 12%]
+tests/integration/test_skill_resolution.py::TestMultipleSkillsResolution::test_multiple_skills_loading PASSED [ 13%]
+tests/integration/test_skill_resolution.py::TestErrorHandlingAndSecurity::test_skill_not_found_error PASSED [ 15%]
+tests/integration/test_skill_resolution.py::TestErrorHandlingAndSecurity::test_path_traversal_detection PASSED [ 16%]
+tests/integration/test_skill_resolution.py::TestErrorHandlingAndSecurity::test_invalid_provider_name_rejected PASSED [ 18%]
+tests/integration/test_skill_resolution.py::TestErrorHandlingAndSecurity::test_null_byte_detection PASSED [ 20%]
+tests/integration/test_skill_resolution.py::TestBackwardCompatibility::test_skills_manager_still_works PASSED [ 21%]
+tests/integration/test_skill_resolution.py::TestBackwardCompatibility::test_bare_skill_name_parsing PASSED [ 23%]
+tests/integration/test_skill_resolution.py::TestBackwardCompatibility::test_both_resolution_methods_available PASSED [ 24%]
+tests/toolsets/test_load_skill_uri.py::TestLoadSkillBackwardCompatibility::test_load_skill_with_bare_name PASSED [ 26%]
+tests/toolsets/test_load_skill_uri.py::TestLoadSkillBackwardCompatibility::test_bare_name_returns_skill_instructions PASSED [ 27%]
+tests/toolsets/test_load_skill_uri.py::TestLoadSkillBackwardCompatibility::test_bare_name_skill_not_found PASSED [ 29%]
+tests/toolsets/test_load_skill_uri.py::TestLoadSkillWithURI::test_uri_includes_provider_info PASSED [ 30%]
+tests/toolsets/test_load_skill_uri.py::TestLoadSkillWithURI::test_uri_skill_not_found_in_provider PASSED [ 32%]
+tests/toolsets/test_load_skill_uri.py::TestLoadSkillWithURI::test_invalid_uri_format PASSED [ 33%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitution::test_dollar_one_substitution PASSED [ 35%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitution::test_dollar_at_substitution PASSED [ 36%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitution::test_dollar_arguments_substitution PASSED [ 38%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitution::test_no_arguments_no_substitution PASSED [ 40%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_single_positional_argument PASSED [ 41%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_multiple_positional_arguments PASSED [ 43%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_at_symbol_replacement PASSED [ 44%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_arguments_uppercase_replacement PASSED [ 46%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_mixed_placeholders PASSED [ 47%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_no_arguments_returns_original PASSED [ 49%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_empty_arguments_clears_placeholders PASSED [ 50%]
+tests/toolsets/test_load_skill_uri.py::TestArgumentSubstitutionUnit::test_partial_arguments PASSED [ 52%]
+tests/toolsets/test_load_skill_uri.py::TestURIParsing::test_parse_bare_skill_name PASSED [ 53%]
+tests/toolsets/test_load_skill_uri.py::TestURIParsing::test_parse_simple_uri PASSED [ 55%]
+tests/toolsets/test_load_skill_uri.py::TestURIParsing::test_parse_uri_with_reference PASSED [ 56%]
+tests/toolsets/test_load_skill_uri.py::TestURIParsing::test_parse_uri_with_nested_reference PASSED [ 58%]
+tests/toolsets/test_load_skill_uri.py::TestURIParsing::test_parse_invalid_scheme_raises PASSED [ 60%]
+tests/toolsets/test_load_skill_uri.py::TestURIParsing::test_parse_empty_path_raises PASSED [ 61%]
+tests/toolsets/test_load_skill_uri.py::TestNoPoolContext::test_no_pool_returns_error PASSED [ 63%]
+tests/toolsets/test_load_skill_uri.py::TestListSkillsIntegration::test_list_skills_returns_available PASSED [ 64%]
+tests/delegation/test_pool_skills.py::TestSkillResolverProperty::test_skill_resolver_available_when_skills_configured PASSED [ 66%]
+tests/delegation/test_pool_skills.py::TestSkillResolverProperty::test_skill_resolver_is_uri_resolver PASSED [ 67%]
+tests/delegation/test_pool_skills.py::TestSkillResolverProperty::test_skill_resolver_has_local_provider PASSED [ 69%]
+tests/delegation/test_pool_skills.py::TestSkillResolverProperty::test_skill_resolver_exists_without_skills PASSED [ 70%]
+tests/delegation/test_pool_skills.py::TestSkillProviderProperty::test_skill_provider_available_when_skills_configured PASSED [ 72%]
+tests/delegation/test_pool_skills.py::TestSkillProviderProperty::test_skill_provider_is_aggregating_provider PASSED [ 73%]
+tests/delegation/test_pool_skills.py::TestSkillProviderProperty::test_skill_provider_has_local_provider PASSED [ 75%]
+tests/delegation/test_pool_skills.py::TestSkillProviderProperty::test_skill_provider_has_skills_changed_signal PASSED [ 76%]
+tests/delegation/test_pool_skills.py::TestSkillResolutionThroughPool::test_resolve_via_skills_manager PASSED [ 78%]
+tests/delegation/test_pool_skills.py::TestSkillResolutionThroughPool::test_list_skills_via_manager PASSED [ 80%]
+tests/delegation/test_pool_skills.py::TestSkillResolutionThroughPool::test_multiple_skills_resolution PASSED [ 81%]
+tests/delegation/test_pool_skills.py::TestProviderAggregation::test_skill_provider_aggregates_local PASSED [ 83%]
+tests/delegation/test_pool_skills.py::TestProviderAggregation::test_provider_count_matches_sources PASSED [ 84%]
+tests/delegation/test_pool_skills.py::TestProviderAggregation::test_aggregating_provider_skills_changed_signal PASSED [ 86%]
+tests/delegation/test_pool_skills.py::TestProviderAggregation::test_skills_accessible_via_pool_skills PASSED [ 87%]
+tests/delegation/test_pool_skills.py::TestPoolLifecycle::test_resolver_initialized_on_enter PASSED [ 89%]
+tests/delegation/test_pool_skills.py::TestPoolLifecycle::test_provider_initialized_on_enter PASSED [ 90%]
+tests/delegation/test_pool_skills.py::TestPoolLifecycle::test_skills_work_via_manager PASSED [ 92%]
+tests/delegation/test_pool_skills.py::TestProviderRegistration::test_can_list_all_providers PASSED [ 93%]
+tests/delegation/test_pool_skills.py::TestProviderRegistration::test_unregistered_provider_returns_none PASSED [ 95%]
+tests/delegation/test_pool_skills.py::TestProviderRegistration::test_resolve_fails_for_unregistered_provider PASSED [ 96%]
+tests/delegation/test_pool_skills.py::TestSkillsChangedIntegration::test_pool_forwards_skills_changed_events PASSED [ 98%]
+tests/delegation/test_pool_skills.py::TestSkillsChangedIntegration::test_signal_propagation_chain PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/integration/test_skill_resolution.py: 7 warnings

@@ -1,0 +1,77 @@
+Task 4 Verification: Create _create_command_context utility function
+
+## Implementation Complete
+
+### Function Created
+- **File**: src/agentpool_server/opencode_server/routes/session_routes.py
+- **Lines**: 83-102
+- **Function**: def _create_command_context(state: ServerState) -> CommandContext
+
+### Implementation Details
+
+```python
+def _create_command_context(state: ServerState) -> CommandContext:
+    """Create a CommandContext for executing slash commands.
+
+    Args:
+        state: The current server state with agent and working directory info.
+
+    Returns:
+        A CommandContext configured with the agent context, output capture, and command store.
+    """
+    from agentpool.agents.context import AgentContext
+
+    assert state.command_store is not None, "Command store must be initialized"
+
+    agent_ctx = AgentContext(node=state.agent, data=None)
+    return CommandContext(
+        output=_CommandOutputCapture(),
+        data=agent_ctx,
+        command_store=state.command_store,
+    )
+```
+
+### Requirements Met
+
+| Requirement | Status |
+|-------------|--------|
+| Function signature correct | ✅ def _create_command_context(state: ServerState) -> CommandContext |
+| Creates CommandContext | ✅ Returns slashed.CommandContext instance |
+| Uses agent from state | ✅ Via state.agent.get_context() wrapped in AgentContext |
+| Handles output capture | ✅ Uses _CommandOutputCapture helper class |
+| Used by Task 3 | ✅ Called in _execute_slashed_command() at line 129 |
+| Working directory resolution | ✅ Available via state.working_dir |
+
+### Verification Results
+
+- **Syntax check**: PASSED
+- **Ruff lint**: No new errors (only pre-existing F811)
+- **Type safety**: CommandContext properly typed
+
+### Helper Class
+
+```python
+class _CommandOutputCapture:
+    """Output writer that captures command output to a string buffer."""
+
+    def __init__(self) -> None:
+        self._buffer: list[str] = []
+
+    def print(self, message: str) -> None:
+        """Write a message to the buffer."""
+        self._buffer.append(message)
+
+    def __str__(self) -> str:
+        """Get the captured output as a single string."""
+        return "\n".join(self._buffer)
+```
+
+### Integration Pattern
+
+```python
+# In _execute_slashed_command:
+cmd_ctx = _create_command_context(state)
+await command.execute(cmd_ctx, args, {})
+```
+
+Task 4 Complete ✅

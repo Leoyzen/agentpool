@@ -1,0 +1,47 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool
+configfile: pyproject.toml
+plugins: docker-3.2.5, cov-7.1.0, syrupy-5.1.0, xdist-3.8.0, devtools-0.12.2, timeout-2.4.0, typeguard-4.5.1, asyncio-1.3.0, braintrust-0.12.1, rerunfailures-16.1, anyio-4.13.0
+timeout: 30.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 18 items
+
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_child_session_parent_id_in_session_data PASSED [  5%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_team_spawn_precedes_subagent_for_each_member PASSED [ 11%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_single_spawn_per_delegation PASSED [ 16%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_team_member_child_session_id_in_subagent_event PASSED [ 22%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_run_started_matches_spawn_child_id PASSED [ 27%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_depth_increments_per_delegation_level PASSED [ 33%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_acp_child_session_inherits_parent_project_and_cwd PASSED [ 38%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_depth_guard_before_session_creation PASSED [ 44%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_workers_child_session_persisted_with_correct_parent PASSED [ 50%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_teamrun_each_member_gets_own_child_session PASSED [ 55%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_nested_team_subagent_preserves_inner_session_ids PASSED [ 61%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_mixed_agent_type_team_all_get_child_sessions PASSED [ 66%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_event_ordering_spawn_before_subagent_per_child PASSED [ 72%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_team_run_does_not_emit_spawn_session_start PASSED [ 77%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_teamrun_run_does_not_emit_spawn_session_start PASSED [ 83%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_spawn_and_subagent_depth_consistency PASSED [ 88%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_pool_backed_team_and_teamrun_create_child_sessions PASSED [ 94%]
+tests/delegation/test_cross_provider_session_lifecycle.py::test_child_session_ids_unique_across_providers PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_child_session_parent_id_in_session_data
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_single_spawn_per_delegation
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_run_started_matches_spawn_child_id
+tests/delegation/test_cross_provider_session_lifecycle.py::test_depth_increments_per_delegation_level
+tests/delegation/test_cross_provider_session_lifecycle.py::test_subagent_depth_guard_before_session_creation
+tests/delegation/test_cross_provider_session_lifecycle.py::test_workers_child_session_persisted_with_correct_parent
+tests/delegation/test_cross_provider_session_lifecycle.py::test_child_session_ids_unique_across_providers
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/skills/manager.py:164: DeprecationWarning: get_effective_paths() is deprecated; paths are now resolved automatically via ConfigPath
+    paths = config.get_effective_paths(config_file_path)
+
+tests/delegation/test_cross_provider_session_lifecycle.py: 35 warnings
+  <string>:8: DeprecationWarning: AgentRunContext.session_id is deprecated — use agent-level session_id instead
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 18 passed, 42 warnings in 37.11s =======================

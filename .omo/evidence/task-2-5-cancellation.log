@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool
+configfile: pyproject.toml
+plugins: anyio-4.12.1, docker-3.2.5, syrupy-5.1.0, xdist-3.8.0, devtools-0.12.2, logfire-4.25.0, timeout-2.4.0, typeguard-4.5.1, asyncio-1.3.0, rerunfailures-16.1, cov-7.0.0
+timeout: 180.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/agents/test_concurrent_safety.py::test_concurrent_cancellation_isolation PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/agents/test_concurrent_safety.py:264
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests/agents/test_concurrent_safety.py:264: PytestUnknownMarkWarning: Unknown pytest.mark.benchmark - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.benchmark
+
+tests/agents/test_concurrent_safety.py:288
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests/agents/test_concurrent_safety.py:288: PytestUnknownMarkWarning: Unknown pytest.mark.benchmark - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.benchmark
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 1 passed, 2 warnings in 0.75s =========================

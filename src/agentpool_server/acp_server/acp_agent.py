@@ -31,10 +31,8 @@ from acp.schema import (
     SetSessionModeResponse,
     StopSessionResponse,
 )
-from acp.schema.mcp import AcpMcpServer
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
-from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
 from agentpool_server.acp_server.provider_router import ProviderRouter
@@ -219,9 +217,6 @@ class AgentPoolACPAgent(ACPAgent):
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
 
-    _mcp_manager: AcpMcpConnectionManager = field(init=False)
-    """Manager for MCP-over-ACP connection lifecycle."""
-
     def __post_init__(self) -> None:
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
@@ -239,9 +234,6 @@ class AgentPoolACPAgent(ACPAgent):
         pool.storage.metadata_generated.connect(self._on_metadata_generated)
         # Setup skill command bridge if pool has skill commands configured
         self._setup_skill_bridge()
-
-        # Initialize MCP-over-ACP connection manager
-        self._mcp_manager = AcpMcpConnectionManager()
 
         # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
@@ -523,7 +515,6 @@ class AgentPoolACPAgent(ACPAgent):
             stop_session=True,
             http_mcp_servers=True,
             sse_mcp_servers=True,
-            acp_mcp_servers=True,
             audio_prompts=True,
             embedded_context_prompts=True,
             image_prompts=True,
@@ -888,29 +879,6 @@ class AgentPoolACPAgent(ACPAgent):
         """
         result: dict[str, Any] = {}
         match method:
-            case "mcp/connect":
-                connection_id = params.get("connectionId", "")
-                server_data = params.get("server", {})
-                server = AcpMcpServer.model_validate(server_data)
-
-                async def send_to_client(message: dict[str, Any]) -> Any:
-                    return await self.client.ext_method("mcp/message", message)
-
-                await self._mcp_manager.create_connection(
-                    connection_id, server, send_to_client
-                )
-                result = {"connected": True}
-            case "mcp/disconnect":
-                connection_id = params.get("connectionId", "")
-                await self._mcp_manager.remove_connection(connection_id)
-                result = {"disconnected": True}
-            case "mcp/message":
-                connection_id = params.get("connectionId", "")
-                message = params.get("message", {})
-                conn = self._mcp_manager.get_connection(connection_id)
-                if conn is not None:
-                    await conn.handle_client_message(message)
-                result = {}
             case "providers/list":
                 providers = self.provider_router.get_providers()
                 result = {"providers": [p.model_dump(mode="json") for p in providers]}
@@ -960,12 +928,8 @@ class AgentPoolACPAgent(ACPAgent):
         return None
 
     async def close(self) -> None:
-        """Close the agent and clean up all MCP-over-ACP connections."""
+        """Close the agent and clean up all resources."""
         logger.info("Closing AgentPoolACPAgent")
-        try:
-            await self._mcp_manager.close_all()
-        except Exception:
-            logger.exception("Failed to close MCP connections during agent shutdown")
         await self.cleanup_all_session_agents()
 
     async def set_session_mode(

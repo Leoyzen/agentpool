@@ -1,0 +1,22 @@
+=== URI Resolver Verification ===
+
+Parsed: skill://local/python-expert
+  provider='local', skill_name='python-expert', reference_path=None
+  ✓ PASSED
+
+Parsed: skill://local/python-expert/references/guide.md
+  provider='local', skill_name='python-expert', reference_path='references/guide.md'
+  ✓ PASSED
+
+Parsed: python-expert
+  provider=None, skill_name='python-expert', reference_path=None
+  ✓ PASSED
+
+Parsed: skill://local/my%2Dskill (URL decoding)
+  provider='local', skill_name='my-skill'
+  ✓ PASSED
+
+Testing path traversal rejection...
+  ✓ PASSED - SecurityError raised: Path traversal detected in URI: 'skill://local/skill/../../../etc/passwd'
+
+=== All verification tests passed! ===

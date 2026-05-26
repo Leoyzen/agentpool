@@ -1,0 +1,125 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool
+configfile: pyproject.toml
+plugins: anyio-4.12.1, docker-3.2.5, syrupy-5.1.0, xdist-3.8.0, devtools-0.12.2, logfire-4.25.0, timeout-2.4.0, typeguard-4.5.1, asyncio-1.3.0, rerunfailures-16.1, cov-7.0.0
+timeout: 180.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 11 items / 2 deselected / 9 selected
+
+tests/agents/test_concurrent_safety.py::test_serial_execution_baseline PASSED [ 11%]
+tests/agents/test_concurrent_safety.py::test_single_call_completion PASSED [ 22%]
+tests/agents/test_concurrent_safety.py::test_concurrent_calls_complete PASSED [ 33%]
+tests/agents/test_concurrent_safety.py::test_concurrent_event_isolation FAILED [ 44%]
+tests/agents/test_concurrent_safety.py::test_concurrent_cancellation_isolation PASSED [ 55%]
+tests/agents/test_concurrent_safety.py::test_concurrent_event_queue_isolation PASSED [ 66%]
+tests/agents/test_concurrent_safety.py::test_serial_performance_baseline PASSED [ 77%]
+tests/agents/test_concurrent_safety.py::test_concurrent_performance FAILED [ 88%]
+tests/agents/test_concurrent_safety.py::test_native_agent_concurrent PASSED [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_concurrent_event_isolation ________________________
+
+native_agent = Agent('test_agent', model='test:test')
+
+    @pytest.mark.asyncio
+    async def test_concurrent_event_isolation(native_agent: BaseAgent) -> None:
+        """Events from concurrent calls must not cross-contaminate.
+    
+        Each call should only receive its own events, not events from
+        other concurrent calls.
+        """
+    
+        async def run_with_marker(task_id: str, marker: str) -> list[str]:
+            """Run task and collect markers from events."""
+            markers = []
+            async for event in native_agent.run_stream(f"Task with marker {marker}"):
+                # Check if event contains expected marker
+                event_str = str(event)
+                if marker in event_str:
+                    markers.append(marker)
+                if event_is_complete(event):
+                    break
+            return markers
+    
+        # Run 3 tasks with different markers
+        results = await asyncio.gather(
+            run_with_marker("A", "MARKER_A"),
+            run_with_marker("B", "MARKER_B"),
+            run_with_marker("C", "MARKER_C"),
+        )
+    
+        # Each task should only see its own marker
+        for i, (marker_list, expected) in enumerate(zip(results, ["MARKER_A", "MARKER_B", "MARKER_C"])):
+            # At least one event should have the marker
+>           assert len(marker_list) > 0, f"Task {i} received no events with its marker"
+E           AssertionError: Task 0 received no events with its marker
+E           assert 0 > 0
+E            +  where 0 = len([])
+
+tests/agents/test_concurrent_safety.py:131: AssertionError
+_________________________ test_concurrent_performance __________________________
+
+native_agent = Agent('test_agent', model='test:test')
+
+    @pytest.mark.benchmark
+    @pytest.mark.asyncio
+    async def test_concurrent_performance(native_agent: BaseAgent) -> None:
+        """Concurrent execution should be faster than serial for multiple tasks.
+    
+        3 concurrent tasks should complete faster than 3 serial tasks.
+        """
+    
+        async def measure_serial() -> float:
+            """Measure serial execution time."""
+            start = time.perf_counter()
+            for i in range(3):
+                async for event in native_agent.run_stream(f"Serial {i}"):
+                    if event_is_complete(event):
+                        break
+            return time.perf_counter() - start
+    
+        async def measure_concurrent() -> float:
+            """Measure concurrent execution time."""
+    
+            async def task(i: int) -> None:
+                async for event in native_agent.run_stream(f"Concurrent {i}"):
+                    if event_is_complete(event):
+                        break
+    
+            start = time.perf_counter()
+            await asyncio.gather(task(0), task(1), task(2))
+            return time.perf_counter() - start
+    
+        serial_time = await measure_serial()
+        concurrent_time = await measure_concurrent()
+    
+        print(f"\nSerial: {serial_time:.3f}s, Concurrent: {concurrent_time:.3f}s")
+    
+        # Concurrent should be significantly faster (at least 1.5x)
+        speedup = serial_time / concurrent_time
+>       assert speedup > 1.5, f"Concurrent execution not faster than serial: speedup = {speedup:.2f}x"
+E       AssertionError: Concurrent execution not faster than serial: speedup = 1.19x
+E       assert 1.186299657038557 > 1.5
+
+tests/agents/test_concurrent_safety.py:324: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+Serial: 0.003s, Concurrent: 0.003s
+=============================== warnings summary ===============================
+tests/agents/test_concurrent_safety.py:264
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests/agents/test_concurrent_safety.py:264: PytestUnknownMarkWarning: Unknown pytest.mark.benchmark - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.benchmark
+
+tests/agents/test_concurrent_safety.py:288
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests/agents/test_concurrent_safety.py:288: PytestUnknownMarkWarning: Unknown pytest.mark.benchmark - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.benchmark
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/agents/test_concurrent_safety.py::test_concurrent_event_isolation
+FAILED tests/agents/test_concurrent_safety.py::test_concurrent_performance - ...
+============ 2 failed, 7 passed, 2 deselected, 2 warnings in 1.25s =============

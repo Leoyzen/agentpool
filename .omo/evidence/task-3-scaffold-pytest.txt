@@ -1,0 +1,8 @@
+============================== 6 passed in 0.53s ===============================
+
+tests/servers/acp_server/test_mcp_notification_bridge.py::test_scaffold_imports PASSED
+tests/servers/acp_server/test_mcp_notification_bridge.py::test_fake_provider_emits_tools_changed PASSED
+tests/servers/acp_server/test_mcp_notification_bridge.py::test_fake_provider_emits_resource_updated PASSED
+tests/servers/acp_server/test_mcp_notification_bridge.py::test_acp_session_fixture_assembles PASSED
+tests/servers/acp_server/test_mcp_notification_bridge.py::test_mock_client_is_async_mock PASSED
+tests/servers/acp_server/test_mcp_notification_bridge.py::test_agent_pool_has_registered_agent PASSED

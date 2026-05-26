@@ -1,0 +1,42 @@
+============================================================
+MCPResourceProvider Skill Support Verification
+============================================================
+Testing imports...
+✓ All imports successful
+
+Testing method existence...
+  ✓ get_skills
+  ✓ _get_prompt_skills
+  ✓ _get_resource_skills
+  ✓ _get_skill_manifest
+  ✓ _get_skill_description
+  ✓ get_skill_instructions
+  ✓ _get_prompt_skill_instructions
+  ✓ _get_resource_skill_instructions
+  ✓ _format_prompt_skill_template
+  ✓ get_references
+  ✓ read_reference
+  ✓ _on_skills_changed
+✓ All required methods exist
+
+Testing _skills_cache attribute...
+✓ _skills_cache attribute exists
+
+Testing path traversal protection...
+  ✓ SecurityError raised: Security violation: Path traversal detected: ../../../etc/passwd
+
+Testing SkillNotFoundError...
+  ✓ SkillNotFoundError: Skill not found: test-skill. Available skills: skill1, skill2
+
+============================================================
+Results Summary
+============================================================
+✓ PASS: test_imports
+✓ PASS: test_skill_methods_exist
+✓ PASS: test_skills_cache_exists
+✓ PASS: test_security_error_raised
+✓ PASS: test_skill_not_found_error
+
+Total: 5/5 tests passed
+
+🎉 All tests passed!

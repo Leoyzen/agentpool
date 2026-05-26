@@ -157,9 +157,6 @@ class McpCapabilities(AnnotatedObject):
     sse: bool | None = False
     """Agent supports [`McpServer::Sse`]."""
 
-    acp: bool | None = False
-    """Agent supports [`McpServer::Acp`]."""
-
 
 class SessionListCapabilities(AnnotatedObject):
     """Capabilities for the `session/list` method.
@@ -285,7 +282,6 @@ class AgentCapabilities(AnnotatedObject):
         load_session: bool | None = False,
         http_mcp_servers: bool = False,
         sse_mcp_servers: bool = False,
-        acp_mcp_servers: bool = False,
         audio_prompts: bool = False,
         embedded_context_prompts: bool = False,
         image_prompts: bool = False,
@@ -300,7 +296,6 @@ class AgentCapabilities(AnnotatedObject):
             load_session: Whether the agent supports `session/load`.
             http_mcp_servers: Whether the agent supports HTTP MCP servers.
             sse_mcp_servers: Whether the agent supports SSE MCP servers.
-            acp_mcp_servers: Whether the agent supports ACP MCP servers.
             audio_prompts: Whether the agent supports audio prompts.
             embedded_context_prompts: Whether the agent supports embedded context prompts.
             image_prompts: Whether the agent supports image prompts.
@@ -313,6 +308,19 @@ class AgentCapabilities(AnnotatedObject):
             list=SessionListCapabilities() if list_sessions else None,
             resume=SessionResumeCapabilities() if resume_session else None,
             stop=SessionStopCapabilities() if stop_session else None,
+        )
+        return cls(
+            load_session=load_session,
+            providers=providers,
+            mcp_capabilities=McpCapabilities(
+                http=http_mcp_servers, sse=sse_mcp_servers
+            ),
+            prompt_capabilities=PromptCapabilities(
+                audio=audio_prompts,
+                embedded_context_prompts=embedded_context_prompts,
+                image=image_prompts,
+            ),
+            session_capabilities=session_caps,
         )
         return cls(
             load_session=load_session,

@@ -1,0 +1,47 @@
+Task 2: Backward compatibility verification for existing list-change callbacks
+
+=== Backcompat test ===
+$ uv run python -c "..."
+BACKCOMPAT PASS
+CLIENT PARAM PASS
+
+Test code:
+import asyncio
+from agentpool.mcp_server.message_handler import MCPMessageHandler
+from agentpool.mcp_server.client import MCPClient
+from agentpool_config.mcp_server import StdioMCPServerConfig
+
+async def test_backcompat():
+    calls = []
+    async def tool_cb() -> None:
+        calls.append('tool')
+    async def prompt_cb() -> None:
+        calls.append('prompt')
+    async def resource_cb() -> None:
+        calls.append('resource')
+    
+    handler = MCPMessageHandler(
+        client=None,
+        tool_change_callback=tool_cb,
+        prompt_change_callback=prompt_cb,
+        resource_change_callback=resource_cb,
+    )
+    
+    import mcp.types
+    await handler.on_tool_list_changed(mcp.types.ToolListChangedNotification())
+    await handler.on_prompt_list_changed(mcp.types.PromptListChangedNotification())
+    await handler.on_resource_list_changed(mcp.types.ResourceListChangedNotification())
+    
+    assert calls == ['tool', 'prompt', 'resource'], f'Got {calls}'
+    print('BACKCOMPAT PASS')
+
+    config = StdioMCPServerConfig(command='echo', args=['hi'])
+    async def updated_cb(uri: str) -> None:
+        pass
+    client = MCPClient(config=config, resource_updated_callback=updated_cb)
+    assert client._resource_updated_callback is updated_cb
+    print('CLIENT PARAM PASS')
+
+asyncio.run(test_backcompat())
+
+Result: BACKCOMPAT PASS, CLIENT PARAM PASS

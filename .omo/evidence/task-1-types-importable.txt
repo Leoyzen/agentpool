@@ -1,0 +1,8 @@
+QA Scenario: Types are importable and match spec
+Tool: Bash
+Preconditions: None
+Steps:
+  1. uv run python -c "from acp.schema.providers import ProviderInfo, LlmProtocol, ProviderStatus; print(ProviderStatus.enabled)"
+Expected Result: No ImportError, output is "ProviderStatus.enabled"
+Actual Result: ProviderStatus.enabled
+Status: PASS
