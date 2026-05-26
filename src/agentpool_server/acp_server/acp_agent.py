@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
+import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from acp import Agent as ACPAgent
@@ -57,6 +60,7 @@ if TYPE_CHECKING:
     )
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
+    from agentpool.models.agents import NativeAgentConfig
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
     from agentpool_server.acp_server.server import ACPServer
 
@@ -237,6 +241,24 @@ class AgentPoolACPAgent(ACPAgent):
         # Setup skill command bridge if pool has skill commands configured
         self._setup_skill_bridge()
 
+        # NEW: Cache agent config for per-session creation (RFC-0031)
+        from agentpool.models.agents import NativeAgentConfig
+        if (
+            self.agent_pool
+            and self.agent_pool.main_agent
+            and self.agent_pool.main_agent.name in self.agent_pool.manifest.agents
+        ):
+            cfg = self.agent_pool.manifest.agents[self.agent_pool.main_agent.name]
+            if isinstance(cfg, NativeAgentConfig):
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent.name})
+                self._agent_config = cfg
+
+    # NEW: Per-session agent registry (RFC-0031)
+    _agent_config: NativeAgentConfig | None = field(init=False, default=None)
+    _session_agents: dict[str, BaseAgent[Any, Any]] = field(init=False, default_factory=dict)
+    _session_agent_locks: dict[str, asyncio.Lock] = field(init=False, default_factory=dict)
+
     def _setup_skill_bridge(self) -> None:
         """Initialize skill command bridge and subscribe to registry changes.
 
@@ -269,6 +291,167 @@ class AgentPoolACPAgent(ACPAgent):
         """
         if self._skill_bridge is not None:
             return self._skill_bridge.get_available_commands()
+        return None
+
+    async def get_or_create_session_agent(
+        self,
+        session_id: str,
+        input_provider: Any | None = None,
+        agent_name: str | None = None,
+    ) -> BaseAgent[Any, Any]:
+        """Get or create a per-session agent instance.
+
+        Uses double-checked locking for concurrent access.
+        """
+        # Fast path: already registered
+        if session_id in self._session_agents:
+            return self._session_agents[session_id]
+
+        # Ensure a lock exists for this session
+        if session_id not in self._session_agent_locks:
+            self._session_agent_locks[session_id] = asyncio.Lock()
+
+        async with self._session_agent_locks[session_id]:
+            # Re-check after acquiring lock
+            if session_id in self._session_agents:
+                return self._session_agents[session_id]
+
+            # Create agent and set config dir for path resolution
+            # (ConfigContextManager from pool loading has exited,
+            # so _config_dir_global and CONFIG_DIR are None, breaking runtime path resolution)
+            import agentpool_config.context as ctx
+            from upathtools import UPath
+
+            config_path = self._resolve_agent_config_path(agent_name)
+            previous_dir = ctx._config_dir_global
+            config_token = None
+            if config_path is not None:
+                ctx._config_dir_global = UPath(config_path)
+                config_token = ctx.CONFIG_DIR.set(UPath(config_path))
+                logger.info(
+                    "get_or_create_session_agent: set _config_dir_global=%s",
+                    ctx._config_dir_global,
+                )
+
+            try:
+                agent = self._create_session_agent(session_id, input_provider, agent_name)
+
+                # Initialize the agent's async context (MCP subprocesses, tool providers, etc.)
+                # Tool providers need _config_dir_global to resolve schema paths
+                entered = False
+                try:
+                    await agent.__aenter__()
+                    entered = True
+                    self._session_agents[session_id] = agent
+                    return agent
+                except Exception:
+                    if entered:
+                        with suppress(Exception):
+                            await agent.__aexit__(*sys.exc_info())
+                    raise
+            finally:
+                ctx._config_dir_global = previous_dir
+                if config_token is not None:
+                    ctx.CONFIG_DIR.reset(config_token)
+                logger.info(
+                    "get_or_create_session_agent: restored _config_dir_global=%s",
+                    ctx._config_dir_global,
+                )
+
+    def _create_session_agent(
+        self,
+        session_id: str,
+        input_provider: Any | None = None,
+        agent_name: str | None = None,
+    ) -> BaseAgent[Any, Any]:
+        """Create a new agent instance for a session.
+
+        NOTE: _config_dir_global must be set by caller (get_or_create_session_agent)
+        before calling this method, and restored after agent.__aenter__().
+        """
+        # Resolve config: use specified agent_name or fallback to main agent
+        agent_config = None
+        if agent_name is not None and self.agent_pool and agent_name in self.agent_pool.manifest.agents:
+            from agentpool.models.agents import NativeAgentConfig
+            cfg = self.agent_pool.manifest.agents[agent_name]
+            if isinstance(cfg, NativeAgentConfig):
+                agent_config = cfg
+        elif agent_name is None:
+            agent_config = self._agent_config
+
+        if agent_config is not None:
+            agent = agent_config.get_agent(
+                input_provider=input_provider,
+                pool=self.agent_pool,
+            )
+            agent.session_id = session_id
+            return agent
+
+        # Fallback: use pool agent directly if available, otherwise shared default_agent
+        if agent_name is not None and self.agent_pool and agent_name in self.agent_pool.all_agents:
+            return self.agent_pool.all_agents[agent_name]
+
+        logger.warning(
+            "Non-native agent type - falling back to shared default_agent",
+            agent_type=type(self.default_agent).__name__,
+        )
+        return self.default_agent
+
+    async def remove_session_agent(self, session_id: str) -> None:
+        """Remove and clean up a session's dedicated agent."""
+        if session_id not in self._session_agent_locks:
+            self._session_agent_locks[session_id] = asyncio.Lock()
+        async with self._session_agent_locks[session_id]:
+            agent = self._session_agents.pop(session_id, None)
+            if agent is not None:
+                try:
+                    await agent.__aexit__(None, None, None)
+                except Exception:
+                    logger.exception("Failed to clean up session agent", session_id=session_id)
+        self._session_agent_locks.pop(session_id, None)
+
+    async def cleanup_all_session_agents(self) -> None:
+        """Clean up all per-session agents."""
+        # Iterate over a snapshot to avoid mutation during iteration
+        for session_id, agent in list(self._session_agents.items()):
+            try:
+                await agent.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Failed to clean up agent", session_id=session_id)
+        self._session_agents.clear()
+        self._session_agent_locks.clear()
+
+    def _resolve_agent_config_path(self, agent_name: str | None = None) -> str | None:
+        """Resolve the config file path for agent creation.
+
+        Used to set _config_dir_global so that tool schemas and other
+        config-relative paths resolve correctly during agent.__aenter__().
+
+        Returns the parent directory of the config file, or None if no
+        config file path can be resolved.
+        """
+        # Resolve config: use specified agent_name or fallback to main agent
+        agent_config = None
+        if agent_name is not None and self.agent_pool and agent_name in self.agent_pool.manifest.agents:
+            from agentpool.models.agents import NativeAgentConfig
+            cfg = self.agent_pool.manifest.agents[agent_name]
+            if isinstance(cfg, NativeAgentConfig):
+                agent_config = cfg
+        elif agent_name is None:
+            agent_config = self._agent_config
+
+        if agent_config is None:
+            return None
+
+        # Resolve config path: agent-level -> manifest-level -> None
+        config_path = agent_config.config_file_path
+        if config_path is None and self.agent_pool and self.agent_pool.manifest:
+            config_path = self.agent_pool.manifest.config_file_path
+
+        if config_path is not None:
+            from upathtools import UPath
+            return str(UPath(config_path).parent)
+
         return None
 
     async def _on_metadata_generated(self, event: SessionMetadataGeneratedEvent) -> None:
@@ -414,12 +597,12 @@ class AgentPoolACPAgent(ACPAgent):
                 return LoadSessionResponse()
 
             # Load session via agent - this populates agent.conversation
-            if not await self.default_agent.load_session(params.session_id):
+            if not await session.agent.load_session(params.session_id):
                 logger.warning("Agent failed to load session", session_id=params.session_id)
                 return LoadSessionResponse()
 
             # Replay loaded conversation to client via ACP notifications
-            if msgs := self.default_agent.conversation.chat_messages:
+            if msgs := session.agent.conversation.chat_messages:
                 model_messages: list[ModelMessage] = []
                 for chat_msg in msgs:
                     if chat_msg.messages:
@@ -432,10 +615,10 @@ class AgentPoolACPAgent(ACPAgent):
                 )
             mode_state: SessionModeState | None = None
             models: SessionModelState | None = None
-            if isinstance(self.default_agent, ACPAgentClient) and self.default_agent._state:
-                mode_state = self.default_agent._state.modes
-                models = self.default_agent._state.models
-            config_opts = await get_session_config_options(self.default_agent)
+            if isinstance(session.agent, ACPAgentClient) and session.agent._state:
+                mode_state = session.agent._state.modes
+                models = session.agent._state.models
+            config_opts = await get_session_config_options(session.agent)
             # Schedule post-load tasks
             self.tasks.create_task(session.send_available_commands_update())
             self.tasks.create_task(session.agent.load_rules(session.cwd))
@@ -543,7 +726,7 @@ class AgentPoolACPAgent(ACPAgent):
 
             # Load session state in the agent (populates conversation) but don't replay to client
             # This restores the agent's internal state so it can continue the conversation
-            if not await self.default_agent.load_session(params.session_id):
+            if not await session.agent.load_session(params.session_id):
                 logger.warning("Agent failed to load session state", session_id=params.session_id)
                 # Continue anyway - session wrapper is created, agent may still work
 
@@ -785,9 +968,12 @@ class AgentPoolACPAgent(ACPAgent):
         """Swap the agent pool with a new one from configuration.
 
         This coordinates the full pool swap:
-        1. Closes all active sessions
-        2. Delegates to server.swap_pool() for pool lifecycle
-        3. Updates internal references
+        1. Acquires session_manager._lock to serialize with create_session()
+        2. Clears all active sessions while holding the lock
+        3. Closes all sessions (outside the lock)
+        4. Cleans up all per-session agents
+        5. Delegates to server.swap_pool() for pool lifecycle
+        6. Updates internal references and cached agent config
 
         Args:
             config_path: Path to the new agent configuration file
@@ -805,18 +991,55 @@ class AgentPoolACPAgent(ACPAgent):
             raise RuntimeError(msg)
 
         logger.info("Swapping pool", config_path=config_path, agent=agent_name)
-        # 1. Close all active sessions
-        closed_count = await self.session_manager.close_all_sessions()
-        logger.info("Closed sessions before pool swap", count=closed_count)
-        # 2. Delegate to server for pool lifecycle management - returns new agent instance
+
+        # Acquire session_manager._lock to serialize with create_session()
+        async with self.session_manager._lock:
+            # 1. Copy and clear all active sessions while holding the lock
+            sessions = list(self.session_manager._active.values())
+            self.session_manager._active.clear()
+
+        # 2. Close all sessions (outside the lock - may take time)
+        for session in sessions:
+            try:
+                await session.close()
+            except Exception:
+                logger.exception("Error closing session during pool swap", session_id=session.session_id)
+
+        # 3. Clean up all per-session agents
+        await self.cleanup_all_session_agents()
+
+        # 4. Swap pool
         new_agent = await self.server.swap_pool(config_path, agent_name)
-        # 3. Update internal references
-        self.default_agent = new_agent
+
+        # 5. Update cached agent config from new pool
         pool = new_agent.agent_pool
         if pool is None:
             msg = "New agent has no associated pool"
             raise RuntimeError(msg)
+
+        # Re-resolve _agent_config from the new pool's manifest
+        if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
+            cfg = pool.manifest.agents[pool.main_agent.name]
+            from agentpool.models.agents import NativeAgentConfig
+            if isinstance(cfg, NativeAgentConfig):
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": pool.main_agent.name})
+                self._agent_config = cfg
+        elif pool.manifest.agents:
+            cfg = next(iter(pool.manifest.agents.values()))
+            from agentpool.models.agents import NativeAgentConfig
+            if isinstance(cfg, NativeAgentConfig):
+                self._agent_config = cfg
+        else:
+            self._agent_config = None
+
+        # 6. Update default_agent reference
+        self.default_agent = new_agent
         self.session_manager._pool = pool
+
+        # 7. Invalidate sessions cache
+        self._sessions_cache = None
+
         agent_names = list(pool.all_agents.keys())
         logger.info("Pool swap complete", agent_names=agent_names)
         return agent_names

@@ -97,6 +97,12 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
             self._previous_dir = _config_dir_global
             _config_dir_global = self._config_dir
             self._token = CONFIG_DIR.set(self._config_dir)
+            import logging
+            logging.getLogger("agentpool.config").info(
+                "ConfigContextManager.__enter__: set _config_dir_global=%s, previous=%s",
+                _config_dir_global,
+                self._previous_dir,
+            )
         return self
 
     def __exit__(
@@ -110,4 +116,11 @@ class ConfigContextManager(AbstractContextManager["ConfigContextManager"]):
             CONFIG_DIR.reset(self._token)
         # Restore previous global config dir (handles nested contexts)
         global _config_dir_global
+        old_value = _config_dir_global
         _config_dir_global = self._previous_dir
+        import logging
+        logging.getLogger("agentpool.config").info(
+            "ConfigContextManager.__exit__: restored _config_dir_global=%s (was %s)",
+            _config_dir_global,
+            old_value,
+        )

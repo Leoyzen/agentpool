@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 import warnings
 
 import anyenv
@@ -216,7 +216,21 @@ def acp_command(  # noqa: PLR0915
         with ConfigContextManager(resolved.primary_path):
             manifest = AgentsManifest.model_validate(resolved.data)
             if resolved.primary_path:
-                manifest = manifest.model_copy(update={"config_file_path": resolved.primary_path})
+                # Update manifest and all agent/team config_file_path for runtime
+                # path resolution (per-session agent creation needs this)
+                def update_with_path(nodes: dict[str, Any]) -> dict[str, Any]:
+                    return {
+                        name: config.model_copy(update={"config_file_path": resolved.primary_path})
+                        for name, config in nodes.items()
+                    }
+
+                manifest = manifest.model_copy(
+                    update={
+                        "config_file_path": resolved.primary_path,
+                        "agents": update_with_path(manifest.agents),
+                        "teams": update_with_path(manifest.teams),
+                    }
+                )
 
             acp_server = ACPServer.from_config(
                 manifest,

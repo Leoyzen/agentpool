@@ -126,9 +126,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
 
         # Set up context manager if we have a config file path
         # This enables config-relative path resolution during manifest loading
+        logger.info("AgentPool.__init__: config_path=%s, creating ConfigContextManager", config_path)
         with ConfigContextManager(config_path):
             if manifest_obj is None:
                 manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]
+            logger.info("AgentPool.__init__: after manifest load, agents=%s", list(manifest_obj.agents.keys()))
+            for name, cfg in manifest_obj.agents.items():
+                logger.info("AgentPool.__init__: agent %s config_file_path=%s", name, getattr(cfg, 'config_file_path', 'N/A'))
 
             self._config_file_path = config_path
             self.manifest = manifest_obj

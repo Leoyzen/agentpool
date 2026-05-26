@@ -151,25 +151,40 @@ class ACPSessionManager:
                     await self.session_store.save(data)
                 effective_cwd = cwd
 
-            # Create the ACP-specific runtime session
-            session = ACPSession(
-                session_id=session_id,
-                agent=agent,
-                cwd=effective_cwd,
-                client=client,
-                mcp_servers=mcp_servers,
-                acp_agent=acp_agent,
-                client_capabilities=client_capabilities or ClientCapabilities(),
-                client_info=client_info,
-                manager=self,
-                subagent_display_mode=subagent_display_mode,
-            )
-            session.register_update_callback(self._on_commands_updated)
-            await session.initialize()
-            await session.initialize_mcp_servers()
-            self._active[session_id] = session
-            logger.info("Created ACP session", session_id=session_id, agent=agent.name)
-            return session_id
+            # NEW: Get or create per-session agent (if acp_agent supports it)
+            try:
+                session_agent = await acp_agent.get_or_create_session_agent(session_id, input_provider=None)
+            except TypeError:
+                # Backward compat: use the passed agent directly (e.g., mocks in tests)
+                session_agent = agent
+
+            try:
+                # Create the ACP-specific runtime session
+                session = ACPSession(
+                    session_id=session_id,
+                    agent=session_agent,  # DEDICATED INSTANCE
+                    cwd=effective_cwd,
+                    client=client,
+                    mcp_servers=mcp_servers,
+                    acp_agent=acp_agent,
+                    client_capabilities=client_capabilities or ClientCapabilities(),
+                    client_info=client_info,
+                    manager=self,
+                    subagent_display_mode=subagent_display_mode,
+                )
+                session.register_update_callback(self._on_commands_updated)
+                await session.initialize()
+                await session.initialize_mcp_servers()
+                self._active[session_id] = session
+                logger.info("Created ACP session", session_id=session_id, agent=session_agent.name)
+                return session_id
+            except Exception:
+                # Session creation failed - clean up the orphaned agent
+                try:
+                    await acp_agent.remove_session_agent(session_id)
+                except TypeError:
+                    pass  # Mock agent, no cleanup needed
+                raise
 
     def get_session(self, session_id: str) -> ACPSession | None:
         """Get an active session by ID."""
@@ -212,11 +227,19 @@ class ACPSessionManager:
                 msg = "Session agent no longer exists"
                 logger.warning(msg, session_id=session_id, agent=data.agent_name)
                 return None
-            agent = self._pool.all_agents[data.agent_name]
-            # Reconstruct ACP session
+
+            # NEW: Create per-session agent for resumed session
+            try:
+                session_agent = await acp_agent.get_or_create_session_agent(
+                    session_id, input_provider=None
+                )
+            except TypeError:
+                # Backward compat: use pool agent directly
+                session_agent = self._pool.all_agents[data.agent_name]
+
             session = ACPSession(
                 session_id=session_id,
-                agent=agent,
+                agent=session_agent,  # DEDICATED INSTANCE
                 cwd=data.cwd or "",
                 client=client,
                 mcp_servers=None,  # MCP servers would need to be re-provided
@@ -230,6 +253,10 @@ class ACPSessionManager:
             await session.initialize()
             self._active[session_id] = session
             logger.info("Resumed ACP session", session_id=session_id)
+
+            # Load conversation history into the per-session agent
+            await session.agent.load_session(session_id)
+
             return session
 
     async def close_session(self, session_id: str, *, delete: bool = False) -> None:
@@ -244,6 +271,12 @@ class ACPSessionManager:
 
         if session:
             await session.close()
+            # NEW: Clean up the dedicated agent
+            if session.acp_agent:
+                try:
+                    await session.acp_agent.remove_session_agent(session_id)
+                except TypeError:
+                    pass  # Mock agent, no cleanup needed
             logger.info("Closed ACP session", session_id=session_id)
 
         if delete:

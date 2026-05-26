@@ -7,6 +7,7 @@ between agents and ACP clients through the JSON-RPC protocol.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass, field
 import re
 from typing import TYPE_CHECKING, Any, Literal
@@ -22,7 +23,7 @@ from acp.agent.acp_requests import ACPRequests
 from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
-from agentpool import Agent, AgentPool  # noqa: TC001
+from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
@@ -212,42 +213,39 @@ class ACPSession:
         self.command_store = CommandStore(commands=get_all_commands())
         self.command_store._initialize_sync()
         self._update_callbacks: list[Callable[[], None]] = []
-        self._remote_commands: list[AvailableCommand] = []  # Commands from nested ACP agents
-        # Inject Zed-specific instructions if client is Zed
-        if self.client_info and self.client_info.name and "zed" in self.client_info.name.lower():
-            self.agent.staged_content.add_text(ZED_CLIENT_PROMPT)
+        self._remote_commands: list[AvailableCommand] = []
+
+        # CRITICAL: Initialize requests and acp_env BEFORE agent mutation
         self.notifications = ACPNotifications(client=self.client, session_id=self.session_id)
         self.requests = ACPRequests(client=self.client, session_id=self.session_id)
         self.input_provider = ACPInputProvider(self)
         self.acp_env = ACPExecutionEnvironment(fs=self.fs, requests=self.requests, cwd=self.cwd)
-        for agent in self.agent_pool.all_agents.values():
-            agent.env = self.acp_env
-            if isinstance(agent, Agent):
-                # TODO: need to inject this info for ACP agents, too.
-                agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType] # ty: ignore[invalid-argument-type]
-            if isinstance(agent, ACPAgent):
 
-                async def permission_callback(
-                    params: RequestPermissionRequest,
-                ) -> RequestPermissionResponse:
-                    # Reconstruct request with our session_id (not nested agent's session_id)
-                    self.log.debug("Forwarding permission request", request=params)
-                    try:
-                        forwarded = params.model_copy(update={"session_id": self.session_id})
-                        response = await self.requests.client.request_permission(forwarded)
-                        self.log.debug("Permission response received", response=response)
-                    except Exception as exc:
-                        self.log.exception("Permission forwarding failed", error=str(exc))
-                        raise
-                    else:
-                        return response
+        # Inject Zed-specific instructions if client is Zed
+        if self.client_info and self.client_info.name and "zed" in self.client_info.name.lower():
+            self.agent.staged_content.add_text(ZED_CLIENT_PROMPT)
 
-                agent.acp_permission_callback = permission_callback
+        # Only mutate THIS session's agent, not all pool agents
+        self.agent.env = self.acp_env
+        # CRITICAL: Set the real input provider (overrides temp None from creation)
+        self.agent._input_provider = self.input_provider
+        if isinstance(self.agent, Agent):
+            self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if isinstance(self.agent, ACPAgent):
+            async def permission_callback(params: RequestPermissionRequest) -> RequestPermissionResponse:
+                forwarded = params.model_copy(update={"session_id": self.session_id})
+                response = await self.requests.client.request_permission(forwarded)
+                return response
+            self.agent.acp_permission_callback = permission_callback
 
-            # Subscribe to state change signal for all agents
-            agent.state_updated.connect(self._on_state_updated)
+        # Subscribe to state changes for THIS agent only
+        # Defense: disconnect first (idempotent) to prevent duplicate connections
+        with suppress(Exception):
+            self.agent.state_updated.disconnect(self._on_state_updated)
+        self.agent.state_updated.connect(self._on_state_updated)
         # Register skill commands from pool's skill_commands registry
         self._register_skill_commands()
+
         self.log.info("Created ACP session", current_agent=self.agent.name)
 
     def _register_skill_commands(self) -> None:
@@ -426,21 +424,48 @@ class ACPSession:
         return f"Working directory: {self.cwd}" if self.cwd else ""
 
     async def switch_active_agent(self, agent_name: str) -> None:
-        """Switch to a different agent in the pool.
-
-        Args:
-            agent_name: Name of the agent to switch to
-
-        Raises:
-            ValueError: If agent not found in pool
-        """
+        """Switch to a different agent in the pool."""
         agents = self.agent_pool.all_agents
         if agent_name not in agents:
             available = list(agents.keys())
             raise ValueError(f"Agent {agent_name!r} not found. Available: {available}")
+
         old_agent_name = self.agent.name
-        # self.agent = pool.get_agent(agent_name, deps_type=ACPSession)
-        self.agent = agents[agent_name]
+
+        # Disconnect old agent's signal
+        with suppress(Exception):
+            self.agent.state_updated.disconnect(self._on_state_updated)
+
+        # Remove old per-session agent
+        if self.acp_agent:
+            await self.acp_agent.remove_session_agent(self.session_id)
+
+        # Create new per-session agent for the target agent type
+        if self.acp_agent:
+            new_agent = await self.acp_agent.get_or_create_session_agent(
+                self.session_id, input_provider=None, agent_name=agent_name
+            )
+            # If get_or_create_session_agent fell back to default_agent
+            # (because agent_name is not in acp_agent's manifest),
+            # use the pool agent directly
+            if new_agent.name != agent_name:
+                new_agent = agents[agent_name]
+            self.agent = new_agent
+        else:
+            # Fallback: shared agent (shouldn't happen in production)
+            self.agent = agents[agent_name]
+
+        # Re-apply session-specific mutations
+        self.agent.env = self.acp_env
+        self.agent._input_provider = self.input_provider
+        if isinstance(self.agent, Agent):
+            self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+
+        # Reconnect signal
+        with suppress(Exception):
+            self.agent.state_updated.disconnect(self._on_state_updated)
+        self.agent.state_updated.connect(self._on_state_updated)
+
         self.log.info("Switched agents", from_agent=old_agent_name, to_agent=agent_name)
         # Persist the agent switch via session manager
         if self.manager:
@@ -582,15 +607,17 @@ class ACPSession:
                 try:
                     await provider.__aexit__(None, None, None)
                 except Exception:
-                    self.log.exception(
-                        "Error cleaning up session MCP provider",
-                        provider=provider.name,
-                    )
+                    self.log.exception("Error cleaning up session MCP provider", provider=provider.name)
             self.session_mcp_providers.clear()
-            # Remove cwd context callable from all agents
-            for agent in self.agent_pool.get_agents(Agent).values():
-                if self.get_cwd_context in agent.sys_prompts.prompts:
-                    agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+
+            # NEW: Disconnect state_updated signal to prevent stale callbacks
+            with suppress(Exception):
+                self.agent.state_updated.disconnect(self._on_state_updated)
+
+            # Clean up sys_prompts from THIS session's agent only
+            if isinstance(self.agent, Agent):
+                if self.get_cwd_context in self.agent.sys_prompts.prompts:
+                    self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
