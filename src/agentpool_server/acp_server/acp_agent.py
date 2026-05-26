@@ -164,7 +164,11 @@ def get_agent_role_config_option(agent: BaseAgent[Any, Any]) -> SessionConfigOpt
         return None
 
     choices = [
-        SessionConfigSelectOption(value=a.name, name=a.name)
+        SessionConfigSelectOption(
+            value=a.name,
+            name=a.display_name if isinstance(a.display_name, str) and a.display_name else a.name,
+            description=f"Switch to {a.name} agent",
+        )
         for a in pool.all_agents.values()
     ]
     return SessionConfigOption(
@@ -1053,6 +1057,13 @@ class AgentPoolACPAgent(ACPAgent):
 
         async with self._session_agent_locks[session_id]:
             await session.switch_active_agent(new_agent_name)
+            # Update session agent registry so subsequent get_or_create calls
+            # return the new agent instead of the cached old one.
+            self._session_agents[session_id] = session.agent
+
+        # TODO: Clean up _session_agent_locks when session ends.
+        # Currently no session lifecycle hook exists to safely pop locks.
+        # Memory impact is minimal (one Lock per active session).
 
         return {"success": True}
 

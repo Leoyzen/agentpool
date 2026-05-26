@@ -37,8 +37,8 @@ class TestListModes:
 
         assert len(result) == 2
         names = {m.name for m in result}
-        assert "Default" in names
-        assert "Accept Edits" in names
+        assert "default" in names
+        assert "accept_edits" in names
 
     async def test_mode_fallback_on_error(self):
         """/mode returns default when get_modes() raises."""

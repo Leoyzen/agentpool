@@ -33,8 +33,10 @@ class TestGetAgentRoleConfigOption:
         pool = MagicMock()
         agent_a = MagicMock()
         agent_a.name = "agent_a"
+        agent_a.display_name = None
         agent_b = MagicMock()
         agent_b.name = "agent_b"
+        agent_b.display_name = "Agent B"
         pool.all_agents = {"agent_a": agent_a, "agent_b": agent_b}
         agent = MagicMock()
         agent.name = "agent_a"
@@ -51,6 +53,13 @@ class TestGetAgentRoleConfigOption:
         choice_values = {o.value for o in options}  # type: ignore[union-attr]
         assert "agent_a" in choice_values
         assert "agent_b" in choice_values
+        # Verify display_name fallback and description
+        option_a = next(o for o in options if o.value == "agent_a")  # type: ignore[union-attr]
+        assert option_a.name == "agent_a"  # type: ignore[union-attr]
+        assert option_a.description == "Switch to agent_a agent"  # type: ignore[union-attr]
+        option_b = next(o for o in options if o.value == "agent_b")  # type: ignore[union-attr]
+        assert option_b.name == "Agent B"  # type: ignore[union-attr]
+        assert option_b.description == "Switch to agent_b agent"  # type: ignore[union-attr]
 
     def test_no_pool_returns_none(self):
         """Agent without pool should not expose agent_role."""

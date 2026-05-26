@@ -71,12 +71,12 @@ class TestCrossProtocolAlignment:
         agent_role_opt = get_agent_role_config_option(agent)
         assert agent_role_opt is None
 
-        # OpenCode: single mode
+        # OpenCode: single mode (returns mode.id, not mode.name)
         state = MagicMock()
         state.agent = agent
         modes = await list_modes(state)  # type: ignore[arg-type]
         assert len(modes) == 1
-        assert modes[0].name == "Default"
+        assert modes[0].name == "default"
 
     async def test_cross_protocol_model_alignment(self):
         """Both protocols reflect same underlying model state."""
