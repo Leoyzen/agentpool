@@ -5,12 +5,13 @@ status: DRAFT
 author: yuchen.liu
 reviewers: []
 created: 2026-05-26
-last_updated: 2026-05-26
+last_updated: 2026-05-27
 decision_date:
 related_rfcs:
   - RFC-0027 (ACP Subagent Zed 兼容性)
   - RFC-0031 (ACP Per-Session Agent Isolation)
   - RFC-0032 (ACP Slash Commands Protocol Compliance)
+  - ACP-RFD-custom-llm-endpoint (Configurable LLM Providers, PR #648, MERGED)
 ---
 
 # RFC-0034: ACP Session Config Options 统一化
@@ -40,6 +41,7 @@ ACP 协议提供两套机制透出可切换配置：
 |------|----------|------|------|
 | `SessionModeState` | `session/set_mode` | 正式规范 | 单一 mode 选择器，一次只能有一套 modes |
 | `SessionConfigOption[]` | `session/set_config_option` | UNSTABLE | 多维度 config option，每个 category 独立选择器 |
+| `ProviderInfo[]` | `providers/list` / `providers/set` / `providers/disable` | UNSTABLE（PR #648 MERGED） | LLM provider 路由配置，客户端可覆盖 agent 的 LLM 请求目标 |
 
 AgentPool 当前实现：
 - `NewSessionResponse.modes` → 透出 tool permission（`get_session_mode_state()`，只取 `id=="mode"` 的 category）
@@ -80,6 +82,30 @@ AgentPool 当前实现：
 - `get_session_mode_state()` 只取 `id=="mode"` 的 category（tool permission），不包含 agent role
 - `agent_routes.py` 的 `GET /agent` 端点可列出所有 agents，供 opencode TUI 使用，但 ACP 协议无对应端点
 
+#### ACP Configurable LLM Providers 协议（PR #648，已 MERGED）
+
+ACP 协议新增 `providers/*` 方法族，允许客户端发现和覆盖 agent 的 LLM 请求路由：
+
+| 方法 | 作用 | 时机 |
+|------|------|------|
+| `providers/list` | 返回 agent 暴露的 LLM provider 列表（id、协议类型、当前路由、是否 required） | `initialize` 后、`session/new` 前 |
+| `providers/set` | 覆盖某个 provider 的路由目标（apiType、baseUrl、headers） | `session/new` 前 |
+| `providers/disable` | 禁用某个 provider（`current: null`） | `session/new` 前 |
+
+协议关键语义：
+- 客户端通过 `agentCapabilities.providers: true` 判断 agent 是否支持 provider 配置
+- `providers/set` 替换 provider 的完整配置（apiType + baseUrl + headers），非增量更新
+- `providers/list` 不返回 headers（可能含 secrets），只返回非敏感路由摘要
+- Provider 配置为 process-scoped，不应持久化到磁盘
+- Agent MAY 不将变更应用到已运行的 session，但 SHOULD 应用到后续创建的 session
+
+**AgentPool 当前状态**：❌ 完全未实现。`AgentCapabilities` 中无 `providers` 字段，无 `providers/*` 处理器。
+
+**与 model 选择的关系**：`providers/*` 运行在**传输层**（"LLM 请求发到哪"），而 `session/set_config_option(model=...)` 运行在**应用层**（"用什么模型"）。两者正交但存在交互：
+- 被禁用的 provider 下的模型不应出现在 `SessionModelState` 中
+- 客户端通过 `providers/set` 覆盖 endpoint 后，agent 的模型请求应路由到新 endpoint
+- agent 的 `model_variants` 中的 `AnyModelConfig` 隐含了 provider 信息，是 `providers/list` 的数据来源
+
 ### 问题陈述
 
 #### GAP 1（P0）：Agent Role 完全未透出到 ACP
@@ -107,6 +133,21 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 
 当前 `get_session_mode_state()` 只提取 `id=="mode"` 的 category 填入旧版 `SessionModeState`。其余 categories（model、thought_level 等）通过 `config_options` 透出，但旧版 `modes` 字段只有 tool permission，导致仅支持旧版 `session/set_mode` 的客户端（如部分旧版 Zed）看不到 model 选择器。
 
+#### GAP 5（P0）：ACP Configurable LLM Providers 完全未实现
+
+ACP 协议 PR #648（已 MERGED）定义了 `providers/list`、`providers/set`、`providers/disable` 三个方法，允许客户端发现 agent 的 LLM provider 并覆盖路由目标。AgentPool 当前完全未实现：
+
+- `AgentCapabilities` 中无 `providers` 字段，客户端无法发现此能力
+- 无 `providers/list` 处理器，客户端无法获取 agent 的 provider 列表
+- 无 `providers/set` 处理器，客户端无法覆盖 provider 的路由目标（apiType、baseUrl、headers）
+- 无 `providers/disable` 处理器，客户端无法禁用某个 provider
+
+**影响**：
+1. 企业用户无法通过 ACP 将 agent 的 LLM 请求路由到内部网关（合规、日志、成本控制）
+2. 自托管用户无法将 agent 请求重定向到本地 vLLM / Ollama 等服务
+3. 客户端无法在 UI 中显示 agent 的 LLM provider 状态
+4. 更关键的是：**model 列表与 provider 状态耦合** — 如果不实现 `providers/*`，Phase 1 的 `build_model_state_for_acp()` 无法感知 provider 的启用/禁用状态，可能展示实际不可用的模型
+
 ### 相关工作
 
 | RFC | 状态 | 关系 |
@@ -114,6 +155,7 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 | RFC-0027 | DRAFT | ACP Subagent Zed 兼容性，提出 `display_mode=zed` |
 | RFC-0031 | IMPLEMENTED | ACP Per-Session Agent Isolation，每 session 独立 agent 实例 |
 | RFC-0032 | DRAFT | ACP Slash Commands 合规性 |
+| ACP PR #648 | MERGED | Configurable LLM Providers，定义 `providers/*` 方法族 |
 
 ### 术语表
 
@@ -139,6 +181,7 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 | G4 | `serve-opencode` 的 `GET /mode` 路由动态透出 agent modes（调用 `agent.get_modes()`） | P1 |
 | G5 | 新增 `agent_role` config option category，切换时实际替换 session 的 agent 实例 | P0 |
 | G6 | 保持向后兼容：旧版 `SessionModeState.modes` 继续透出 tool permission | P0 |
+| G7 | 实现 ACP `providers/*` 协议方法（`providers/list`、`providers/set`、`providers/disable`），从 `model_variants` 派生 `ProviderInfo[]` | P0 |
 
 ### 非目标
 
@@ -149,6 +192,7 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 | NG3 | 实现 agent role 的持久化（跨 session 记忆上次选择） | 不在本 RFC 范围 |
 | NG4 | 支持动态新增/删除 agent（运行时 reload manifest） | 涉及 agent pool 热更新，属于单独 RFC |
 | NG5 | 跨 session 同步 config option 变更 | 每个 session 独立配置，不需要全局同步 |
+| NG6 | 实现 `providers/*` 对已运行 session 的实时路由切换 | 协议规定 Agent MAY 不应用到已运行 session，本 RFC 遵循保守策略：`providers/set` 仅影响后续新建 session |
 
 ## 评估标准
 
@@ -156,9 +200,10 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 |------|------|------|----------|
 | IDE 兼容性 | 关键 | Zed 等 IDE 能显示 agent role 和模型选择器 | config_options 能被客户端正确解析 |
 | 数据一致性 | 高 | ACP 和 OpenCode 透出的模型列表相同 | 相同配置下两者列表集合一致 |
+| 协议合规性 | 高 | 实现已 MERGED 的 ACP 协议特性（`providers/*`） | 通过 ACP 官方 conformance test |
 | 向后兼容性 | 关键 | 旧版 SessionModeState.modes 不变 | 现有 tool permission 切换功能正常 |
 | 代码复用 | 高 | ACP 和 OpenCode 复用共享的 model 构建逻辑 | 提取到 `shared/model_utils.py` |
-| 实施复杂度 | 中 | 修改范围可控 | 不超过 5 个核心文件 |
+| 实施复杂度 | 中 | 修改范围可控 | 不超过 7 个核心文件 |
 | 可测试性 | 中 | 可单元测试的 config option 构建逻辑 | 覆盖率 ≥ 80% |
 
 ## 方案分析
@@ -315,6 +360,7 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 │  get_session_mode_state()         GET /agent                    │
 │    → tool permission only         → all_agents (正确)           │
 │                                                                  │
+│  providers/*: 未实现 ❌            （无 ACP 协议，不适用）         │
 │  Agent Role: 未透出 ❌                                           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -323,26 +369,291 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 │                    目标状态（对齐后）                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  shared/model_utils.py                                           │
-│    build_model_config_option_for_acp()                          │
-│      → configured variants first（解析 provider → 仅取名）       │
-│      → tokonomics fallback（agent.get_available_models()）       │
+│  ┌─ 传输层（session/new 前配置） ─────────────────────────────┐  │
+│  │                                                              │  │
+│  │  providers/list ✅                                           │  │
+│  │    → 从 model_variants 派生 ProviderInfo[]                  │  │
+│  │    → 每个 provider 含 id、supported LlmProtocol、           │  │
+│  │      required、current（apiType + baseUrl）                  │  │
+│  │                                                              │  │
+│  │  providers/set ✅                                            │  │
+│  │    → 覆盖 provider 路由表（apiType + baseUrl + headers）     │  │
+│  │    → 仅影响后续新建 session                                  │  │
+│  │                                                              │  │
+│  │  providers/disable ✅                                        │  │
+│  │    → 设置 provider.current = null                            │  │
+│  │    → 被禁用 provider 下的模型从 model list 中移除            │  │
+│  │                                                              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  ACP Server                      OpenCode Server                │
-│  ──────────────────               ────────────────────────────  │
-│  get_session_model_state()        _build_providers_with_fallback │
-│    ↑ 使用共享逻辑                  ↑ 保持不变（provider 分组）     │
-│    → configured first ✅          → configured first ✅          │
+│  ┌─ 应用层（session 生命周期内） ─────────────────────────────┐  │
+│  │                                                              │  │
+│  │  shared/model_utils.py                                       │  │
+│  │    build_model_state_for_acp()                               │  │
+│  │      → configured variants first                             │  │
+│  │      → tokonomics fallback                                   │  │
+│  │      → 过滤 disabled provider 下的模型 ✅                    │  │
+│  │                                                              │  │
+│  │  ACP Server                     OpenCode Server              │  │
+│  │  ───────────────                ───────────────────────────  │  │
+│  │  get_session_model_state()      _build_providers_with_fall  │  │
+│  │    ↑ 使用共享逻辑               ↑ 保持不变                   │  │
+│  │    → configured first ✅        → configured first ✅        │  │
+│  │    → 过滤 disabled ✅                                         │  │
+│  │                                                              │  │
+│  │  get_session_config_options()  GET /mode                     │  │
+│  │    → get_modes() + agent_role  → agent.get_modes() 动态 ✅  │  │
+│  │                                                              │  │
+│  │  Agent Role: config_options ✅                               │  │
+│  │    id="agent_role", category="other"                         │  │
+│  │    options=[all_agents as ModeInfo]                          │  │
+│  │    切换时: _swap_session_agent()                              │  │
+│  │                                                              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  get_session_config_options()     GET /mode                     │
-│    → get_modes() + agent_role     → agent.get_modes() 动态 ✅   │
-│                                                                  │
-│  Agent Role: config_options ✅                                   │
-│    id="agent_role", category="other"                             │
-│    options=[all_agents as ModeInfo]                              │
-│    切换时: _swap_session_agent()                                  │
+│  ┌─ 运行时路由 ───────────────────────────────────────────────┐  │
+│  │                                                              │  │
+│  │  Provider 路由表（agentpool 内存维护）                       │  │
+│  │    默认：manifest model_variants → provider → default URL   │  │
+│  │    覆盖：providers/set → provider → client URL + headers    │  │
+│  │    禁用：providers/disable → provider → null（不可路由）     │  │
+│  │                                                              │  │
+│  │  agent 请求模型 X → 查找 X 的 provider P                    │  │
+│  │    → 从路由表获取 P 的当前 endpoint                         │  │
+│  │    → providers/set override 优先，manifest default 兜底      │  │
+│  │                                                              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 0：ACP Configurable LLM Providers 实现
+
+#### 数据模型
+
+从 ACP PR #648 协议定义映射到 agentpool 的类型：
+
+```python
+# acp/schema/providers.py（新增文件）
+
+LlmProtocol = Literal["anthropic", "openai", "azure", "vertex", "bedrock"] | str
+
+
+class ProviderCurrentConfig(BaseModel):
+    """Provider 当前有效路由配置（非敏感信息）。"""
+
+    api_type: LlmProtocol = Field(alias="apiType")
+    base_url: str = Field(alias="baseUrl")
+
+
+class ProviderInfo(BaseModel):
+    """可配置的 LLM Provider 信息。"""
+
+    id: str
+    supported: list[LlmProtocol]
+    required: bool
+    current: ProviderCurrentConfig | None = None  # None = 禁用
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class ProvidersListRequest(BaseModel):
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class ProvidersListResponse(BaseModel):
+    providers: list[ProviderInfo]
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class ProvidersSetRequest(BaseModel):
+    id: str
+    api_type: LlmProtocol = Field(alias="apiType")
+    base_url: str = Field(alias="baseUrl")
+    headers: dict[str, str]
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class ProvidersSetResponse(BaseModel):
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class ProvidersDisableRequest(BaseModel):
+    id: str
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+
+
+class ProvidersDisableResponse(BaseModel):
+    meta: dict[str, Any] | None = Field(default=None, alias="_meta")
+```
+
+#### Provider 路由表
+
+agentpool 内存维护一个 provider 路由表，存储 `providers/set` 的覆盖配置：
+
+```python
+# acp_server/provider_router.py（新增文件）
+
+class ProviderRouter:
+    """LLM Provider 路由表，管理客户端覆盖的 provider 配置。
+
+    路由优先级：
+    1. providers/set 覆盖的配置（客户端声明）
+    2. manifest model_variants 中的默认配置（agent 配置）
+
+    生命周期：process-scoped，不持久化。
+    """
+
+    def __init__(self, manifest: AgentsManifest | None = None) -> None:
+        self._overrides: dict[str, ProviderOverride] = {}
+        self._disabled: set[str] = set()
+        self._manifest = manifest
+
+    def get_provider_info_list(self) -> list[ProviderInfo]:
+        """生成 providers/list 响应数据，从 model_variants 派生。"""
+        providers = self._derive_providers_from_manifest()
+        result = []
+        for pid, info in providers.items():
+            if pid in self._overrides:
+                info["current"] = self._overrides[pid].to_current_config()
+            if pid in self._disabled:
+                info["current"] = None
+            result.append(ProviderInfo(**info))
+        return result
+
+    def set_provider(self, id: str, api_type: LlmProtocol,
+                     base_url: str, headers: dict[str, str]) -> None:
+        """处理 providers/set 请求。"""
+        self._overrides[id] = ProviderOverride(
+            api_type=api_type, base_url=base_url, headers=headers
+        )
+        self._disabled.discard(id)  # set 隐含 re-enable
+
+    def disable_provider(self, id: str) -> None:
+        """处理 providers/disable 请求。"""
+        self._disabled.add(id)
+
+    def is_provider_disabled(self, provider_id: str) -> bool:
+        """查询 provider 是否被禁用。供 model list 构建时过滤。"""
+        return provider_id in self._disabled
+
+    def get_provider_headers(self, provider_id: str) -> dict[str, str]:
+        """获取 provider 的客户端覆盖 headers。供运行时路由使用。"""
+        if provider_id in self._overrides:
+            return self._overrides[provider_id].headers
+        return {}
+
+    def get_provider_base_url(self, provider_id: str) -> str | None:
+        """获取 provider 的覆盖 base_url，无覆盖则返回 None。"""
+        if provider_id in self._overrides:
+            return self._overrides[provider_id].base_url
+        return None
+
+    def _derive_providers_from_manifest(self) -> dict[str, dict[str, Any]]:
+        """从 manifest.model_variants 派生 ProviderInfo 列表。
+
+        复用 shared/model_utils._extract_provider() 提取 provider 名称，
+        然后按 provider 分组，推断 supported LlmProtocol 和 required 标志。
+        """
+        providers: dict[str, dict[str, Any]] = {}
+        if not self._manifest or not self._manifest.model_variants:
+            return providers
+
+        for name, config in self._manifest.model_variants.items():
+            provider_name = _extract_provider(config)
+            if provider_name not in providers:
+                api_type = self._infer_llm_protocol(provider_name)
+                providers[provider_name] = {
+                    "id": provider_name,
+                    "supported": [api_type],
+                    "required": True,  # manifest 中配置的 provider 默认 required
+                    "current": ProviderCurrentConfig(
+                        api_type=api_type,
+                        base_url=self._get_default_base_url(provider_name),
+                    ),
+                }
+        return providers
+
+    @staticmethod
+    def _infer_llm_protocol(provider_name: str) -> LlmProtocol:
+        """从 provider 名称推断 LlmProtocol 类型。"""
+        mapping = {
+            "anthropic": "anthropic",
+            "openai": "openai",
+            "azure": "azure",
+            "bedrock": "bedrock",
+            "vertex": "vertex",
+            "google": "vertex",   # google → vertex 协议
+            "deepseek": "openai", # deepseek 兼容 openai 协议
+            "groq": "openai",
+            "openrouter": "openai",
+        }
+        return mapping.get(provider_name, "openai")  # 未知 provider 默认 openai 兼容
+
+    @staticmethod
+    def _get_default_base_url(provider_name: str) -> str:
+        """获取 provider 的默认 base URL。"""
+        # 从 PROVIDER_INFO 或环境变量推断
+        ...
+```
+
+#### 修改 `AgentCapabilities`
+
+```python
+# acp/schema/capabilities.py
+class AgentCapabilities(AnnotatedObject):
+    # ... 现有字段 ...
+    providers: bool | None = False
+    """Whether the agent supports providers/list, providers/set, providers/disable."""
+```
+
+#### 修改 ACP Server 请求分发
+
+```python
+# acp_server/acp_agent.py — 在 AgentPoolACPAgent 中添加 handlers
+
+async def handle_providers_list(
+    self, params: ProvidersListRequest
+) -> ProvidersListResponse:
+    return ProvidersListResponse(
+        providers=self._provider_router.get_provider_info_list()
+    )
+
+async def handle_providers_set(
+    self, params: ProvidersSetRequest
+) -> ProvidersSetResponse:
+    # 验证 id 存在于当前 providers 中
+    known_ids = {p.id for p in self._provider_router.get_provider_info_list()}
+    if params.id not in known_ids:
+        raise JsonRpcError(code=-32602, message=f"Unknown provider: {params.id}")
+
+    self._provider_router.set_provider(
+        id=params.id,
+        api_type=params.api_type,
+        base_url=params.base_url,
+        headers=params.headers,
+    )
+    return ProvidersSetResponse()
+
+async def handle_providers_disable(
+    self, params: ProvidersDisableRequest
+) -> ProvidersDisableResponse:
+    # 验证不是 required provider
+    known = {p.id: p for p in self._provider_router.get_provider_info_list()}
+    if params.id in known and known[params.id].required:
+        raise JsonRpcError(code=-32602, message=f"Cannot disable required provider: {params.id}")
+
+    self._provider_router.disable_provider(params.id)
+    return ProvidersDisableResponse()
+```
+
+#### 修改 `initialize` 响应
+
+```python
+# 返回 AgentCapabilities(providers=True)
+agent_capabilities = AgentCapabilities(
+    # ... 现有字段 ...
+    providers=True,
+)
 ```
 
 ### Phase 1：共享 Model List 逻辑
@@ -353,6 +664,7 @@ Zed 等 IDE 通过 `SessionModeState` 或 `config_options` 中的 `category="mod
 async def build_model_state_for_acp(
     agent: BaseAgent,
     manifest: AgentsManifest | None = None,
+    provider_router: ProviderRouter | None = None,
 ) -> SessionModelState | None:
     """构建 ACP SessionModelState，与 OpenCode 对齐优先级逻辑。
 
@@ -360,9 +672,13 @@ async def build_model_state_for_acp(
     1. manifest.model_variants（configured variants，优先）
     2. agent.get_available_models()（tokonomics，兜底）
 
+    过滤：
+    - 若 provider_router 非空，被禁用 provider 下的模型不列入列表
+
     Args:
         agent: 当前 session 的 agent 实例
         manifest: 可选的 AgentsManifest 配置
+        provider_router: 可选的 ProviderRouter 实例，用于感知 provider 禁用状态
 
     Returns:
         SessionModelState，若无可用模型则返回 None
@@ -371,12 +687,15 @@ async def build_model_state_for_acp(
 
     # Step 1: configured variants（与 OpenCode 对齐：configured first）
     configured: dict[str, ACPModelInfo] = {}
+    configured_providers: dict[str, str] = {}  # model_name → provider_id
     if manifest and manifest.model_variants:
-        for name in manifest.model_variants:
+        for name, config in manifest.model_variants.items():
             configured[name] = ACPModelInfo(model_id=name, name=name)
+            configured_providers[name] = _extract_provider(config)
 
     # Step 2: tokonomics fallback（仅当 configured 为空时调用）
     toko_models: dict[str, ACPModelInfo] = {}
+    toko_providers: dict[str, str] = {}  # model_name → provider_id
     if not configured:
         try:
             raw = await agent.get_available_models()
@@ -387,10 +706,20 @@ async def build_model_state_for_acp(
                     name=m.name,
                     description=m.description or "",
                 )
+                toko_providers[mid] = m.provider
         except Exception:
             logger.exception("Failed to get available models from agent")
 
-    all_models = configured if configured else toko_models  # strict fallback: configured 存在时只用 configured
+    all_models = configured if configured else toko_models
+    model_providers = configured_providers if configured else toko_providers
+
+    # Step 3: 过滤被禁用 provider 下的模型
+    if provider_router:
+        disabled_models = {
+            name for name, pid in model_providers.items()
+            if provider_router.is_provider_disabled(pid)
+        }
+        all_models = {k: v for k, v in all_models.items() if k not in disabled_models}
 
     if not all_models:
         return None
@@ -420,11 +749,14 @@ async def get_session_model_state(agent: BaseAgent) -> SessionModelState | None:
     configured = [ACPModelInfo(model_id=name, ...) for name in manifest.model_variants]
     ...
 
-# 修改后：委托给共享逻辑
-async def get_session_model_state(agent: BaseAgent) -> SessionModelState | None:
+# 修改后：委托给共享逻辑，传入 provider_router 感知 provider 状态
+async def get_session_model_state(
+    agent: BaseAgent,
+    provider_router: ProviderRouter | None = None,
+) -> SessionModelState | None:
     from agentpool_server.shared.model_utils import build_model_state_for_acp
     manifest = getattr(getattr(agent, "agent_pool", None), "manifest", None)
-    return await build_model_state_for_acp(agent, manifest)
+    return await build_model_state_for_acp(agent, manifest, provider_router)
 ```
 
 ### Phase 2：Agent Role Config Option
@@ -602,11 +934,26 @@ async def list_modes(state: StateDep) -> list[Mode]:
 
 ### API 变更汇总
 
+#### 新增文件
+
+| 文件 | 描述 |
+|------|------|
+| `acp/schema/providers.py` | ACP `providers/*` 协议类型定义（`ProviderInfo`、`LlmProtocol`、请求/响应类型） |
+| `acp_server/provider_router.py` | Provider 路由表（内存维护，process-scoped，不持久化） |
+
 #### 新增函数
 
 | 函数 | 文件 | 描述 |
 |------|------|------|
-| `build_model_state_for_acp()` | `shared/model_utils.py` | ACP model state 构建，configured first |
+| `ProviderRouter.__init__()` | `acp_server/provider_router.py` | 初始化路由表，从 manifest 派生 provider 列表 |
+| `ProviderRouter.get_provider_info_list()` | `acp_server/provider_router.py` | 生成 `providers/list` 响应数据 |
+| `ProviderRouter.set_provider()` | `acp_server/provider_router.py` | 处理 `providers/set` 请求，覆盖路由 |
+| `ProviderRouter.disable_provider()` | `acp_server/provider_router.py` | 处理 `providers/disable` 请求 |
+| `ProviderRouter.is_provider_disabled()` | `acp_server/provider_router.py` | 查询 provider 禁用状态（供 model list 过滤） |
+| `handle_providers_list()` | `acp_server/acp_agent.py` | ACP `providers/list` 请求处理器 |
+| `handle_providers_set()` | `acp_server/acp_agent.py` | ACP `providers/set` 请求处理器 |
+| `handle_providers_disable()` | `acp_server/acp_agent.py` | ACP `providers/disable` 请求处理器 |
+| `build_model_state_for_acp()` | `shared/model_utils.py` | ACP model state 构建，configured first + provider 状态过滤 |
 | `get_agent_role_config_option()` | `acp_server/acp_agent.py` | 构建 agent role config option |
 | `_swap_session_agent()` | `acp_server/acp_agent.py` | 切换 session 的 agent 实例（委托 `session.switch_active_agent()` + 锁保护） |
 
@@ -614,9 +961,11 @@ async def list_modes(state: StateDep) -> list[Mode]:
 
 | 函数 | 文件 | 变更描述 |
 |------|------|----------|
-| `get_session_model_state()` | `acp_server/acp_agent.py` | 委托给 `build_model_state_for_acp()` |
+| `AgentCapabilities` | `acp/schema/capabilities.py` | 新增 `providers: bool \| None` 字段 |
+| `get_session_model_state()` | `acp_server/acp_agent.py` | 委托给 `build_model_state_for_acp()`，传入 `provider_router` |
 | `get_session_config_options()` | `acp_server/acp_agent.py` | 追加 agent role option |
 | `set_session_config_option()` | `acp_server/acp_agent.py` | 处理 `agent_role` category |
+| `initialize` 响应 | `acp_server/acp_agent.py` | 返回 `AgentCapabilities(providers=True)` |
 | `list_modes()` | `opencode_server/routes/config_routes.py` | 动态调用 `agent.get_modes()` |
 
 ### Agent Role 切换状态机
@@ -649,27 +998,59 @@ session 初始化
 
 | 机制 | 影响 | 兼容性 |
 |------|------|--------|
+| `initialize` 响应 | `AgentCapabilities` 新增 `providers` 字段 | ✅ 新增可选字段，旧客户端忽略 |
+| `providers/*` 方法 | 新增三个方法 | ✅ 旧客户端不调用；`agentCapabilities.providers` 为 feature flag |
 | `NewSessionResponse.modes`（旧版） | tool permission，不变 | ✅ 完全兼容 |
-| `NewSessionResponse.models`（旧版） | model list，数据来源统一为 configured first | ✅ 格式兼容，数据来源优先级与 OpenCode 一致 |
+| `NewSessionResponse.models`（旧版） | model list，数据来源统一为 configured first + provider 过滤 | ✅ 格式兼容，数据来源优先级与 OpenCode 一致 |
 | `NewSessionResponse.config_options`（新） | 追加 `agent_role`，现有 config_options 不变 | ✅ 新增字段，客户端忽略未知 config_id |
 | `session/set_mode` | tool permission 切换，不变 | ✅ 完全兼容 |
 | `session/set_config_option` | 新增 `agent_role` 处理，现有 config_id 不变 | ✅ 扩展，不破坏现有 |
 
 ## 实施计划
 
+### Phase 0：ACP Configurable LLM Providers（优先级 P0）
+
+**目标**：G7、GAP 5
+
+**范围**：
+- [ ] 新增 `acp/schema/providers.py`：定义 `LlmProtocol`、`ProviderInfo`、`ProviderCurrentConfig`、请求/响应类型
+- [ ] 新增 `acp_server/provider_router.py`：实现 `ProviderRouter` 类
+  - 从 `manifest.model_variants` 派生 `ProviderInfo[]`（复用 `_extract_provider()`）
+  - 推断 `LlmProtocol` 和默认 `baseUrl`
+  - 维护 `_overrides` 和 `_disabled` 内存状态
+- [ ] 修改 `acp/schema/capabilities.py`：`AgentCapabilities` 新增 `providers: bool | None = False`
+- [ ] 修改 `acp_server/acp_agent.py`：
+  - 初始化 `ProviderRouter` 实例
+  - 添加 `handle_providers_list()`、`handle_providers_set()`、`handle_providers_disable()` 处理器
+  - 在请求分发 switch 中注册 `providers/list`、`providers/set`、`providers/disable`
+  - 修改 `initialize` 响应返回 `AgentCapabilities(providers=True)`
+- [ ] 编写单元测试：`ProviderRouter._derive_providers_from_manifest()` 正确提取 provider
+- [ ] 编写单元测试：`providers/set` 覆盖后 `get_provider_info_list()` 反映新配置
+- [ ] 编写单元测试：`providers/disable` 后 `is_provider_disabled()` 返回 True
+- [ ] 编写单元测试：`providers/disable` 对 required provider 返回 `invalid_params`
+- [ ] 编写单元测试：`providers/set` 对未知 id 返回 `invalid_params`
+- [ ] 添加 ACP 快照测试：验证 `initialize` 响应包含 `agentCapabilities.providers=true`
+
+**预估代码量**：~200 行新增
+**依赖**：无（应最先实施，为 Phase 1 提供 `ProviderRouter`）
+
+---
+
 ### Phase 1：共享 Model List 逻辑（优先级 P1）
 
 **目标**：G2、G3
 
 **范围**：
-- [ ] 在 `shared/model_utils.py` 中新增 `build_model_state_for_acp()` 函数（configured first）
-- [ ] 修改 `acp_server/acp_agent.py` 的 `get_session_model_state()` 委托给共享函数
+- [ ] 在 `shared/model_utils.py` 中新增 `build_model_state_for_acp()` 函数（configured first + provider 状态过滤）
+- [ ] 修改 `acp_server/acp_agent.py` 的 `get_session_model_state()` 委托给共享函数，传入 `provider_router`
 - [ ] 编写单元测试：验证 configured variants 存在时 tokonomics 不被调用
 - [ ] 编写单元测试：验证 configured variants 为空时 tokonomics 作为 fallback
 - [ ] 编写单元测试：验证 current model 不在列表时被插入到列表头
+- [ ] 编写单元测试：验证 provider 被禁用时，该 provider 下的模型从列表中过滤
+- [ ] 编写单元测试：验证 `provider_router=None` 时行为与不传一致（向后兼容）
 
-**预估代码量**：~80 行新增，~30 行修改
-**依赖**：无
+**预估代码量**：~90 行新增，~30 行修改
+**依赖**：Phase 0（需要 `ProviderRouter` 类型和接口）
 
 ---
 
@@ -720,12 +1101,13 @@ session 初始化
 
 | Phase | 目标 | 工作量 |
 |-------|------|--------|
-| Phase 1 | 统一 model list 数据来源 | ~110 行 |
+| Phase 0 | ACP Configurable LLM Providers | ~200 行 |
+| Phase 1 | 统一 model list 数据来源 + provider 状态过滤 | ~120 行 |
 | Phase 2 | Agent role config option | ~100 行 |
 | Phase 3 | OpenCode /mode 路由修复 | ~30 行 |
-| **合计** | | **~240 行** |
+| **合计** | | **~450 行** |
 
-Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
+Phase 0 必须最先实施（Phase 1 依赖 `ProviderRouter`）。Phase 1 和 Phase 2 可在 Phase 0 完成后并行。Phase 3 独立，可任意时序交付。
 
 ## 开放问题
 
@@ -743,6 +1125,12 @@ Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
 
 5. **agent_role config option 的 display 策略**：若 pool 只有 2 个 agent，是否应显示 agent role 选择器？`len(all_agents) <= 1` 时返回 `None` 的逻辑是否合理？
 
+6. **`providers/set` 对已运行 session 的影响**：ACP 协议规定 Agent MAY 不将变更应用到已运行 session。本 RFC 采用保守策略：`providers/set` 仅影响后续新建 session。但如果用户在 IDE 中 `providers/set` 后立即发送 `session/prompt`，期望新路由立即生效，这可能与保守策略冲突。是否应在 `providers/set` 响应中明确告知客户端变更生效范围？
+
+7. **Provider 路由覆盖与 agent 内部模型初始化的兼容**：agent 的 `model_variants` 中的 `AnyModelConfig` 可能包含 `base_url`、`api_key_env` 等字段。当 `providers/set` 覆盖了 provider 的 `baseUrl` 和 `headers` 后，agent 在创建 LLM client 时应使用覆盖后的配置。这需要在 agent 的 LLM client 初始化路径中注入 `ProviderRouter` 查找逻辑。具体实现可能涉及 pydantic-ai 的 `Provider` 初始化参数注入，需要评估侵入性。
+
+8. **`SessionModelState` 中是否应携带 provider 关联信息**：当前 `ACPModelInfo` 只有 `model_id`、`name`、`description`，不含 provider 信息。客户端无法从 `SessionModelState` 中判断某个模型属于哪个 provider。如果 `providers/list` 和 `SessionModelState` 都可用，客户端可以自行关联（如根据 model 命名约定推断）。但更精确的做法是在 `ACPModelInfo._meta` 中添加 `provider_id` 字段，代价是 `SessionModelState` 结构略有扩展。
+
 ## 决策记录
 
 | 日期 | 决策 | 理由 |
@@ -756,6 +1144,10 @@ Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
 | 2026-05-26 | agent swap 在 `_session_agent_locks` 保护下执行 | 防止并发 `set_config_option` 请求导致竞态条件和 session corruption |
 | 2026-05-26 | agent swap 拒绝在 active prompt 期间执行 | 通过检查 `session._task_lock.locked()` 避免 mid-stream agent 切换导致 crash |
 | 2026-05-26 | agent swap 后新 agent 不继承对话历史 | 不同 agent 的 system prompt 和工具集可能不兼容；历史继承需单独 RFC 设计 |
+| 2026-05-27 | 新增 Phase 0：实现 ACP Configurable LLM Providers | ACP PR #648 已 MERGED，`providers/*` 为协议已合并特性；Phase 1 的 model list 需感知 provider 禁用状态 |
+| 2026-05-27 | `providers/set` 仅影响后续新建 session | 遵循 ACP 协议 MAY 语义，保守策略降低复杂度；已运行 session 的动态路由切换留作后续增强 |
+| 2026-05-27 | 从 `model_variants` 派生 `ProviderInfo[]` | 复用已有 `_extract_provider()` 逻辑，`AnyModelConfig` 隐含了 provider 信息，无需额外配置 |
+| 2026-05-27 | Phase 1 的 `build_model_state_for_acp()` 接受 `provider_router` 参数 | 解耦 model list 构建与 provider 状态管理；`provider_router=None` 时退化为旧行为，保证向后兼容 |
 
 ## 参考
 
@@ -767,12 +1159,16 @@ Phase 1 和 Phase 2 可并行。Phase 3 独立，可任意时序交付。
 - `packages/agentpool/src/agentpool_server/shared/model_utils.py` — 现有共享 model 工具函数
 - `packages/agentpool/src/agentpool/agents/native_agent/helpers.py` — `get_permission_category()`、`get_model_category()`
 - `packages/agentpool/src/agentpool/agents/modes.py` — `ModeCategory`、`ModeInfo`、`ModeCategoryId`
+- `packages/agentpool/src/acp/schema/capabilities.py` — `AgentCapabilities`（需新增 `providers` 字段）
+- `packages/agentpool/src/agentpool/models/manifest.py` — `AgentsManifest.model_variants`（`providers/list` 的数据来源）
 
 ### ACP 协议
 
 - `packages/agentpool/src/acp/schema/session_state.py` — `SessionConfigOption`、`SessionConfigOptionCategory`、`SessionModeState`
 - `packages/agentpool/src/acp/schema/agent_responses.py` — `NewSessionResponse`（`models`、`modes`、`config_options` 字段）
 - [ACP 协议官网](https://agentclientprotocol.com/protocol/session-modes)
+- [ACP PR #648: Configurable LLM Providers](https://github.com/agentclientprotocol/agent-client-protocol/pull/648) — `providers/*` 方法族定义（已 MERGED）
+- `packages/agent-client-protocol/docs/rfds/custom-llm-endpoint.mdx` — ACP RFD 原文
 
 ### 相关 RFC
 
