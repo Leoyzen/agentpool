@@ -168,10 +168,6 @@ class TestScratchpadSkillReferenceLoading:
         # This should NOT raise ValueError
         skill = await resolver.resolve(uri)
 
-        # Verify skill was found
-        assert skill is not None
-        assert skill.name == "systematic-troubleshooting"
-
         # Verify skill was found (resolver didn't raise ValueError)
         assert skill is not None
         assert skill.name == "systematic-troubleshooting"

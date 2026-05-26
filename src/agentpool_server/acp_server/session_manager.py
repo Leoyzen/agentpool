@@ -154,7 +154,7 @@ class ACPSessionManager:
             # NEW: Get or create per-session agent (if acp_agent supports it)
             try:
                 session_agent = await acp_agent.get_or_create_session_agent(session_id, input_provider=None)
-            except TypeError:
+            except (TypeError, AttributeError):
                 # Backward compat: use the passed agent directly (e.g., mocks in tests)
                 session_agent = agent
 
@@ -182,7 +182,7 @@ class ACPSessionManager:
                 # Session creation failed - clean up the orphaned agent
                 try:
                     await acp_agent.remove_session_agent(session_id)
-                except TypeError:
+                except (TypeError, AttributeError):
                     pass  # Mock agent, no cleanup needed
                 raise
 
@@ -233,7 +233,7 @@ class ACPSessionManager:
                 session_agent = await acp_agent.get_or_create_session_agent(
                     session_id, input_provider=None
                 )
-            except TypeError:
+            except (TypeError, AttributeError):
                 # Backward compat: use pool agent directly
                 session_agent = self._pool.all_agents[data.agent_name]
 

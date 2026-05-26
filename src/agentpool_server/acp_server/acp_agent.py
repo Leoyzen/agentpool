@@ -1017,42 +1017,43 @@ class AgentPoolACPAgent(ACPAgent):
         # 4. Clean up all per-session agents
         await self.cleanup_all_session_agents()
 
-        # 5. Swap pool
-        new_agent = await self.server.swap_pool(config_path, agent_name)
+        try:
+            # 5. Swap pool
+            new_agent = await self.server.swap_pool(config_path, agent_name)
 
-        # 6. Update cached agent config from new pool
-        pool = new_agent.agent_pool
-        if pool is None:
+            # 6. Update cached agent config from new pool
+            pool = new_agent.agent_pool
+            if pool is None:
+                msg = "New agent has no associated pool"
+                raise RuntimeError(msg)
+
+            # Re-resolve _agent_config from the new pool's manifest
+            if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
+                cfg = pool.manifest.agents[pool.main_agent.name]
+                from agentpool.models.agents import NativeAgentConfig
+                if isinstance(cfg, NativeAgentConfig):
+                    if cfg.name is None:
+                        cfg = cfg.model_copy(update={"name": pool.main_agent.name})
+                    self._agent_config = cfg
+            elif pool.manifest.agents:
+                cfg = next(iter(pool.manifest.agents.values()))
+                from agentpool.models.agents import NativeAgentConfig
+                if isinstance(cfg, NativeAgentConfig):
+                    self._agent_config = cfg
+            else:
+                self._agent_config = None
+
+            # 7. Update default_agent reference and pool
+            self.default_agent = new_agent
+            self.session_manager._pool = pool
+
+            # 8. Invalidate sessions cache
+            self._sessions_cache = None
+
+            agent_names = list(pool.all_agents.keys())
+            logger.info("Pool swap complete", agent_names=agent_names)
+            return agent_names
+        finally:
+            # 9. Clear swap flag - new sessions can now be created
+            # This MUST be in finally to prevent permanent blocking on error
             self._swap_in_progress = False
-            msg = "New agent has no associated pool"
-            raise RuntimeError(msg)
-
-        # Re-resolve _agent_config from the new pool's manifest
-        if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
-            cfg = pool.manifest.agents[pool.main_agent.name]
-            from agentpool.models.agents import NativeAgentConfig
-            if isinstance(cfg, NativeAgentConfig):
-                if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": pool.main_agent.name})
-                self._agent_config = cfg
-        elif pool.manifest.agents:
-            cfg = next(iter(pool.manifest.agents.values()))
-            from agentpool.models.agents import NativeAgentConfig
-            if isinstance(cfg, NativeAgentConfig):
-                self._agent_config = cfg
-        else:
-            self._agent_config = None
-
-        # 7. Update default_agent reference and pool
-        self.default_agent = new_agent
-        self.session_manager._pool = pool
-
-        # 8. Invalidate sessions cache
-        self._sessions_cache = None
-
-        # 9. Clear swap flag - new sessions can now be created with new config
-        self._swap_in_progress = False
-
-        agent_names = list(pool.all_agents.keys())
-        logger.info("Pool swap complete", agent_names=agent_names)
-        return agent_names

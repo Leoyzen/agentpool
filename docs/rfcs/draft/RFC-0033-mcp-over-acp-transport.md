@@ -497,6 +497,7 @@ class AcpMcpConnectionManager:
 ```
 
 **设计决策说明**：
+
 - **所有权**：Manager 由 `AgentPoolACPAgent` 持有（per-ACP-connection），因为 `acpId` 注册和 `connectionId` 映射必须存活于多个 session 生命周期
 - **类型安全**：`McpJsonRpcRequest`/`Response` 用 `TypedDict` 替代 `Any`，符合代码库 "零 Any" 策略
 - **异步清理**：`cleanup_all()` 为 async，因为可能需要发送 `mcp/disconnect` 消息
@@ -571,6 +572,7 @@ class AcpMcpTransport(ClientTransport):
 ```
 
 **关键实现挑战**：
+
 - MCP 的 JSON-RPC 消息需要被序列化后作为 ACP `mcp/message` 的 payload 发送
 - ACP JSON-RPC 的 `id` 与 MCP JSON-RPC 的 `id` 属于两个独立命名空间
 - Transport 需处理 `request → response` 的配对（通过 MCP id 匹配）
@@ -820,12 +822,12 @@ MCP-over-ACP 遵循与现有 MCP 传输相同的信任模型：工具调用由 A
 
 ### 仍待确认
 
-5. **`acp` 库 handler 注册机制**
+1. **`acp` 库 handler 注册机制**
    - Context：`AgentPoolACPAgent` 继承自外部 `acp` 库的 `ACPAgent`，新 method 的 dispatch 机制需在 Pre-Phase 0 中确认
    - Owner: 本 RFC 实现者
    - Status: **Blocker for Phase 3**
 
-6. **fastmcp pinned 版本是否支持自定义 ClientTransport**
+2. **fastmcp pinned 版本是否支持自定义 ClientTransport**
    - Context：需确认 agentpool 当前锁定的 fastmcp 版本是否暴露 `ClientTransport` 接口
    - Owner: 本 RFC 实现者
    - Status: **Blocker for Pre-Phase 0**
