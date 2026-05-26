@@ -37,18 +37,24 @@ Detailed instructions for the agent...
 ## Protocol-Specific Usage
 
 ### ACP Protocol
-Skills appear as AvailableCommand in AgentCapabilities:
+Skills appear as `AvailableCommand` via the `session/update` notification with `available_commands_update` after session creation:
 ```json
 {
-  "slash_commands": [
-    {
-      "name": "my-skill",
-      "description": "A description...",
-      "input": {"hint": "Arguments for skill"}
-    }
-  ]
+  "sessionId": "sess_abc123",
+  "update": {
+    "sessionUpdate": "available_commands_update",
+    "availableCommands": [
+      {
+        "name": "my-skill",
+        "description": "A description...",
+        "input": {"hint": "Arguments for skill"}
+      }
+    ]
+  }
 }
 ```
+
+> **Note**: Per the ACP specification, available commands are declared via `session/update` after session creation, not in the `initialize` response.
 
 ### AG-UI Protocol
 Skills appear as Tools with `skill__` prefix:

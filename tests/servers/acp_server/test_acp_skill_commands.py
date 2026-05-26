@@ -1,12 +1,13 @@
 """TDD tests for ACP server skill commands exposure.
 
 These tests verify that skills are properly exposed as slash commands
-in the ACP initialize response and available commands updates.
+via the session/update notification (available_commands_update),
+per the ACP protocol specification.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 import pytest
 
@@ -59,27 +60,26 @@ def mock_acp_agent_with_skills(agent_pool_with_skill: AgentPool) -> AgentPoolACP
     return AgentPoolACPAgent(client=mock_connection, default_agent=agent)
 
 
-async def test_initialize_exposes_skill_commands(mock_acp_agent_with_skills: AgentPoolACPAgent):
-    """Test that initialize response includes skill commands when skills are configured.
+async def test_initialize_does_not_expose_skill_commands(
+    mock_acp_agent_with_skills: AgentPoolACPAgent,
+):
+    """Test that initialize response does NOT include skill commands.
 
-    This is a TDD test: it should fail before the fix and pass after.
+    Per RFC-0032, slash commands must be advertised via session/update
+    (available_commands_update) after session creation, not in the
+    initialize response.
     """
     request = InitializeRequest.create(title="Test", name="test", version="1.0.0")
     response = await mock_acp_agent_with_skills.initialize(request)
 
     assert response.agent_capabilities is not None
-    assert len(response.agent_capabilities.slash_commands) > 0, (
-        "initialize response should expose skill commands when skills are configured"
-    )
-
-    cmd_names = [cmd.name for cmd in response.agent_capabilities.slash_commands]
-    assert "test-skill" in cmd_names, (
-        f"Expected 'test-skill' in slash commands, got: {cmd_names}"
+    assert not hasattr(response.agent_capabilities, "slash_commands"), (
+        "initialize response should NOT expose slash_commands per ACP spec"
     )
 
 
-async def test_initialize_without_skills_has_empty_commands():
-    """Test that initialize response has empty slash commands when no skills configured."""
+async def test_initialize_without_skills_no_commands():
+    """Test that initialize response has no slash_commands field."""
     pool = AgentPool()
 
     def simple_callback(message: str) -> str:
@@ -95,4 +95,6 @@ async def test_initialize_without_skills_has_empty_commands():
     response = await acp_agent.initialize(request)
 
     assert response.agent_capabilities is not None
-    assert response.agent_capabilities.slash_commands == []
+    assert not hasattr(response.agent_capabilities, "slash_commands"), (
+        "initialize response should NOT have slash_commands field"
+    )

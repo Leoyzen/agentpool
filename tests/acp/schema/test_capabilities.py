@@ -5,61 +5,76 @@ from __future__ import annotations
 import pytest
 
 from acp.schema.capabilities import AgentCapabilities
-from acp.schema.slash_commands import AvailableCommand
 
 
-class TestAgentCapabilitiesSlashCommands:
-    """Test suite for slash_commands field in AgentCapabilities."""
+class TestAgentCapabilities:
+    """Test suite for AgentCapabilities schema."""
 
-    def test_default_empty_list(self):
-        """Default value should be empty list (backward compatible)."""
+    def test_default_load_session(self):
+        """Default load_session should be False."""
         caps = AgentCapabilities()
-        assert caps.slash_commands == []
+        assert caps.load_session is False
 
-    def test_accepts_empty_list_explicitly(self):
-        """AgentCapabilities accepts explicit empty list."""
-        caps = AgentCapabilities(slash_commands=[])
-        assert caps.slash_commands == []
+    def test_default_mcp_capabilities(self):
+        """Default mcp_capabilities should be None."""
+        caps = AgentCapabilities()
+        assert caps.mcp_capabilities is None
 
-    def test_accepts_list_of_commands(self):
-        """AgentCapabilities accepts list of AvailableCommand."""
-        command = AvailableCommand.create(
-            name="test_cmd",
-            description="Test command",
-            input_hint="Provide input",
+    def test_default_prompt_capabilities(self):
+        """Default prompt_capabilities should be None."""
+        caps = AgentCapabilities()
+        assert caps.prompt_capabilities is None
+
+    def test_default_session_capabilities(self):
+        """Default session_capabilities should be None."""
+        caps = AgentCapabilities()
+        assert caps.session_capabilities is None
+
+    def test_create_method_with_all_capabilities(self):
+        """create() method should set all capabilities correctly."""
+        caps = AgentCapabilities.create(
+            load_session=True,
+            http_mcp_servers=True,
+            sse_mcp_servers=True,
+            audio_prompts=True,
+            embedded_context_prompts=True,
+            image_prompts=True,
+            list_sessions=True,
+            resume_session=True,
+            stop_session=True,
         )
-        caps = AgentCapabilities(slash_commands=[command])
-        assert len(caps.slash_commands) == 1
-        assert caps.slash_commands[0].name == "test_cmd"
-        assert caps.slash_commands[0].description == "Test command"
+        assert caps.load_session is True
+        assert caps.mcp_capabilities is not None
+        assert caps.mcp_capabilities.http is True
+        assert caps.mcp_capabilities.sse is True
+        assert caps.prompt_capabilities is not None
+        assert caps.prompt_capabilities.audio is True
+        assert caps.prompt_capabilities.embedded_context is True
+        assert caps.prompt_capabilities.image is True
+        assert caps.session_capabilities is not None
+        assert caps.session_capabilities.list is not None
+        assert caps.session_capabilities.resume is not None
+        assert caps.session_capabilities.stop is not None
 
-    def test_multiple_commands(self):
-        """AgentCapabilities accepts multiple commands."""
-        cmd1 = AvailableCommand.create(name="cmd1", description="First command")
-        cmd2 = AvailableCommand.create(name="cmd2", description="Second command")
-        caps = AgentCapabilities(slash_commands=[cmd1, cmd2])
-        assert len(caps.slash_commands) == 2
-        assert caps.slash_commands[0].name == "cmd1"
-        assert caps.slash_commands[1].name == "cmd2"
+    def test_create_method_defaults(self):
+        """create() method should use correct defaults."""
+        caps = AgentCapabilities.create()
+        assert caps.load_session is False
+        assert caps.mcp_capabilities is not None
+        assert caps.mcp_capabilities.http is False
+        assert caps.mcp_capabilities.sse is False
+        assert caps.prompt_capabilities is not None
+        assert caps.prompt_capabilities.audio is False
+        assert caps.prompt_capabilities.embedded_context is False
+        assert caps.prompt_capabilities.image is False
 
-    def test_json_serialization_includes_field(self):
-        """JSON serialization includes slash_commands field."""
-        caps = AgentCapabilities(slash_commands=[])
+    def test_json_serialization(self):
+        """JSON serialization should not include slash_commands."""
+        caps = AgentCapabilities()
         json_data = caps.model_dump(mode="json")
-        assert "slash_commands" in json_data
-        assert json_data["slash_commands"] == []
+        assert "slash_commands" not in json_data
 
-    def test_json_serialization_with_commands(self):
-        """JSON serialization works with commands."""
-        command = AvailableCommand.create(name="my_cmd", description="My command")
-        caps = AgentCapabilities(slash_commands=[command])
-        json_data = caps.model_dump(mode="json")
-        assert "slash_commands" in json_data
-        assert len(json_data["slash_commands"]) == 1
-        assert json_data["slash_commands"][0]["name"] == "my_cmd"
-        assert json_data["slash_commands"][0]["description"] == "My command"
-
-    def test_json_deserialization_without_field(self):
+    def test_json_deserialization_without_slash_commands(self):
         """Backward compatibility: old JSON without slash_commands works."""
         json_data = {
             "load_session": False,
@@ -68,48 +83,22 @@ class TestAgentCapabilitiesSlashCommands:
             "session_capabilities": {},
         }
         caps = AgentCapabilities.model_validate(json_data)
-        assert caps.slash_commands == []
+        assert caps.load_session is False
+        assert caps.mcp_capabilities is not None
 
-    def test_json_deserialization_with_empty_list(self):
-        """JSON deserialization with explicit empty list works."""
-        json_data = {
-            "load_session": False,
-            "slash_commands": [],
-        }
-        caps = AgentCapabilities.model_validate(json_data)
-        assert caps.slash_commands == []
+    def test_json_deserialization_with_slash_commands_ignored(self):
+        """Backward compatibility: old JSON with slash_commands is ignored safely.
 
-    def test_json_deserialization_with_commands(self):
-        """JSON deserialization with commands works."""
+        Pydantic ignores extra fields by default, so old JSON containing
+        slash_commands should deserialize without errors.
+        """
         json_data = {
             "load_session": False,
             "slash_commands": [
                 {"name": "cmd1", "description": "Command 1"},
-                {"name": "cmd2", "description": "Command 2", "input": {"hint": "hint text"}},
             ],
         }
         caps = AgentCapabilities.model_validate(json_data)
-        assert len(caps.slash_commands) == 2
-        assert caps.slash_commands[0].name == "cmd1"
-        assert caps.slash_commands[1].name == "cmd2"
-        assert caps.slash_commands[1].input is not None
-        assert caps.slash_commands[1].input.root.hint == "hint text"
-
-    def test_create_method_accepts_slash_commands(self):
-        """create() method accepts slash_commands parameter."""
-        command = AvailableCommand.create(name="create_plan", description="Create a plan")
-        caps = AgentCapabilities.create(slash_commands=[command])
-        assert len(caps.slash_commands) == 1
-        assert caps.slash_commands[0].name == "create_plan"
-
-    def test_create_method_default_empty_list(self):
-        """create() method defaults to empty list when not provided."""
-        caps = AgentCapabilities.create()
-        assert caps.slash_commands == []
-
-    def test_field_is_not_none_type(self):
-        """slash_commands is list type, not optional None."""
-        caps = AgentCapabilities()
-        # Should be list, not None
-        assert caps.slash_commands is not None
-        assert isinstance(caps.slash_commands, list)
+        assert caps.load_session is False
+        # slash_commands is not a field on the model, so it's ignored
+        assert not hasattr(caps, "slash_commands")
