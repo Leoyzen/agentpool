@@ -19,6 +19,7 @@ from acp.schema.session_updates import Usage  # noqa: TC001
 
 if TYPE_CHECKING:
     from acp.schema import ModelInfo, SessionMode
+    from acp.schema.slash_commands import AvailableCommand
 
 
 StopReason = Literal[
@@ -297,6 +298,7 @@ class InitializeResponse(Response):
         resume_session: bool = False,
         stop_session: bool = False,
         auth_methods: Sequence[AuthMethod] | None = None,
+        slash_commands: Sequence[AvailableCommand] | None = None,
     ) -> Self:
         """Create an instance of AgentCapabilities.
 
@@ -315,6 +317,7 @@ class InitializeResponse(Response):
             resume_session: Whether the agent supports `session/resume` (unstable).
             stop_session: Whether the agent supports `session/stop` (unstable).
             auth_methods: The authentication methods supported by the agent.
+            slash_commands: Available slash commands exposed by the agent.
         """
         caps = AgentCapabilities.create(
             load_session=load_session,
@@ -326,6 +329,7 @@ class InitializeResponse(Response):
             list_sessions=list_sessions,
             resume_session=resume_session,
             stop_session=stop_session,
+            slash_commands=list(slash_commands) if slash_commands else None,
         )
         return cls(
             agent_info=Implementation(name=name, title=title, version=version),

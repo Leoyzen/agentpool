@@ -307,6 +307,7 @@ class AgentPoolACPAgent(ACPAgent):
         self.client_info = params.client_info
         logger.info("Client info", request=params.model_dump_json())
         self._initialized = True
+        skill_commands = self.get_skill_commands()
         return InitializeResponse.create(
             protocol_version=version,
             name="agentpool",
@@ -321,6 +322,7 @@ class AgentPoolACPAgent(ACPAgent):
             audio_prompts=True,
             embedded_context_prompts=True,
             image_prompts=True,
+            slash_commands=skill_commands,
         )
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:
