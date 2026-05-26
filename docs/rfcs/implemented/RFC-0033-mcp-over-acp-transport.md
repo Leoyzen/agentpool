@@ -1,7 +1,7 @@
 ---
 rfc_id: RFC-0033
 title: "MCP-over-ACP: Support MCP Servers via ACP Channel Transport"
-status: DRAFT
+status: IMPLEMENTED
 author: yuchen.liu
 reviewers:
   - name: TBD
