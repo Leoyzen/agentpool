@@ -68,6 +68,52 @@ def _is_enum_schema(schema: dict[str, Any]) -> bool:
     return schema.get("type") == "string" and "enum" in schema
 
 
+def _is_oneof_schema(schema: dict[str, Any]) -> bool:
+    """Check if the elicitation schema uses oneOf with const entries."""
+    if schema.get("type") != "string":
+        return False
+    one_of = schema.get("oneOf")
+    if not isinstance(one_of, list) or not one_of:
+        return False
+    # At least one entry must have a const field to be considered valid
+    return any(isinstance(entry, dict) and "const" in entry for entry in one_of)
+
+
+def _is_array_enum_schema(schema: dict[str, Any]) -> bool:
+    """Check if the elicitation schema is an array with enum items."""
+    if schema.get("type") != "array":
+        return False
+    items = schema.get("items")
+    if not isinstance(items, dict):
+        return False
+    return "enum" in items and isinstance(items.get("enum"), list) and bool(items["enum"])
+
+
+def _unwrap_object_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
+    """If schema is an object wrapper, extract the first elicitable property.
+
+    xeno-agent generates ``{"type": "object", "properties": {"q0": {...}}}``
+    for multi-question schemas.  ACP ``request_permission`` can only present
+    a single question, so we pick the first property that looks like an
+    enum/oneOf/array-enum and use its schema for option generation.
+    """
+    if schema.get("type") != "object":
+        return None
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return None
+    for prop_schema in props.values():
+        if not isinstance(prop_schema, dict):
+            continue
+        if (
+            _is_enum_schema(prop_schema)
+            or _is_oneof_schema(prop_schema)
+            or _is_array_enum_schema(prop_schema)
+        ):
+            return prop_schema
+    return None
+
+
 def _create_boolean_elicitation_options() -> list[PermissionOption]:
     """Create permission options for boolean elicitation (Yes/No)."""
     return [
@@ -75,6 +121,66 @@ def _create_boolean_elicitation_options() -> list[PermissionOption]:
         PermissionOption(option_id="false", name="No", kind="reject_once"),
         PermissionOption(option_id="cancel", name="Cancel", kind="reject_always"),
     ]
+
+
+def _create_oneof_elicitation_options(schema: dict[str, Any]) -> list[PermissionOption] | None:
+    """Create permission options from a oneOf schema.
+
+    Uses ``const`` as the option value and ``title`` as the display label.
+    Entries without ``const`` are skipped. Falls back to generic options
+    if no valid entries are found.
+    """
+    one_of = schema.get("oneOf", [])
+    if not isinstance(one_of, list):
+        return None
+
+    options: list[PermissionOption] = []
+    for entry in one_of:
+        if not isinstance(entry, dict):
+            continue
+        const_val = entry.get("const")
+        if const_val is None:
+            continue
+        label = entry.get("title") or str(const_val)
+        opt_id = f"oneof_{len(options)}_{const_val}"
+        options.append(PermissionOption(option_id=opt_id, name=str(label), kind="allow_once"))
+
+    if not options:
+        return None
+
+    options.append(PermissionOption(option_id="cancel", name="Cancel", kind="reject_always"))
+    return options
+
+
+def _create_array_enum_elicitation_options(schema: dict[str, Any]) -> list[PermissionOption] | None:
+    """Create permission options from an array schema with enum items.
+
+    Uses ``items.enum`` values as options and ``items.x-option-descriptions``
+    for display labels when available.
+    """
+    items = schema.get("items", {})
+    if not isinstance(items, dict):
+        return None
+
+    enum_values = items.get("enum", [])
+    if not isinstance(enum_values, list) or not enum_values:
+        return None
+
+    descriptions = items.get("x-option-descriptions", {})
+    if not isinstance(descriptions, dict):
+        descriptions = {}
+
+    options: list[PermissionOption] = []
+    for value in enum_values:
+        label = descriptions.get(str(value), str(value))
+        opt_id = f"array_enum_{len(options)}_{value}"
+        options.append(PermissionOption(option_id=opt_id, name=str(label), kind="allow_once"))
+
+    if not options:
+        return None
+
+    options.append(PermissionOption(option_id="cancel", name="Cancel", kind="reject_always"))
+    return options
 
 
 class ACPInputProvider(InputProvider):
@@ -322,45 +428,116 @@ class ACPInputProvider(InputProvider):
                 requested_schema=schema,
             )
             return self._map_elicitation_create_response(response)
-        # Fallback: request_permission with schema-specific handling
+        return await self._get_form_elicitation_fallback(params, schema)
+
+    async def _get_form_elicitation_fallback(
+        self,
+        params: types.ElicitRequestFormParams,
+        schema: dict[str, Any],
+    ) -> types.ElicitResult | types.ErrorData:
+        """Fallback path using request_permission for form elicitation."""
         tool_call_id = f"elicit_{hash(params.message)}"
         title = f"Elicitation: {params.message}"
 
-        if _is_boolean_schema(schema):
-            options: list[PermissionOption] | None = _create_boolean_elicitation_options()
-            perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id,
-                title=title,
-                options=options,
-            )
-            return self._handle_boolean_elicitation_response(perm_response, schema)
-        if _is_enum_schema(schema) and (options := _create_enum_elicitation_options(schema)):
-            perm_response = await self.session.requests.request_permission(
-                tool_call_id=tool_call_id,
-                title=title,
-                options=options,
-            )
-            return _handle_enum_elicitation_response(perm_response, schema)
-
-        options = [
-            PermissionOption(option_id="accept", name="Accept", kind="allow_once"),
-            PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
-        ]
-        perm_response = await self.session.requests.request_permission(
-            tool_call_id=tool_call_id,
-            title=title,
-            options=options,
+        # xeno-agent wraps questions in {"type": "object", "properties": {"q0": {...}}}.
+        # request_permission can only present a single question, so unwrap the first
+        # elicitable property and remember the original key to wrap the result back.
+        effective_schema, object_key = self._resolve_effective_schema(schema)
+        result = await self._dispatch_elicitation_by_schema(
+            effective_schema, tool_call_id, title
         )
+        return self._wrap_object_result(result, object_key)
 
-        match perm_response.outcome:
-            case AllowedOutcome(option_id="accept"):
-                return types.ElicitResult(action="accept", content={})
-            case AllowedOutcome():
-                return types.ElicitResult(action="decline")
-            case DeniedOutcome():
-                return types.ElicitResult(action="cancel")
-            case _ as unreachable:
-                assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+    def _resolve_effective_schema(
+        self, schema: dict[str, Any]
+    ) -> tuple[dict[str, Any], str | None]:
+        """If schema is an object wrapper, extract the first elicitable property."""
+        if (
+            schema.get("type") == "object"
+            and not _is_boolean_schema(schema)
+            and not _is_enum_schema(schema)
+            and not _is_oneof_schema(schema)
+            and not _is_array_enum_schema(schema)
+            and (unwrapped := _unwrap_object_schema(schema))
+        ):
+            for key, prop in schema.get("properties", {}).items():
+                if prop is unwrapped:
+                    return unwrapped, key
+        return schema, None
+
+    async def _dispatch_elicitation_by_schema(
+        self,
+        schema: dict[str, Any],
+        tool_call_id: str,
+        title: str,
+    ) -> types.ElicitResult | types.ErrorData:
+        """Route to the appropriate handler based on schema type."""
+        result: types.ElicitResult | types.ErrorData
+
+        if _is_boolean_schema(schema):
+            options = _create_boolean_elicitation_options()
+            perm_response = await self.session.requests.request_permission(
+                tool_call_id=tool_call_id, title=title, options=options,
+            )
+            result = self._handle_boolean_elicitation_response(perm_response, schema)
+        elif _is_enum_schema(schema) and (
+            enum_options := _create_enum_elicitation_options(schema)
+        ):
+            perm_response = await self.session.requests.request_permission(
+                tool_call_id=tool_call_id, title=title, options=enum_options,
+            )
+            result = _handle_enum_elicitation_response(perm_response, schema)
+        elif _is_oneof_schema(schema) and (
+            oneof_options := _create_oneof_elicitation_options(schema)
+        ):
+            perm_response = await self.session.requests.request_permission(
+                tool_call_id=tool_call_id, title=title, options=oneof_options,
+            )
+            result = _handle_oneof_elicitation_response(perm_response, schema)
+        elif _is_array_enum_schema(schema) and (
+            array_options := _create_array_enum_elicitation_options(schema)
+        ):
+            perm_response = await self.session.requests.request_permission(
+                tool_call_id=tool_call_id, title=title, options=array_options,
+            )
+            result = _handle_array_enum_elicitation_response(perm_response, schema)
+        else:
+            # Generic fallback: Accept/Decline
+            generic_options = [
+                PermissionOption(option_id="accept", name="Accept", kind="allow_once"),
+                PermissionOption(option_id="decline", name="Decline", kind="reject_once"),
+            ]
+            perm_response = await self.session.requests.request_permission(
+                tool_call_id=tool_call_id, title=title, options=generic_options,
+            )
+
+            match perm_response.outcome:
+                case AllowedOutcome(option_id="accept"):
+                    result = types.ElicitResult(action="accept", content={})
+                case AllowedOutcome():
+                    result = types.ElicitResult(action="decline")
+                case DeniedOutcome():
+                    result = types.ElicitResult(action="cancel")
+                case _ as unreachable:
+                    assert_never(unreachable)  # ty:ignore[type-assertion-failure]
+
+        return result
+
+    @staticmethod
+    def _wrap_object_result(
+        result: types.ElicitResult | types.ErrorData,
+        object_key: str | None,
+    ) -> types.ElicitResult | types.ErrorData:
+        """If we unwrapped an object property, wrap the result content back."""
+        if (
+            object_key is not None
+            and isinstance(result, types.ElicitResult)
+            and result.action == "accept"
+        ):
+            inner_content = result.content if isinstance(result.content, dict) else {}
+            value = inner_content.get("value")
+            return types.ElicitResult(action="accept", content={object_key: value})
+        return result
 
     def _handle_boolean_elicitation_response(
         self, response: RequestPermissionResponse, schema: dict[str, Any]
@@ -430,6 +607,84 @@ def _handle_enum_elicitation_response(
             return types.ElicitResult(action="cancel")
         case AllowedOutcome(option_id=option_id):
             logger.warning("Failed to parse enum option_id", option_id=option_id)
+            return types.ElicitResult(action="cancel")
+        case DeniedOutcome():
+            return types.ElicitResult(action="cancel")
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _handle_oneof_elicitation_response(
+    response: RequestPermissionResponse, schema: dict[str, Any]
+) -> types.ElicitResult | types.ErrorData:
+    """Handle ACP response for oneOf elicitation.
+
+    Maps the selected option_id back to the ``const`` value from the
+    corresponding oneOf entry.
+    """
+    from mcp import types
+
+    match response.outcome:
+        case AllowedOutcome(option_id="cancel"):
+            return types.ElicitResult(action="cancel")
+        case AllowedOutcome(option_id=option_id) if option_id.startswith("oneof_"):
+            try:
+                parts = option_id.split("_", 2)  # ["oneof", index, value]
+                if len(parts) >= 3:  # noqa: PLR2004
+                    oneof_index = int(parts[1])
+                    one_of = schema.get("oneOf", [])
+                    if isinstance(one_of, list) and 0 <= oneof_index < len(one_of):
+                        entry = one_of[oneof_index]
+                        if isinstance(entry, dict) and "const" in entry:
+                            selected_value = entry["const"]
+                            return types.ElicitResult(
+                                action="accept", content={"value": selected_value}
+                            )
+            except (ValueError, IndexError):
+                pass
+            logger.warning("Failed to parse oneof option_id", option_id=option_id)
+            return types.ElicitResult(action="cancel")
+        case AllowedOutcome(option_id=option_id):
+            logger.warning("Failed to parse oneof option_id", option_id=option_id)
+            return types.ElicitResult(action="cancel")
+        case DeniedOutcome():
+            return types.ElicitResult(action="cancel")
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _handle_array_enum_elicitation_response(
+    response: RequestPermissionResponse, schema: dict[str, Any]
+) -> types.ElicitResult | types.ErrorData:
+    """Handle ACP response for array-enum elicitation.
+
+    Returns the selected value as a single-element list since
+    request_permission only supports single selection.
+    """
+    from mcp import types
+
+    match response.outcome:
+        case AllowedOutcome(option_id="cancel"):
+            return types.ElicitResult(action="cancel")
+        case AllowedOutcome(option_id=option_id) if option_id.startswith("array_enum_"):
+            try:
+                parts = option_id.split("_", 3)  # ["array", "enum", index, value]
+                if len(parts) >= 4:  # noqa: PLR2004
+                    enum_index = int(parts[2])
+                    items = schema.get("items", {})
+                    if isinstance(items, dict):
+                        enum_values = items.get("enum", [])
+                        if isinstance(enum_values, list) and 0 <= enum_index < len(enum_values):
+                            selected_value = enum_values[enum_index]
+                            return types.ElicitResult(
+                                action="accept", content={"value": [selected_value]}
+                            )
+            except (ValueError, IndexError):
+                pass
+            logger.warning("Failed to parse array_enum option_id", option_id=option_id)
+            return types.ElicitResult(action="cancel")
+        case AllowedOutcome(option_id=option_id):
+            logger.warning("Failed to parse array_enum option_id", option_id=option_id)
             return types.ElicitResult(action="cancel")
         case DeniedOutcome():
             return types.ElicitResult(action="cancel")
