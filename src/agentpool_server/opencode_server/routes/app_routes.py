@@ -21,6 +21,7 @@ from agentpool_server.opencode_server.models import (
     ProjectUpdateRequest,
     VcsInfo,
 )
+from agentpool_storage.opencode_provider import helpers
 from agentpool_storage.project_store import ProjectStore
 
 
@@ -42,8 +43,16 @@ async def get_app(state: StateDep) -> App:
     return App(git=is_git, hostname="localhost", path=path_info, time=time_info)
 
 
-def _project_data_to_response(data: ProjectData) -> Project:
-    """Convert ProjectData to OpenCode Project response."""
+def _project_data_to_response(data: ProjectData, *, project_id: str | None = None) -> Project:
+    """Convert ProjectData to OpenCode Project response.
+
+    Args:
+        data: Internal ProjectData from storage.
+        project_id: Optional override for the project ID. When provided, uses
+            the OpenCode-compatible project ID (git root commit SHA1) instead
+            of the internal path-based ID. This is required for TUI event
+            routing compatibility after OpenCode v1.4.4+.
+    """
     working_path = Path(data.worktree)
     match data.vcs:
         case "git":
@@ -53,7 +62,7 @@ def _project_data_to_response(data: ProjectData) -> Project:
         case _:
             vcs_dir = None
     return Project(
-        id=data.project_id,
+        id=project_id or data.project_id,
         worktree=data.worktree,
         vcs_dir=vcs_dir,
         vcs=data.vcs,
@@ -83,9 +92,15 @@ async def list_projects(state: StateDep) -> list[Project]:
 
 @router.get("/project/current")
 async def get_project_current(state: StateDep) -> Project:
-    """Get current project."""
+    """Get current project.
+
+    Returns the OpenCode-compatible project ID (git root commit SHA1) so
+    that the TUI's event routing filter (event.project === project.project())
+    matches the project field in GlobalEvent SSE envelopes.
+    """
     project = await _get_current_project(state)
-    return _project_data_to_response(project)
+    opencode_project_id = helpers.compute_project_id(project.worktree)
+    return _project_data_to_response(project, project_id=opencode_project_id)
 
 
 @router.patch("/project/{project_id}")
