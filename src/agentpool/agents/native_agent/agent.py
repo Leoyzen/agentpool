@@ -1144,6 +1144,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for this agent."""
+        from agentpool.agents.modes import ModeCategory as ModeCategoryRuntime, ModeInfo
         from agentpool.agents.native_agent.helpers import (
             get_model_category,
             get_permission_category,
@@ -1153,7 +1154,26 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Use native ToolConfirmationMode value directly
         mode_category = get_permission_category(self.tool_confirmation_mode)
         categories.append(mode_category)
-        if models := await self.get_available_models():
+        # Check configured model_variants first (RFC-0034: configured-first)
+        if self.agent_pool and self.agent_pool.manifest.model_variants:
+            current_model = self.model_name or ""
+            model_modes = [
+                ModeInfo(
+                    id=variant_name,
+                    name=variant_name,
+                    category_id="model",
+                )
+                for variant_name in self.agent_pool.manifest.model_variants.keys()
+            ]
+            model_category = ModeCategoryRuntime(
+                id="model",
+                name="Model",
+                available_modes=model_modes,
+                current_mode_id=current_model,
+                category="model",
+            )
+            categories.append(model_category)
+        elif models := await self.get_available_models():
             current_model = self.model_name or (models[0].id if models else "")
             model_category = get_model_category(current_model, models)
             categories.append(model_category)
