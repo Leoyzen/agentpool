@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence  # noqa: TC003
 from typing import Literal
 
-from pydantic import Field, HttpUrl  # noqa: TC002
+from pydantic import Field, HttpUrl
 
 from acp.schema.base import AnnotatedObject, Schema
 from acp.schema.common import EnvVariable  # noqa: TC001
@@ -75,8 +75,8 @@ class StdioMcpServer(BaseMcpServer):
     args: Sequence[str]
     """Command-line arguments to pass to the MCP server."""
 
-    # typ: Literal["stdio"] = Field(default="stdio", init=False)
-    # """Stdio transport type."""
+    type: Literal["stdio"] = Field(default="stdio", init=False)
+    """Stdio transport type."""
 
     command: str
     """Path to the MCP server executable."""
@@ -88,4 +88,17 @@ class StdioMcpServer(BaseMcpServer):
         return {env.name: env.value for env in self.env}
 
 
-McpServer = HttpMcpServer | SseMcpServer | StdioMcpServer
+class AcpMcpServer(BaseMcpServer):
+    """ACP channel transport configuration.
+
+    Only available when the Agent capabilities indicate `mcp_capabilities.acp` is `true`.
+    """
+
+    type: Literal["acp"] = Field(default="acp", init=False)
+    """ACP transport type."""
+
+    id: str
+    """Component-generated unique identifier for routing."""
+
+
+McpServer = HttpMcpServer | SseMcpServer | StdioMcpServer | AcpMcpServer

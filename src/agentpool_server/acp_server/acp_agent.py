@@ -19,6 +19,8 @@ from acp.schema import (
     NewSessionResponse,
     PromptResponse,
     ResumeSessionResponse,
+    SessionConfigOption,
+    SessionConfigSelectOption,
     SessionMode,
     SessionModelState,
     SessionModeState,
@@ -29,10 +31,13 @@ from acp.schema import (
     SetSessionModeResponse,
     StopSessionResponse,
 )
+from acp.schema.mcp import AcpMcpServer
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
+from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
+from agentpool_server.acp_server.provider_router import ProviderRouter
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
@@ -52,7 +57,6 @@ if TYPE_CHECKING:
         NewSessionRequest,
         PromptRequest,
         ResumeSessionRequest,
-        SessionConfigOption,
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
@@ -67,79 +71,41 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-async def get_session_model_state(agent: BaseAgent) -> SessionModelState | None:
+async def get_session_model_state(
+    agent: BaseAgent,
+    provider_router: ProviderRouter | None = None,
+) -> SessionModelState | None:
     """Get SessionModelState from an agent, including configured variants.
 
-    Converts tokonomics ModelInfo to ACP ModelInfo format, then merges
-    with configured model variants from the manifest.
-
-    Configured variants take precedence over discovered models with the same ID.
+    Uses configured-first logic via build_model_state_for_acp(),
+    falling back to tokonomics discovery if no configured variants exist.
 
     Args:
         agent: Any agent with get_available_models() method
+        provider_router: Optional ProviderRouter for disable filtering
 
     Returns:
         SessionModelState with all available models, None if no models available
     """
+    from agentpool_server.shared.model_utils import build_model_state_for_acp
+
     try:
-        toko_models = await agent.get_available_models()
+        state = await build_model_state_for_acp(agent, provider_router)
     except Exception:
-        logger.exception("Failed to get available models from agent")
+        logger.exception("Failed to build model state for ACP")
         return None
 
-    # Get configured variants from manifest
-    configured = []
-    agent_pool = getattr(agent, "agent_pool", None)
-    manifest = getattr(agent_pool, "manifest", None) if agent_pool else None
+    if state is not None:
+        return state
 
-    if manifest and manifest.model_variants:
-        configured = [
-            ACPModelInfo(
-                model_id=name,
-                name=name,
-            )
-            for name in manifest.model_variants
-        ]
-
-    # Convert tokonomics ModelInfo to ACP ModelInfo
-    acp_models_from_tokonomics = [
-        ACPModelInfo(
-            model_id=toko.id_override if toko.id_override else toko.id,
-            name=toko.name,
-            description=toko.description or "",
-        )
-        for toko in toko_models or []
-    ]
-
-    # Merge lists (configured variants take precedence over discovered)
-    all_models: dict[str, ACPModelInfo] = {}
-
-    # Add tokonomics models first
-    for model in acp_models_from_tokonomics:
-        all_models[model.model_id] = model
-
-    # Override/add configured variants (they take precedence)
-    for model in configured:
-        all_models[model.model_id] = model
-
-    if not all_models:
-        return None
-
-    # Ensure current model is in the list
-    acp_models_list = list(all_models.values())
-    all_ids = [model.model_id for model in acp_models_list]
+    # Final fallback: ensure current model is represented
     current_model = agent.model_name
-
-    if current_model and current_model not in all_ids:
-        # Add current model to the list so the UI shows it
+    if current_model:
         desc = "Currently configured model"
         model_info = ACPModelInfo(model_id=current_model, name=current_model, description=desc)
-        acp_models_list.insert(0, model_info)
-        current_model_id = current_model
-    else:
-        current_model_id = current_model if current_model in all_ids else all_ids[0]
+        return SessionModelState(available_models=[model_info], current_model_id=current_model)
 
-    return SessionModelState(available_models=acp_models_list, current_model_id=current_model_id)
+    return None
 
 
 async def get_session_mode_state(agent: BaseAgent) -> SessionModeState | None:
@@ -179,11 +145,38 @@ async def get_session_config_options(agent: BaseAgent) -> list[SessionConfigOpti
     except Exception:
         logger.exception("Failed to get modes from agent")
         return []
-    return [to_session_config_option(category) for category in mode_categories]
-    # for opt in options:
-    #     if opt.id == config_id:
-    #         opt.current_value = value_id
-    #         break
+    options = [to_session_config_option(category) for category in mode_categories]
+    # Append agent_role config option if pool has multiple agents
+    if agent_role_opt := get_agent_role_config_option(agent):
+        options.append(agent_role_opt)
+    return options
+
+
+def get_agent_role_config_option(agent: BaseAgent[Any, Any]) -> SessionConfigOption | None:
+    """Build agent_role config option if pool has more than one agent.
+
+    Args:
+        agent: The agent to check pool membership for.
+
+    Returns:
+        SessionConfigOption for agent_role, or None if pool has <= 1 agents.
+    """
+    pool = agent.agent_pool
+    if pool is None or len(pool.all_agents) <= 1:
+        return None
+
+    choices = [
+        SessionConfigSelectOption(value=a.name, name=a.name)
+        for a in pool.all_agents.values()
+    ]
+    return SessionConfigOption(
+        id="agent_role",
+        name="Agent Role",
+        description="Switch between available agents",
+        category="other",
+        current_value=agent.name,
+        options=choices,
+    )
 
 
 @dataclass
@@ -226,6 +219,9 @@ class AgentPoolACPAgent(ACPAgent):
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
 
+    _mcp_manager: AcpMcpConnectionManager = field(init=False)
+    """Manager for MCP-over-ACP connection lifecycle."""
+
     def __post_init__(self) -> None:
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
@@ -243,6 +239,9 @@ class AgentPoolACPAgent(ACPAgent):
         pool.storage.metadata_generated.connect(self._on_metadata_generated)
         # Setup skill command bridge if pool has skill commands configured
         self._setup_skill_bridge()
+
+        # Initialize MCP-over-ACP connection manager
+        self._mcp_manager = AcpMcpConnectionManager()
 
         # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
@@ -263,6 +262,10 @@ class AgentPoolACPAgent(ACPAgent):
     _session_agent_locks: dict[str, asyncio.Lock] = field(init=False, default_factory=dict)
     _swap_in_progress: bool = field(init=False, default=False)
     """Flag to prevent concurrent session creation during pool swap."""
+
+    # RFC-0034: Provider router for ACP providers/* protocol
+    provider_router: ProviderRouter = field(init=False)
+    """Router for LLM provider metadata and override tracking."""
 
     def _setup_skill_bridge(self) -> None:
         """Initialize skill command bridge and subscribe to registry changes.
@@ -329,8 +332,9 @@ class AgentPoolACPAgent(ACPAgent):
             # Create agent and set config dir for path resolution
             # (ConfigContextManager from pool loading has exited,
             # so _config_dir_global and CONFIG_DIR are None, breaking runtime path resolution)
-            import agentpool_config.context as ctx
             from upathtools import UPath
+
+            import agentpool_config.context as ctx
 
             config_path = self._resolve_agent_config_path(agent_name)
             previous_dir = ctx._config_dir_global
@@ -352,13 +356,14 @@ class AgentPoolACPAgent(ACPAgent):
                 try:
                     await agent.__aenter__()
                     entered = True
-                    self._session_agents[session_id] = agent
-                    return agent
                 except Exception:
                     if entered:
                         with suppress(Exception):
                             await agent.__aexit__(*sys.exc_info())
                     raise
+                else:
+                    self._session_agents[session_id] = agent
+                    return agent
             finally:
                 ctx._config_dir_global = previous_dir
                 if config_token is not None:
@@ -381,7 +386,8 @@ class AgentPoolACPAgent(ACPAgent):
         """
         # Resolve config: use specified agent_name or fallback to main agent
         agent_config = None
-        if agent_name is not None and self.agent_pool and agent_name in self.agent_pool.manifest.agents:
+        if (agent_name is not None and self.agent_pool
+                and agent_name in self.agent_pool.manifest.agents):
             from agentpool.models.agents import NativeAgentConfig
             cfg = self.agent_pool.manifest.agents[agent_name]
             if isinstance(cfg, NativeAgentConfig):
@@ -398,7 +404,8 @@ class AgentPoolACPAgent(ACPAgent):
             return agent
 
         # Fallback: use pool agent directly if available, otherwise shared default_agent
-        if agent_name is not None and self.agent_pool and agent_name in self.agent_pool.all_agents:
+        if (agent_name is not None and self.agent_pool
+                and agent_name in self.agent_pool.all_agents):
             return self.agent_pool.all_agents[agent_name]
 
         logger.warning(
@@ -442,7 +449,8 @@ class AgentPoolACPAgent(ACPAgent):
         """
         # Resolve config: use specified agent_name or fallback to main agent
         agent_config = None
-        if agent_name is not None and self.agent_pool and agent_name in self.agent_pool.manifest.agents:
+        if (agent_name is not None and self.agent_pool
+                and agent_name in self.agent_pool.manifest.agents):
             from agentpool.models.agents import NativeAgentConfig
             cfg = self.agent_pool.manifest.agents[agent_name]
             if isinstance(cfg, NativeAgentConfig):
@@ -500,6 +508,10 @@ class AgentPoolACPAgent(ACPAgent):
         self.client_info = params.client_info
         logger.info("Client info", request=params.model_dump_json())
         self._initialized = True
+        # Initialize provider router from current pool manifest
+        pool = self.agent_pool
+        manifest = pool.manifest if pool else None
+        self.provider_router = ProviderRouter(manifest)
         return InitializeResponse.create(
             protocol_version=version,
             name="agentpool",
@@ -511,9 +523,11 @@ class AgentPoolACPAgent(ACPAgent):
             stop_session=True,
             http_mcp_servers=True,
             sse_mcp_servers=True,
+            acp_mcp_servers=True,
             audio_prompts=True,
             embedded_context_prompts=True,
             image_prompts=True,
+            providers=True,
         )
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:
@@ -549,7 +563,9 @@ class AgentPoolACPAgent(ACPAgent):
                     config_options = await get_session_config_options(session.agent)
                 else:
                     # Use unified helpers for all other agents
-                    models = await get_session_model_state(session.agent)
+                    models = await get_session_model_state(
+                        session.agent, provider_router=self.provider_router
+                    )
                     state = await get_session_mode_state(session.agent)
                     config_options = await get_session_config_options(session.agent)
         except Exception:
@@ -861,10 +877,96 @@ class AgentPoolACPAgent(ACPAgent):
             logger.exception("Failed to cancel session", session_id=params.session_id)
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        return {"example": "response"}
+        """Handle extension methods including MCP-over-ACP lifecycle messages.
+
+        Args:
+            method: The extension method name.
+            params: Method parameters.
+
+        Returns:
+            Response dictionary.
+        """
+        result: dict[str, Any] = {}
+        match method:
+            case "mcp/connect":
+                connection_id = params.get("connectionId", "")
+                server_data = params.get("server", {})
+                server = AcpMcpServer.model_validate(server_data)
+
+                async def send_to_client(message: dict[str, Any]) -> Any:
+                    return await self.client.ext_method("mcp/message", message)
+
+                await self._mcp_manager.create_connection(
+                    connection_id, server, send_to_client
+                )
+                result = {"connected": True}
+            case "mcp/disconnect":
+                connection_id = params.get("connectionId", "")
+                await self._mcp_manager.remove_connection(connection_id)
+                result = {"disconnected": True}
+            case "mcp/message":
+                connection_id = params.get("connectionId", "")
+                message = params.get("message", {})
+                conn = self._mcp_manager.get_connection(connection_id)
+                if conn is not None:
+                    await conn.handle_client_message(message)
+                result = {}
+            case "providers/list":
+                providers = self.provider_router.get_providers()
+                result = {"providers": [p.model_dump(mode="json") for p in providers]}
+            case "providers/set":
+                await self._handle_providers_set(params)
+                result = {"success": True}
+            case "providers/disable":
+                await self._handle_providers_disable(params)
+                result = {"success": True}
+            case _:
+                result = {}
+        return result
+
+    async def _handle_providers_set(self, params: dict[str, Any]) -> None:
+        """Handle providers/set extension method.
+
+        Raises:
+            RequestError: If provider_id is unknown.
+        """
+        from acp.exceptions import RequestError
+
+        provider_id = params.get("provider_id", "")
+        base_url = params.get("base_url")
+        api_key_id = params.get("api_key_id")
+        try:
+            await self.provider_router.set_provider_override(
+                provider_id, base_url=base_url, api_key_id=api_key_id
+            )
+        except ValueError as e:
+            raise RequestError.invalid_params({"provider_id": provider_id}) from e
+
+    async def _handle_providers_disable(self, params: dict[str, Any]) -> None:
+        """Handle providers/disable extension method.
+
+        Raises:
+            RequestError: If provider_id is unknown.
+        """
+        from acp.exceptions import RequestError
+
+        provider_id = params.get("provider_id", "")
+        try:
+            await self.provider_router.disable_provider(provider_id)
+        except ValueError as e:
+            raise RequestError.invalid_params({"provider_id": provider_id}) from e
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         return None
+
+    async def close(self) -> None:
+        """Close the agent and clean up all MCP-over-ACP connections."""
+        logger.info("Closing AgentPoolACPAgent")
+        try:
+            await self._mcp_manager.close_all()
+        except Exception:
+            logger.exception("Failed to close MCP connections during agent shutdown")
+        await self.cleanup_all_session_agents()
 
     async def set_session_mode(
         self, params: SetSessionModeRequest
@@ -952,13 +1054,51 @@ class AgentPoolACPAgent(ACPAgent):
             logger.exception("Failed to set session model", session_id=params.session_id)
             return None
 
+    async def _swap_session_agent(self, session_id: str, new_agent_name: str) -> dict[str, bool]:
+        """Swap the active agent for a session.
+
+        Acquires the session agent lock to prevent concurrent swaps,
+        then delegates to the session's switch_active_agent method.
+
+        Args:
+            session_id: The session to swap agent for.
+            new_agent_name: Name of the agent to switch to.
+
+        Returns:
+            Dict with success flag.
+
+        Raises:
+            RequestError: If swap fails (session not found, agent unknown,
+                or prompt is active).
+        """
+        from acp.exceptions import RequestError
+
+        session = self.session_manager.get_session(session_id)
+        if not session:
+            msg = {"session_id": session_id, "reason": "Session not found"}
+            raise RequestError.invalid_params(msg)
+
+        # Block swap during active prompt
+        if hasattr(session, "_task_lock") and session._task_lock.locked():
+            msg = {"session_id": session_id, "reason": "Prompt active"}
+            raise RequestError.invalid_params(msg)
+
+        # Ensure lock exists for this session
+        if session_id not in self._session_agent_locks:
+            self._session_agent_locks[session_id] = asyncio.Lock()
+
+        async with self._session_agent_locks[session_id]:
+            await session.switch_active_agent(new_agent_name)
+
+        return {"success": True}
+
     async def set_session_config_option(
         self, params: SetSessionConfigOptionRequest
     ) -> SetSessionConfigOptionResponse | None:
         """Set a session config option.
 
         Forwards the config option change to the agent's set_mode method
-        and returns the updated config options.
+        or handles agent_role swap, then returns the updated config options.
         """
         session = self.session_manager.get_session(params.session_id)
         if not session or not session.agent:
@@ -972,15 +1112,36 @@ class AgentPoolACPAgent(ACPAgent):
             session_id=params.session_id,
         )
         try:
-            # Forward to agent's set_mode method
-            # config_id maps to category_id, value maps to mode_id
-            await session.agent.set_mode(params.value, category_id=params.config_id)
+            if params.config_id == "agent_role":
+                await self._set_agent_role(session, params.value)
+            else:
+                # Forward to agent's set_mode method
+                # config_id maps to category_id, value maps to mode_id
+                await session.agent.set_mode(params.value, category_id=params.config_id)
             # Return updated config options
             config_options = await get_session_config_options(session.agent)
             return SetSessionConfigOptionResponse(config_options=config_options)
         except Exception:
             logger.exception("Failed to set session config option", session_id=params.session_id)
             return None
+
+    async def _set_agent_role(self, session: Any, agent_name: str) -> None:
+        """Validate and swap to the requested agent role.
+
+        Args:
+            session: The active session.
+            agent_name: Target agent name.
+
+        Raises:
+            RequestError: If agent name is not in pool.
+        """
+        from acp.exceptions import RequestError
+
+        pool = session.agent.agent_pool
+        if pool is None or agent_name not in pool.all_agents:
+            msg = {"agent_role": agent_name, "reason": "Unknown agent"}
+            raise RequestError.invalid_params(msg)
+        await self._swap_session_agent(session.session_id, agent_name)
 
     async def swap_pool(self, config_path: str, agent_name: str | None = None) -> list[str]:
         """Swap the agent pool with a new one from configuration.
@@ -1023,7 +1184,10 @@ class AgentPoolACPAgent(ACPAgent):
             try:
                 await session.close()
             except Exception:
-                logger.exception("Error closing session during pool swap", session_id=session.session_id)
+                logger.exception(
+                    "Error closing session during pool swap",
+                    session_id=session.session_id,
+                )
 
         # 4. Clean up all per-session agents
         await self.cleanup_all_session_agents()

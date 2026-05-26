@@ -1,18 +1,5 @@
 [
   {
-    "content": [],
-    "event_kind": "tool_call_start",
-    "kind": "execute",
-    "locations": [],
-    "raw_input": {
-      "command": "echo hello"
-    },
-    "title": "Running: echo hello",
-    "tool_call_id": "pyd_ai_tool_call_id__bash",
-    "tool_name": "Running: echo hello",
-    "type": "ToolCallStartEvent"
-  },
-  {
     "event_kind": "tool_call_progress",
     "items": [
       {
@@ -74,14 +61,23 @@
     "type": "ToolCallProgressEvent"
   },
   {
+    "content": [],
+    "event_kind": "tool_call_start",
+    "kind": "execute",
+    "locations": [],
+    "raw_input": {
+      "command": "echo hello"
+    },
+    "title": "Running: echo hello",
+    "tool_call_id": "pyd_ai_tool_call_id__bash",
+    "tool_name": "Running: echo hello",
+    "type": "ToolCallStartEvent"
+  },
+  {
     "agent_name": "test_client",
     "event_kind": "tool_call_complete",
     "message_id": "",
-    "metadata": {
-      "description": "echo hello",
-      "exit": 0,
-      "output": "hello\n"
-    },
+    "metadata": null,
     "tool_call_id": "pyd_ai_tool_call_id__bash",
     "tool_input": {},
     "tool_name": "unknown",
