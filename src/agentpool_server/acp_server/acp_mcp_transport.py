@@ -12,11 +12,15 @@ from typing import TYPE_CHECKING, Any
 import anyio
 from mcp import ClientSession
 
+from agentpool.log import get_logger
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
+
+logger = get_logger(__name__)
 
 
 class AcpMcpTransport:
@@ -78,5 +82,9 @@ class AcpMcpTransport:
             yield session
         finally:
             forwarder.cancel()
-            with suppress(asyncio.CancelledError):
-                await forwarder
+            try:
+                with suppress(asyncio.CancelledError):
+                    await forwarder
+            except Exception:
+                logger.exception("Error in MCP-over-ACP forwarder task")
+            self._forwarder_task = None

@@ -954,6 +954,9 @@ class AgentPoolACPAgent(ACPAgent):
                 server = AcpMcpServer.model_validate(server_data)
 
                 async def send_to_client(message: dict[str, Any]) -> Any:
+                    mcp_message_method = getattr(self.client, "mcp_message", None)
+                    if mcp_message_method is not None:
+                        return await mcp_message_method(message)
                     return await self.client.ext_method("mcp/message", message)
 
                 await self._mcp_manager.create_connection(
@@ -969,7 +972,12 @@ class AgentPoolACPAgent(ACPAgent):
                 message = params.get("message", {})
                 conn = self._mcp_manager.get_connection(connection_id)
                 if conn is not None:
-                    await conn.handle_client_message(message)
+                    self.tasks.create_task(conn.handle_client_message(message))
+                else:
+                    logger.warning(
+                        "Received MCP message for unknown connection",
+                        connection_id=connection_id,
+                    )
                 return {}
             case _:
                 return {}

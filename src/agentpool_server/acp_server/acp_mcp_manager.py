@@ -9,7 +9,8 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 import anyio
-import structlog
+
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 
     from acp.schema.mcp import AcpMcpServer
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class AcpMcpConnection:
@@ -168,7 +169,10 @@ class AcpMcpConnectionManager:
         async with self._lock:
             conn = self._connections.pop(connection_id, None)
         if conn is not None:
-            await conn.close()
+            try:
+                await conn.close()
+            except Exception:
+                logger.exception("Failed to close MCP connection", connection_id=connection_id)
             logger.info("MCP connection removed", connection_id=connection_id)
 
     def get_connection(self, connection_id: str) -> AcpMcpConnection | None:
@@ -188,7 +192,10 @@ class AcpMcpConnectionManager:
             connections = list(self._connections.values())
             self._connections.clear()
         for conn in connections:
-            await conn.close()
+            try:
+                await conn.close()
+            except Exception:
+                logger.exception("Failed to close MCP connection", connection_id=conn.connection_id)
         logger.info("All MCP connections closed")
 
     def __contains__(self, connection_id: str) -> bool:
