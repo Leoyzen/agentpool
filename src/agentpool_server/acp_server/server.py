@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import sys
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from acp import ACPWebSocketTransport, StdioTransport, serve
@@ -39,6 +40,30 @@ def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
     return "tool_box"
 
 
+def _acp_event_observer(show_detailed: bool = False):
+    """Create an ACP stream observer that prints JSON-RPC messages to stderr.
+
+    Args:
+        show_detailed: Whether to print full message content or just summary.
+
+    Returns:
+        StreamObserver callable for Connection._observers.
+    """
+
+    def observer(event) -> None:
+        direction_icon = "→" if event.direction == "outgoing" else "←"
+        method = event.message.get("method", "response")
+        if show_detailed:
+            import json
+
+            msg_str = json.dumps(event.message, ensure_ascii=False, separators=(",", ":"))
+            print(f"[ACP {direction_icon}] {method}: {msg_str}", flush=True, file=sys.stderr)
+        else:
+            print(f"[ACP {direction_icon}] {method}", flush=True, file=sys.stderr)
+
+    return observer
+
+
 class ACPServer(BaseServer):
     """ACP (Agent Client Protocol) server for agentpool using external library.
 
@@ -62,6 +87,8 @@ class ACPServer(BaseServer):
         config_path: str | None = None,
         transport: Transport = "stdio",
         subagent_display_mode: SubagentDisplayMode = "tool_box",
+        show_events: bool = False,
+        show_events_detailed: bool = False,
     ) -> None:
         """Initialize ACP server with configuration.
 
@@ -76,6 +103,8 @@ class ACPServer(BaseServer):
             config_path: Path to the configuration file (for tracking/hot-switching)
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: How to display nested agent output in ACP clients
+            show_events: Whether to print agent stream events to stderr
+            show_events_detailed: Whether to print detailed agent stream events to stderr
         """
         super().__init__(pool, name=name, raise_exceptions=True)
         self.debug_messages = debug_messages
@@ -86,6 +115,8 @@ class ACPServer(BaseServer):
         self.config_path = config_path
         self.transport: Transport = transport
         self.subagent_display_mode: SubagentDisplayMode = subagent_display_mode
+        self.show_events = show_events
+        self.show_events_detailed = show_events_detailed
 
     @classmethod
     def from_config(
@@ -99,6 +130,8 @@ class ACPServer(BaseServer):
         load_skills: bool = True,
         transport: Transport = "stdio",
         subagent_display_mode: SubagentDisplayMode | None = None,
+        show_events: bool = False,
+        show_events_detailed: bool = False,
     ) -> Self:
         """Create ACP server from configuration path or manifest.
 
@@ -159,6 +192,8 @@ class ACPServer(BaseServer):
             config_path=config_path,
             transport=resolved_transport,
             subagent_display_mode=resolved_display_mode,
+            show_events=show_events,
+            show_events_detailed=show_events_detailed,
         )
         agent_names = list(server.pool.all_agents.keys())
 
@@ -207,6 +242,9 @@ class ACPServer(BaseServer):
             subagent_display_mode=self.subagent_display_mode,
         )
         debug_file = self.debug_file if self.debug_messages else None
+        observers = None
+        if self.show_events or self.show_events_detailed:
+            observers = [_acp_event_observer(show_detailed=self.show_events_detailed)]
         self.log.info("ACP server started")
         try:
             await serve(
@@ -214,6 +252,7 @@ class ACPServer(BaseServer):
                 transport=self.transport,
                 shutdown_event=self._shutdown_event,
                 debug_file=debug_file,
+                observers=observers,
             )
         except asyncio.CancelledError:
             self.log.info("ACP server shutdown requested")

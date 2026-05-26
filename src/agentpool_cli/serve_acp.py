@@ -39,6 +39,20 @@ def acp_command(  # noqa: PLR0915
     show_messages: Annotated[
         bool, t.Option("--show-messages", help="Show message activity in logs")
     ] = False,
+    show_events: Annotated[
+        bool,
+        t.Option(
+            "--show-events",
+            help="Print agent stream events to stderr for debugging",
+        ),
+    ] = False,
+    show_events_detailed: Annotated[
+        bool,
+        t.Option(
+            "--show-events-detailed",
+            help="Print detailed agent stream events to stderr (includes tool progress)",
+        ),
+    ] = False,
     debug_messages: Annotated[
         bool, t.Option("--debug-messages", help="Save raw JSON-RPC messages to debug file")
     ] = False,
@@ -213,6 +227,8 @@ def acp_command(  # noqa: PLR0915
                 load_skills=load_skills,
                 transport=transport_config,
                 subagent_display_mode=subagent_display_mode,
+                show_events=show_events,
+                show_events_detailed=show_events_detailed,
             )
     except Exception as e:
         raise t.BadParameter(f"Invalid merged configuration: {e}") from e
