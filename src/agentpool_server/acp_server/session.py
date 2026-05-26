@@ -261,9 +261,15 @@ class ACPSession:
         if skill_registry is None:
             return
 
-        # on_command_change immediately notifies all existing commands,
-        # so we only use the callback path (no manual registration)
-        skill_registry.on_command_change(self._on_skill_command_changed)
+        self._skill_command_callback = self._on_skill_command_changed
+        # Skip scheduling updates during initial registration;
+        # the caller of create_session already schedules a consolidated update.
+        self._skill_commands_initializing = True
+        try:
+            skill_registry.on_command_change(self._skill_command_callback)
+        finally:
+            self._skill_commands_initializing = False
+
         self.log.debug(
             "Subscribed to skill command changes",
             skill_count=len(skill_registry.list_items()),
@@ -295,12 +301,15 @@ class ACPSession:
             except Exception:
                 self.log.exception("Failed to register skill command", skill_name=name)
 
-        # Trigger command update notification asynchronously
+        # Skip notification during initial registration
+        if getattr(self, "_skill_commands_initializing", False):
+            return
+
+        # Schedule update via TaskManager for proper lifecycle tracking
         try:
-            asyncio.get_event_loop().create_task(self.send_available_commands_update())
-        except RuntimeError:
-            # No event loop running, skip async update
-            pass
+            self.acp_agent.tasks.create_task(self.send_available_commands_update())
+        except Exception:
+            self.log.exception("Failed to schedule command update")
 
     async def _on_state_updated(
         self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
@@ -582,6 +591,15 @@ class ACPSession:
             for agent in self.agent_pool.get_agents(Agent).values():
                 if self.get_cwd_context in agent.sys_prompts.prompts:
                     agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+
+            # Unregister skill command callback to prevent memory leak
+            if hasattr(self, "_skill_command_callback"):
+                skill_registry = getattr(self.agent_pool, "skill_commands", None)
+                if skill_registry is not None and hasattr(skill_registry, "_command_change_handlers"):
+                    try:
+                        skill_registry._command_change_handlers.remove(self._skill_command_callback)
+                    except ValueError:
+                        pass  # Already removed
 
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed
