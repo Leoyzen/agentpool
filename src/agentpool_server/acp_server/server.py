@@ -83,7 +83,7 @@ class ACPServer(BaseServer):
         debug_file: str | None = None,
         debug_commands: bool = False,
         agent: str | None = None,
-        load_skills: bool = True,
+        load_skills: bool | None = None,
         config_path: str | None = None,
         transport: Transport = "stdio",
         subagent_display_mode: SubagentDisplayMode = "tool_box",
@@ -99,7 +99,8 @@ class ACPServer(BaseServer):
             debug_file: File path for debug message logging
             debug_commands: Whether to enable debug slash commands for testing
             agent: Optional specific agent name to use (defaults to first agent)
-            load_skills: Whether to load client-side skills from .claude/skills
+            load_skills: Whether to load client-side skills from .claude/skills.
+                If None (default), uses the manifest's skills.include_default setting.
             config_path: Path to the configuration file (for tracking/hot-switching)
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: How to display nested agent output in ACP clients
@@ -127,7 +128,7 @@ class ACPServer(BaseServer):
         debug_file: str | None = None,
         debug_commands: bool = False,
         agent: str | None = None,
-        load_skills: bool = True,
+        load_skills: bool | None = None,
         transport: Transport = "stdio",
         subagent_display_mode: SubagentDisplayMode | None = None,
         show_events: bool = False,
@@ -141,7 +142,8 @@ class ACPServer(BaseServer):
             debug_file: Path to debug file
             debug_commands: Enable debug slash commands for testing
             agent: Optional specific agent name to use (defaults to first agent)
-            load_skills: Whether to load client-side skills from .claude/skills
+            load_skills: Whether to load client-side skills from .claude/skills.
+                If None (default), uses the manifest's skills.include_default setting.
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: Override for subagent display mode (argument > config > default)
 
@@ -182,13 +184,24 @@ class ACPServer(BaseServer):
         else:
             resolved_transport = StdioTransport()
 
+        # Resolve load_skills with priority: argument > manifest > default (True)
+        resolved_load_skills: bool
+        if load_skills is not None:
+            # Explicit argument overrides manifest
+            resolved_load_skills = load_skills
+        elif isinstance(config, AgentsManifest):
+            # Fall back to manifest's skills.include_default setting
+            resolved_load_skills = config.skills.include_default
+        else:
+            resolved_load_skills = True
+
         server = cls(
             pool,
             debug_messages=debug_messages,
             debug_file=debug_file or "acp-debug.jsonl" if debug_messages else None,
             debug_commands=debug_commands,
             agent=agent,
-            load_skills=load_skills,
+            load_skills=resolved_load_skills,
             config_path=config_path,
             transport=resolved_transport,
             subagent_display_mode=resolved_display_mode,

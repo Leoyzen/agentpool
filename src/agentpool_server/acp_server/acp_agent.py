@@ -211,8 +211,11 @@ class AgentPoolACPAgent(ACPAgent):
     debug_commands: bool = False
     """Whether to enable debug slash commands for testing."""
 
-    load_skills: bool = True
-    """Whether to load client-side skills from .claude/skills directory."""
+    load_skills: bool | None = None
+    """Whether to load client-side skills from .claude/skills directory.
+
+    If None (default), uses the manifest's skills.include_default setting.
+    """
 
     server: ACPServer | None = field(default=None)
     """Reference to the ACPServer for pool hot-switching."""
@@ -559,7 +562,15 @@ class AgentPoolACPAgent(ACPAgent):
                 self.tasks.create_task(session.send_available_commands_update())
                 self.tasks.create_task(session.agent.load_rules(session.cwd))
                 self.tasks.create_task(session._register_prompt_hub_commands())
-                if self.load_skills:
+                # Determine whether to load client skills
+                # None means "use manifest's include_default setting"
+                should_load_skills = self.load_skills
+                if should_load_skills is None and self.agent_pool and self.agent_pool.manifest:
+                    should_load_skills = self.agent_pool.manifest.skills.include_default
+                elif should_load_skills is None:
+                    should_load_skills = True  # Fallback default
+
+                if should_load_skills:
                     coro_4 = session.init_client_skills()
                     self.tasks.create_task(coro_4, name=f"init_client_skills_{session_id}")
             logger.info("Created session", session_id=session_id)

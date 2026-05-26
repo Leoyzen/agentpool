@@ -78,12 +78,13 @@ def acp_command(  # noqa: PLR0915
         ),
     ] = None,
     load_skills: Annotated[
-        bool,
+        bool | None,
         t.Option(
             "--skills/--no-skills",
-            help="Load client-side skills from .claude/skills directory",
+            help="Load client-side skills from .claude/skills directory. "
+                 "Defaults to the manifest's skills.include_default setting.",
         ),
-    ] = True,
+    ] = None,
     transport: Annotated[
         Literal["stdio", "websocket", "streamable-http"],
         t.Option(

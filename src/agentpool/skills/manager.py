@@ -167,6 +167,11 @@ class SkillsManager:
             paths = self.registry.skills_dirs
             default_paths = [p.expanduser() for p in DEFAULT_SKILLS_PATHS]
 
+        # Sync registry's skills_dirs to reflect actual effective paths.
+        # This ensures downstream consumers (e.g. LocalResourceProvider)
+        # do not re-discover default paths when include_default=False.
+        self.registry.skills_dirs = [to_upath(p).expanduser() for p in paths]
+
         logger.debug("Skills discovery paths", paths=[str(p) for p in paths])
         for path in reversed(paths):
             upath = to_upath(path).expanduser()
