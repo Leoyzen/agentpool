@@ -34,6 +34,7 @@ from agentpool_server.acp_server.converters import (
 )
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
+from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
 
 if TYPE_CHECKING:
@@ -245,7 +246,61 @@ class ACPSession:
 
             # Subscribe to state change signal for all agents
             agent.state_updated.connect(self._on_state_updated)
+        # Register skill commands from pool's skill_commands registry
+        self._register_skill_commands()
         self.log.info("Created ACP session", current_agent=self.agent.name)
+
+    def _register_skill_commands(self) -> None:
+        """Register skill commands from pool's SkillCommandRegistry to command_store.
+
+        Bridges skill commands into the session's command_store so they are
+        included in available_commands_update notifications per ACP spec.
+        """
+        pool = self.agent_pool
+        skill_registry = getattr(pool, "skill_commands", None)
+        if skill_registry is None:
+            return
+
+        # on_command_change immediately notifies all existing commands,
+        # so we only use the callback path (no manual registration)
+        skill_registry.on_command_change(self._on_skill_command_changed)
+        self.log.debug(
+            "Subscribed to skill command changes",
+            skill_count=len(skill_registry.list_items()),
+        )
+
+    def _on_skill_command_changed(self, name: str, command: Any | None) -> None:
+        """Handle skill command add/remove changes from SkillCommandRegistry.
+
+        Args:
+            name: The name of the skill command.
+            command: The SkillCommand if added, None if removed.
+        """
+        if command is None:
+            # Command removed
+            try:
+                self.command_store.unregister_command(name)
+                self.log.debug("Unregistered skill command", skill_name=name)
+            except Exception:
+                self.log.exception("Failed to unregister skill command", skill_name=name)
+        else:
+            # Command added/updated
+            try:
+                from agentpool.skills.command import SkillCommand
+
+                if isinstance(command, SkillCommand):
+                    slashed_cmd = create_skill_command(command)
+                    self.command_store.register_command(slashed_cmd)
+                    self.log.debug("Registered skill command", skill_name=name)
+            except Exception:
+                self.log.exception("Failed to register skill command", skill_name=name)
+
+        # Trigger command update notification asynchronously
+        try:
+            asyncio.get_event_loop().create_task(self.send_available_commands_update())
+        except RuntimeError:
+            # No event loop running, skip async update
+            pass
 
     async def _on_state_updated(
         self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
