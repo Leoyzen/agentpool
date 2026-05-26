@@ -258,6 +258,8 @@ class AgentPoolACPAgent(ACPAgent):
     _agent_config: NativeAgentConfig | None = field(init=False, default=None)
     _session_agents: dict[str, BaseAgent[Any, Any]] = field(init=False, default_factory=dict)
     _session_agent_locks: dict[str, asyncio.Lock] = field(init=False, default_factory=dict)
+    _swap_in_progress: bool = field(init=False, default=False)
+    """Flag to prevent concurrent session creation during pool swap."""
 
     def _setup_skill_bridge(self) -> None:
         """Initialize skill command bridge and subscribe to registry changes.
@@ -303,6 +305,11 @@ class AgentPoolACPAgent(ACPAgent):
 
         Uses double-checked locking for concurrent access.
         """
+        # Reject session creation during pool swap to prevent stale config usage
+        if self._swap_in_progress:
+            msg = "Pool swap in progress - cannot create new session"
+            raise RuntimeError(msg)
+
         # Fast path: already registered
         if session_id in self._session_agents:
             return self._session_agents[session_id]
@@ -997,23 +1004,26 @@ class AgentPoolACPAgent(ACPAgent):
             # 1. Copy and clear all active sessions while holding the lock
             sessions = list(self.session_manager._active.values())
             self.session_manager._active.clear()
+            # 2. Set swap flag to prevent new session creation during swap
+            self._swap_in_progress = True
 
-        # 2. Close all sessions (outside the lock - may take time)
+        # 3. Close all sessions (outside the lock - may take time)
         for session in sessions:
             try:
                 await session.close()
             except Exception:
                 logger.exception("Error closing session during pool swap", session_id=session.session_id)
 
-        # 3. Clean up all per-session agents
+        # 4. Clean up all per-session agents
         await self.cleanup_all_session_agents()
 
-        # 4. Swap pool
+        # 5. Swap pool
         new_agent = await self.server.swap_pool(config_path, agent_name)
 
-        # 5. Update cached agent config from new pool
+        # 6. Update cached agent config from new pool
         pool = new_agent.agent_pool
         if pool is None:
+            self._swap_in_progress = False
             msg = "New agent has no associated pool"
             raise RuntimeError(msg)
 
@@ -1033,12 +1043,15 @@ class AgentPoolACPAgent(ACPAgent):
         else:
             self._agent_config = None
 
-        # 6. Update default_agent reference
+        # 7. Update default_agent reference and pool
         self.default_agent = new_agent
         self.session_manager._pool = pool
 
-        # 7. Invalidate sessions cache
+        # 8. Invalidate sessions cache
         self._sessions_cache = None
+
+        # 9. Clear swap flag - new sessions can now be created with new config
+        self._swap_in_progress = False
 
         agent_names = list(pool.all_agents.keys())
         logger.info("Pool swap complete", agent_names=agent_names)
