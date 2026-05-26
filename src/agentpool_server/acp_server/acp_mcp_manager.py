@@ -84,7 +84,13 @@ class AcpMcpConnection:
         """
         if self._to_session_send is None:
             raise RuntimeError("Connection not opened")
-        await self._to_session_send.send(message)
+        try:
+            await self._to_session_send.send(message)
+        except (anyio.ClosedResourceError, anyio.EndOfStream):
+            logger.debug(
+                "Failed to route message: connection already closed",
+                connection_id=self.connection_id,
+            )
 
     async def send_to_client(self, message: dict[str, Any]) -> Any:
         """Send an mcp/message to the client.
@@ -152,6 +158,8 @@ class AcpMcpConnectionManager:
             ValueError: If a connection with the same ID already exists.
         """
         async with self._lock:
+            if not connection_id:
+                raise ValueError("connection_id cannot be empty")
             if connection_id in self._connections:
                 raise ValueError(f"MCP connection '{connection_id}' already exists")
             conn = AcpMcpConnection(connection_id, server_config, send_to_client)

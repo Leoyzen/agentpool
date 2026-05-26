@@ -69,6 +69,10 @@ class AcpMcpTransport:
                     await self._connection.send_to_client(message)
             except anyio.EndOfStream:
                 pass
+            except Exception:
+                logger.exception("Error in MCP-over-ACP forwarder task")
+                await self._connection.close()
+                raise
 
         session = ClientSession(
             self._connection.to_session,  # type: ignore[arg-type]

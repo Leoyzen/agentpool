@@ -202,7 +202,7 @@ async def test_error_handling_closed_connection(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """Verify handle_client_message raises when streams are closed."""
+    """Verify handle_client_message handles closed streams gracefully."""
     # 1. Create connection, open it, then close it
     conn = AcpMcpConnection(
         connection_id="conn-closed",
@@ -214,6 +214,6 @@ async def test_error_handling_closed_connection(
 
     assert conn._closed is True
 
-    # 2. Verify handle_client_message raises when streams are closed
-    with pytest.raises(anyio.ClosedResourceError):
-        await conn.handle_client_message({"jsonrpc": "2.0", "method": "test"})
+    # 2. Verify handle_client_message handles closed streams gracefully
+    # (does not raise, logs debug message instead)
+    await conn.handle_client_message({"jsonrpc": "2.0", "method": "test"})
