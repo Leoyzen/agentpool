@@ -27,6 +27,7 @@ from agentpool.mcp_server.message_handler import MCPMessageHandler
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
 from agentpool_config.mcp_server import (
+    AcpMCPServerConfig,
     SSEMCPServerConfig,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
@@ -113,7 +114,8 @@ class MCPClient:
             await self._client.__aenter__()  # type: ignore[no-untyped-call]
         except Exception as first_error:
             # OAuth fallback for HTTP/SSE if not already using OAuth
-            if not isinstance(self.config, StdioMCPServerConfig) and not self.config.auth.oauth:
+            if (not isinstance(self.config, (StdioMCPServerConfig, AcpMCPServerConfig))
+                    and not self.config.auth.oauth):
                 try:
                     with contextlib.suppress(Exception):
                         await self._client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]
@@ -197,6 +199,12 @@ class MCPClient:
             case StreamableHTTPMCPServerConfig(url=url, headers=headers, auth=auth):
                 transport = StreamableHttpTransport(url=url, headers=headers)
                 oauth = auth.oauth
+
+            case AcpMCPServerConfig():
+                raise NotImplementedError(
+                    "ACP-transport MCP servers are managed by the ACP agent directly. "
+                    "Use AcpMcpConnectionManager to establish connections."
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 

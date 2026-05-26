@@ -349,6 +349,10 @@ async def _agent_handler(  # noqa: PLR0911
         case "providers/disable":
             disable_providers_request = DisableProvidersRequest.model_validate(params)
             return await agent.disable_provider(disable_providers_request)
+        case "mcp/connect":
+            return await agent.ext_method("mcp/connect", params or {})
+        case "mcp/disconnect":
+            return await agent.ext_method("mcp/disconnect", params or {})
         case str() if method.startswith("_") and is_notification:
             await agent.ext_notification(method[1:], params or {})
             return None

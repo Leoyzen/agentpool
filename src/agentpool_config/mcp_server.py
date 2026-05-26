@@ -374,8 +374,64 @@ class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
         )
 
 
+class AcpMCPServerConfig(BaseMCPServerConfig):
+    """MCP server using ACP channel transport.
+
+    Connects to a server over the existing ACP connection.
+    """
+
+    model_config = ConfigDict(json_schema_extra={"x-doc-title": "ACP MCP Server"})
+
+    type: Literal["acp"] = Field("acp", init=False)
+    """ACP server configuration."""
+
+    acp_id: str = Field(
+        examples=["uuid-xxx", "server-123"],
+        title="ACP server ID",
+    )
+    """Unique identifier for the ACP-transport MCP server."""
+
+    @property
+    def client_id(self) -> str:
+        """Generate a unique client ID for this ACP server configuration."""
+        return f"acp_{self.acp_id}"
+
+    def wrap_with_mcp_filter(self) -> StdioMCPServerConfig:
+        """Wrap this ACP MCP server with mcp-filter for tool filtering.
+
+        Returns:
+            A new StdioMCPServerConfig that wraps this server with mcp-filter
+        """
+        filter_args = ["mcp-filter", "run", "-t", "acp", "--acp-id", self.acp_id]
+
+        # Add allowlist (exact tool names)
+        if self.enabled_tools:
+            filter_args.extend(["-a", ",".join(self.enabled_tools)])
+
+        # Add denylist (regex patterns)
+        if self.disabled_tools:
+            filter_args.extend(["-d", ",".join(self.disabled_tools)])
+
+        return StdioMCPServerConfig(
+            name=self.name,
+            command="uvx",
+            args=filter_args,
+            timeout=self.timeout,
+        )
+
+    def to_pydantic_ai(self) -> MCPServer:
+        """Convert to pydantic-ai MCP server instance.
+
+        ACP transport is handled by the AcpMcpTransport, not pydantic-ai directly.
+        This method should not be called for ACP-transport servers.
+        """
+        raise NotImplementedError(
+            "ACP transport must use AcpMcpTransport, not pydantic-ai directly"
+        )
+
+
 MCPServerConfig = Annotated[
-    StdioMCPServerConfig | SSEMCPServerConfig | StreamableHTTPMCPServerConfig,
+    StdioMCPServerConfig | SSEMCPServerConfig | StreamableHTTPMCPServerConfig | AcpMCPServerConfig,
     Field(discriminator="type"),
 ]
 
@@ -429,8 +485,13 @@ def parse_mcp_servers_json(data: dict[str, object]) -> list[MCPServerConfig]:
                 server = SSEMCPServerConfig(name=server_name, url=url)
             case {"transport": "http", "url": url} | {"url": url}:  # Default to HTTP
                 server = StreamableHTTPMCPServerConfig(name=server_name, url=url)
+            case {"transport": "acp", "id": acp_id} | {"id": acp_id}:  # ACP transport requires id
+                server = AcpMCPServerConfig(name=server_name, acp_id=acp_id)
             case {"transport": unknown}:
-                raise ValueError(f"Unsupported transport type for '{server_name}': {unknown}")
+                raise ValueError(
+                    f"Unsupported transport type for '{server_name}': {unknown}. "
+                    f"Supported transports: stdio, sse, http, acp"
+                )
             case _:
                 raise ValueError(f"Invalid config for MCP server '{server_name}': {server_cfg}")
 

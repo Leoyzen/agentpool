@@ -23,7 +23,8 @@ from acp.agent.acp_requests import ACPRequests
 from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
-from agentpool import Agent, AgentPool
+from acp.schema.mcp import AcpMcpServer
+from agentpool import Agent, AgentPool  # noqa: TC001
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
@@ -414,6 +415,15 @@ class ACPSession:
         self.log.info("Initializing MCP servers", server_count=len(self.mcp_servers))
         # Create session-level MCP providers (isolated from pool-level agent)
         for server in self.mcp_servers:
+            # ACP-transport MCP servers are managed via mcp/connect ext_method,
+            # not through session-level MCP provider initialization
+            if isinstance(server, AcpMcpServer):
+                self.log.info(
+                    "Skipping ACP MCP server in session initialization - "
+                    "server will be connected via mcp/connect",
+                    server_name=server.name,
+                )
+                continue
             cfg = convert_acp_mcp_server_to_config(server)
             try:
                 # Skip if already registered for this session

@@ -288,6 +288,7 @@ class InitializeResponse(Response):
         load_session: bool | None = False,
         http_mcp_servers: bool = False,
         sse_mcp_servers: bool = False,
+        acp_mcp_servers: bool = False,
         audio_prompts: bool = False,
         embedded_context_prompts: bool = False,
         image_prompts: bool = False,
@@ -308,6 +309,7 @@ class InitializeResponse(Response):
             load_session: Whether the agent supports `session/load`.
             http_mcp_servers: Whether the agent supports HTTP MCP servers.
             sse_mcp_servers: Whether the agent supports SSE MCP servers.
+            acp_mcp_servers: Whether the agent supports ACP MCP servers.
             audio_prompts: Whether the agent supports audio prompts.
             embedded_context_prompts: Whether the agent supports embedded context prompts.
             image_prompts: Whether the agent supports image prompts.
@@ -322,6 +324,7 @@ class InitializeResponse(Response):
             load_session=load_session,
             http_mcp_servers=http_mcp_servers,
             sse_mcp_servers=sse_mcp_servers,
+            acp_mcp_servers=acp_mcp_servers,
             audio_prompts=audio_prompts,
             embedded_context_prompts=embedded_context_prompts,
             image_prompts=image_prompts,

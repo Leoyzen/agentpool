@@ -75,9 +75,10 @@ class MCPResourceProvider(ResourceProvider):
         return f"MCPResourceProvider({self.server!r}, source={self.source!r})"
 
     @property
-    def transport_type(self) -> Literal["stdio", "http", "sse"]:
+    def transport_type(self) -> Literal["stdio", "http", "sse", "acp"]:
         """Return the type of connection used by the MCP server."""
         from agentpool_config import (
+            AcpMCPServerConfig,
             SSEMCPServerConfig,
             StdioMCPServerConfig,
             StreamableHTTPMCPServerConfig,
@@ -90,6 +91,8 @@ class MCPResourceProvider(ResourceProvider):
                 return "http"
             case SSEMCPServerConfig():
                 return "sse"
+            case AcpMCPServerConfig():
+                return "acp"
             case _ as unreachable:
                 assert_never(unreachable)  # ty: ignore[type-assertion-failure]
 
