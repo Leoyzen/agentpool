@@ -948,25 +948,6 @@ class AgentPoolACPAgent(ACPAgent):
             Response dictionary.
         """
         match method:
-            case "mcp/connect":
-                connection_id = params.get("connectionId", "")
-                server_data = params.get("server", {})
-                server = AcpMcpServer.model_validate(server_data)
-
-                async def send_to_client(message: dict[str, Any]) -> Any:
-                    mcp_message_method = getattr(self.client, "mcp_message", None)
-                    if mcp_message_method is not None:
-                        return await mcp_message_method(message)
-                    return await self.client.ext_method("mcp/message", message)
-
-                await self._mcp_manager.create_connection(
-                    connection_id, server, send_to_client
-                )
-                return {"connected": True}
-            case "mcp/disconnect":
-                connection_id = params.get("connectionId", "")
-                await self._mcp_manager.remove_connection(connection_id)
-                return {"disconnected": True}
             case "mcp/message":
                 connection_id = params.get("connectionId", "")
                 message = params.get("message", {})
@@ -982,6 +963,71 @@ class AgentPoolACPAgent(ACPAgent):
             case _:
                 return {}
 
+    async def connect_acp_mcp_server(self, server: AcpMcpServer) -> str:
+        """Connect to an ACP-transport MCP server by requesting connection from client.
+
+        Initiates mcp/connect to the client per ACP spec. The client returns a
+        connectionId which is used to establish the local AcpMcpConnection.
+
+        Args:
+            server: The ACP MCP server configuration.
+
+        Returns:
+            The connectionId returned by the client.
+
+        Raises:
+            ValueError: If the client does not return a connectionId.
+        """
+        params = {
+            "server": server.model_dump(by_alias=True, exclude_none=True),
+            "acpId": server.id,
+        }
+        response = await self.client.ext_method("mcp/connect", params)
+        connection_id = response.get("connectionId", "")
+        if not connection_id:
+            msg = "Client did not return connectionId for mcp/connect"
+            raise ValueError(msg)
+
+        async def send_to_client(message: dict[str, Any]) -> Any:
+            mcp_message_method = getattr(self.client, "mcp_message", None)
+            if mcp_message_method is not None:
+                return await mcp_message_method(
+                    {"connectionId": connection_id, "message": message}
+                )
+            return await self.client.ext_method(
+                "mcp/message",
+                {"connectionId": connection_id, "message": message},
+            )
+
+        await self._mcp_manager.create_connection(
+            connection_id, server, send_to_client
+        )
+        logger.info(
+            "ACP MCP server connected",
+            server_name=server.name,
+            connection_id=connection_id,
+        )
+        return connection_id
+
+    async def disconnect_acp_mcp_server(self, connection_id: str) -> None:
+        """Disconnect from an ACP-transport MCP server.
+
+        Sends mcp/disconnect to the client and cleans up the local connection.
+
+        Args:
+            connection_id: The connection ID to disconnect.
+        """
+        try:
+            await self.client.ext_method(
+                "mcp/disconnect", {"connectionId": connection_id}
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send mcp/disconnect to client",
+                connection_id=connection_id,
+            )
+        await self._mcp_manager.remove_connection(connection_id)
+
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         return None
 
@@ -989,6 +1035,15 @@ class AgentPoolACPAgent(ACPAgent):
         """Close the agent and clean up all resources."""
         logger.info("Closing AgentPoolACPAgent")
         try:
+            # Notify client to disconnect all ACP MCP servers before closing locally
+            for conn_id in list(self._mcp_manager.get_connection_ids()):
+                try:
+                    await self.disconnect_acp_mcp_server(conn_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to disconnect ACP MCP server during shutdown",
+                        connection_id=conn_id,
+                    )
             await self._mcp_manager.close_all()
         except Exception:
             logger.exception("Failed to close MCP connections during agent shutdown")

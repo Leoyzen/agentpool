@@ -206,6 +206,10 @@ class AcpMcpConnectionManager:
                 logger.exception("Failed to close MCP connection", connection_id=conn.connection_id)
         logger.info("All MCP connections closed")
 
+    def get_connection_ids(self) -> list[str]:
+        """Return a snapshot of all active connection IDs."""
+        return list(self._connections.keys())
+
     def __contains__(self, connection_id: str) -> bool:
         """Check if a connection ID is active."""
         return connection_id in self._connections

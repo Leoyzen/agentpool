@@ -415,14 +415,20 @@ class ACPSession:
         self.log.info("Initializing MCP servers", server_count=len(self.mcp_servers))
         # Create session-level MCP providers (isolated from pool-level agent)
         for server in self.mcp_servers:
-            # ACP-transport MCP servers are managed via mcp/connect ext_method,
-            # not through session-level MCP provider initialization
+            # ACP-transport MCP servers are connected by the agent initiating
+            # mcp/connect to the client (Agent -> Client per ACP spec)
             if isinstance(server, AcpMcpServer):
                 self.log.info(
-                    "Skipping ACP MCP server in session initialization - "
-                    "server will be connected via mcp/connect",
+                    "Connecting ACP MCP server via mcp/connect",
                     server_name=server.name,
                 )
+                try:
+                    await self.acp_agent.connect_acp_mcp_server(server)
+                except Exception:
+                    self.log.exception(
+                        "Failed to connect ACP MCP server",
+                        server_name=server.name,
+                    )
                 continue
             cfg = convert_acp_mcp_server_to_config(server)
             try:
