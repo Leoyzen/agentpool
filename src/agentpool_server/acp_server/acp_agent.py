@@ -584,7 +584,12 @@ class AgentPoolACPAgent(ACPAgent):
                 # Determine whether to load client skills
                 # None means "use manifest's include_default setting"
                 should_load_skills = self.load_skills
-                if should_load_skills is None and self.agent_pool and self.agent_pool.manifest:
+                if (
+                    should_load_skills is None
+                    and self.agent_pool
+                    and self.agent_pool.manifest
+                    and self.agent_pool.manifest.skills is not None
+                ):
                     should_load_skills = self.agent_pool.manifest.skills.include_default
                 elif should_load_skills is None:
                     should_load_skills = True  # Fallback default
