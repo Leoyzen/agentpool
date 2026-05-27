@@ -305,9 +305,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self._model, settings = self._resolve_model_string(model)
             if settings:
                 self.model_settings = settings
-            # Track variant name if model string is a variant key
-            if self.agent_pool and model in self.agent_pool.manifest.model_variants:
-                self._current_model_variant = model
         else:
             self._model = model
         self._retries = retries
@@ -315,8 +312,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._output_retries = output_retries
         self.parallel_init = parallel_init
         self._iteration_task: asyncio.Task[Any] | None = None
-        # Track current model variant name for get_modes() to return matching current_mode_id
-        self._current_model_variant: str | None = None
         self.talk = Interactions(self)
         # Set up system prompts
         all_prompts: list[AnyPromptType] = []
@@ -1161,30 +1156,21 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         categories.append(mode_category)
         # Check configured model_variants first (RFC-0034: configured-first)
         if self.agent_pool and self.agent_pool.manifest.model_variants:
-            # Use tracked variant name if available, otherwise fallback to model_name
-            current_variant = self._current_model_variant or self.model_name or ""
-            # If current_variant is still a raw model identifier (not a variant name),
-            # try to find which variant matches the current model
-            if current_variant and current_variant not in self.agent_pool.manifest.model_variants:
-                current_model = self.model_name or ""
-                for variant_name, config in self.agent_pool.manifest.model_variants.items():
-                    resolved = str(config.identifier) if hasattr(config, "identifier") else str(config)
-                    if resolved == current_model:
-                        current_variant = variant_name
-                        break
+            # current_mode_id should be the actual model identifier to match option values
+            current_model_id = self.model_name or ""
             model_modes = [
                 ModeInfo(
-                    id=variant_name,
+                    id=str(config.identifier) if hasattr(config, "identifier") else str(config),
                     name=variant_name,
                     category_id="model",
                 )
-                for variant_name in self.agent_pool.manifest.model_variants.keys()
+                for variant_name, config in self.agent_pool.manifest.model_variants.items()
             ]
             model_category = ModeCategoryRuntime(
                 id="model",
                 name="Model",
                 available_modes=model_modes,
-                current_mode_id=current_variant,
+                current_mode_id=current_model_id,
                 category="model",
             )
             categories.append(model_category)
@@ -1205,6 +1191,19 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         elif category_id == "model":
             self.log.info(f"_set_mode called for model: {mode_id}")
+            # Resolve variant name from actual model identifier if needed
+            variant_name = mode_id
+            if (
+                self.agent_pool
+                and mode_id not in self.agent_pool.manifest.model_variants
+            ):
+                # mode_id is an actual model identifier, find matching variant
+                for vn, config in self.agent_pool.manifest.model_variants.items():
+                    resolved = str(config.identifier) if hasattr(config, "identifier") else str(config)
+                    if resolved == mode_id:
+                        variant_name = vn
+                        self.log.info(f"Resolved model identifier {mode_id} to variant {variant_name}")
+                        break
             # Validate model exists (check both tokonomics models and model_variants)
             is_valid = False
             if models := await self.get_available_models():
@@ -1212,27 +1211,24 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 if mode_id in valid_ids:
                     is_valid = True
                     self.log.info(f"Model {mode_id} validated against tokonomics")
-            # Also check model_variants from manifest
+            # Also check model_variants from manifest (by variant name or identifier)
             if (
                 not is_valid
                 and self.agent_pool
-                and mode_id in self.agent_pool.manifest.model_variants
+                and variant_name in self.agent_pool.manifest.model_variants
             ):
                 is_valid = True
-                self.log.info(f"Model {mode_id} validated against model_variants")
+                self.log.info(f"Model {mode_id} validated against model_variants (variant: {variant_name})")
             if not is_valid:
                 self.log.warning(
                     f"Model {mode_id} validation failed. Available variants: {list(self.agent_pool.manifest.model_variants.keys()) if self.agent_pool else 'N/A'}"
                 )
                 raise UnknownModeError(mode_id, valid_ids if models else [])
-            # Set the model directly
+            # Set the model using variant name (preserves model_settings)
             old_model = self._model
-            self._model, settings = self._resolve_model_string(mode_id)
+            self._model, settings = self._resolve_model_string(variant_name)
             if settings:
                 self.model_settings = settings
-            # Track variant name so get_modes() can return matching current_mode_id
-            if self.agent_pool and mode_id in self.agent_pool.manifest.model_variants:
-                self._current_model_variant = mode_id
             self.log.info(f"Model changed from {old_model} to {self._model}")
             await self.update_state(config_id="model", value_id=mode_id)
         else:
