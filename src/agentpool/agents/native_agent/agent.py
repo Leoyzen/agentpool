@@ -312,6 +312,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._output_retries = output_retries
         self.parallel_init = parallel_init
         self._iteration_task: asyncio.Task[Any] | None = None
+        # Track current model variant name for get_modes() to return matching current_mode_id
+        self._current_model_variant: str | None = None
         self.talk = Interactions(self)
         # Set up system prompts
         all_prompts: list[AnyPromptType] = []
@@ -1156,7 +1158,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         categories.append(mode_category)
         # Check configured model_variants first (RFC-0034: configured-first)
         if self.agent_pool and self.agent_pool.manifest.model_variants:
-            current_model = self.model_name or ""
+            # Use tracked variant name if available, otherwise fallback to model_name
+            current_variant = self._current_model_variant or self.model_name or ""
+            # If current_variant is still a raw model identifier (not a variant name),
+            # try to find which variant matches the current model
+            if current_variant and current_variant not in self.agent_pool.manifest.model_variants:
+                current_model = self.model_name or ""
+                for variant_name, config in self.agent_pool.manifest.model_variants.items():
+                    resolved = str(config.identifier) if hasattr(config, "identifier") else str(config)
+                    if resolved == current_model:
+                        current_variant = variant_name
+                        break
             model_modes = [
                 ModeInfo(
                     id=variant_name,
@@ -1169,7 +1181,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 id="model",
                 name="Model",
                 available_modes=model_modes,
-                current_mode_id=current_model,
+                current_mode_id=current_variant,
                 category="model",
             )
             categories.append(model_category)
@@ -1215,6 +1227,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self._model, settings = self._resolve_model_string(mode_id)
             if settings:
                 self.model_settings = settings
+            # Track variant name so get_modes() can return matching current_mode_id
+            if self.agent_pool and mode_id in self.agent_pool.manifest.model_variants:
+                self._current_model_variant = mode_id
             self.log.info(f"Model changed from {old_model} to {self._model}")
             await self.update_state(config_id="model", value_id=mode_id)
         else:
