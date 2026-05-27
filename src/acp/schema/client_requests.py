@@ -291,6 +291,42 @@ class AuthenticateRequest(Request):
     """
 
 
+class ListProvidersRequest(Request):
+    """Request parameters for listing available LLM providers.
+
+    Only available if the Agent supports the ``providers`` capability.
+    """
+
+
+class SetProvidersRequest(Request):
+    """Request parameters for configuring an LLM provider.
+
+    Only available if the Agent supports the ``providers`` capability.
+    """
+
+    id: str
+    """Unique identifier for the provider."""
+
+    api_type: str
+    """The LLM protocol to use (e.g., "openai", "anthropic")."""
+
+    base_url: str
+    """Base URL for the provider API."""
+
+    headers: dict[str, str] | None = None
+    """Optional headers to include with requests."""
+
+
+class DisableProvidersRequest(Request):
+    """Request parameters for disabling an LLM provider.
+
+    Only available if the Agent supports the ``providers`` capability.
+    """
+
+    id: str
+    """Unique identifier for the provider to disable."""
+
+
 ClientRequest = (
     InitializeRequest
     | AuthenticateRequest
@@ -304,5 +340,8 @@ ClientRequest = (
     | SetSessionConfigOptionRequest
     | PromptRequest
     | SetSessionModelRequest
+    | ListProvidersRequest
+    | SetProvidersRequest
+    | DisableProvidersRequest
     | CustomRequest
 )

@@ -41,6 +41,12 @@ from acp.schema import (
     WaitForTerminalExitResponse,
     WriteTextFileRequest,
     WriteTextFileResponse,
+    ListProvidersRequest,
+    ListProvidersResponse,
+    SetProvidersRequest,
+    SetProvidersResponse,
+    DisableProvidersRequest,
+    DisableProvidersResponse,
 )
 from acp.task import DebuggingMessageStateStore
 
@@ -119,6 +125,9 @@ class AgentSideConnection(Client):
             | LoadSessionResponse
             | ListSessionsResponse
             | CloseSessionResponse
+            | ListProvidersResponse
+            | SetProvidersResponse
+            | DisableProvidersResponse
             | dict[str, Any]
             | None
         ):
@@ -260,6 +269,9 @@ async def _agent_handler(  # noqa: PLR0911
     | LoadSessionResponse
     | ListSessionsResponse
     | CloseSessionResponse
+    | ListProvidersResponse
+    | SetProvidersResponse
+    | DisableProvidersResponse
     | dict[str, Any]
     | None
 ):
@@ -312,6 +324,15 @@ async def _agent_handler(  # noqa: PLR0911
             p = AuthenticateRequest.model_validate(params)
             result = await agent.authenticate(p)
             return result.model_dump(by_alias=True, exclude_none=True) if result else {}
+        case "providers/list":
+            list_providers_request = ListProvidersRequest.model_validate(params)
+            return await agent.list_providers(list_providers_request)
+        case "providers/set":
+            set_providers_request = SetProvidersRequest.model_validate(params)
+            return await agent.set_provider(set_providers_request)
+        case "providers/disable":
+            disable_providers_request = DisableProvidersRequest.model_validate(params)
+            return await agent.disable_provider(disable_providers_request)
         case str() if method.startswith("_") and is_notification:
             await agent.ext_notification(method[1:], params or {})
             return None

@@ -28,6 +28,11 @@ class TestAgentCapabilities:
         caps = AgentCapabilities()
         assert caps.session_capabilities is None
 
+    def test_default_providers_capabilities(self):
+        """Default providers should be None."""
+        caps = AgentCapabilities()
+        assert caps.providers is None
+
     def test_create_method_with_all_capabilities(self):
         """create() method should set all capabilities correctly."""
         caps = AgentCapabilities.create(
@@ -41,6 +46,7 @@ class TestAgentCapabilities:
             resume_session=True,
             close_session=True,
             fork_session=True,
+            providers=True,
         )
         assert caps.load_session is True
         assert caps.mcp_capabilities is not None
@@ -55,6 +61,7 @@ class TestAgentCapabilities:
         assert caps.session_capabilities.resume is not None
         assert caps.session_capabilities.close is not None
         assert caps.session_capabilities.fork is not None
+        assert caps.providers is not None
 
     def test_create_method_defaults(self):
         """create() method should use correct defaults."""

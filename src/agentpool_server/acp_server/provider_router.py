@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from acp.schema.providers import ProviderInfo, ProviderStatus
+from acp.schema.providers import ProviderCurrentConfig, ProviderInfo, ProviderStatus
 from agentpool.log import get_logger
 from agentpool_server.shared.model_utils import _extract_provider
 
@@ -53,11 +53,14 @@ class ProviderRouter:
             if provider_name not in self._providers:
                 self._providers[provider_name] = ProviderInfo(
                     id=provider_name,
-                    name=provider_name.title(),
-                    protocol=provider_name,
-                    base_url=base_url or None,
-                    api_key_id=None,
-                    status=ProviderStatus.enabled,
+                    supported=[provider_name],
+                    required=False,
+                    current=ProviderCurrentConfig(
+                        api_type=provider_name,
+                        base_url=base_url or "",
+                    )
+                    if base_url
+                    else None,
                 )
 
     def _get_default_base_url(self, provider: str) -> str:
@@ -88,16 +91,26 @@ class ProviderRouter:
         """
         result: list[ProviderInfo] = []
         for pid, info in self._providers.items():
-            status = ProviderStatus.disabled if pid in self._disabled else ProviderStatus.enabled
+            is_disabled = pid in self._disabled
             override = self._overrides.get(pid, {})
+
+            # Build current config
+            current = info.current
+            if current is not None:
+                base_url = override.get("base_url", current.base_url)
+                if isinstance(base_url, str):
+                    current = ProviderCurrentConfig(
+                        api_type=current.api_type,
+                        base_url=base_url,
+                        headers=current.headers,
+                    )
+
             result.append(
                 ProviderInfo(
                     id=info.id,
-                    name=info.name,
-                    protocol=info.protocol,
-                    base_url=override.get("base_url", info.base_url),
-                    api_key_id=override.get("api_key_id", info.api_key_id),
-                    status=status,
+                    supported=info.supported,
+                    required=info.required,
+                    current=None if is_disabled else current,
                 )
             )
         return result

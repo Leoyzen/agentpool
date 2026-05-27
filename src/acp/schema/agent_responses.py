@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 from pydantic import Field
 
 from acp.schema.base import Response
+from acp.schema.providers import ProviderInfo
 from acp.schema.capabilities import AgentCapabilities
 from acp.schema.common import AuthMethod, Implementation
 from acp.schema.session_state import (  # noqa: TC001
@@ -338,6 +339,30 @@ class InitializeResponse(Response):
         )
 
 
+class ListProvidersResponse(Response):
+    """Response from listing available LLM providers.
+
+    Only available if the Agent supports the ``providers`` capability.
+    """
+
+    providers: Sequence[ProviderInfo] = Field(default_factory=list)
+    """Array of available provider information objects."""
+
+
+class SetProvidersResponse(Response):
+    """Response from configuring an LLM provider.
+
+    Only available if the Agent supports the ``providers`` capability.
+    """
+
+
+class DisableProvidersResponse(Response):
+    """Response from disabling an LLM provider.
+
+    Only available if the Agent supports the ``providers`` capability.
+    """
+
+
 class ListSessionsResponse(Response):
     """**UNSTABLE**: This capability is not part of the spec yet.
 
@@ -361,6 +386,9 @@ AgentResponse = (
     | ResumeSessionResponse
     | CloseSessionResponse
     | ListSessionsResponse
+    | ListProvidersResponse
+    | SetProvidersResponse
+    | DisableProvidersResponse
     | SetSessionModeResponse
     | SetSessionConfigOptionResponse
     | PromptResponse

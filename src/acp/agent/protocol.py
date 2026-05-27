@@ -10,10 +10,16 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         AuthenticateResponse,
         CancelNotification,
+        CloseSessionRequest,
+        CloseSessionResponse,
+        DisableProvidersRequest,
+        DisableProvidersResponse,
         ForkSessionRequest,
         ForkSessionResponse,
         InitializeRequest,
         InitializeResponse,
+        ListProvidersRequest,
+        ListProvidersResponse,
         ListSessionsRequest,
         ListSessionsResponse,
         LoadSessionRequest,
@@ -24,14 +30,14 @@ if TYPE_CHECKING:
         PromptResponse,
         ResumeSessionRequest,
         ResumeSessionResponse,
+        SetProvidersRequest,
+        SetProvidersResponse,
         SetSessionConfigOptionRequest,
         SetSessionConfigOptionResponse,
         SetSessionModelRequest,
         SetSessionModelResponse,
         SetSessionModeRequest,
         SetSessionModeResponse,
-        CloseSessionRequest,
-        CloseSessionResponse,
     )
 
 
@@ -55,6 +61,12 @@ class Agent(Protocol):
     async def resume_session(self, params: ResumeSessionRequest) -> ResumeSessionResponse: ...
 
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse: ...
+
+    async def list_providers(self, params: ListProvidersRequest) -> ListProvidersResponse: ...
+
+    async def set_provider(self, params: SetProvidersRequest) -> SetProvidersResponse: ...
+
+    async def disable_provider(self, params: DisableProvidersRequest) -> DisableProvidersResponse: ...
 
     async def authenticate(self, params: AuthenticateRequest) -> AuthenticateResponse | None: ...
 

@@ -11,8 +11,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from acp import Agent as ACPAgent
 from acp.schema import (
+    DisableProvidersRequest,
+    DisableProvidersResponse,
     ForkSessionResponse,
     InitializeResponse,
+    ListProvidersRequest,
+    ListProvidersResponse,
     ListSessionsResponse,
     LoadSessionResponse,
     ModelInfo as ACPModelInfo,
@@ -24,6 +28,8 @@ from acp.schema import (
     SessionMode,
     SessionModelState,
     SessionModeState,
+    SetProvidersRequest,
+    SetProvidersResponse,
     SetSessionConfigOptionResponse,
     SetSessionModelRequest,
     SetSessionModelResponse,
@@ -873,8 +879,33 @@ class AgentPoolACPAgent(ACPAgent):
         except Exception:
             logger.exception("Failed to cancel session", session_id=params.session_id)
 
+    async def list_providers(self, params: ListProvidersRequest) -> ListProvidersResponse:
+        """List available LLM providers."""
+        providers = self.provider_router.get_providers()
+        return ListProvidersResponse(providers=providers)
+
+    async def set_provider(self, params: SetProvidersRequest) -> SetProvidersResponse:
+        """Configure an LLM provider."""
+        try:
+            await self.provider_router.set_provider_override(
+                params.id, base_url=params.base_url, api_key_id=None
+            )
+        except ValueError as e:
+            from acp.exceptions import RequestError
+            raise RequestError.invalid_params({"id": params.id}) from e
+        return SetProvidersResponse()
+
+    async def disable_provider(self, params: DisableProvidersRequest) -> DisableProvidersResponse:
+        """Disable an LLM provider."""
+        try:
+            await self.provider_router.disable_provider(params.id)
+        except ValueError as e:
+            from acp.exceptions import RequestError
+            raise RequestError.invalid_params({"id": params.id}) from e
+        return DisableProvidersResponse()
+
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Handle extension methods including MCP-over-ACP lifecycle messages.
+        """Handle extension methods.
 
         Args:
             method: The extension method name.
@@ -883,52 +914,7 @@ class AgentPoolACPAgent(ACPAgent):
         Returns:
             Response dictionary.
         """
-        result: dict[str, Any] = {}
-        match method:
-            case "providers/list":
-                providers = self.provider_router.get_providers()
-                result = {"providers": [p.model_dump(mode="json") for p in providers]}
-            case "providers/set":
-                await self._handle_providers_set(params)
-                result = {"success": True}
-            case "providers/disable":
-                await self._handle_providers_disable(params)
-                result = {"success": True}
-            case _:
-                result = {}
-        return result
-
-    async def _handle_providers_set(self, params: dict[str, Any]) -> None:
-        """Handle providers/set extension method.
-
-        Raises:
-            RequestError: If provider_id is unknown.
-        """
-        from acp.exceptions import RequestError
-
-        provider_id = params.get("provider_id") or params.get("id", "")
-        base_url = params.get("base_url")
-        api_key_id = params.get("api_key_id")
-        try:
-            await self.provider_router.set_provider_override(
-                provider_id, base_url=base_url, api_key_id=api_key_id
-            )
-        except ValueError as e:
-            raise RequestError.invalid_params({"provider_id": provider_id}) from e
-
-    async def _handle_providers_disable(self, params: dict[str, Any]) -> None:
-        """Handle providers/disable extension method.
-
-        Raises:
-            RequestError: If provider_id is unknown.
-        """
-        from acp.exceptions import RequestError
-
-        provider_id = params.get("provider_id") or params.get("id", "")
-        try:
-            await self.provider_router.disable_provider(provider_id)
-        except ValueError as e:
-            raise RequestError.invalid_params({"provider_id": provider_id}) from e
+        return {}
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         return None

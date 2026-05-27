@@ -7,6 +7,7 @@ from typing import Any, Self
 from pydantic import field_validator
 
 from acp.schema.base import AnnotatedObject
+from acp.schema.providers import ProvidersCapabilities
 
 
 class FileSystemCapability(AnnotatedObject):
@@ -269,7 +270,7 @@ class AgentCapabilities(AnnotatedObject):
     session_capabilities: SessionCapabilities | None = None
     """Session capabilities supported by the agent."""
 
-    providers: bool | None = False
+    providers: ProvidersCapabilities | None = None
     """Whether the agent supports `providers/*` protocol methods.
 
     When enabled, the client can list, configure, and disable LLM providers
@@ -312,9 +313,10 @@ class AgentCapabilities(AnnotatedObject):
             close=SessionCloseCapabilities() if close_session else None,
             fork=SessionForkCapabilities() if fork_session else None,
         )
+        providers_caps = ProvidersCapabilities() if providers else None
         return cls(
             load_session=load_session,
-            providers=providers,
+            providers=providers_caps,
             mcp_capabilities=McpCapabilities(http=http_mcp_servers, sse=sse_mcp_servers),
             prompt_capabilities=PromptCapabilities(
                 audio=audio_prompts,

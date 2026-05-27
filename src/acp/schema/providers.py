@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from typing import Any
+
+from pydantic import Field
 
 from acp.schema.base import AnnotatedObject
 
@@ -16,14 +18,14 @@ as plain strings for forward compatibility.
 """
 
 
-class ProviderStatus(StrEnum):
-    """Status of a provider."""
+class ProviderCurrentConfig(AnnotatedObject):
+    """Current provider configuration."""
 
-    enabled = "enabled"
-    """Provider is active and available for use."""
+    api_type: LlmProtocol
+    """The LLM protocol this provider uses."""
 
-    disabled = "disabled"
-    """Provider has been disabled and should not be used."""
+    base_url: str
+    """Base URL for the provider API."""
 
 
 class ProviderInfo(AnnotatedObject):
@@ -36,17 +38,32 @@ class ProviderInfo(AnnotatedObject):
     id: str
     """Unique identifier for the provider (e.g., "openai", "anthropic")."""
 
-    name: str
-    """Human-readable display name for the provider."""
+    supported: list[LlmProtocol] = Field(default_factory=list)
+    """List of LLM protocols this provider supports."""
 
-    protocol: LlmProtocol
-    """The LLM protocol this provider implements."""
+    required: bool = False
+    """Whether this provider is required (cannot be disabled)."""
 
-    base_url: str | None = None
-    """Optional custom base URL for the provider API."""
+    current: ProviderCurrentConfig | None = None
+    """Current configuration if the provider is active."""
 
-    api_key_id: str | None = None
-    """Optional identifier for the API key (not the key itself)."""
 
-    status: ProviderStatus = ProviderStatus.enabled
-    """Current status of the provider."""
+class ProvidersCapabilities(AnnotatedObject):
+    """Capabilities related to the providers protocol surface."""
+
+    # Empty for now — presence indicates providers/* methods are supported.
+    # Future: max_providers, configurable_fields, etc.
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        """Override to return empty dict (capabilities object with no fields)."""
+        return {}
+
+
+class ProviderStatus:
+    """Status of a provider (internal AgentPool use, not part of ACP spec)."""
+
+    enabled = "enabled"
+    """Provider is active and available for use."""
+
+    disabled = "disabled"
+    """Provider has been disabled and should not be used."""

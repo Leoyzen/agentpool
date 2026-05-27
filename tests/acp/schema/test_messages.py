@@ -26,18 +26,21 @@ def test_agent_method_accepts_standard_methods() -> None:
     methods: list[AgentMethod] = [
         "authenticate",
         "initialize",
+        "providers/disable",
+        "providers/list",
+        "providers/set",
         "session/cancel",
+        "session/close",
+        "session/fork",
+        "session/list",
         "session/load",
         "session/new",
         "session/prompt",
+        "session/resume",
         "session/set_mode",
         "session/set_model",
-        "session/list",
-        "session/fork",
-        "session/resume",
-        "session/close",
     ]
-    assert len(methods) == 12
+    assert len(methods) == 15
 
 
 @pytest.mark.unit
