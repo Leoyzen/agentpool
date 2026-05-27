@@ -1158,14 +1158,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if self.agent_pool and self.agent_pool.manifest.model_variants:
             # current_mode_id should be the actual model identifier to match option values
             current_model_id = self.model_name or ""
-            model_modes = [
-                ModeInfo(
-                    id=str(config.identifier) if hasattr(config, "identifier") else str(config),
-                    name=variant_name,
-                    category_id="model",
+            model_modes = []
+            for variant_name, config in self.agent_pool.manifest.model_variants.items():
+                model = config.get_model()
+                mode_id = f"{model.system}:{model.model_name}"
+                model_modes.append(
+                    ModeInfo(
+                        id=mode_id,
+                        name=variant_name,
+                        category_id="model",
+                    )
                 )
-                for variant_name, config in self.agent_pool.manifest.model_variants.items()
-            ]
             model_category = ModeCategoryRuntime(
                 id="model",
                 name="Model",
@@ -1199,7 +1202,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             ):
                 # mode_id is an actual model identifier, find matching variant
                 for vn, config in self.agent_pool.manifest.model_variants.items():
-                    resolved = str(config.identifier) if hasattr(config, "identifier") else str(config)
+                    model = config.get_model()
+                    resolved = f"{model.system}:{model.model_name}"
                     if resolved == mode_id:
                         variant_name = vn
                         self.log.info(f"Resolved model identifier {mode_id} to variant {variant_name}")
