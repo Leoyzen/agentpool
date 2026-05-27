@@ -29,6 +29,7 @@ from pydantic_ai import (
     TextPartDelta,
     ThinkingPart,
     ThinkingPartDelta,
+    ToolCallPart,
     ToolCallPartDelta,
     ToolReturnPart,
 )
@@ -469,6 +470,22 @@ class ACPEventConverter:
                     )
                 self._cleanup_tool_state(tc_id)
 
+            # Regular tool call started (e.g., question_for_user)
+            case PartStartEvent(part=ToolCallPart() as part):
+                tool_call_id = part.tool_call_id
+                tool_input = safe_args_as_dict(part, default={})
+                self._current_tool_inputs[tool_call_id] = tool_input
+                state = self._get_or_create_tool_state(tool_call_id, part.tool_name, tool_input)
+                if not state.started:
+                    state.started = True
+                    yield ToolCallStart(
+                        tool_call_id=tool_call_id,
+                        title=state.title,
+                        kind=state.kind,
+                        raw_input=state.raw_input,
+                        status="pending",
+                    )
+
             case PartStartEvent(part=part):
                 logger.debug("Received unhandled PartStartEvent", part=part)
 
@@ -544,6 +561,16 @@ class ACPEventConverter:
                         kind=state.kind,
                         raw_input=state.raw_input,
                         status="pending",
+                    )
+                elif state.raw_input != tool_input:
+                    # Streaming already started, update with complete args
+                    state.raw_input = tool_input
+                    state.title = generate_tool_title(part.tool_name, tool_input)
+                    yield ToolCallProgress(
+                        tool_call_id=tool_call_id,
+                        title=state.title,
+                        raw_input=tool_input,
+                        status="in_progress",
                     )
 
             # Tool completed successfully
