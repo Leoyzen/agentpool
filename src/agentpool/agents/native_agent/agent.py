@@ -305,6 +305,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self._model, settings = self._resolve_model_string(model)
             if settings:
                 self.model_settings = settings
+            # Track variant name if model string is a variant key
+            if self.agent_pool and model in self.agent_pool.manifest.model_variants:
+                self._current_model_variant = model
         else:
             self._model = model
         self._retries = retries
