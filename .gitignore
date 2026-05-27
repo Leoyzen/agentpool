@@ -59,3 +59,6 @@ test_configs/
 
 .envrc
 .sisyphus
+
+# Prometheus / OpenCode workspace files
+.omo/

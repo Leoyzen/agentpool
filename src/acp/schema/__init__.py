@@ -105,6 +105,11 @@ from acp.schema.mcp import (
     SseMcpServer,
     StdioMcpServer,
 )
+from acp.schema.providers import (
+    LlmProtocol,
+    ProviderInfo,
+    ProviderStatus,
+)
 from acp.schema.messages import AgentMethod, ClientMethod
 from acp.schema.notifications import (
     AgentNotification,
@@ -232,6 +237,7 @@ __all__ = [
     "KillTerminalCommandResponse",
     "ListSessionsRequest",
     "ListSessionsResponse",
+    "LlmProtocol",
     "LoadSessionRequest",
     "LoadSessionResponse",
     "McpCapabilities",
@@ -247,6 +253,8 @@ __all__ = [
     "PromptCapabilities",
     "PromptRequest",
     "PromptResponse",
+    "ProviderInfo",
+    "ProviderStatus",
     "ReadTextFileRequest",
     "ReadTextFileResponse",
     "ReleaseTerminalRequest",

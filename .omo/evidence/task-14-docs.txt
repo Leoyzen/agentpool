@@ -1,0 +1,25 @@
+-rw-r--r-- 1 yuchen.liu staff  8584 Apr 10 16:43 docs/configuration/skill-uri-usage.md
+-rw-r--r-- 1 yuchen.liu staff 70973 Apr 10 16:47 docs/rfcs/implemented/RFC-0020-mcp-skills-resources-provider.md
+
+docs/examples/mcp_skills/:
+total 12
+drwxr-xr-x  4 yuchen.liu staff  128 Apr 10 16:46 .
+drwxr-xr-x 17 yuchen.liu staff  544 Apr 10 16:43 ..
+-rw-r--r--  1 yuchen.liu staff 1945 Apr 10 16:46 config.yml
+-rw-r--r--  1 yuchen.liu staff 7102 Apr 10 16:46 index.md
+
+docs/examples/skill_uri_loading/:
+total 8
+drwxr-xr-x  5 yuchen.liu staff  160 Apr 10 16:44 .
+drwxr-xr-x 17 yuchen.liu staff  544 Apr 10 16:43 ..
+-rw-r--r--  1 yuchen.liu staff 1472 Apr 10 16:44 config.yml
+-rw-r--r--  1 yuchen.liu staff 3216 Apr 10 16:44 index.md
+drwxr-xr-x  3 yuchen.liu staff   96 Apr 10 16:44 skills
+
+docs/examples/skill_with_references/:
+total 12
+drwxr-xr-x  5 yuchen.liu staff  160 Apr 10 16:46 .
+drwxr-xr-x 17 yuchen.liu staff  544 Apr 10 16:43 ..
+-rw-r--r--  1 yuchen.liu staff 1794 Apr 10 16:45 config.yml
+-rw-r--r--  1 yuchen.liu staff 4528 Apr 10 16:46 index.md
+drwxr-xr-x  3 yuchen.liu staff   96 Apr 10 16:45 skills

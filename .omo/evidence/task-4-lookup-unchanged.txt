@@ -1,0 +1,1 @@
+193:	    config = next((s for s in manager.servers if s.client_id == name), None)

@@ -1144,6 +1144,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for this agent."""
+        from agentpool.agents.modes import ModeCategory as ModeCategoryRuntime, ModeInfo
         from agentpool.agents.native_agent.helpers import (
             get_model_category,
             get_permission_category,
@@ -1153,7 +1154,30 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Use native ToolConfirmationMode value directly
         mode_category = get_permission_category(self.tool_confirmation_mode)
         categories.append(mode_category)
-        if models := await self.get_available_models():
+        # Check configured model_variants first (RFC-0034: configured-first)
+        if self.agent_pool and self.agent_pool.manifest.model_variants:
+            # current_mode_id should be the actual model identifier to match option values
+            current_model_id = self.model_name or ""
+            model_modes = []
+            for variant_name, config in self.agent_pool.manifest.model_variants.items():
+                model = config.get_model()
+                mode_id = f"{model.system}:{model.model_name}"
+                model_modes.append(
+                    ModeInfo(
+                        id=mode_id,
+                        name=variant_name,
+                        category_id="model",
+                    )
+                )
+            model_category = ModeCategoryRuntime(
+                id="model",
+                name="Model",
+                available_modes=model_modes,
+                current_mode_id=current_model_id,
+                category="model",
+            )
+            categories.append(model_category)
+        elif models := await self.get_available_models():
             current_model = self.model_name or (models[0].id if models else "")
             model_category = get_model_category(current_model, models)
             categories.append(model_category)
@@ -1170,6 +1194,20 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         elif category_id == "model":
             self.log.info(f"_set_mode called for model: {mode_id}")
+            # Resolve variant name from actual model identifier if needed
+            variant_name = mode_id
+            if (
+                self.agent_pool
+                and mode_id not in self.agent_pool.manifest.model_variants
+            ):
+                # mode_id is an actual model identifier, find matching variant
+                for vn, config in self.agent_pool.manifest.model_variants.items():
+                    model = config.get_model()
+                    resolved = f"{model.system}:{model.model_name}"
+                    if resolved == mode_id:
+                        variant_name = vn
+                        self.log.info(f"Resolved model identifier {mode_id} to variant {variant_name}")
+                        break
             # Validate model exists (check both tokonomics models and model_variants)
             is_valid = False
             if models := await self.get_available_models():
@@ -1177,22 +1215,22 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 if mode_id in valid_ids:
                     is_valid = True
                     self.log.info(f"Model {mode_id} validated against tokonomics")
-            # Also check model_variants from manifest
+            # Also check model_variants from manifest (by variant name or identifier)
             if (
                 not is_valid
                 and self.agent_pool
-                and mode_id in self.agent_pool.manifest.model_variants
+                and variant_name in self.agent_pool.manifest.model_variants
             ):
                 is_valid = True
-                self.log.info(f"Model {mode_id} validated against model_variants")
+                self.log.info(f"Model {mode_id} validated against model_variants (variant: {variant_name})")
             if not is_valid:
                 self.log.warning(
                     f"Model {mode_id} validation failed. Available variants: {list(self.agent_pool.manifest.model_variants.keys()) if self.agent_pool else 'N/A'}"
                 )
                 raise UnknownModeError(mode_id, valid_ids if models else [])
-            # Set the model directly
+            # Set the model using variant name (preserves model_settings)
             old_model = self._model
-            self._model, settings = self._resolve_model_string(mode_id)
+            self._model, settings = self._resolve_model_string(variant_name)
             if settings:
                 self.model_settings = settings
             self.log.info(f"Model changed from {old_model} to {self._model}")

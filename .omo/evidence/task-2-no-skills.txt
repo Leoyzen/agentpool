@@ -1,0 +1,12 @@
+Task 2: CommandStore None when no skills - VERIFIED
+
+Evidence:
+- Lines 122-133: Wrapped in `if state.pool.skill_commands is not None:`
+- When skill_commands is None, the entire block is skipped
+- ServerState initializes command_store as None by default (see state.py)
+- No errors or exceptions when skills are not configured
+
+Graceful handling confirmed:
+- No command_store initialization when no skills
+- state.command_store remains None (default from ServerState)
+- Server continues to operate normally

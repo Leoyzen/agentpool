@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Self
 
-from pydantic import Field, field_validator
+from pydantic import field_validator
 
 from acp.schema.base import AnnotatedObject
 
@@ -269,6 +269,13 @@ class AgentCapabilities(AnnotatedObject):
     session_capabilities: SessionCapabilities | None = None
     """Session capabilities supported by the agent."""
 
+    providers: bool | None = False
+    """Whether the agent supports `providers/*` protocol methods.
+
+    When enabled, the client can list, configure, and disable LLM providers
+    via the providers/list, providers/set, and providers/disable methods.
+    """
+
     @classmethod
     def create(
         cls,
@@ -281,6 +288,7 @@ class AgentCapabilities(AnnotatedObject):
         list_sessions: bool = False,
         resume_session: bool = False,
         stop_session: bool = False,
+        providers: bool = False,
     ) -> Self:
         """Create an instance of AgentCapabilities.
 
@@ -294,6 +302,7 @@ class AgentCapabilities(AnnotatedObject):
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
             stop_session: Whether the agent supports `session/stop` (unstable).
+            providers: Whether the agent supports `providers/*` methods.
         """
         session_caps = SessionCapabilities(
             list=SessionListCapabilities() if list_sessions else None,
@@ -302,7 +311,23 @@ class AgentCapabilities(AnnotatedObject):
         )
         return cls(
             load_session=load_session,
-            mcp_capabilities=McpCapabilities(http=http_mcp_servers, sse=sse_mcp_servers),
+            providers=providers,
+            mcp_capabilities=McpCapabilities(
+                http=http_mcp_servers, sse=sse_mcp_servers
+            ),
+            prompt_capabilities=PromptCapabilities(
+                audio=audio_prompts,
+                embedded_context_prompts=embedded_context_prompts,
+                image=image_prompts,
+            ),
+            session_capabilities=session_caps,
+        )
+        return cls(
+            load_session=load_session,
+            providers=providers,
+            mcp_capabilities=McpCapabilities(
+                http=http_mcp_servers, sse=sse_mcp_servers, acp=acp_mcp_servers
+            ),
             prompt_capabilities=PromptCapabilities(
                 audio=audio_prompts,
                 embedded_context=embedded_context_prompts,

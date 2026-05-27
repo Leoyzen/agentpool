@@ -1,0 +1,19 @@
+{
+  "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-rfc0033/.sisyphus/plans/rfc-0033-mcp-over-acp.md",
+  "started_at": "2026-05-26T12:49:00.770Z",
+  "session_ids": [
+    "ses_19bab2ecaffe95v27aQvAFVcxw",
+    "ses_19baa932dffe1YaaYkBbShmH5P",
+    "ses_19baa6abeffeHAWtW3kAkIb9cR",
+    "ses_19baa4262ffeB1oIO0U6MhlKr2"
+  ],
+  "plan_name": "rfc-0033-mcp-over-acp",
+  "worktree_path": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-rfc0033",
+  "session_origins": {
+    "ses_19bab2ecaffe95v27aQvAFVcxw": "direct",
+    "ses_19baa932dffe1YaaYkBbShmH5P": "appended",
+    "ses_19baa6abeffeHAWtW3kAkIb9cR": "appended",
+    "ses_19baa4262ffeB1oIO0U6MhlKr2": "appended"
+  },
+  "task_sessions": {}
+}

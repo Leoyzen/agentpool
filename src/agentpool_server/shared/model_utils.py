@@ -18,6 +18,7 @@ from llmling_models_config import (
     StringModelConfig,
 )
 
+from agentpool.log import get_logger
 from agentpool_server.shared.constants import (
     DEFAULT_MODEL_CONTEXT_LIMIT,
     DEFAULT_MODEL_INPUT_COST,
@@ -29,7 +30,12 @@ from agentpool_server.shared.constants import (
 if TYPE_CHECKING:
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
+    from acp.schema import SessionModelState
+    from agentpool.agents.base_agent import BaseAgent
+    from agentpool_server.acp_server.provider_router import ProviderRouter
     from agentpool_server.opencode_server.models import Provider
+
+logger = get_logger(__name__)
 
 
 def _extract_provider_from_identifier(identifier: str) -> str:
@@ -200,3 +206,111 @@ def _apply_configured_variants(
                     output=DEFAULT_MODEL_OUTPUT_LIMIT,
                 ),
             )
+
+
+async def build_model_state_for_acp(
+    agent: BaseAgent[Any, Any],
+    provider_router: ProviderRouter | None,
+) -> SessionModelState | None:
+    """Build SessionModelState for ACP with configured-first, tokonomics-fallback logic.
+
+    1. Checks agent's pool manifest for configured model_variants
+    2. Builds ACPModelInfo list from configured variants
+    3. Filters out disabled providers via provider_router
+    4. If configured list is non-empty → returns SessionModelState
+    5. If empty → falls back to agent.get_available_models() (tokonomics)
+    6. If both empty → returns None
+
+    Args:
+        agent: The agent to build model state for.
+        provider_router: Optional provider router for disable filtering.
+
+    Returns:
+        SessionModelState with available models, or None if no models found.
+    """
+    from acp.schema import ModelInfo as ACPModelInfo, SessionModelState
+
+    # Phase 1: Configured variants from manifest (configured-first)
+    configured_models: list[ACPModelInfo] = []
+    agent_pool = agent.agent_pool
+    manifest = agent_pool.manifest if agent_pool else None
+
+    if manifest and manifest.model_variants:
+        for variant_name, _config in manifest.model_variants.items():
+            provider_name = _extract_provider(_config)
+
+            # Skip if provider is disabled
+            if provider_router and provider_router.is_provider_disabled(provider_name):
+                continue
+
+            configured_models.append(
+                ACPModelInfo(
+                    model_id=variant_name,
+                    name=variant_name,
+                )
+            )
+
+    if configured_models:
+        current_model = agent.model_name
+        all_ids = [m.model_id for m in configured_models]
+        if current_model and current_model not in all_ids:
+            # Ensure current model is visible in IDE even if not in configured variants
+            desc = "Currently configured model"
+            model_info = ACPModelInfo(
+                model_id=current_model, name=current_model, description=desc
+            )
+            configured_models.insert(0, model_info)
+            current_model_id = current_model
+        elif current_model and current_model in all_ids:
+            current_model_id = current_model
+        else:
+            current_model_id = all_ids[0]
+        return SessionModelState(
+            available_models=configured_models,
+            current_model_id=current_model_id,
+        )
+
+    # Phase 2: Tokonomics fallback
+    try:
+        toko_models = await agent.get_available_models()
+    except Exception:
+        logger.exception("Failed to get available models from agent")
+        return None
+
+    if not toko_models:
+        return None
+
+    # Filter disabled providers from raw tokonomics models (more accurate than parsing model_id)
+    if provider_router:
+        toko_models = [
+            toko
+            for toko in toko_models
+            if not provider_router.is_provider_disabled(toko.provider)
+        ]
+
+    if not toko_models:
+        return None
+
+    acp_models_from_tokonomics = [
+        ACPModelInfo(
+            model_id=toko.id_override if toko.id_override else toko.id,
+            name=toko.name,
+            description=toko.description or "",
+        )
+        for toko in toko_models
+    ]
+
+    if not acp_models_from_tokonomics:
+        return None
+
+    all_ids = [m.model_id for m in acp_models_from_tokonomics]
+    current_model = agent.model_name
+    if current_model and current_model in all_ids:
+        current_model_id = current_model
+    else:
+        current_model_id = all_ids[0]
+
+    return SessionModelState(
+        available_models=acp_models_from_tokonomics,
+        current_model_id=current_model_id,
+    )

@@ -1,0 +1,24 @@
+PERF401 Use `list.extend` to create a transformed list
+   --> src/agentpool_server/opencode_server/routes/agent_routes.py:130:13
+    |
+128 |     if state.skill_bridge is not None:
+129 |         for skill_cmd in state.skill_bridge.get_commands():
+130 |             commands.append(Command(name=skill_cmd.name, description=skill_cmd.description))
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+131 |
+132 |     return commands
+    |
+help: Replace for loop with list.extend
+
+E501 Line too long (115 > 100)
+   --> src/agentpool_server/opencode_server/routes/agent_routes.py:149:101
+    |
+147 |     """
+148 |     # Build the config based on request
+149 |     # Note: client_id is auto-generated for internal identification; display_name uses configured name if available
+    |                                                                                                     ^^^^^^^^^^^^^^^
+150 |     config: SSEMCPServerConfig | StdioMCPServerConfig | StreamableHTTPMCPServerConfig
+151 |     if request.url:
+    |
+
+Found 2 errors.

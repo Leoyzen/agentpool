@@ -1,0 +1,23 @@
+src/agentpool_server/opencode_server/routes/agent_routes.py:479: error:
+Returning Any from function declared to return
+"dict[str, list[ProviderAuthMethod]]"  [no-any-return]
+        return state.auth_service.methods()
+        ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/agentpool_server/opencode_server/routes/agent_routes.py:489: error:
+Returning Any from function declared to return "ProviderAuthAuthorization" 
+[no-any-return]
+            return await state.auth_service.authorize(provider_id)
+            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/agentpool_server/opencode_server/routes/agent_routes.py:504: error:
+Returning Any from function declared to return "bool"  [no-any-return]
+            return await state.auth_service.callback(
+            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+src/agentpool_server/opencode_server/routes/agent_routes.py:517: error:
+Returning Any from function declared to return "bool"  [no-any-return]
+            return await state.auth_service.set_credentials(provider_id, i...
+            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~...
+src/agentpool_server/opencode_server/routes/agent_routes.py:526: error:
+Returning Any from function declared to return "bool"  [no-any-return]
+            return await state.auth_service.remove_credentials(provider_id...
+            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Found 5 errors in 1 file (checked 4 source files)

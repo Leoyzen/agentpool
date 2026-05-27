@@ -1,0 +1,26 @@
+TASK: Create src/agentpool/skills/exceptions.py with exception hierarchy
+STATUS: COMPLETED
+
+VERIFICATION RESULTS:
+--------------------
+✓ SkillNotFoundError with available_skills works
+✓ SkillNotFoundError without available_skills works
+✓ SecurityError works
+✓ ProviderError works
+✓ ReferenceNotFoundError works
+✓ All inheritance checks pass
+
+EXCEPTION HIERARCHY:
+-------------------
+AgentPoolError (from agentpool.utils.baseregistry)
+└── SkillError
+    ├── SkillNotFoundError(skill_name, available_skills=None)
+    ├── ReferenceNotFoundError(reference_path)
+    ├── SecurityError(message)
+    └── ProviderError(message)
+
+FILE LOCATION:
+--------------
+src/agentpool/skills/exceptions.py
+
+All exceptions properly importable from agentpool.skills.exceptions

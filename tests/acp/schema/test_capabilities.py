@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from acp.schema.capabilities import AgentCapabilities
+from acp.schema.capabilities import AgentCapabilities, McpCapabilities
 
 
 class TestAgentCapabilities:
@@ -102,3 +102,6 @@ class TestAgentCapabilities:
         assert caps.load_session is False
         # slash_commands is not a field on the model, so it's ignored
         assert not hasattr(caps, "slash_commands")
+
+
+

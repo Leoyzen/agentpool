@@ -464,11 +464,30 @@ async def list_providers(state: StateDep) -> ProviderListResponse:
 
 @router.get("/mode")
 async def list_modes(state: StateDep) -> list[Mode]:
-    """List available modes."""
-    _ = state  # unused for now
+    """List available modes dynamically from agent."""
+    if state.agent is None:
+        return [Mode(name="default", tools={})]
+    try:
+        mode_categories = await state.agent.get_modes()
+    except Exception:
+        logger.exception("Failed to get modes from agent")
+        return [Mode(name="default", tools={})]
+
+    if not mode_categories:
+        return [Mode(name="default", tools={})]
+
+    # Find the mode category (permissions/behavior modes, not model selectors)
+    category = next(
+        (c for c in mode_categories if c.id == "mode" or c.category == "mode"),
+        None,
+    )
+    if not category or not category.available_modes:
+        return [Mode(name="default", tools={})]
+
     return [
         Mode(
-            name="default",
+            name=mode.id,
             tools={},
         )
+        for mode in category.available_modes
     ]

@@ -1,0 +1,44 @@
+=== MCPStatus Model Fields Verification ===
+
+MCPStatus Model Definition:
+- name: str (Server identifier - client_id for backward compatibility)
+- display_name: str (Human-readable display name)
+- status: MCPConnectionStatus
+- tools: list[str]
+- error: str | None
+
+=== API Response Test ===
+
+Sample Response:
+{
+  "name": "test-client-id",
+  "display_name": "Test Display Name",
+  "status": "connected",
+  "tools": [],
+  "error": null
+}
+
+=== Field Verification ===
+✓ name field present: True
+✓ display_name field present: True
+✓ name value (client_id): test-client-id
+✓ display_name value: Test Display Name
+
+=== Backward Compatibility ===
+✓ Existing 'name' field unchanged (still uses client_id)
+✓ New 'display_name' field added
+✓ Both fields present in response
+
+=== Fallback Behavior ===
+When display_name is None in MCPServerStatus, to_mcp_status converter
+falls back to using the name field:
+  name: fallback-client-id
+  display_name (fallback to name): fallback-client-id
+
+=== Files Modified ===
+1. src/agentpool/common_types.py - Added display_name to MCPServerStatus
+2. src/agentpool_server/opencode_server/models/mcp.py - Added display_name to MCPStatus
+3. src/agentpool_server/opencode_server/converters.py - Updated to_mcp_status to include display_name
+4. src/agentpool/resource_providers/mcp_provider.py - Updated get_status to include display_name
+5. src/agentpool/agents/codex_agent/codex_agent.py - Updated MCPServerStatus creation with display_name
+6. src/agentpool/agents/claude_code_agent/claude_code_agent.py - Updated MCPServerStatus creation with display_name

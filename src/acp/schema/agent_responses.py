@@ -7,7 +7,7 @@ from pydantic import Field
 
 from acp.schema.base import Response
 from acp.schema.capabilities import AgentCapabilities
-from acp.schema.common import AuthMethod, Implementation  # noqa: TC001
+from acp.schema.common import AuthMethod, Implementation
 from acp.schema.session_state import (  # noqa: TC001
     SessionConfigOption,
     SessionInfo,
@@ -296,6 +296,7 @@ class InitializeResponse(Response):
         list_sessions: bool = False,
         resume_session: bool = False,
         stop_session: bool = False,
+        providers: bool = False,
         auth_methods: Sequence[AuthMethod] | None = None,
     ) -> Self:
         """Create an instance of InitializeResponse.
@@ -314,6 +315,7 @@ class InitializeResponse(Response):
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
             stop_session: Whether the agent supports `session/stop` (unstable).
+            providers: Whether the agent supports `providers/*` methods.
             auth_methods: The authentication methods supported by the agent.
         """
         caps = AgentCapabilities.create(
@@ -326,6 +328,7 @@ class InitializeResponse(Response):
             list_sessions=list_sessions,
             resume_session=resume_session,
             stop_session=stop_session,
+            providers=providers,
         )
         return cls(
             agent_info=Implementation(name=name, title=title, version=version),

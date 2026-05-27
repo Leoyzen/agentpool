@@ -1,0 +1,151 @@
+# F2 - Code Quality Review Evidence
+# Generated: Sun Apr 05 2026
+# Command: uv run ruff check src/agentpool/agents/
+#          uv run --no-group docs mypy src/agentpool/agents/
+#          uv run ruff format --check src/agentpool/agents/
+
+================================================================================
+                              LINT CHECK (ruff)
+================================================================================
+STATUS: FAIL (33 errors)
+
+IMPORT ISSUES:
+  - I001: Import block un-sorted/un-formatted (4 files)
+    * src/agentpool/agents/acp_agent/acp_agent.py:29
+    * src/agentpool/agents/claude_code_agent/claude_code_agent.py:56
+    * src/agentpool/agents/codex_agent/codex_agent.py:3,36,358
+    * src/agentpool/agents/context.py:3
+
+  - TC001: Application imports in non-type-checking block (4 files)
+    * src/agentpool/agents/acp_agent/acp_agent.py:49
+    * src/agentpool/agents/agui_agent/agui_agent.py:33
+    * src/agentpool/agents/claude_code_agent/claude_code_agent.py:86
+    * src/agentpool/agents/native_agent/agent.py:21
+
+  - F401: Unused imports (2 files)
+    * src/agentpool/agents/base_agent.py:198 - PromptInjectionManager
+    * src/agentpool/agents/native_agent/agent.py:16,18 - RunContext, ToolDefinition
+
+UNDEFINED NAMES (claude_code_agent.py - CRITICAL):
+  - F821: Undefined name `to_claude_system_prompt` at line 511
+  - F821: Undefined name `to_output_format` at line 558
+  - F821: Undefined name `claude_message_to_events` at line 1142
+
+DOCSTRING ISSUES:
+  - D417: Missing argument description in docstring for `_run_stream_once`
+    * src/agentpool/agents/base_agent.py:687
+
+CODE STYLE ISSUES:
+  - PIE790: Unnecessary `pass` statement
+    * src/agentpool/agents/claude_code_agent/exceptions.py:33
+
+COMPLEXITY ISSUES:
+  - PLR0915: Too many statements (51 > 50) in from_config method
+    * src/agentpool/agents/native_agent/agent.py:358
+
+LINE LENGTH:
+  - E501: Line too long (114 > 100)
+    * src/agentpool/agents/native_agent/agent.py:317
+  - E501: Line too long (162 > 100)
+    * src/agentpool/agents/native_agent/agent.py:1089
+
+ERROR HANDLING:
+  - BLE001: Do not catch blind exception `BaseException`
+    * src/agentpool/agents/native_agent/agent.py:888
+  - TRY301: Abstract `raise` to an inner function
+    * src/agentpool/agents/native_agent/agent.py:885
+  - SIM117: Use single `with` statement instead of nested
+    * src/agentpool/agents/native_agent/agent.py:844
+  - SIM105: Use `contextlib.suppress` instead of try-except-pass
+    * src/agentpool/agents/native_agent/agent.py:924
+  - UP041: Replace aliased errors with `TimeoutError`
+    * src/agentpool/agents/native_agent/agent.py:929
+
+UNUSED VARIABLE:
+  - F841: Local variable `response_time` assigned but never used
+    * src/agentpool/agents/native_agent/agent.py:821
+
+LOGGING:
+  - G004: Logging statement uses f-string (5 occurrences)
+    * src/agentpool/agents/native_agent/agent.py:1071,1078,1086,1089,1097
+
+================================================================================
+                           TYPE CHECK (mypy)
+================================================================================
+STATUS: FAIL (56 errors in 7 files)
+
+CRITICAL MISSING IMPORTS:
+  - codex_adapter.codex_types (CodexAgent)
+  - codex_adapter.events (CodexAgent)
+  - clawd_code_sdk.types (ClaudeCodeAgent)
+  - agentpool.agents.claude_code_agent.models (ClaudeCodeAgent)
+
+TYPE ERRORS:
+  - Incompatible types in assignments (21 errors)
+  - Missing type annotations (2 errors)
+  - Name redefinition errors (1 error)
+  - Attribute errors (15 errors)
+  - Unexpected keyword arguments (6 errors)
+  - Module has no attribute errors (3 errors)
+  - Unused "type: ignore" comments (3 errors)
+
+KEY FILES WITH TYPE ERRORS:
+  - src/agentpool/agents/claude_code_agent/claude_code_agent.py (22 errors)
+  - src/agentpool/agents/native_agent/agent.py (10 errors)
+  - src/agentpool/agents/codex_agent/codex_agent.py (5 errors)
+  - src/agentpool/agents/acp_agent/acp_agent.py (4 errors)
+
+================================================================================
+                           FORMAT CHECK (ruff)
+================================================================================
+STATUS: FAIL
+
+File would be reformatted:
+  - src/agentpool/agents/claude_code_agent/exceptions.py:1
+
+47 files already formatted
+
+================================================================================
+                      CODE QUALITY ISSUES ANALYSIS
+================================================================================
+
+TYPE ESCAPES (type: ignore comments): 55 occurrences
+  - Most are `# type: ignore[arg-type]` for generic type issues
+  - Some `# type: ignore[assignment]` for output_type patterns
+  - 3 unused-ignore comments that should be removed
+
+EMPTY/BROAD EXCEPTION HANDLING:
+  - 1 BaseException catch (too broad) in native_agent/agent.py:888
+  - 1 try-except-pass pattern that could use contextlib.suppress
+
+AI SLOP PATTERNS DETECTED:
+  - Missing imports (3 undefined names in claude_code_agent.py)
+  - Unused imports left in code
+  - Overly complex function (51 statements > 50 limit)
+  - F-string logging (should use lazy % formatting)
+  - Nested with statements instead of combined
+
+================================================================================
+                                SUMMARY
+================================================================================
+
+Lint:        FAIL (33 errors)
+Type Check:  FAIL (56 errors)
+Format:      FAIL (1 file needs reformat)
+Code Issues: 90+ total issues
+
+VERDICT: REJECT
+
+The agent code has significant quality issues:
+1. Multiple undefined names in claude_code_agent.py (F821 errors)
+2. Missing module dependencies (codex_adapter, clawd_code_sdk)
+3. 55 type: ignore comments indicating type system workarounds
+4. Import organization issues across multiple files
+5. Formatting inconsistency
+
+Required fixes before approval:
+- Fix missing imports/undefined names in claude_code_agent.py
+- Add missing module stubs or dependencies
+- Organize imports properly
+- Fix formatting
+- Address critical type errors
