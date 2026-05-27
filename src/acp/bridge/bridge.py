@@ -140,7 +140,7 @@ class ACPBridge:
                 resume_session_request = ResumeSessionRequest.model_validate(params)
                 resume_session_resp = await self._connection.resume_session(resume_session_request)
                 return resume_session_resp.model_dump(by_alias=True, exclude_none=True)
-            case "session/stop":
+            case "session/close":
                 stop_session_request = StopSessionRequest.model_validate(params)
                 stop_session_resp = await self._connection.stop_session(stop_session_request)
                 return stop_session_resp.model_dump(by_alias=True, exclude_none=True)

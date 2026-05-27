@@ -190,13 +190,13 @@ class SessionResumeCapabilities(AnnotatedObject):
     """
 
 
-class SessionStopCapabilities(AnnotatedObject):
-    """Capabilities for the `session/stop` method.
+class SessionCloseCapabilities(AnnotatedObject):
+    """Capabilities for the `session/close` method.
 
     **UNSTABLE**: This capability is not part of the spec yet,
     and may be removed or changed at any point.
 
-    By supplying ``{}`` it means that the agent supports stopping of sessions.
+    By supplying ``{}`` it means that the agent supports closing of sessions.
     """
 
 
@@ -213,6 +213,14 @@ class SessionCapabilities(AnnotatedObject):
     This will be unified in future versions of the protocol.
 
     See protocol docs: [Session Capabilities](https://agentclientprotocol.com/protocol/initialization#session-capabilities)
+    """
+
+    close: SessionCloseCapabilities | None = None
+    """**UNSTABLE**
+
+    This capability is not part of the spec yet, and may be removed or changed at any point.
+
+    Whether the agent supports `session/close`.
     """
 
     fork: SessionForkCapabilities | None = None
@@ -237,14 +245,6 @@ class SessionCapabilities(AnnotatedObject):
     This capability is not part of the spec yet, and may be removed or changed at any point.
 
     Whether the agent supports `session/resume`.
-    """
-
-    stop: SessionStopCapabilities | None = None
-    """**UNSTABLE**
-
-    This capability is not part of the spec yet, and may be removed or changed at any point.
-
-    Whether the agent supports `session/stop`.
     """
 
 
@@ -287,7 +287,7 @@ class AgentCapabilities(AnnotatedObject):
         image_prompts: bool = False,
         list_sessions: bool = False,
         resume_session: bool = False,
-        stop_session: bool = False,
+        close_session: bool = False,
         providers: bool = False,
     ) -> Self:
         """Create an instance of AgentCapabilities.
@@ -301,33 +301,18 @@ class AgentCapabilities(AnnotatedObject):
             image_prompts: Whether the agent supports image prompts.
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
-            stop_session: Whether the agent supports `session/stop` (unstable).
+            close_session: Whether the agent supports `session/close` (unstable).
             providers: Whether the agent supports `providers/*` methods.
         """
         session_caps = SessionCapabilities(
             list=SessionListCapabilities() if list_sessions else None,
             resume=SessionResumeCapabilities() if resume_session else None,
-            stop=SessionStopCapabilities() if stop_session else None,
+            close=SessionCloseCapabilities() if close_session else None,
         )
         return cls(
             load_session=load_session,
             providers=providers,
-            mcp_capabilities=McpCapabilities(
-                http=http_mcp_servers, sse=sse_mcp_servers
-            ),
-            prompt_capabilities=PromptCapabilities(
-                audio=audio_prompts,
-                embedded_context_prompts=embedded_context_prompts,
-                image=image_prompts,
-            ),
-            session_capabilities=session_caps,
-        )
-        return cls(
-            load_session=load_session,
-            providers=providers,
-            mcp_capabilities=McpCapabilities(
-                http=http_mcp_servers, sse=sse_mcp_servers, acp=acp_mcp_servers
-            ),
+            mcp_capabilities=McpCapabilities(http=http_mcp_servers, sse=sse_mcp_servers),
             prompt_capabilities=PromptCapabilities(
                 audio=audio_prompts,
                 embedded_context=embedded_context_prompts,

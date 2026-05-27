@@ -273,7 +273,7 @@ class StopSessionRequest(Request):
     (treat it as if ``session/cancel`` was called) and then free up any resources
     associated with the session.
 
-    Only available if the Agent supports the ``session.stop`` capability.
+    Only available if the Agent supports the ``session/close`` capability.
     """
 
     session_id: str

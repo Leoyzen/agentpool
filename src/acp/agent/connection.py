@@ -298,7 +298,7 @@ async def _agent_handler(  # noqa: PLR0911
                 if (model_result := await agent.set_session_model(set_model_request))
                 else {}
             )
-        case "session/stop":
+        case "session/close":
             stop_request = StopSessionRequest.model_validate(params)
             return await agent.stop_session(stop_request)
         case "session/set_config_option":

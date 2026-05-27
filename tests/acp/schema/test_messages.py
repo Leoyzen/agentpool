@@ -35,7 +35,7 @@ def test_agent_method_accepts_standard_methods() -> None:
         "session/list",
         "session/fork",
         "session/resume",
-        "session/stop",
+        "session/close",
     ]
     assert len(methods) == 12
 

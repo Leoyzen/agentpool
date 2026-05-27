@@ -41,7 +41,7 @@ from acp.schema.capabilities import (
     SessionForkCapabilities,
     SessionListCapabilities,
     SessionResumeCapabilities,
-    SessionStopCapabilities,
+    SessionCloseCapabilities,
 )
 from acp.schema.client_requests import (
     AuthenticateRequest,
@@ -265,6 +265,7 @@ __all__ = [
     "ResumeSessionRequest",
     "ResumeSessionResponse",
     "SessionCapabilities",
+    "SessionCloseCapabilities",
     "SessionConfigOption",
     "SessionConfigOptionCategory",
     "SessionConfigSelect",
@@ -280,7 +281,6 @@ __all__ = [
     "SessionModelState",
     "SessionNotification",
     "SessionResumeCapabilities",
-    "SessionStopCapabilities",
     "SessionUpdate",
     "SetSessionConfigOptionRequest",
     "SetSessionConfigOptionResponse",

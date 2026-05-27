@@ -245,7 +245,7 @@ class PromptResponse(Response):
 class StopSessionResponse(Response):
     """**UNSTABLE**: This capability is not part of the spec yet.
 
-    Response from stopping a session.
+    Response from closing a session.
     """
 
 
@@ -295,7 +295,7 @@ class InitializeResponse(Response):
         image_prompts: bool = False,
         list_sessions: bool = False,
         resume_session: bool = False,
-        stop_session: bool = False,
+        close_session: bool = False,
         providers: bool = False,
         auth_methods: Sequence[AuthMethod] | None = None,
     ) -> Self:
@@ -314,7 +314,7 @@ class InitializeResponse(Response):
             image_prompts: Whether the agent supports image prompts.
             list_sessions: Whether the agent supports `session/list` (unstable).
             resume_session: Whether the agent supports `session/resume` (unstable).
-            stop_session: Whether the agent supports `session/stop` (unstable).
+            close_session: Whether the agent supports `session/close` (unstable).
             providers: Whether the agent supports `providers/*` methods.
             auth_methods: The authentication methods supported by the agent.
         """
@@ -327,7 +327,7 @@ class InitializeResponse(Response):
             image_prompts=image_prompts,
             list_sessions=list_sessions,
             resume_session=resume_session,
-            stop_session=stop_session,
+            close_session=close_session,
             providers=providers,
         )
         return cls(

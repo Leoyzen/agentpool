@@ -517,7 +517,7 @@ class AgentPoolACPAgent(ACPAgent):
             load_session=True,
             list_sessions=True,
             resume_session=True,
-            stop_session=True,
+            close_session=True,
             http_mcp_servers=True,
             sse_mcp_servers=True,
             audio_prompts=True,

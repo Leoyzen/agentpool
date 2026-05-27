@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from acp.schema.capabilities import AgentCapabilities, McpCapabilities
+from acp.schema.capabilities import AgentCapabilities
 
 
 class TestAgentCapabilities:
@@ -41,7 +39,7 @@ class TestAgentCapabilities:
             image_prompts=True,
             list_sessions=True,
             resume_session=True,
-            stop_session=True,
+            close_session=True,
         )
         assert caps.load_session is True
         assert caps.mcp_capabilities is not None
@@ -54,7 +52,7 @@ class TestAgentCapabilities:
         assert caps.session_capabilities is not None
         assert caps.session_capabilities.list is not None
         assert caps.session_capabilities.resume is not None
-        assert caps.session_capabilities.stop is not None
+        assert caps.session_capabilities.close is not None
 
     def test_create_method_defaults(self):
         """create() method should use correct defaults."""
@@ -102,6 +100,3 @@ class TestAgentCapabilities:
         assert caps.load_session is False
         # slash_commands is not a field on the model, so it's ignored
         assert not hasattr(caps, "slash_commands")
-
-
-

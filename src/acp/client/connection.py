@@ -142,7 +142,7 @@ class ClientSideConnection(Agent):
         dct = params.model_dump(
             mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
         )
-        resp = await self._conn.send_request("session/stop", dct)
+        resp = await self._conn.send_request("session/close", dct)
         payload = resp if isinstance(resp, dict) else {}
         return StopSessionResponse.model_validate(payload)
 
