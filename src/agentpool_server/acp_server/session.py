@@ -91,18 +91,13 @@ Query params must be URL-encoded (spaces → `%20`). Paths must be absolute.
 
 
 def get_all_commands() -> Sequence[BaseCommand]:
-    from agentpool_commands import get_commands
-    from agentpool_server.acp_server.commands import get_commands as get_acp_commands
+    """Return empty command list to align with OpenCode behavior.
 
-    return [
-        *get_commands(
-            enable_set_model=False,
-            enable_list_resources=False,
-            enable_add_resource=False,
-            enable_show_resource=False,
-        ),
-        *get_acp_commands(),
-    ]
+    Only skill commands are exposed via _register_skill_commands().
+    All built-in framework commands are hidden to keep ACP consistent
+    with OpenCode, which does not register agentpool_commands at all.
+    """
+    return []
 
 
 def _is_slash_command(text: str) -> bool:
