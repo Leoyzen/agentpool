@@ -87,11 +87,20 @@ Query params must be URL-encoded (spaces → `%20`). Paths must be absolute.
 """
 
 
-def get_all_commands() -> Sequence[BaseCommand]:
+def get_all_commands(manifest: Any = None) -> Sequence[BaseCommand]:
+    """Get all available commands including built-in, ACP, and manifest commands.
+
+    Args:
+        manifest: Optional AgentsManifest to load commands from.
+                  If None, only built-in and ACP commands are loaded.
+
+    Returns:
+        Sequence of all available commands
+    """
     from agentpool_commands import get_commands
     from agentpool_server.acp_server.commands import get_commands as get_acp_commands
 
-    return [
+    commands = [
         *get_commands(
             enable_set_model=False,
             enable_list_resources=False,
@@ -100,6 +109,37 @@ def get_all_commands() -> Sequence[BaseCommand]:
         ),
         *get_acp_commands(),
     ]
+
+    if manifest is not None:
+        manifest_commands = _get_manifest_commands(manifest)
+        commands.extend(manifest_commands)
+
+    return commands
+
+
+def _get_manifest_commands(manifest: Any) -> list[BaseCommand]:
+    """Load commands from manifest configuration."""
+    from agentpool_config.commands import BaseCommandConfig
+
+    command_configs = getattr(manifest, "get_command_configs", dict)()
+
+    commands = []
+    for name, config in command_configs.items():
+        try:
+            if isinstance(config, BaseCommandConfig):
+                command = config.get_slashed_command(category="manifest")
+                commands.append(command)
+        except (ImportError, TypeError, ValueError, FileNotFoundError) as e:
+            import logger as log_module
+
+            logger = log_module.get_logger(__name__)
+            logger.warning(
+                "Failed to create command from manifest",
+                command_name=name,
+                error=str(e),
+            )
+
+    return commands
 
 
 def _is_slash_command(text: str) -> bool:
@@ -204,7 +244,9 @@ class ACPSession:
         self._current_converter: ACPEventConverter | None = None
         self.last_usage: Usage | None = None
         self.fs = ACPFileSystem(self.client, session_id=self.session_id)
-        self.command_store = CommandStore(commands=get_all_commands())
+        self.command_store = CommandStore(
+            commands=get_all_commands(manifest=self.agent_pool.manifest)
+        )
         self.command_store._initialize_sync()
         self._update_callbacks: list[Callable[[], None]] = []
         self._remote_commands: list[AvailableCommand] = []  # Commands from nested ACP agents
