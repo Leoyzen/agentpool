@@ -189,9 +189,9 @@ class ACPServer(BaseServer):
         if load_skills is not None:
             # Explicit argument overrides manifest
             resolved_load_skills = load_skills
-        elif isinstance(config, AgentsManifest):
+        elif pool.manifest.skills is not None:
             # Fall back to manifest's skills.include_default setting
-            resolved_load_skills = config.skills.include_default
+            resolved_load_skills = pool.manifest.skills.include_default
         else:
             resolved_load_skills = True
 
