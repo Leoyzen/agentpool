@@ -81,7 +81,7 @@ class MessageSender:
         self._closed = True
         await self._queue.put(None)
         if self._task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(Exception):
                 await self._task
 
     async def _loop(self) -> None:
