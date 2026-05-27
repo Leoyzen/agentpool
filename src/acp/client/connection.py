@@ -30,7 +30,7 @@ from acp.schema import (
     SetSessionConfigOptionResponse,
     SetSessionModelResponse,
     SetSessionModeResponse,
-    StopSessionResponse,
+    CloseSessionResponse,
     TerminalOutputRequest,
     WaitForTerminalExitRequest,
     WriteTextFileRequest,
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        StopSessionRequest,
+        CloseSessionRequest,
         TerminalOutputResponse,
         WaitForTerminalExitResponse,
         WriteTextFileResponse,
@@ -138,13 +138,13 @@ class ClientSideConnection(Agent):
         payload = resp if isinstance(resp, dict) else {}
         return ResumeSessionResponse.model_validate(payload)
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         dct = params.model_dump(
             mode="json", by_alias=True, exclude_none=True, exclude_defaults=True
         )
         resp = await self._conn.send_request("session/close", dct)
         payload = resp if isinstance(resp, dict) else {}
-        return StopSessionResponse.model_validate(payload)
+        return CloseSessionResponse.model_validate(payload)
 
     async def set_session_mode(self, params: SetSessionModeRequest) -> SetSessionModeResponse:
         dct = params.model_dump(

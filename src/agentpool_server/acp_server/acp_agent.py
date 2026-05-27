@@ -29,7 +29,7 @@ from acp.schema import (
     SetSessionModelResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
-    StopSessionResponse,
+    CloseSessionResponse,
 )
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        StopSessionRequest,
+        CloseSessionRequest,
     )
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
@@ -841,7 +841,7 @@ class AgentPoolACPAgent(ACPAgent):
             logger.info("Returning PromptResponse", stop_reason=stop_reason)
             return response
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         """Stop an active session and free its resources.
 
         Cancels any ongoing work (like session/cancel) and then
@@ -857,7 +857,7 @@ class AgentPoolACPAgent(ACPAgent):
             logger.info("Session stopped", session_id=params.session_id)
         except Exception:
             logger.exception("Failed to stop session", session_id=params.session_id)
-        return StopSessionResponse()
+        return CloseSessionResponse()
 
     async def cancel(self, params: CancelNotification) -> None:
         """Cancel operations for a session."""

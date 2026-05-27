@@ -242,11 +242,8 @@ class PromptResponse(Response):
     """
 
 
-class StopSessionResponse(Response):
-    """**UNSTABLE**: This capability is not part of the spec yet.
-
-    Response from closing a session.
-    """
+class CloseSessionResponse(Response):
+    """Response from closing a session."""
 
 
 class AuthenticateResponse(Response):
@@ -362,7 +359,7 @@ AgentResponse = (
     | LoadSessionResponse
     | ForkSessionResponse
     | ResumeSessionResponse
-    | StopSessionResponse
+    | CloseSessionResponse
     | ListSessionsResponse
     | SetSessionModeResponse
     | SetSessionConfigOptionResponse

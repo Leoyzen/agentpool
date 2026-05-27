@@ -34,7 +34,7 @@ from acp.schema import (
     SetSessionConfigOptionRequest,
     SetSessionModelRequest,
     SetSessionModeRequest,
-    StopSessionRequest,
+    CloseSessionRequest,
     TerminalOutputRequest,
     TerminalOutputResponse,
     WaitForTerminalExitRequest,
@@ -67,7 +67,7 @@ if TYPE_CHECKING:
         ReleaseTerminalRequest,
         RequestPermissionRequest,
         SessionNotification,
-        StopSessionResponse,
+        CloseSessionResponse,
         TerminalOutputRequest,
         WaitForTerminalExitRequest,
         WriteTextFileRequest,
@@ -118,7 +118,7 @@ class AgentSideConnection(Client):
             | PromptResponse
             | LoadSessionResponse
             | ListSessionsResponse
-            | StopSessionResponse
+            | CloseSessionResponse
             | dict[str, Any]
             | None
         ):
@@ -259,7 +259,7 @@ async def _agent_handler(  # noqa: PLR0911
     | PromptResponse
     | LoadSessionResponse
     | ListSessionsResponse
-    | StopSessionResponse
+    | CloseSessionResponse
     | dict[str, Any]
     | None
 ):
@@ -299,8 +299,8 @@ async def _agent_handler(  # noqa: PLR0911
                 else {}
             )
         case "session/close":
-            stop_request = StopSessionRequest.model_validate(params)
-            return await agent.stop_session(stop_request)
+            stop_request = CloseSessionRequest.model_validate(params)
+            return await agent.close_session(stop_request)
         case "session/set_config_option":
             set_config_request = SetSessionConfigOptionRequest.model_validate(params)
             return (

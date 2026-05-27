@@ -264,10 +264,8 @@ class InitializeRequest(Request):
         )
 
 
-class StopSessionRequest(Request):
-    """**UNSTABLE**: This capability is not part of the spec yet.
-
-    Request parameters for stopping an active session.
+class CloseSessionRequest(Request):
+    """Request parameters for closing an active session.
 
     If supported, the agent **must** cancel any ongoing work related to the session
     (treat it as if ``session/cancel`` was called) and then free up any resources
@@ -277,7 +275,7 @@ class StopSessionRequest(Request):
     """
 
     session_id: str
-    """The ID of the session to stop."""
+    """The ID of the session to close."""
 
 
 class AuthenticateRequest(Request):
@@ -301,7 +299,7 @@ ClientRequest = (
     | ListSessionsRequest
     | ForkSessionRequest
     | ResumeSessionRequest
-    | StopSessionRequest
+    | CloseSessionRequest
     | SetSessionModeRequest
     | SetSessionConfigOptionRequest
     | PromptRequest

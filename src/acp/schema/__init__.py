@@ -27,7 +27,7 @@ from acp.schema.agent_responses import (
     SetSessionModeResponse,
     SetSessionModelResponse,
     StopReason,
-    StopSessionResponse,
+    CloseSessionResponse,
 )
 from acp.schema.capabilities import (
     AgentCapabilities,
@@ -57,7 +57,7 @@ from acp.schema.client_requests import (
     SetSessionConfigOptionRequest,
     SetSessionModeRequest,
     SetSessionModelRequest,
-    StopSessionRequest,
+    CloseSessionRequest,
 )
 from acp.schema.client_responses import (
     ClientResponse,
@@ -290,9 +290,9 @@ __all__ = [
     "SetSessionModelResponse",
     "SseMcpServer",
     "StdioMcpServer",
+    "CloseSessionRequest",
+    "CloseSessionResponse",
     "StopReason",
-    "StopSessionRequest",
-    "StopSessionResponse",
     "TerminalExitStatus",
     "TerminalOutputRequest",
     "TerminalOutputResponse",

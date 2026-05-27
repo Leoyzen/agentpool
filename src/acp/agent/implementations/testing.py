@@ -17,7 +17,7 @@ from acp.schema import (
     ForkSessionResponse,
     ListSessionsResponse,
     ResumeSessionResponse,
-    StopSessionResponse,
+    CloseSessionResponse,
 )
 
 
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
         ResumeSessionRequest,
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
-        StopSessionRequest,
+        CloseSessionRequest,
     )
 
 
@@ -97,5 +97,5 @@ class TestAgent(Agent):
     async def resume_session(self, params: ResumeSessionRequest) -> ResumeSessionResponse:
         return ResumeSessionResponse()
 
-    async def stop_session(self, params: StopSessionRequest) -> StopSessionResponse:
-        return StopSessionResponse()
+    async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
+        return CloseSessionResponse()
