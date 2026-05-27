@@ -151,15 +151,10 @@ class ProviderRouter:
         """Disable a provider.
 
         Args:
-            provider_id: Provider to disable.
-
-        Raises:
-            ValueError: If provider_id is unknown.
+            provider_id: Provider to disable. Unknown providers are silently
+                added to the disabled set (they won't appear in listings).
         """
         async with self._lock:
-            if provider_id not in self._providers:
-                msg = f"Unknown provider: {provider_id}"
-                raise ValueError(msg)
             self._disabled.add(provider_id)
             logger.info("Provider disabled", provider_id=provider_id)
 

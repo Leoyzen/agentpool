@@ -37,13 +37,14 @@ class MockAgent:
         return self._toko_models
 
 
-def create_toko_model(model_id, name, description=""):
+def create_toko_model(model_id, name, description="", provider=""):
     """Create a mock tokonomics model."""
     m = MagicMock()
     m.id = model_id
     m.id_override = None
     m.name = name
     m.description = description
+    m.provider = provider
     return m
 
 
@@ -89,8 +90,8 @@ class TestBuildModelStateForAcp:
         """When no configured variants, tokonomics is used."""
         pool = MockPool(manifest=empty_manifest)
         toko_models = [
-            create_toko_model("openai:gpt-4o", "GPT-4o"),
-            create_toko_model("anthropic:claude-sonnet", "Claude Sonnet"),
+            create_toko_model("openai:gpt-4o", "GPT-4o", provider="openai"),
+            create_toko_model("anthropic:claude-sonnet", "Claude Sonnet", provider="anthropic"),
         ]
         agent = MockAgent(model_name="openai:gpt-4o", pool=pool, toko_models=toko_models)
         router = ProviderRouter(empty_manifest)  # type: ignore[arg-type]
@@ -102,11 +103,15 @@ class TestBuildModelStateForAcp:
         assert "openai:gpt-4o" in model_ids
         assert "anthropic:claude-sonnet" in model_ids
 
-    async def test_provider_filtering(self, manifest_with_variants):
-        """Disabled providers are filtered out."""
-        pool = MockPool(manifest=manifest_with_variants)
-        agent = MockAgent(model_name="fast_gpt", pool=pool)
-        router = ProviderRouter(manifest_with_variants)  # type: ignore[arg-type]
+    async def test_provider_filtering(self, empty_manifest):
+        """Disabled providers are filtered out from tokonomics fallback."""
+        pool = MockPool(manifest=empty_manifest)
+        toko_models = [
+            create_toko_model("openai:gpt-4o", "GPT-4o", provider="openai"),
+            create_toko_model("anthropic:claude-sonnet", "Claude Sonnet", provider="anthropic"),
+        ]
+        agent = MockAgent(model_name="openai:gpt-4o", pool=pool, toko_models=toko_models)
+        router = ProviderRouter(empty_manifest)  # type: ignore[arg-type]
         await router.disable_provider("openai")
 
         state = await build_model_state_for_acp(agent, router)  # type: ignore[arg-type]
@@ -114,9 +119,9 @@ class TestBuildModelStateForAcp:
         assert state is not None
         model_ids = {m.model_id for m in state.available_models}
         # openai provider models should be filtered out
-        assert "fast_gpt" not in model_ids
+        assert "openai:gpt-4o" not in model_ids
         # anthropic provider models should remain
-        assert "smart" in model_ids
+        assert "anthropic:claude-sonnet" in model_ids
 
     async def test_empty_state(self):
         """No configured variants and no tokonomics returns None."""
@@ -151,7 +156,7 @@ class TestBuildModelStateForAcp:
         assert state.current_model_id == "smart"
 
     async def test_current_model_not_in_list(self, manifest_with_variants):
-        """Current model defaults to first configured variant when not in list."""
+        """Current model is inserted when not in configured variants."""
         pool = MockPool(manifest=manifest_with_variants)
         agent = MockAgent(model_name="unknown-model", pool=pool)
         router = ProviderRouter(manifest_with_variants)  # type: ignore[arg-type]
@@ -159,4 +164,10 @@ class TestBuildModelStateForAcp:
         state = await build_model_state_for_acp(agent, router)  # type: ignore[arg-type]
 
         assert state is not None
-        assert state.current_model_id in {"fast_gpt", "smart"}
+        # Current model should be inserted at the front for IDE visibility
+        assert state.current_model_id == "unknown-model"
+        assert state.available_models[0].model_id == "unknown-model"
+        # Configured variants should still be present
+        model_ids = {m.model_id for m in state.available_models}
+        assert "fast_gpt" in model_ids
+        assert "smart" in model_ids

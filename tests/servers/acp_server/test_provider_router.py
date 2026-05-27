@@ -102,12 +102,13 @@ class TestProviderRouter:
         assert provider is not None
         assert provider.status == ProviderStatus.disabled
 
-    def test_disable_provider_unknown_raises(self, manifest_with_variants):
-        """Disabling unknown provider should raise ValueError."""
+    def test_disable_provider_unknown_silently(self, manifest_with_variants):
+        """Disabling unknown provider should silently succeed (for tokonomics providers)."""
         router = ProviderRouter(manifest_with_variants)
 
-        with pytest.raises(ValueError, match="Unknown provider"):
-            asyncio.run(router.disable_provider("nonexistent"))
+        # Should not raise for unknown providers (e.g., tokonomics-discovered)
+        asyncio.run(router.disable_provider("nonexistent"))
+        assert router.is_provider_disabled("nonexistent") is True
 
     def test_enable_provider(self, manifest_with_variants):
         """ProviderRouter should support re-enabling disabled providers."""

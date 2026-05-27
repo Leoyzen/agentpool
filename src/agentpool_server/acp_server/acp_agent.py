@@ -239,7 +239,8 @@ class AgentPoolACPAgent(ACPAgent):
         # Setup skill command bridge if pool has skill commands configured
         self._setup_skill_bridge()
 
-        # NEW: Cache agent config for per-session creation (RFC-0031)
+        # RFC-0034: Initialize provider router with None manifest (will be updated in initialize)
+        self.provider_router = ProviderRouter(None)
         from agentpool.models.agents import NativeAgentConfig
         if (
             self.agent_pool
@@ -904,7 +905,7 @@ class AgentPoolACPAgent(ACPAgent):
         """
         from acp.exceptions import RequestError
 
-        provider_id = params.get("provider_id", "")
+        provider_id = params.get("provider_id") or params.get("id", "")
         base_url = params.get("base_url")
         api_key_id = params.get("api_key_id")
         try:
@@ -922,7 +923,7 @@ class AgentPoolACPAgent(ACPAgent):
         """
         from acp.exceptions import RequestError
 
-        provider_id = params.get("provider_id", "")
+        provider_id = params.get("provider_id") or params.get("id", "")
         try:
             await self.provider_router.disable_provider(provider_id)
         except ValueError as e:

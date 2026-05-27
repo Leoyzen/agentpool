@@ -253,7 +253,15 @@ async def build_model_state_for_acp(
     if configured_models:
         current_model = agent.model_name
         all_ids = [m.model_id for m in configured_models]
-        if current_model and current_model in all_ids:
+        if current_model and current_model not in all_ids:
+            # Ensure current model is visible in IDE even if not in configured variants
+            desc = "Currently configured model"
+            model_info = ACPModelInfo(
+                model_id=current_model, name=current_model, description=desc
+            )
+            configured_models.insert(0, model_info)
+            current_model_id = current_model
+        elif current_model and current_model in all_ids:
             current_model_id = current_model
         else:
             current_model_id = all_ids[0]
@@ -272,6 +280,17 @@ async def build_model_state_for_acp(
     if not toko_models:
         return None
 
+    # Filter disabled providers from raw tokonomics models (more accurate than parsing model_id)
+    if provider_router:
+        toko_models = [
+            toko
+            for toko in toko_models
+            if not provider_router.is_provider_disabled(toko.provider)
+        ]
+
+    if not toko_models:
+        return None
+
     acp_models_from_tokonomics = [
         ACPModelInfo(
             model_id=toko.id_override if toko.id_override else toko.id,
@@ -280,16 +299,6 @@ async def build_model_state_for_acp(
         )
         for toko in toko_models
     ]
-
-    # Filter disabled providers from tokonomics models
-    if provider_router:
-        acp_models_from_tokonomics = [
-            m
-            for m in acp_models_from_tokonomics
-            if not provider_router.is_provider_disabled(
-                _extract_provider_from_identifier(m.model_id)
-            )
-        ]
 
     if not acp_models_from_tokonomics:
         return None
