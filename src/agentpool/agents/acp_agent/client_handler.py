@@ -186,6 +186,8 @@ class ACPClientHandler(Client):
                 # LOCAL commands; remote commands pass through to the agent prompt.
                 await self._agent.state_updated.emit(update)
                 logger.debug("Available commands updated", count=len(update.available_commands))
+                # Also capture during load so replay/restoration works correctly
+                self.state.add_update(params.update)
                 self._update_event.set()
                 return
 
