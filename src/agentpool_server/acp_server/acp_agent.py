@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import anyio
 from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
@@ -838,9 +840,10 @@ class AgentPoolACPAgent(ACPAgent):
             logger.exception("Failed to process prompt", session_id=params.session_id)
             msg = f"Error processing prompt: {e}"
             if session:
-                # Send error notification asynchronously to avoid blocking response
-                name = f"error_notification_{params.session_id}"
-                self.tasks.create_task(session._send_error_notification(msg), name=name)
+                # Send error notification synchronously before returning end_turn
+                # to prevent race where session/update arrives after end_turn
+                await session._send_error_notification(msg)
+                await anyio.sleep(0.05)  # Allow network buffers to flush
 
             return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
         else:

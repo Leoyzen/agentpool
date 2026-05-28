@@ -576,9 +576,10 @@ class ACPSession:
             except Exception as e:
                 self._current_converter = None  # Clear converter reference
                 self.log.exception("Error during streaming")
-                # Send error notification asynchronously to avoid blocking response
-                coro = self._send_error_notification(f"❌ Agent error: {e}")
-                self.acp_agent.tasks.create_task(coro)
+                # Send error notification synchronously before returning end_turn
+                # to prevent race where session/update arrives after end_turn
+                await self._send_error_notification(f"❌ Agent error: {e}")
+                await anyio.sleep(0.05)  # Allow network buffers to flush
                 return "end_turn"
             else:
                 # Title generation is now handled automatically by log_session
@@ -736,9 +737,9 @@ class ACPSession:
             await self.command_store.execute_command(command_str, cmd_ctx)
         except Exception as e:
             logger.exception("Command execution failed")
-            # Send error notification asynchronously to avoid blocking
-            coro = self._send_error_notification(f"❌ Command error: {e}")
-            self.acp_agent.tasks.create_task(coro)
+            # Send error notification synchronously to maintain message ordering
+            await self._send_error_notification(f"❌ Command error: {e}")
+            await anyio.sleep(0.05)  # Allow network buffers to flush
 
     def register_update_callback(self, callback: Callable[[], None]) -> None:
         """Register callback for command updates."""
