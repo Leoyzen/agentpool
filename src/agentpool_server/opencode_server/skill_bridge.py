@@ -118,7 +118,20 @@ def create_skill_command(
                     duration_ms=round(duration_ms, 2),
                     has_instructions=True,
                 )
-                # Inject instructions into staged_content for agent processing
+                # Build complete prompt with instructions AND user request (args)
+                # This matches OpenCode's pattern: skill-instruction + user-request
+                user_request = " ".join(args)
+                if user_request:
+                    full_prompt = f"""<skill-instruction>
+{instructions}
+</skill-instruction>
+
+<user-request>
+{user_request}
+</user-request>"""
+                else:
+                    full_prompt = instructions
+                # Inject complete prompt into staged_content for agent processing
                 if (
                     hasattr(ctx, "data")
                     and ctx.data is not None
@@ -126,7 +139,7 @@ def create_skill_command(
                     and ctx.data.node is not None
                     and hasattr(ctx.data.node, "staged_content")
                 ):
-                    ctx.data.node.staged_content.add_text(instructions)
+                    ctx.data.node.staged_content.add_text(full_prompt)
                     logger.debug(
                         "Injected skill instructions into staged_content",
                         skill_name=skill_cmd.name,
