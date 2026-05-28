@@ -725,6 +725,10 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         try:
             self._state.start_load()
             response = await self._api.load_session(session_id, cwd, mcp_servers or None)
+            # Allow pending session/update notifications from replay to be processed
+            # before finishing load capture. Notifications may be in flight when
+            # the JSON-RPC response arrives.
+            await asyncio.sleep(0)
             raw_updates = self._state.finish_load()
 
             self._sdk_session_id = session_id
