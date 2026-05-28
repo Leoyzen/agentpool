@@ -27,7 +27,7 @@ class AcpMcpConnection:
     """Represents a single active MCP-over-ACP connection.
 
     Bridges MCP JSON-RPC messages between fastmcp's ClientSession
-    and the ACP connection via mcp/message ext_method calls.
+    and the ACP connection via mcp/message send_request calls.
     """
 
     def __init__(

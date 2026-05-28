@@ -207,3 +207,8 @@ class DefaultACPClient(Client):
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         self.ext_notes.append((method, params))
+
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send a raw request (for standard ACP methods like mcp/connect)."""
+        self.ext_calls.append((method, params))
+        return {"ok": True, "method": method}

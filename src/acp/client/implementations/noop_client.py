@@ -122,3 +122,7 @@ class NoOpClient(Client):
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Ignore extension notifications."""
+
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Return empty dict for raw requests (standard ACP methods)."""
+        return {}

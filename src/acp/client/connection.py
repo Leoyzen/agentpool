@@ -199,6 +199,10 @@ class ClientSideConnection(Agent):
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         await self._conn.send_notification(f"_{method}", params)
 
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send a raw request without the _ prefix (for standard ACP methods)."""
+        return await self._conn.send_request(method, params)  # type: ignore[no-any-return]
+
     async def close(self) -> None:
         await self._conn.close()
 

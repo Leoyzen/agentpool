@@ -982,7 +982,7 @@ class AgentPoolACPAgent(ACPAgent):
             "server": server.model_dump(by_alias=True, exclude_none=True),
             "acpId": server.id,
         }
-        response = await self.client.ext_method("mcp/connect", params)
+        response = await self.client.send_request("mcp/connect", params)
         connection_id = response.get("connectionId", "")
         if not connection_id:
             msg = "Client did not return connectionId for mcp/connect"
@@ -994,7 +994,7 @@ class AgentPoolACPAgent(ACPAgent):
                 return await mcp_message_method(
                     {"connectionId": connection_id, "message": message}
                 )
-            return await self.client.ext_method(
+            return await self.client.send_request(
                 "mcp/message",
                 {"connectionId": connection_id, "message": message},
             )
@@ -1018,7 +1018,7 @@ class AgentPoolACPAgent(ACPAgent):
             connection_id: The connection ID to disconnect.
         """
         try:
-            await self.client.ext_method(
+            await self.client.send_request(
                 "mcp/disconnect", {"connectionId": connection_id}
             )
         except Exception:
