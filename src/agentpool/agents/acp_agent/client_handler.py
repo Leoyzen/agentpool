@@ -404,7 +404,20 @@ class ACPClientHandler(Client):
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications."""
-        logger.debug("Extension notification", method=method)
+        match method:
+            case "_agentpool/toast":
+                from agentpool.agents.events import ToastInfo
+
+                toast = ToastInfo(
+                    message=params.get("message", ""),
+                    level=params.get("level", "info"),
+                    duration=params.get("duration"),
+                    action=params.get("action"),
+                )
+                await self._agent.state_updated.emit(toast)
+                logger.debug("Toast notification received", message=toast.message, level=toast.level)
+            case _:
+                logger.debug("Unhandled extension notification", method=method)
 
     def _populate_command_store(self, commands: Sequence[AvailableCommand]) -> None:
         """Populate the agent's command store with remote ACP commands.

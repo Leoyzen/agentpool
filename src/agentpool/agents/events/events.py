@@ -105,6 +105,24 @@ class RunErrorEvent:
     """Event type identifier."""
 
 
+@dataclass(kw_only=True)
+class ToastInfo:
+    """Toast notification from an agent.
+
+    Emitted via the state_updated signal to display non-chat notifications
+    (errors, warnings, info) without polluting the conversation history.
+    """
+
+    message: str
+    """Toast message text."""
+    level: Literal["error", "warning", "info", "success"] = "info"
+    """Toast severity level."""
+    duration: int | None = None
+    """Display duration in milliseconds; None for persistent."""
+    action: dict[str, str] | None = None
+    """Optional action button {label: ..., command: ...}."""
+
+
 # Unified tool call content models (dataclass versions of ACP schema models)
 
 

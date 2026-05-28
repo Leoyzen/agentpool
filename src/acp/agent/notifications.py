@@ -186,6 +186,22 @@ class ACPNotifications:
         )
         await self.client.elicitation_complete(notification)
 
+    async def send_ext_notification(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        """Send an extension notification.
+
+        Uses the ACP ExtNotification mechanism to send arbitrary one-way
+        messages for custom functionality (e.g., toast notifications).
+
+        Args:
+            method: Extension method name (should be prefixed with underscore).
+            params: Optional parameters for the notification.
+        """
+        await self.client.ext_notification(method, params or {})
+
     async def tool_call_progress(
         self,
         tool_call_id: str,

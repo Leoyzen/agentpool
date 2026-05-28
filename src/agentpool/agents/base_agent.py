@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from upathtools.filesystems import OverlayFileSystem
 
     from acp.schema import AvailableCommandsUpdate
+    from agentpool.agents.events import ToastInfo
     from agentpool.agents.events import (
         CommandCompleteEvent,
         CommandOutputEvent,
@@ -69,7 +70,7 @@ if TYPE_CHECKING:
     from agentpool_config.mcp_server import MCPServerConfig
 
     # Union type for state updates emitted via state_updated signal
-    type StateUpdate = ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
+    type StateUpdate = ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged | ToastInfo
 
 
 # ContextVar for per-execution isolation of _current_run_ctx (RFC-0021 compliance)

@@ -576,9 +576,11 @@ class ACPSession:
             except Exception as e:
                 self._current_converter = None  # Clear converter reference
                 self.log.exception("Error during streaming")
-                # Send error notification synchronously before returning end_turn
-                # to prevent race where session/update arrives after end_turn
-                await self._send_error_notification(f"❌ Agent error: {e}")
+                # Send error as toast notification instead of polluting chat history
+                await self._send_toast(
+                    message=f"Agent error: {e}",
+                    level="error",
+                )
                 await anyio.sleep(0.05)  # Allow network buffers to flush
                 return "end_turn"
             else:
@@ -587,14 +589,39 @@ class ACPSession:
                 self._current_converter = None  # Clear converter reference
                 return "end_turn"
 
-    async def _send_error_notification(self, message: str) -> None:
-        """Send error notification, with exception handling."""
+    async def _send_toast(
+        self,
+        message: str,
+        level: str = "error",
+        *,
+        duration: int | None = None,
+        action: dict[str, str] | None = None,
+    ) -> None:
+        """Send a toast notification via ExtNotification.
+
+        Uses _agentpool/toast ext notification instead of polluting chat
+        history with error messages disguised as agent text.
+
+        Args:
+            message: Toast message text.
+            level: Severity level (error, warning, info, success).
+            duration: Display duration in ms; None for persistent.
+            action: Optional action button {label, command}.
+        """
         if self._cancelled:
             return
         try:
-            await self.notifications.send_agent_text(message)
+            await self.notifications.send_ext_notification(
+                method="_agentpool/toast",
+                params={
+                    "message": message,
+                    "level": level,
+                    "duration": duration,
+                    "action": action,
+                },
+            )
         except Exception:
-            self.log.exception("Failed to send error notification")
+            self.log.exception("Failed to send toast notification")
 
     async def close(self) -> None:
         """Close the session and cleanup resources."""
@@ -737,8 +764,11 @@ class ACPSession:
             await self.command_store.execute_command(command_str, cmd_ctx)
         except Exception as e:
             logger.exception("Command execution failed")
-            # Send error notification synchronously to maintain message ordering
-            await self._send_error_notification(f"❌ Command error: {e}")
+            # Send error as toast instead of polluting chat history
+            await self._send_toast(
+                message=f"Command error: {e}",
+                level="error",
+            )
             await anyio.sleep(0.05)  # Allow network buffers to flush
 
     def register_update_callback(self, callback: Callable[[], None]) -> None:
