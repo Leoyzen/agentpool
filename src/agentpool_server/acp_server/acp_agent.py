@@ -367,6 +367,20 @@ class AgentPoolACPAgent(ACPAgent):
                             await agent.__aexit__(*sys.exc_info())
                     raise
                 else:
+                    # Add pool-level MCP tools to the session agent
+                    # Pool-level MCP servers are registered in AgentPool.__aenter__
+                    # but session agents are newly created instances, not the pool's
+                    # original agents, so they need the pool's MCP provider added.
+                    if self.agent_pool is not None and self.agent_pool.mcp is not None:
+                        try:
+                            agent.tools.add_provider(
+                                self.agent_pool.mcp.get_aggregating_provider()
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Failed to add pool-level MCP provider to session agent",
+                                exc_info=True,
+                            )
                     self._session_agents[session_id] = agent
                     return agent
             finally:
