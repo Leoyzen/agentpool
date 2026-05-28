@@ -10,6 +10,7 @@ from agentpool.resource_providers import ResourceProvider
 
 if TYPE_CHECKING:
     from agentpool.prompts.instructions import InstructionFunc
+    from agentpool.resource_providers.aggregating import AggregatingResourceProvider
     from agentpool.skills.registry import SkillsRegistry
 
 
@@ -32,6 +33,7 @@ class SkillsInstructionProvider(ResourceProvider):
         self,
         name: str = "skills_instructions",
         skills_registry: SkillsRegistry | None = None,
+        skill_provider: AggregatingResourceProvider | None = None,
         injection_mode: InjectionMode = "metadata",
         max_skills: int | None = None,
         owner: str | None = None,
@@ -41,12 +43,14 @@ class SkillsInstructionProvider(ResourceProvider):
         Args:
             name: Provider name
             skills_registry: Registry containing discovered skills
+            skill_provider: Aggregating provider combining local + MCP skills
             injection_mode: "metadata" (names/desc) or "full" (complete instructions)
             max_skills: Maximum skills to include (None = all)
             owner: Optional owner of the provider
         """
         super().__init__(name=name, owner=owner)
         self.registry = skills_registry
+        self.skill_provider = skill_provider
         self.injection_mode = injection_mode
         self.max_skills = max_skills
 
@@ -59,9 +63,6 @@ class SkillsInstructionProvider(ResourceProvider):
 
         This instruction function is called on each agent run.
         """
-        if self.registry is None:
-            return ""
-
         # 1. Check for overrides in agent context
         injection_mode = self.injection_mode
         max_skills = self.max_skills
@@ -84,8 +85,14 @@ class SkillsInstructionProvider(ResourceProvider):
         if injection_mode == "off":
             return ""
 
-        # Apply limit if configured
-        skill_items = list(self.registry.items())
+        # 2. Collect skills from skill_provider (includes local + MCP) or registry
+        skill_items: list[tuple[str, Any]] = []
+        if self.skill_provider is not None:
+            skills = await self.skill_provider.get_skills()
+            skill_items = [(skill.name, skill) for skill in skills]
+        elif self.registry is not None:
+            skill_items = list(self.registry.items())
+
         if not skill_items:
             return ""
 

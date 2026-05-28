@@ -212,6 +212,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 # Initialize skill provider and resolver BEFORE skill command registry
                 # so that skill_provider is available when syncing commands
                 await self._setup_skills_provider()
+                # Link skill provider to instruction provider so MCP skills are included
+                self.skills_instruction_provider.skill_provider = self._skill_provider
                 # Initialize skill command registry after skill provider is set up
                 self._skill_commands = SkillCommandRegistry(
                     skills_registry=self.skills.registry,

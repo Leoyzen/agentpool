@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from upathtools import UPath
@@ -147,3 +147,76 @@ async def test_skills_instruction_override_off(mock_registry, mock_ctx):
     result = await provider._generate_skills_instruction(mock_ctx)
 
     assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_skills_instruction_with_skill_provider(mock_registry, mock_ctx):
+    """SkillsInstructionProvider should use skill_provider when available."""
+    # Create an MCP skill that's NOT in the local registry
+    mcp_skill = Skill(
+        name="mcp_skill",
+        description="MCP skill description",
+        skill_path=UPath("mcp://server/tool"),
+        instructions="MCP skill instructions",
+    )
+
+    # Mock skill_provider that returns MCP skills
+    mock_skill_provider = MagicMock()
+    mock_skill_provider.get_skills = AsyncMock(return_value=[mcp_skill])
+
+    provider = SkillsInstructionProvider(
+        skills_registry=mock_registry,
+        injection_mode="metadata",
+        skill_provider=mock_skill_provider,
+    )
+
+    result = await provider._generate_skills_instruction(mock_ctx)
+
+    # Should include MCP skills from skill_provider (not registry skills,
+    # since skill_provider replaces registry when available)
+    assert "<id>mcp-skill</id>" in result
+    assert "<name>mcp-skill</name>" in result
+    assert "<description>MCP skill description</description>" in result
+    assert "<uri>mcp://server/tool</uri>" in result
+
+    # Verify skill_provider.get_skills was called
+    mock_skill_provider.get_skills.assert_called_once()
+
+    # Registry should NOT be consulted when skill_provider is available
+    mock_registry.items.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_skills_instruction_fallback_to_registry(mock_registry, mock_ctx):
+    """SkillsInstructionProvider should fallback to registry when skill_provider is None."""
+    provider = SkillsInstructionProvider(
+        skills_registry=mock_registry,
+        injection_mode="metadata",
+    )
+
+    result = await provider._generate_skills_instruction(mock_ctx)
+
+    # Should only include local registry skills
+    assert "<id>skill1</id>" in result
+    assert "<id>skill2</id>" in result
+    assert "<id>mcp_skill</id>" not in result
+    mock_registry.items.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_skills_instruction_skill_provider_empty(mock_registry, mock_ctx):
+    """When skill_provider returns empty list, should return empty."""
+    mock_skill_provider = MagicMock()
+    mock_skill_provider.get_skills = AsyncMock(return_value=[])
+
+    provider = SkillsInstructionProvider(
+        skills_registry=mock_registry,
+        injection_mode="metadata",
+        skill_provider=mock_skill_provider,
+    )
+
+    result = await provider._generate_skills_instruction(mock_ctx)
+
+    # When skill_provider is set but returns empty, result is empty
+    assert result == ""
+    mock_registry.items.assert_not_called()
