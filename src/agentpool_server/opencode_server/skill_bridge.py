@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import logfire
-from slashed import Command as SlashedCommand, CommandContext
+from slashed import Command as SlashedCommand
 
 from agentpool.log import get_logger
 
@@ -16,6 +15,10 @@ from agentpool.log import get_logger
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from slashed import CommandContext
+
     from agentpool.skills.command import SkillCommand
 
 

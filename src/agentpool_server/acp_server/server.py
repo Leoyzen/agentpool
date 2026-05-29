@@ -148,6 +148,8 @@ class ACPServer(BaseServer):
                 If None (default), uses the manifest's skills.include_default setting.
             transport: Transport configuration ("stdio", "websocket", or transport object)
             subagent_display_mode: Override for subagent display mode (argument > config > default)
+            show_events: Whether to show events in the output
+            show_events_detailed: Whether to show detailed events in the output
 
         Returns:
             Configured ACP server instance with agent pool

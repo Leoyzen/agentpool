@@ -240,15 +240,6 @@ class ResourceProvider:
             ),
         )
 
-    # Skill-related methods - subclasses should override these
-
-    async def get_skills(self) -> list[Any]:
-        """Get all available skills from this provider.
-
-        Returns:
-            List of Skill objects
-        """
-        return []
 
     async def get_skill(self, name: str) -> Any:
         """Get a specific skill by name.
@@ -291,6 +282,6 @@ class ResourceProvider:
             SkillNotFoundError: If skill not found
             ReferenceNotFoundError: If reference file not found
         """
-        from agentpool.skills.exceptions import ReferenceNotFoundError, SkillNotFoundError
+        from agentpool.skills.exceptions import SkillNotFoundError
 
         raise SkillNotFoundError(skill_name)

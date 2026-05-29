@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from contextlib import AbstractAsyncContextManager
     from types import TracebackType
-    from typing import Any
 
     from upathtools import JoinablePathLike, UPath
 
@@ -126,13 +125,23 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
 
         # Set up context manager if we have a config file path
         # This enables config-relative path resolution during manifest loading
-        logger.debug("AgentPool.__init__: config_path=%s, creating ConfigContextManager", config_path)
+        logger.debug(
+            "AgentPool.__init__: config_path=%s, creating ConfigContextManager",
+            config_path,
+        )
         with ConfigContextManager(config_path):
             if manifest_obj is None:
                 manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]
-            logger.debug("AgentPool.__init__: after manifest load, agents=%s", list(manifest_obj.agents.keys()))
+            logger.debug(
+            "AgentPool.__init__: after manifest load, agents=%s",
+            list(manifest_obj.agents.keys()),
+        )
             for name, cfg in manifest_obj.agents.items():
-                logger.debug("AgentPool.__init__: agent %s config_file_path=%s", name, getattr(cfg, 'config_file_path', 'N/A'))
+                logger.debug(
+            "AgentPool.__init__: agent %s config_file_path=%s",
+            name,
+            getattr(cfg, "config_file_path", "N/A"),
+        )
 
             self._config_file_path = config_path
             self.manifest = manifest_obj
@@ -334,8 +343,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 providers.append(local_provider)
 
         # Add MCPResourceProvider for each MCP server
-        for mcp_provider in self.mcp.providers:
-            providers.append(mcp_provider)
+        providers.extend(self.mcp.providers)
 
         # Create aggregating provider
         self._skill_provider = AggregatingResourceProvider(
@@ -364,7 +372,6 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         # Skill changes are handled by SkillCommandRegistry which subscribes
         # directly to _skill_provider.skills_changed. No additional forwarding
         # needed here to avoid potential event loops.
-        pass
 
     async def cleanup(self) -> None:
         """Clean up all agents."""

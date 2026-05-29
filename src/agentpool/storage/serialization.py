@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict, TypeAdapter
@@ -12,6 +11,8 @@ from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic_ai import ModelRequestPart
 
 

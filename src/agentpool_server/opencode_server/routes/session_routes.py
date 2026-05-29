@@ -675,6 +675,7 @@ async def get_session_messages(
 
     Args:
         session_id: Unique identifier for the session
+        state: Server state dependency
         limit: Optional maximum number of messages to return
 
     Returns:

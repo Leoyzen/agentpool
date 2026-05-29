@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic_ai import UserContent
 
-from agentpool.common_types import PathReference
 from agentpool.log import get_logger
 from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.utils import identifiers as identifier
@@ -51,6 +48,11 @@ from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapte
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pydantic_ai import UserContent
+
+    from agentpool.common_types import PathReference
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -97,7 +99,7 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
             logger.exception("LSP warmup failed")
 
     # Fire and forget - don't block message processing
-    asyncio.create_task(warmup())
+    _ = _task = asyncio.create_task(warmup())
 
 
 async def _maybe_generate_title(
@@ -190,7 +192,7 @@ def _update_session_title(state: StateDep, session_id: str, title: str) -> None:
     # Schedule the async update
     try:
         loop = asyncio.get_event_loop()
-        loop.create_task(_update())
+        _ = _task = loop.create_task(_update())
     except RuntimeError:
         # No event loop running, ignore
         pass

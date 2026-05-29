@@ -7,6 +7,7 @@ between agents and ACP clients through the JSON-RPC protocol.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextlib import suppress
 from dataclasses import dataclass, field
 import re
@@ -24,11 +25,10 @@ from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent, AgentPool  # noqa: TC001
+from agentpool import Agent
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
-from agentpool_config.commands import CommandConfig
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
@@ -55,6 +55,7 @@ if TYPE_CHECKING:
         StopReason,
         Usage,
     )
+    from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import PathReference
     from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
@@ -235,8 +236,7 @@ class ACPSession:
                 params: RequestPermissionRequest,
             ) -> RequestPermissionResponse:
                 forwarded = params.model_copy(update={"session_id": self.session_id})
-                response = await self.requests.client.request_permission(forwarded)
-                return response
+                return await self.requests.client.request_permission(forwarded)
 
             self.agent.acp_permission_callback = permission_callback
 
@@ -642,10 +642,12 @@ class ACPSession:
                             # This happens in the same async context as the converter
                             async for cancel_update in converter.cancel_pending_tools():
                                 await self.notifications.send_update(cancel_update)
-                            # CRITICAL: Allow time for client to process tool completion notifications
-                            # before sending PromptResponse. Without this delay, the client may receive
-                            # and process the PromptResponse before the tool notifications, causing UI
-                            # state desync where subsequent prompts appear stuck/unresponsive.
+                            # CRITICAL: Allow time for client to process tool
+                            # completion notifications before sending PromptResponse.
+                            # Without this delay, the client may receive and process
+                            # the PromptResponse before the tool notifications, causing
+                            # UI state desync where subsequent prompts appear
+                            # stuck/unresponsive.
                             # This is needed because even though send() awaits the write, the client
                             # may process messages asynchronously or out of order.
                             await anyio.sleep(0.05)
@@ -757,9 +759,10 @@ class ACPSession:
                 self.agent.state_updated.disconnect(self._on_state_updated)
 
             # Clean up sys_prompts from THIS session's agent only
-            if isinstance(self.agent, Agent):
-                if self.get_cwd_context in self.agent.sys_prompts.prompts:
-                    self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            if isinstance(self.agent, Agent) and self.get_cwd_context in self.agent.sys_prompts.prompts:
+                    self.agent.sys_prompts.prompts.remove(
+                        self.get_cwd_context  # pyright: ignore[reportArgumentType]
+                    )  # ty: ignore[invalid-argument-type]
 
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
@@ -767,10 +770,8 @@ class ACPSession:
                 if skill_registry is not None and hasattr(
                     skill_registry, "_command_change_handlers"
                 ):
-                    try:
+                    with contextlib.suppress(ValueError):
                         skill_registry._command_change_handlers.remove(self._skill_command_callback)
-                    except ValueError:
-                        pass  # Already removed
 
             # Note: Individual agents are managed by the pool's lifecycle
             # The pool will handle agent cleanup when it's closed

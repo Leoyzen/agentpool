@@ -12,6 +12,7 @@ from acp.connection import Connection
 from acp.exceptions import RequestError
 from acp.schema import (
     AuthenticateResponse,
+    CloseSessionResponse,
     CreateTerminalRequest,
     ElicitationCompleteNotification,
     ElicitationCreateRequest,
@@ -30,7 +31,6 @@ from acp.schema import (
     SetSessionConfigOptionResponse,
     SetSessionModelResponse,
     SetSessionModeResponse,
-    CloseSessionResponse,
     TerminalOutputRequest,
     WaitForTerminalExitRequest,
     WriteTextFileRequest,
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         CancelNotification,
         ClientMethod,
+        CloseSessionRequest,
         CreateTerminalResponse,
         ElicitationCreateResponse,
         ForkSessionRequest,
@@ -64,7 +65,6 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        CloseSessionRequest,
         TerminalOutputResponse,
         WaitForTerminalExitResponse,
         WriteTextFileResponse,

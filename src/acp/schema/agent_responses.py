@@ -7,8 +7,7 @@ from pydantic import Field
 
 from acp.schema.base import Response
 from acp.schema.capabilities import AgentCapabilities
-from acp.schema.common import AuthMethod, Implementation
-from acp.schema.providers import ProviderInfo  # noqa: TC001
+from acp.schema.common import Implementation
 from acp.schema.session_state import (  # noqa: TC001
     SessionConfigOption,
     SessionInfo,
@@ -20,6 +19,8 @@ from acp.schema.session_updates import Usage  # noqa: TC001
 
 if TYPE_CHECKING:
     from acp.schema import ModelInfo, SessionMode
+    from acp.schema.common import AuthMethod
+    from acp.schema.providers import ProviderInfo
 
 
 StopReason = Literal[

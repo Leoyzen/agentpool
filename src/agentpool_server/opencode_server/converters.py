@@ -351,7 +351,8 @@ def chat_message_to_opencode(  # noqa: PLR0915
                             else:
                                 title = f"Completed {tool_name}"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
-                                # Extract metadata from tool result if present (e.g., subagent sessionId)
+                                # Extract metadata from tool result if present
+                    # (e.g., subagent sessionId)
                                 metadata = (
                                     tool_content.get("metadata", {})
                                     if isinstance(tool_content, dict)

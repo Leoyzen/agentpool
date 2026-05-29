@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from acp.schema import ClientCapabilities
@@ -153,7 +154,9 @@ class ACPSessionManager:
 
             # NEW: Get or create per-session agent (if acp_agent supports it)
             try:
-                session_agent = await acp_agent.get_or_create_session_agent(session_id, input_provider=None)
+                session_agent = await acp_agent.get_or_create_session_agent(
+                    session_id, input_provider=None
+                )
             except (TypeError, AttributeError):
                 # Backward compat: use the passed agent directly (e.g., mocks in tests)
                 session_agent = agent
@@ -177,14 +180,13 @@ class ACPSessionManager:
                 await session.initialize_mcp_servers()
                 self._active[session_id] = session
                 logger.info("Created ACP session", session_id=session_id, agent=session_agent.name)
-                return session_id
             except Exception:
                 # Session creation failed - clean up the orphaned agent
-                try:
+                with contextlib.suppress(TypeError, AttributeError):
                     await acp_agent.remove_session_agent(session_id)
-                except (TypeError, AttributeError):
-                    pass  # Mock agent, no cleanup needed
                 raise
+            else:
+                return session_id
 
     def get_session(self, session_id: str) -> ACPSession | None:
         """Get an active session by ID."""
@@ -309,10 +311,8 @@ class ACPSessionManager:
             await session.close()
             # NEW: Clean up the dedicated agent
             if session.acp_agent:
-                try:
+                with contextlib.suppress(TypeError):
                     await session.acp_agent.remove_session_agent(session_id)
-                except TypeError:
-                    pass  # Mock agent, no cleanup needed
             logger.info("Closed ACP session", session_id=session_id)
 
         if delete:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from cachetools import TTLCache
 from upathtools import UPath
@@ -15,13 +15,14 @@ from agentpool.skills.exceptions import (
     SkillNotFoundError,
 )
 from agentpool.skills.registry import SkillsRegistry
-from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
     from types import TracebackType
 
     from upathtools import JoinablePathLike
+
+    from agentpool.skills.skill import Skill
 
 
 class LocalResourceProvider(ResourceProvider):
@@ -61,7 +62,7 @@ class LocalResourceProvider(ResourceProvider):
         self._cache: TTLCache[str, Skill] = TTLCache(maxsize=1000, ttl=cache_ttl)
         self._cache_valid = False
 
-    async def __aenter__(self) -> LocalResourceProvider:
+    async def __aenter__(self) -> Self:
         """Async context entry - discover skills and connect callbacks.
 
         Returns:
@@ -124,7 +125,6 @@ class LocalResourceProvider(ResourceProvider):
         try:
             skill = self._registry.get(name)
             self._cache[name] = skill
-            return skill
         except Exception as e:
             available = list(self._registry.keys())
             raise SkillNotFoundError(name, available) from e
@@ -247,7 +247,7 @@ class LocalResourceProvider(ResourceProvider):
             event = self.create_change_event("skills")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self.skills_changed.emit(event))
+                task_ref = loop.create_task(self.skills_changed.emit(event))
             except RuntimeError:
                 # No running loop - can't emit signal
                 pass
@@ -260,7 +260,7 @@ class LocalResourceProvider(ResourceProvider):
             event = self.create_change_event("skills")
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self.skills_changed.emit(event))
+                task_ref = loop.create_task(self.skills_changed.emit(event))
             except RuntimeError:
                 # No running loop - can't emit signal
                 pass

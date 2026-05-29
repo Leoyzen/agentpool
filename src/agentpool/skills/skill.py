@@ -10,6 +10,7 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from upathtools import UPath
 
+
 # Type for skill paths - can be UPath (for local filesystem skills)
 # or PurePosixPath (for virtual skill:// URIs from MCP providers)
 SkillPathType = UPath | PurePosixPath

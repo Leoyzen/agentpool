@@ -415,7 +415,11 @@ class ACPClientHandler(Client):
                     action=params.get("action"),
                 )
                 await self._agent.state_updated.emit(toast)
-                logger.debug("Toast notification received", message=toast.message, level=toast.level)
+                logger.debug(
+                    "Toast notification received",
+                    message=toast.message,
+                    level=toast.level,
+                )
             case _:
                 logger.debug("Unhandled extension notification", method=method)
 

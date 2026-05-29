@@ -465,14 +465,14 @@ class Tool[TOutputType = Any]:
             tree = ast.parse(code)
         except SyntaxError as e:
             msg = f"Invalid Python syntax: {e}"
-            raise ValueError(msg) from e
+            raise TypeError(msg) from e
 
         # Check for dangerous constructs
         for node in ast.walk(tree):
             # Disallow imports
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 msg = "Import statements are not allowed in code execution"
-                raise ValueError(msg)
+                raise TypeError(msg)
             # Disallow function calls that aren't attribute accesses on safe objects
             if isinstance(node, ast.Call):
                 # Allow simple calls like print(), str(), int(), etc.
@@ -561,7 +561,7 @@ class Tool[TOutputType = Any]:
                 # Disallow complex calls
                 else:
                     msg = "Complex function calls are not allowed"
-                    raise ValueError(msg)
+                    raise TypeError(msg)
             # Disallow exec, eval, compile
             if isinstance(node, ast.Name) and node.id in {"exec", "eval", "compile", "__import__"}:
                 msg = f"Use of {node.id} is not allowed"
@@ -584,11 +584,13 @@ class Tool[TOutputType = Any]:
                     msg = f"Access to attribute {node.attr} is not allowed"
                     raise ValueError(msg)
             # Disallow calls to type() or accessing type information
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id == "type":
-                    if len(node.args) > 1:
-                        msg = "Using type() to create classes is not allowed"
-                        raise ValueError(msg)
+            if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "type"
+                and len(node.args) > 1
+            ):
+                msg = "Using type() to create classes is not allowed"
+                raise ValueError(msg)
 
         # Create restricted namespace with only safe builtins
         safe_namespace: dict[str, Any] = {

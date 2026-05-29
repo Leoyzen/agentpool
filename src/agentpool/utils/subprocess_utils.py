@@ -200,7 +200,8 @@ async def start_process(
     """
     if use_shell:
         logger.warning(
-            "Starting process with shell=True. This is a security risk if command contains untrusted input. "
+            "Starting process with shell=True. "
+            "This is a security risk if command contains untrusted input. "
             "Only use shell=True with trusted commands.",
             command=startup_command,
         )

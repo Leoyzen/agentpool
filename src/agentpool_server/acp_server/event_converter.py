@@ -10,7 +10,7 @@ This separation enables easy testing without mocks.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 import os
 from typing import TYPE_CHECKING, Any, Literal, assert_never
@@ -72,7 +72,10 @@ from agentpool.agents.events import (
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
+
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from acp.agent.notifications import ACPNotifications
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
@@ -827,7 +830,11 @@ class ACPEventConverter:
                 tool_call_id=tc_id,
             ):
                 if self._display_mode == "zed" and child_session_id:
-                    tool_call_id = tc_id or str(uuid.uuid4())
+                    # Use a NEW tool_call_id for the subagent, independent from
+                    # the PydanticAI-native tool call.  This lets Zed see a
+                    # distinct tool call bearing _meta.subagent_session_info,
+                    # while the original tool call remains untouched.
+                    tool_call_id = str(uuid.uuid4())
                     self._subagent_message_counts[child_session_id] = 0
                     # RFC-0027 Wave 3: Create independent ACP child subsession
                     if (

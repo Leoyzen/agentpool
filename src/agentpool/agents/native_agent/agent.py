@@ -16,12 +16,16 @@ import logfire
 from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
 
+
 try:
     from pydantic_ai import AgentRetries
     from pydantic_ai.capabilities import NativeTool, ProcessHistory
 except ImportError:
     AgentRetries = None  # type: ignore[misc,assignment]
-    from pydantic_ai.capabilities import BuiltinTool as NativeTool, HistoryProcessor as ProcessHistory
+    from pydantic_ai.capabilities import (
+        BuiltinTool as NativeTool,
+        HistoryProcessor as ProcessHistory,
+    )
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
@@ -204,7 +208,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers: Model providers for model discovery (e.g., ["openai", "anthropic"]).
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
-            history_processors: History processors (deprecated - use session=MemoryConfig(history_processors=[...]))
+            history_processors: History processors (deprecated - use
+                session=MemoryConfig(history_processors=[...]))
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -360,7 +365,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if len(params) == two_params:
             last_param_name = params[1].name.lower()
             if last_param_name not in ("messages", "msgs", "history"):
-                msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
+                msg = (
+                    "Second parameter of history processor must be "
+                    f"messages/msgs/history, got {params[1].name}"
+                )
                 raise ValueError(msg)
 
     def _resolve_history_processors(self) -> list[Callable[..., Any]]:
@@ -889,7 +897,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         iteration_done = asyncio.Event()
         iteration_error: BaseException | None = None
         response_msg: ChatMessage[Any] | None = None
-        response_time: float = 0.0
 
         async def agent_iteration_task() -> None:
             """Background task that runs agentlet.iter() and feeds events to queue."""
@@ -994,7 +1001,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     # See: https://github.com/python/cpython/issues/111162
                     current = asyncio.current_task()
                     if current is not None and current.cancelling() > 0:
-                        raise asyncio.CancelledError() from None
+                        raise asyncio.CancelledError from None
                     # Check if we should exit
                     if run_ctx.cancelled:
                         break
@@ -1193,7 +1200,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             await self.update_state(config_id="mode", value_id=mode_id)
 
         elif category_id == "model":
-            self.log.info(f"_set_mode called for model: {mode_id}")
+            self.log.info("_set_mode called for model: %s", mode_id)
             # Resolve variant name from actual model identifier if needed
             variant_name = mode_id
             if (
@@ -1206,7 +1213,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     resolved = f"{model.system}:{model.model_name}"
                     if resolved == mode_id:
                         variant_name = vn
-                        self.log.info(f"Resolved model identifier {mode_id} to variant {variant_name}")
+                        self.log.info(
+                            "Resolved model identifier %s to variant %s",
+                            mode_id,
+                            variant_name,
+                        )
                         break
             # Validate model exists (check both tokonomics models and model_variants)
             is_valid = False
@@ -1214,7 +1225,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 valid_ids = [m.pydantic_ai_id for m in models]
                 if mode_id in valid_ids:
                     is_valid = True
-                    self.log.info(f"Model {mode_id} validated against tokonomics")
+                    self.log.info("Model %s validated against tokonomics", mode_id)
             # Also check model_variants from manifest (by variant name or identifier)
             if (
                 not is_valid
@@ -1222,18 +1233,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 and variant_name in self.agent_pool.manifest.model_variants
             ):
                 is_valid = True
-                self.log.info(f"Model {mode_id} validated against model_variants (variant: {variant_name})")
+                self.log.info(
+                            "Model %s validated against model_variants (variant: %s)",
+                            mode_id,
+                            variant_name,
+                        )
             if not is_valid:
-                self.log.warning(
-                    f"Model {mode_id} validation failed. Available variants: {list(self.agent_pool.manifest.model_variants.keys()) if self.agent_pool else 'N/A'}"
+                available = (
+                    list(self.agent_pool.manifest.model_variants.keys())
+                    if self.agent_pool
+                    else "N/A"
                 )
+                self.log.warning(
+                        "Model %s validation failed. Available variants: %s",
+                        mode_id,
+                        available,
+                    )
                 raise UnknownModeError(mode_id, valid_ids if models else [])
             # Set the model using variant name (preserves model_settings)
             old_model = self._model
             self._model, settings = self._resolve_model_string(variant_name)
             if settings:
                 self.model_settings = settings
-            self.log.info(f"Model changed from {old_model} to {self._model}")
+            self.log.info("Model changed from %s to %s", old_model, self._model)
             await self.update_state(config_id="model", value_id=mode_id)
         else:
             raise UnknownCategoryError(category_id, ["mode", "model"])

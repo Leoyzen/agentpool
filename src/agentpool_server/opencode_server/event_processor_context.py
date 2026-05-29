@@ -10,12 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from agentpool_server.opencode_server.models.parts import ReasoningPart, TextPart, ToolPart
+from agentpool_server.opencode_server.models.parts import ToolPart
 
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.models import MessageWithParts
-    from agentpool_server.opencode_server.models.parts import ToolPart
+    from agentpool_server.opencode_server.models.parts import ReasoningPart, TextPart, ToolPart
     from agentpool_server.opencode_server.state import ServerState
 
 

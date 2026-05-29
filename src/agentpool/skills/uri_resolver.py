@@ -14,13 +14,14 @@ Security features:
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
+import re
 from typing import TYPE_CHECKING
+import unicodedata
 from urllib.parse import unquote, urlparse
 
 from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
+
 
 if TYPE_CHECKING:
     from agentpool.resource_providers.base import ResourceProvider
@@ -48,7 +49,11 @@ class ResolvedSkillURI:
         ResolvedSkillURI(provider='local', skill_name='python-expert', reference_path=None)
 
         >>> ResolvedSkillURI.parse("skill://local/python-expert/references/guide.md")
-        ResolvedSkillURI(provider='local', skill_name='python-expert', reference_path='references/guide.md')
+        ResolvedSkillURI(
+            provider='local',
+            skill_name='python-expert',
+            reference_path='references/guide.md',
+        )
 
         >>> ResolvedSkillURI.parse("python-expert")
         ResolvedSkillURI(provider=None, skill_name='python-expert', reference_path=None)
@@ -142,10 +147,11 @@ class ResolvedSkillURI:
 
         # Validate reference path components if present
         # Reject absolute paths (starting with /) for defense-in-depth
-        if reference_path is not None:
-            if ".." in reference_path.split("/") or reference_path.startswith("/"):
-                msg = f"Path traversal detected in reference path: {uri!r}"
-                raise SecurityError(msg)
+        if reference_path is not None and (
+            ".." in reference_path.split("/") or reference_path.startswith("/")
+        ):
+            msg = f"Path traversal detected in reference path: {uri!r}"
+            raise SecurityError(msg)
 
         return cls(provider=provider, skill_name=skill_name, reference_path=reference_path)
 

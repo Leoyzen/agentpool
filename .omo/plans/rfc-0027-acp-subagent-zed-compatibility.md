@@ -137,7 +137,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
 
 ## TODOs
 
-- [ ] 1. Phase 0 spike: validate child `session/update` transport
+- [x] 1. Phase 0 spike: validate child `session/update` transport
 
   **What to do**:
   - Build a proof-of-concept that creates a child ACP session during prompt processing.
@@ -196,7 +196,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
     Evidence: .sisyphus/evidence/task-1-unknown-child-update-rejected.md
   ```
 
-- [ ] 2. Phase 1 `_meta` plumbing for Zed subagent tool calls
+- [x] 2. Phase 1 `_meta` plumbing for Zed subagent tool calls
 
   **What to do**:
   - Add `SubagentSessionInfo` and helper builders for `field_meta` / `_meta`.
@@ -258,7 +258,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
     Evidence: .sisyphus/evidence/task-2-non-zed-clean.md
   ```
 
-- [ ] 3. Propagate `zed` through config, CLI, and type surfaces
+- [x] 3. Propagate `zed` through config, CLI, and type surfaces
 
   **What to do**:
   - Add `zed` to the display-mode literals in the ACP server/config surface.
@@ -322,7 +322,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
     Evidence: .sisyphus/evidence/task-3-invalid-mode-rejected.md
   ```
 
-- [ ] 4. Fix `subagent_tools.py` child-session emission correctness
+- [x] 4. Fix `subagent_tools.py` child-session emission correctness
 
   **What to do**:
   - Remove the duplicate `SpawnSessionStart` emission on the sync path.
@@ -380,7 +380,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
     Evidence: .sisyphus/evidence/task-4-child-session-id-match.md
   ```
 
-- [ ] 5. Phase 2 child ACP session lifecycle and event routing
+- [x] 5. Phase 2 child ACP session lifecycle and event routing
 
   **What to do**:
   - Extend the ACP converter/session bridge so `zed` mode can create a child ACP session.
@@ -443,7 +443,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
     Evidence: .sisyphus/evidence/task-5-child-session-close.md
   ```
 
-- [ ] 6. Phase 3 message index tracking
+- [x] 6. Phase 3 message index tracking
 
   **What to do**:
   - Track subagent message counts so `message_start_index` / `message_end_index` are meaningful.
@@ -503,7 +503,7 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
     Evidence: .sisyphus/evidence/task-6-empty-session-index.md
   ```
 
-- [ ] 7. Final regression sweep, docs, and cleanup
+- [x] 7. Final regression sweep, docs, and cleanup
 
   **What to do**:
   - Update any config/docs/help text that mentions display modes or subagent behavior.
@@ -565,22 +565,22 @@ Every task must include agent-executed QA scenarios and evidence paths in `.sisy
 
 ## Final Verification Wave (MANDATORY)
 
-- [ ] F1. Plan compliance audit — `oracle`
+- [x] F1. Plan compliance audit — `oracle`
   - Read the plan end-to-end and verify each must-have/must-not-have is satisfied by the implemented diff.
-  - Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
+  - Output: `Must Have [3/3] | Must NOT Have [5/5] | Tasks [7/7] | VERDICT: APPROVE`
 
-- [ ] F2. Code quality review — `unspecified-high`
+- [x] F2. Code quality review — `unspecified-high`
   - Run `uv run pytest`, the repo type check, and `ruff check` on the touched modules.
   - Check for `as any`-style shortcuts, empty catches, debug prints, unused imports, and AI-slop over-abstraction.
-  - Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
+  - Output: `Build [PASS] | Lint [PASS] | Tests [29 pass/0 fail event_converter, 4/4 zed snapshots] | Files [12 clean/0 new issues] | VERDICT: APPROVE`
 
-- [ ] F3. Real QA replay — `unspecified-high`
+- [x] F3. Real QA replay — `unspecified-high`
   - Re-run every QA scenario listed above and capture evidence under `.sisyphus/evidence/final-qa/`.
-  - Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
+  - Output: `Scenarios [10/10 pass] | Integration [PASS] | Edge Cases [5 tested] | VERDICT: APPROVE`
 
-- [ ] F4. Scope fidelity check — `deep`
+- [x] F4. Scope fidelity check — `deep`
   - Compare the final diff against the RFC scope to ensure 1:1 coverage and no contamination from unrelated work.
-  - Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
+  - Output: `Tasks [7/7 compliant] | Contamination [CLEAN] | Unaccounted [CLEAN] | VERDICT: APPROVE`
 
 ---
 

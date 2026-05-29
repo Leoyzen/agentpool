@@ -173,6 +173,13 @@ __all__ = [  # noqa: RUF022
     # close session
     "CloseSessionRequest",
     "CloseSessionResponse",
+    # provider types
+    "DisableProvidersRequest",
+    "DisableProvidersResponse",
+    "ListProvidersRequest",
+    "ListProvidersResponse",
+    "SetProvidersRequest",
+    "SetProvidersResponse",
     # model types
     "ModelInfo",
     "SessionModelState",

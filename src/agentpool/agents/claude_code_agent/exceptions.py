@@ -32,4 +32,3 @@ def raise_if_usage_limit_reached(message) -> None:
     """
     # Usage limits are handled internally by the Claude Code SDK
     # This function is a stub for API compatibility
-    pass
