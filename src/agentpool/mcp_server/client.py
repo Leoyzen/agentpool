@@ -475,13 +475,8 @@ class MCPClient:
                 name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
             )
             if result.is_error:
-                # MCP tool returned an error - notify ACP and return to LLM
+                # MCP tool returned an error - return it as content so LLM can see it
                 error_text = extract_text_content(result.content)
-                if agent_ctx:
-                    await agent_ctx.events.tool_call_progress(
-                        title=f"Tool {name} failed",
-                        status="failed",
-                    )
                 return ToolReturn(return_value=f"Tool error: {error_text}", content=error_text)
             content = await from_mcp_content(result.content)
             # Decision logic for return type
