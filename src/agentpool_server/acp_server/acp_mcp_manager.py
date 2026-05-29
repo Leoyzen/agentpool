@@ -116,9 +116,44 @@ class AcpMcpConnection:
             message = message.message.model_dump(
                 by_alias=True, mode="json", exclude_none=True
             )
-        return await self._send_to_client(
-            {"connectionId": self.connection_id, "message": message}
-        )
+
+        wrapped = {"connectionId": self.connection_id, "message": message}
+        result = await self._send_to_client(wrapped)
+
+        # Forward ACP mcp/message response back to the MCP session so
+        # ClientSession._receive_loop can process it.
+        if isinstance(result, dict) and self._to_session_send is not None:
+            if "jsonrpc" in result:
+                # Client returned standard JSON-RPC response
+                session_msg = SessionMessage(
+                    message=JSONRPCMessage.model_validate(result)
+                )
+                try:
+                    await self._to_session_send.send(session_msg)
+                except anyio.BrokenResourceError:
+                    logger.debug(
+                        "Cannot forward response: session stream already closed",
+                        connection_id=self.connection_id,
+                    )
+            elif isinstance(message, dict) and "id" in message:
+                # Client returned bare result; wrap as JSON-RPC response
+                wrapped_response = {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "result": result,
+                }
+                session_msg = SessionMessage(
+                    message=JSONRPCMessage.model_validate(wrapped_response)
+                )
+                try:
+                    await self._to_session_send.send(session_msg)
+                except anyio.BrokenResourceError:
+                    logger.debug(
+                        "Cannot forward response: session stream already closed",
+                        connection_id=self.connection_id,
+                    )
+
+        return result
 
     @property
     def to_session(self) -> MemoryObjectReceiveStream[dict[str, Any]]:

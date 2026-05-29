@@ -399,55 +399,25 @@ async def test_get_tools_sends_tools_list_via_acp(
                     req_id = session_msg.get("id")
 
                     if req_method == "initialize" and req_id is not None:
-                        result = InitializeResult(
-                            protocolVersion="2024-11-05",
-                            capabilities=ServerCapabilities(),
-                            serverInfo=Implementation(
-                                name="test", version="1.0"
-                            ),
-                        )
-                        response = JSONRPCResponse(
-                            jsonrpc="2.0",
-                            id=req_id,
-                            result=result.model_dump(
-                                by_alias=True, mode="json", exclude_none=True
-                            ),
-                        )
-                        response_msg = SessionMessage(
-                            message=JSONRPCMessage(response)
-                        )
-                        assert conn._to_session_send is not None
-                        asyncio.create_task(
-                            conn._to_session_send.send(response_msg)
-                        )
+                        return {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {},
+                            "serverInfo": {"name": "test", "version": "1.0"},
+                        }
 
                     elif req_method == "tools/list":
-                        result = ListToolsResult(
-                            tools=[
-                                Tool(
-                                    name="test_tool",
-                                    description="A test tool",
-                                    inputSchema={
+                        return {
+                            "tools": [
+                                {
+                                    "name": "test_tool",
+                                    "description": "A test tool",
+                                    "inputSchema": {
                                         "type": "object",
                                         "properties": {},
                                     },
-                                )
+                                }
                             ]
-                        )
-                        response = JSONRPCResponse(
-                            jsonrpc="2.0",
-                            id=req_id,
-                            result=result.model_dump(
-                                by_alias=True, mode="json", exclude_none=True
-                            ),
-                        )
-                        response_msg = SessionMessage(
-                            message=JSONRPCMessage(response)
-                        )
-                        assert conn._to_session_send is not None
-                        asyncio.create_task(
-                            conn._to_session_send.send(response_msg)
-                        )
+                        }
             return {}
 
         return {}

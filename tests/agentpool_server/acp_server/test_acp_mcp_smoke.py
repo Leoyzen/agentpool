@@ -125,16 +125,7 @@ async def test_initialize_and_get_tools_with_json_round_trip(
                     capabilities=ServerCapabilities(),
                     serverInfo=Implementation(name="test", version="1.0"),
                 )
-                response_dict = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": result.model_dump(
-                        by_alias=True, mode="json", exclude_none=True
-                    ),
-                }
-                # Simulate wire round-trip for the response as well
-                response_dict = json.loads(json.dumps(response_dict))
-                asyncio.create_task(conn.handle_client_message(response_dict))
+                return result.model_dump(by_alias=True, mode="json", exclude_none=True)
 
             elif req_method == "tools/list":
                 result = ListToolsResult(
@@ -146,15 +137,7 @@ async def test_initialize_and_get_tools_with_json_round_trip(
                         )
                     ]
                 )
-                response_dict = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": result.model_dump(
-                        by_alias=True, mode="json", exclude_none=True
-                    ),
-                }
-                response_dict = json.loads(json.dumps(response_dict))
-                asyncio.create_task(conn.handle_client_message(response_dict))
+                return result.model_dump(by_alias=True, mode="json", exclude_none=True)
 
             return {}
 

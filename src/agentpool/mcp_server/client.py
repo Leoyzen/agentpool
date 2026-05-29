@@ -474,7 +474,7 @@ class MCPClient:
             result = await self._client.call_tool(
                 name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
             )
-            if result.isError:
+            if result.is_error:
                 # MCP tool returned an error - return it as content so LLM can see it
                 error_text = extract_text_content(result.content)
                 return ToolReturn(return_value=f"Tool error: {error_text}", content=error_text)

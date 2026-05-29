@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+DEFAULT_READ_TIMEOUT_SECONDS: float = 5.0
+
 
 class AcpMcpTransport(ClientTransport):
     """fastmcp ClientTransport that tunnels MCP over ACP.
@@ -31,13 +34,15 @@ class AcpMcpTransport(ClientTransport):
     with an MCP server over the existing ACP connection.
     """
 
-    def __init__(self, connection: AcpMcpConnection) -> None:
+    def __init__(self, connection: AcpMcpConnection, timeout: float = DEFAULT_READ_TIMEOUT_SECONDS) -> None:
         """Initialize the transport with an active ACP MCP connection.
 
         Args:
             connection: An active AcpMcpConnection with open streams.
+            timeout: Read timeout in seconds for MCP session operations.
         """
         self._connection = connection
+        self._timeout = timeout
 
     @property
     def connection_id(self) -> str:
@@ -74,9 +79,13 @@ class AcpMcpTransport(ClientTransport):
                 await self._connection.close()
                 raise
 
+        # Remove read_timeout_seconds from session_kwargs to avoid duplicate keyword
+        # argument since we set it explicitly from our transport timeout.
+        session_kwargs.pop("read_timeout_seconds", None)
         session = ClientSession(
             self._connection.to_session,  # type: ignore[arg-type]
             self._connection.from_session,  # type: ignore[arg-type]
+            read_timeout_seconds=timedelta(seconds=self._timeout),
             **session_kwargs,
         )
 
