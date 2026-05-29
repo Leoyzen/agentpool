@@ -17,7 +17,20 @@ import pytest
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
+from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
+from agentpool_config.mcp_server import AcpMCPServerConfig
+from mcp.shared.message import SessionMessage
+from mcp.types import (
+    JSONRPCMessage,
+    JSONRPCResponse,
+    Implementation,
+    InitializeResult,
+    ListToolsResult,
+    ServerCapabilities,
+    Tool,
+)
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -254,3 +267,235 @@ async def test_close_disconnects_all_servers(
 
     # Verify manager is empty
     assert len(acp_agent._mcp_manager) == 0
+
+
+# Test 8: session.initialize() triggers the ACP mcp/message send_to_client callback
+
+
+async def test_session_initialize_triggers_mcp_message(
+    acp_agent: AgentPoolACPAgent,
+    server_config: AcpMcpServer,
+) -> None:
+    """ClientSession.initialize() must trigger send_to_client via _forward_to_client.
+
+    This verifies the bidirectional flow that existing tests miss because
+    they patch ClientSession.initialize():
+
+    1. connect_acp_mcp_server() creates AcpMcpConnection with send_to_client
+    2. AcpMcpTransport.connect_session() creates ClientSession + _forward_to_client
+    3. Real session.initialize() sends MCP initialize request
+    4. _forward_to_client() reads it and calls connection.send_to_client()
+    5. Mock client captures it and sends back response
+    6. ClientSession receives response, initialize() completes
+
+    If _forward_to_client() is broken (e.g. doesn't read from
+    from_session_receive), initialize() hangs forever.
+    """
+    received_mcp_messages: list[dict] = []
+
+    async def mock_send_request(method: str, params: dict) -> dict:
+        if method == "mcp/connect":
+            return {"connectionId": "test-conn-init"}
+
+        if method == "mcp/message":
+            received_mcp_messages.append(params)
+            session_msg = params.get("message")
+            if (
+                session_msg is not None
+                and hasattr(session_msg, "message")
+                and hasattr(session_msg.message, "root")
+                and hasattr(session_msg.message.root, "method")
+                and session_msg.message.root.method == "initialize"
+            ):
+                conn = acp_agent._mcp_manager.get_connection("test-conn-init")
+                if conn is not None:
+                    result = InitializeResult(
+                        protocolVersion="2024-11-05",
+                        capabilities=ServerCapabilities(),
+                        serverInfo=Implementation(name="test", version="1.0"),
+                    )
+                    response = JSONRPCResponse(
+                        jsonrpc="2.0",
+                        id=session_msg.message.root.id,
+                        result=result.model_dump(
+                            by_alias=True, mode="json", exclude_none=True
+                        ),
+                    )
+                    response_msg = SessionMessage(message=JSONRPCMessage(response))
+                    assert conn._to_session_send is not None
+                    await conn._to_session_send.send(response_msg)
+            return {}
+
+        return {}
+
+    acp_agent.client.send_request = mock_send_request  # type: ignore[method-assign]
+
+    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    assert connection_id == "test-conn-init"
+
+    conn = acp_agent._mcp_manager.get_connection(connection_id)
+    assert conn is not None
+
+    transport = AcpMcpTransport(conn)
+    async with transport.connect_session() as session:
+        with anyio.fail_after(5):
+            await session.initialize()
+
+    assert len(received_mcp_messages) >= 1, (
+        "send_to_client was never called - _forward_to_client() may be broken"
+    )
+
+    initialize_found = False
+    for msg in received_mcp_messages:
+        inner = msg.get("message")
+        if (
+            inner is not None
+            and hasattr(inner, "message")
+            and hasattr(inner.message, "root")
+            and hasattr(inner.message.root, "method")
+            and inner.message.root.method == "initialize"
+        ):
+            initialize_found = True
+            break
+
+    assert initialize_found, (
+        f"No initialize request found in {len(received_mcp_messages)} messages"
+    )
+
+
+# Test 9: get_tools() sends tools/list through the ACP channel
+
+
+async def test_get_tools_sends_tools_list_via_acp(
+    acp_agent: AgentPoolACPAgent,
+    server_config: AcpMcpServer,
+) -> None:
+    """MCPResourceProvider.get_tools() must trigger tools/list via ACP mcp/message.
+
+    This verifies the complete end-to-end flow:
+
+    1. connect_acp_mcp_server() creates connection
+    2. MCPResourceProvider with AcpMcpTransport enters context
+    3. Real initialize() completes (via _forward_to_client + mock response)
+    4. provider.get_tools() calls refresh_tools_cache() -> list_tools()
+    5. session.list_tools() sends MCP tools/list request
+    6. _forward_to_client() reads it and calls send_to_client()
+    7. Mock client captures it and sends back response with tools
+    8. get_tools() returns tools
+
+    If step 6 is broken, list_tools() hangs and no tools are returned.
+    """
+    received_mcp_messages: list[dict] = []
+
+    async def mock_send_request(method: str, params: dict) -> dict:
+        if method == "mcp/connect":
+            return {"connectionId": "test-conn-tools"}
+
+        if method == "mcp/message":
+            received_mcp_messages.append(params)
+            session_msg = params.get("message")
+            if (
+                session_msg is not None
+                and hasattr(session_msg, "message")
+                and hasattr(session_msg.message, "root")
+                and hasattr(session_msg.message.root, "method")
+            ):
+                conn = acp_agent._mcp_manager.get_connection("test-conn-tools")
+                if conn is not None:
+                    req_method = session_msg.message.root.method
+                    req_id = getattr(session_msg.message.root, "id", None)
+
+                    if req_method == "initialize" and req_id is not None:
+                        result = InitializeResult(
+                            protocolVersion="2024-11-05",
+                            capabilities=ServerCapabilities(),
+                            serverInfo=Implementation(
+                                name="test", version="1.0"
+                            ),
+                        )
+                        response = JSONRPCResponse(
+                            jsonrpc="2.0",
+                            id=req_id,
+                            result=result.model_dump(
+                                by_alias=True, mode="json", exclude_none=True
+                            ),
+                        )
+                        response_msg = SessionMessage(
+                            message=JSONRPCMessage(response)
+                        )
+                        assert conn._to_session_send is not None
+                        asyncio.create_task(
+                            conn._to_session_send.send(response_msg)
+                        )
+
+                    elif req_method == "tools/list":
+                        result = ListToolsResult(
+                            tools=[
+                                Tool(
+                                    name="test_tool",
+                                    description="A test tool",
+                                    inputSchema={
+                                        "type": "object",
+                                        "properties": {},
+                                    },
+                                )
+                            ]
+                        )
+                        response = JSONRPCResponse(
+                            jsonrpc="2.0",
+                            id=req_id,
+                            result=result.model_dump(
+                                by_alias=True, mode="json", exclude_none=True
+                            ),
+                        )
+                        response_msg = SessionMessage(
+                            message=JSONRPCMessage(response)
+                        )
+                        assert conn._to_session_send is not None
+                        asyncio.create_task(
+                            conn._to_session_send.send(response_msg)
+                        )
+            return {}
+
+        return {}
+
+    acp_agent.client.send_request = mock_send_request  # type: ignore[method-assign]
+
+    connection_id = await acp_agent.connect_acp_mcp_server(server_config)
+    assert connection_id == "test-conn-tools"
+
+    conn = acp_agent._mcp_manager.get_connection(connection_id)
+    assert conn is not None
+
+    transport = AcpMcpTransport(conn)
+    acp_server_config = AcpMCPServerConfig(
+        acp_id=server_config.id,
+        name=server_config.name,
+        timeout=10.0,
+    )
+    provider = MCPResourceProvider(
+        server=acp_server_config, transport=transport
+    )
+
+    with anyio.fail_after(5):
+        async with provider:
+            tools = await provider.get_tools()
+
+    assert len(tools) >= 1, "Expected at least one tool from get_tools()"
+
+    tools_list_found = False
+    for msg in received_mcp_messages:
+        inner = msg.get("message")
+        if (
+            inner is not None
+            and hasattr(inner, "message")
+            and hasattr(inner.message, "root")
+            and hasattr(inner.message.root, "method")
+            and inner.message.root.method == "tools/list"
+        ):
+            tools_list_found = True
+            break
+
+    assert tools_list_found, (
+        f"No tools/list request found in {len(received_mcp_messages)} messages"
+    )
