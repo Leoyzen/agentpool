@@ -14,10 +14,12 @@ from pydantic_ai import (
     TextPartDelta,
     ToolCallPart,
 )
+from pydantic_ai.usage import RequestUsage
 import pytest
 
 from acp.schema import AgentMessageChunk, ToolCallProgress, ToolCallStart
 from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent, SubAgentEvent
+from agentpool.messaging.messages import ChatMessage
 from agentpool_server.acp_server.event_converter import ACPEventConverter, SubagentSessionInfo
 
 
@@ -632,3 +634,275 @@ async def test_cleanup_clears_child_sessions_and_counts():
 
     assert len(converter._child_sessions) == 0
     assert len(converter._subagent_message_counts) == 0
+
+
+# ============================================================================
+# Task 19: Comprehensive subsession and index tracking tests
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_concurrent_subsessions_independent_message_counts():
+    """Multiple child sessions active simultaneously have independent message counts."""
+    from unittest.mock import AsyncMock
+
+    from agentpool_server.acp_server.event_converter import _ChildSessionState
+
+    converter = ACPEventConverter()
+    converter._display_mode = "zed"  # type: ignore[assignment]
+    converter._parent_session_id = "parent-456"
+    mock_client = AsyncMock()
+    converter._client = mock_client
+
+    mock_session_manager = AsyncMock()
+    mock_session_manager.create_child_session = AsyncMock(return_value="child-123")
+    converter._session_manager = mock_session_manager
+
+    # Create first child session
+    spawn_1 = SpawnSessionStart(
+        child_session_id="child-123",
+        parent_session_id="parent-456",
+        source_name="agent_a",
+        source_type="agent",
+        description="First spawn",
+        spawn_mechanism="task",
+    )
+    await collect_updates(converter, spawn_1)
+    assert "child-123" in converter._child_sessions
+
+    # Manually inject second child session (simulate concurrent creation)
+    child_converter_2 = ACPEventConverter()
+    mock_notifications_2 = AsyncMock()
+    converter._child_sessions["child-456"] = _ChildSessionState(
+        session_id="child-456",
+        converter=child_converter_2,
+        notifications=mock_notifications_2,
+        message_count=0,
+    )
+    converter._subagent_message_counts["child-456"] = 0
+    converter._subagent_tool_map["child-456"] = "tc-002"
+
+    # Route events to child-123
+    event_1 = SubAgentEvent(
+        source_name="agent_a",
+        source_type="agent",
+        event=PartStartEvent(part=TextPart(content="Hello from A"), index=0),
+        depth=1,
+        child_session_id="child-123",
+    )
+    await collect_updates(converter, event_1)
+
+    # Route events to child-456
+    event_2 = SubAgentEvent(
+        source_name="agent_b",
+        source_type="agent",
+        event=PartStartEvent(part=TextPart(content="Hello from B"), index=0),
+        depth=1,
+        child_session_id="child-456",
+    )
+    await collect_updates(converter, event_2)
+    event_3 = SubAgentEvent(
+        source_name="agent_b",
+        source_type="agent",
+        event=PartDeltaEvent(delta=TextPartDelta(content_delta=" more B"), index=0),
+        depth=1,
+        child_session_id="child-456",
+    )
+    await collect_updates(converter, event_3)
+
+    # Verify independent message counts
+    assert converter._subagent_message_counts["child-123"] == 1
+    assert converter._subagent_message_counts["child-456"] == 2
+
+    # Close child-123
+    close_1 = SubAgentEvent(
+        source_name="agent_a",
+        source_type="agent",
+        event=StreamCompleteEvent(
+            message=ChatMessage(
+                content="done",
+                role="assistant",
+                usage=RequestUsage(input_tokens=1, output_tokens=1),
+            )
+        ),
+        depth=1,
+        child_session_id="child-123",
+    )
+    await collect_updates(converter, close_1)
+    assert "child-123" not in converter._child_sessions
+
+    # Close child-456
+    close_2 = SubAgentEvent(
+        source_name="agent_b",
+        source_type="agent",
+        event=StreamCompleteEvent(
+            message=ChatMessage(
+                content="done",
+                role="assistant",
+                usage=RequestUsage(input_tokens=1, output_tokens=1),
+            )
+        ),
+        depth=1,
+        child_session_id="child-456",
+    )
+    await collect_updates(converter, close_2)
+    assert "child-456" not in converter._child_sessions
+
+
+@pytest.mark.anyio
+async def test_memory_leak_child_session_cleanup_on_stream_complete():
+    """Top-level StreamCompleteEvent removes child sessions and message count entries via reset."""
+    from unittest.mock import AsyncMock
+
+    from agentpool_server.acp_server.event_converter import _ChildSessionState
+
+    converter = ACPEventConverter()
+    converter._display_mode = "zed"  # type: ignore[assignment]
+    converter._subagent_tool_map["child-123"] = "tc-001"
+    converter._subagent_message_counts["child-123"] = 3
+
+    child_converter = ACPEventConverter()
+    mock_notifications = AsyncMock()
+    converter._child_sessions["child-123"] = _ChildSessionState(
+        session_id="child-123",
+        converter=child_converter,
+        notifications=mock_notifications,
+        message_count=3,
+    )
+
+    # Verify preconditions
+    assert "child-123" in converter._child_sessions
+    assert converter._subagent_message_counts.get("child-123") == 3
+
+    message = ChatMessage(
+        content="done",
+        role="assistant",
+        usage=RequestUsage(input_tokens=1, output_tokens=1),
+    )
+    # Top-level StreamCompleteEvent triggers reset() which clears all state
+    event = StreamCompleteEvent(message=message)
+
+    await collect_updates(converter, event)
+
+    # Child session and counts should be removed by reset()
+    assert "child-123" not in converter._child_sessions
+    assert "child-123" not in converter._subagent_message_counts
+
+
+@pytest.mark.anyio
+async def test_integration_full_zed_mode_flow_with_index_tracking():
+    """Full zed mode flow: start, progress, complete with correct index tracking."""
+    from agentpool.messaging.messages import ChatMessage
+    from pydantic_ai.usage import RequestUsage
+
+    converter = ACPEventConverter()
+    converter._display_mode = "zed"  # type: ignore[assignment]
+
+    # Step 1: SpawnSessionStart → ToolCallStart with message_start_index=0
+    spawn = SpawnSessionStart(
+        child_session_id="child-123",
+        parent_session_id="parent-456",
+        source_name="test_agent",
+        source_type="agent",
+        description="Test spawn",
+        spawn_mechanism="task",
+    )
+    updates = await collect_updates(converter, spawn)
+
+    tool_starts = [u for u in updates if isinstance(u, ToolCallStart)]
+    assert len(tool_starts) == 1
+    assert tool_starts[0].field_meta is not None
+    session_info = tool_starts[0].field_meta["subagent_session_info"]
+    assert session_info["message_start_index"] == 0
+    assert session_info["message_end_index"] is None
+
+    # Step 2: Multiple SubAgentEvents → ToolCallProgress with incremental content
+    event_1 = SubAgentEvent(
+        source_name="test_agent",
+        source_type="agent",
+        event=PartStartEvent(part=TextPart(content="First chunk"), index=0),
+        depth=1,
+        child_session_id="child-123",
+    )
+    updates_1 = await collect_updates(converter, event_1)
+    progresses_1 = [u for u in updates_1 if isinstance(u, ToolCallProgress)]
+    assert len(progresses_1) == 1
+    assert progresses_1[0].field_meta is not None
+
+    event_2 = SubAgentEvent(
+        source_name="test_agent",
+        source_type="agent",
+        event=PartDeltaEvent(delta=TextPartDelta(content_delta=" second chunk"), index=0),
+        depth=1,
+        child_session_id="child-123",
+    )
+    updates_2 = await collect_updates(converter, event_2)
+    progresses_2 = [u for u in updates_2 if isinstance(u, ToolCallProgress)]
+    assert len(progresses_2) == 1
+    assert progresses_2[0].field_meta is not None
+
+    # Step 3: StreamCompleteEvent → ToolCallProgress(status="completed") with correct message_end_index
+    message = ChatMessage(
+        content="done",
+        role="assistant",
+        usage=RequestUsage(input_tokens=5, output_tokens=5),
+    )
+    complete_event = SubAgentEvent(
+        source_name="test_agent",
+        source_type="agent",
+        event=StreamCompleteEvent(message=message),
+        depth=1,
+        child_session_id="child-123",
+    )
+    updates_3 = await collect_updates(converter, complete_event)
+    progresses_3 = [u for u in updates_3 if isinstance(u, ToolCallProgress)]
+    assert len(progresses_3) == 1
+    assert progresses_3[0].status == "completed"
+    assert progresses_3[0].field_meta is not None
+
+    # Verify final _meta has correct message_end_index
+    # Note: message_start_index is not propagated to the final progress in fallback path
+    final_meta = progresses_3[0].field_meta["subagent_session_info"]
+    assert final_meta["message_end_index"] == 1  # 2 content events (0 and 1)
+
+
+@pytest.mark.anyio
+async def test_child_session_creation_failure_fallback_and_warning(caplog):
+    """Child session creation failure falls back to parent and emits warning log."""
+    from unittest.mock import AsyncMock
+
+    import logging
+
+    converter = ACPEventConverter()
+    converter._display_mode = "zed"  # type: ignore[assignment]
+    converter._parent_session_id = "parent-456"
+    converter._client = object()
+
+    mock_session_manager = AsyncMock()
+    mock_session_manager.create_child_session = AsyncMock(side_effect=RuntimeError("boom"))
+    converter._session_manager = mock_session_manager
+
+    event = SpawnSessionStart(
+        child_session_id="child-123",
+        parent_session_id="parent-456",
+        source_name="test_agent",
+        source_type="agent",
+        description="Test spawn",
+        spawn_mechanism="task",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="agentpool_server.acp_server.event_converter"):
+        updates = await collect_updates(converter, event)
+
+    # Child session creation was attempted but failed
+    mock_session_manager.create_child_session.assert_awaited_once()
+    # No child session stored due to failure
+    assert "child-123" not in converter._child_sessions
+    # Parent still emits ToolCallStart (fallback behavior)
+    tool_starts = [u for u in updates if isinstance(u, ToolCallStart)]
+    assert len(tool_starts) == 1
+    assert tool_starts[0].field_meta is not None
+    # Message count is still initialized
+    assert converter._subagent_message_counts.get("child-123") == 0
+    # Verify warning log was emitted
+    assert any("Failed to create child session" in rec.message for rec in caplog.records)
