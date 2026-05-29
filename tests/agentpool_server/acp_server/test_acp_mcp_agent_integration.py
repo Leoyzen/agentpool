@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, Mock
 
+from typing import Any
+
 import anyio
 import pytest
 
@@ -92,7 +94,25 @@ async def test_connect_acp_mcp_server_missing_connection_id(
         await acp_agent.connect_acp_mcp_server(server_config)
 
 
-# Test 3: disconnect_acp_mcp_server sends mcp/disconnect and removes connection
+# Test 3: connect_acp_mcp_server raises TimeoutError when client hangs
+
+
+async def test_connect_acp_mcp_server_timeout(
+    acp_agent: AgentPoolACPAgent,
+    server_config: AcpMcpServer,
+) -> None:
+    """Verify connect_acp_mcp_server raises TimeoutError when send_request hangs."""
+
+    async def hang_forever(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    acp_agent.client.send_request = hang_forever  # type: ignore[method-assign]
+
+    with pytest.raises(TimeoutError):
+        await acp_agent.connect_acp_mcp_server(server_config)
+
+
+# Test 4: disconnect_acp_mcp_server sends mcp/disconnect and removes connection
 
 
 async def test_disconnect_acp_mcp_server(
