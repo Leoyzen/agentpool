@@ -45,6 +45,7 @@ class MCPResourceProvider(ResourceProvider):
         source: Literal["pool", "node"] = "node",
         sampling_callback: SamplingHandler[Any, Any] | None = None,
         accessible_roots: list[str] | None = None,
+        transport: Any | None = None,
     ) -> None:
         from agentpool.mcp_server import MCPClient
         from agentpool_config.mcp_server import BaseMCPServerConfig
@@ -69,6 +70,7 @@ class MCPResourceProvider(ResourceProvider):
             tool_change_callback=self._on_tools_changed,
             prompt_change_callback=self._on_prompts_changed,
             resource_change_callback=self._on_resources_changed,
+            transport=transport,
         )
 
     def __repr__(self) -> str:

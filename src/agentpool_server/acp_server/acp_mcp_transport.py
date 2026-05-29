@@ -44,6 +44,11 @@ class AcpMcpTransport:
         """
         self._connection = connection
 
+    @property
+    def connection_id(self) -> str:
+        """Return the ACP connection ID managed by this transport."""
+        return self._connection.connection_id
+
     @asynccontextmanager
     async def connect_session(
         self,
@@ -82,7 +87,10 @@ class AcpMcpTransport:
 
         forwarder = asyncio.create_task(_forward_to_client())
         try:
-            await session.initialize()
+            # Note: session.initialize() is NOT called here.
+            # When this transport is used via fastmcp.Client (MCPClient),
+            # the Client will call initialize() as part of its own connection
+            # lifecycle. Calling it here would cause a double-initialize.
             yield session
         finally:
             forwarder.cancel()
