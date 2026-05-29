@@ -16,13 +16,12 @@ from typing import TYPE_CHECKING, Any, Literal, assert_never
 import uuid
 
 from pydantic import BaseModel
-
 from pydantic_ai import (
-    NativeToolCallPart,
-    NativeToolReturnPart,
     FinalResultEvent,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    NativeToolCallPart,
+    NativeToolReturnPart,
     PartDeltaEvent,
     PartEndEvent,
     PartStartEvent,
@@ -781,18 +780,80 @@ class ACPEventConverter:
                 source_name=source_name,
                 description=description,
                 spawn_mechanism=spawn_mechanism,
+                child_session_id=child_session_id,
+                tool_call_id=tc_id,
             ):
-                icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
-                text = f"\n{icon} **`{source_name}`**: {description}\n"
-                yield AgentMessageChunk.text(text)
+                if self._display_mode == "zed" and child_session_id:
+                    tool_call_id = tc_id or str(uuid.uuid4())
+                    meta = self._build_subagent_field_meta(child_session_id, tool_call_id)
+                    self._subagent_tool_map[child_session_id] = tool_call_id
+                    yield ToolCallStart(
+                        tool_call_id=tool_call_id,
+                        title=description or f"Subagent: {source_name}",
+                        kind="other",
+                        status="pending",
+                        field_meta=meta,
+                    )
+                else:
+                    icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
+                    text = f"\n{icon} **`{source_name}`**: {description}\n"
+                    yield AgentMessageChunk.text(text)
 
             case SubAgentEvent(
                 source_name=source_name,
                 source_type=source_type,
                 event=inner_event,
                 depth=depth,
+                child_session_id=child_session_id,
             ):
                 match self._display_mode:
+                    case "zed" if child_session_id:
+                        mapped_id = self._subagent_tool_map.get(child_session_id)
+                        tool_call_id = mapped_id or str(uuid.uuid4())
+                        if not mapped_id:
+                            self._subagent_tool_map[child_session_id] = tool_call_id
+                        meta = self._build_subagent_field_meta(
+                            child_session_id, tool_call_id
+                        )
+                        match inner_event:
+                            case PartStartEvent(part=TextPart(content=text)):
+                                if text:
+                                    yield ToolCallProgress(
+                                        tool_call_id=tool_call_id,
+                                        content=[ContentToolCallContent.text(text=text)],
+                                        field_meta=meta,
+                                    )
+                            case PartDeltaEvent(delta=TextPartDelta(content_delta=text)):
+                                if text:
+                                    yield ToolCallProgress(
+                                        tool_call_id=tool_call_id,
+                                        content=[ContentToolCallContent.text(text=text)],
+                                        field_meta=meta,
+                                    )
+                            case PartStartEvent(part=ThinkingPart(content=text)):
+                                if text:
+                                    yield ToolCallProgress(
+                                        tool_call_id=tool_call_id,
+                                        content=[ContentToolCallContent.text(text=text)],
+                                        field_meta=meta,
+                                    )
+                            case PartDeltaEvent(
+                                delta=ThinkingPartDelta(content_delta=thinking_text)
+                            ):
+                                if thinking_text:
+                                    yield ToolCallProgress(
+                                        tool_call_id=tool_call_id,
+                                        content=[ContentToolCallContent.text(text=thinking_text)],
+                                        field_meta=meta,
+                                    )
+                            case StreamCompleteEvent():
+                                yield ToolCallProgress(
+                                    tool_call_id=tool_call_id,
+                                    status="completed",
+                                    field_meta=meta,
+                                )
+                            case _:
+                                pass
                     case "inline":
                         async for update in self._convert_subagent_inline(
                             source_name, source_type, inner_event, depth
