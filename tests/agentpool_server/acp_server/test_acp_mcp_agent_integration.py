@@ -172,7 +172,11 @@ async def test_ext_method_routes_message(
     assert conn is not None
     with anyio.fail_after(1):
         received = await conn.to_session.receive()
-    assert received == msg
+
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received, SessionMessage)
+    assert received.message.root.method == "tools/list"
 
 
 # Test 5: ext_method with unknown connectionId logs warning and does not crash
@@ -228,8 +232,13 @@ async def test_ext_method_concurrent_messages(
     with anyio.fail_after(1):
         received_a = await conn_a.to_session.receive()
         received_b = await conn_b.to_session.receive()
-    assert received_a == msg_a
-    assert received_b == msg_b
+
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received_a, SessionMessage)
+    assert isinstance(received_b, SessionMessage)
+    assert received_a.message.root.method == "tools/list"
+    assert received_b.message.root.method == "tools/call"
 
 
 # Test 7: close disconnects all ACP MCP servers and cleans up
@@ -300,15 +309,10 @@ async def test_session_initialize_triggers_mcp_message(
         if method == "mcp/message":
             received_mcp_messages.append(params)
             session_msg = params.get("message")
-            if (
-                session_msg is not None
-                and hasattr(session_msg, "message")
-                and hasattr(session_msg.message, "root")
-                and hasattr(session_msg.message.root, "method")
-                and session_msg.message.root.method == "initialize"
-            ):
+            if isinstance(session_msg, dict) and session_msg.get("method") == "initialize":
                 conn = acp_agent._mcp_manager.get_connection("test-conn-init")
                 if conn is not None:
+                    req_id = session_msg.get("id")
                     result = InitializeResult(
                         protocolVersion="2024-11-05",
                         capabilities=ServerCapabilities(),
@@ -316,7 +320,7 @@ async def test_session_initialize_triggers_mcp_message(
                     )
                     response = JSONRPCResponse(
                         jsonrpc="2.0",
-                        id=session_msg.message.root.id,
+                        id=req_id,
                         result=result.model_dump(
                             by_alias=True, mode="json", exclude_none=True
                         ),
@@ -348,13 +352,7 @@ async def test_session_initialize_triggers_mcp_message(
     initialize_found = False
     for msg in received_mcp_messages:
         inner = msg.get("message")
-        if (
-            inner is not None
-            and hasattr(inner, "message")
-            and hasattr(inner.message, "root")
-            and hasattr(inner.message.root, "method")
-            and inner.message.root.method == "initialize"
-        ):
+        if isinstance(inner, dict) and inner.get("method") == "initialize":
             initialize_found = True
             break
 
@@ -394,16 +392,11 @@ async def test_get_tools_sends_tools_list_via_acp(
         if method == "mcp/message":
             received_mcp_messages.append(params)
             session_msg = params.get("message")
-            if (
-                session_msg is not None
-                and hasattr(session_msg, "message")
-                and hasattr(session_msg.message, "root")
-                and hasattr(session_msg.message.root, "method")
-            ):
+            if isinstance(session_msg, dict):
                 conn = acp_agent._mcp_manager.get_connection("test-conn-tools")
                 if conn is not None:
-                    req_method = session_msg.message.root.method
-                    req_id = getattr(session_msg.message.root, "id", None)
+                    req_method = session_msg.get("method")
+                    req_id = session_msg.get("id")
 
                     if req_method == "initialize" and req_id is not None:
                         result = InitializeResult(
@@ -486,13 +479,7 @@ async def test_get_tools_sends_tools_list_via_acp(
     tools_list_found = False
     for msg in received_mcp_messages:
         inner = msg.get("message")
-        if (
-            inner is not None
-            and hasattr(inner, "message")
-            and hasattr(inner.message, "root")
-            and hasattr(inner.message.root, "method")
-            and inner.message.root.method == "tools/list"
-        ):
+        if isinstance(inner, dict) and inner.get("method") == "tools/list":
             tools_list_found = True
             break
 

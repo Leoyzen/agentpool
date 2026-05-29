@@ -175,7 +175,7 @@ async def test_connection_handle_client_message_routes_to_session(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """handle_client_message sends the message to the session receive stream."""
+    """handle_client_message converts dict to SessionMessage and routes to session."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
     await conn.open()
 
@@ -186,7 +186,10 @@ async def test_connection_handle_client_message_routes_to_session(
         tg.start_soon(conn.handle_client_message, message)
         received = await conn.to_session.receive()
 
-    assert received == message
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received, SessionMessage)
+    assert received.message.root.method == "test"
 
 
 async def test_connection_handle_client_message_not_opened_raises(

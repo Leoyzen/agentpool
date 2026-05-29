@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
     from acp.schema.mcp import AcpMcpServer
 
+from mcp.shared.message import SessionMessage
+from mcp.types import JSONRPCMessage
+
 logger = get_logger(__name__)
 
 
@@ -81,26 +84,38 @@ class AcpMcpConnection:
         """Handle an incoming mcp/message from the client.
 
         Routes the message to the MCP session's receive stream.
+        If the message is a plain dict (from JSON deserialization),
+        it is converted back to a SessionMessage before sending.
         """
         if self._to_session_send is None:
             raise RuntimeError("Connection not opened")
         try:
-            await self._to_session_send.send(message)
+            if isinstance(message, SessionMessage):
+                await self._to_session_send.send(message)
+            else:
+                session_msg = SessionMessage(
+                    message=JSONRPCMessage.model_validate(message)
+                )
+                await self._to_session_send.send(session_msg)
         except (anyio.ClosedResourceError, anyio.EndOfStream):
             logger.debug(
                 "Failed to route message: connection already closed",
                 connection_id=self.connection_id,
             )
 
-    async def send_to_client(self, message: dict[str, Any]) -> Any:
+    async def send_to_client(self, message: Any) -> Any:
         """Send an mcp/message to the client.
 
         Args:
-            message: MCP JSON-RPC message dict.
+            message: MCP JSON-RPC message dict or SessionMessage.
 
         Returns:
             Response from client (for requests) or None (for notifications).
         """
+        if isinstance(message, SessionMessage):
+            message = message.message.model_dump(
+                by_alias=True, mode="json", exclude_none=True
+            )
         return await self._send_to_client(
             {"connectionId": self.connection_id, "message": message}
         )

@@ -28,11 +28,13 @@
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "Everything specified in \"What to do\" was actually built",
-      "session_id": "ses_18d6f85edffey0zOp9Ag8v69Lr",
+      "task_title": "`ClientSession._send()` 发送 `SessionMessage` 到 `from_session`",
+      "session_id": "ses_18d28dafaffer605NjDrfnN8bE",
       "agent": "Sisyphus-Junior",
       "category": "deep",
-      "updated_at": "2026-05-29T07:08:51.717Z"
+      "updated_at": "2026-05-29T08:29:13.992Z",
+      "started_at": "2026-05-29T08:29:13.992Z",
+      "status": "running"
     }
   },
   "active_work_id": "rfc-0033-mcp-over-acp-legacy",
@@ -71,15 +73,17 @@
         "todo:1": {
           "task_key": "todo:1",
           "task_label": "1",
-          "task_title": "Everything specified in \"What to do\" was actually built",
-          "session_id": "ses_18d6f85edffey0zOp9Ag8v69Lr",
+          "task_title": "`ClientSession._send()` 发送 `SessionMessage` 到 `from_session`",
+          "session_id": "ses_18d28dafaffer605NjDrfnN8bE",
           "agent": "Sisyphus-Junior",
           "category": "deep",
-          "updated_at": "2026-05-29T07:08:51.717Z"
+          "updated_at": "2026-05-29T08:29:13.992Z",
+          "started_at": "2026-05-29T08:29:13.992Z",
+          "status": "running"
         }
       },
-      "updated_at": "2026-05-29T07:08:51.717Z"
+      "updated_at": "2026-05-29T08:29:13.992Z"
     }
   },
-  "updated_at": "2026-05-29T07:08:51.717Z"
+  "updated_at": "2026-05-29T08:29:13.992Z"
 }
