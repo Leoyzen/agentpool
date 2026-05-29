@@ -989,15 +989,9 @@ class AgentPoolACPAgent(ACPAgent):
             raise ValueError(msg)
 
         async def send_to_client(message: dict[str, Any]) -> Any:
-            mcp_message_method = getattr(self.client, "mcp_message", None)
-            if mcp_message_method is not None:
-                return await mcp_message_method(
-                    {"connectionId": connection_id, "message": message}
-                )
-            return await self.client.send_request(
-                "mcp/message",
-                {"connectionId": connection_id, "message": message},
-            )
+            # message is already wrapped as {"connectionId": conn_id, "message": mcp_msg}
+            # by AcpMcpConnection.send_to_client. Pass through directly.
+            return await self.client.send_request("mcp/message", message)
 
         await self._mcp_manager.create_connection(
             connection_id, server, send_to_client
