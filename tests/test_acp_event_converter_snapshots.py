@@ -22,6 +22,8 @@ Per RFC-0001:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import uuid
+from unittest.mock import patch
 
 import pytest
 
@@ -137,6 +139,19 @@ def zed_converter() -> Generator[ACPEventConverter]:
 
 class TestZedModeSnapshots:
     """Snapshot tests for zed subagent mode."""
+
+    @pytest.fixture(autouse=True)
+    def deterministic_uuid(self):
+        """Patch uuid.uuid4 to produce deterministic values for stable snapshots."""
+        counter = 0
+
+        def mock_uuid4():
+            nonlocal counter
+            counter += 1
+            return uuid.UUID(int=counter)
+
+        with patch("uuid.uuid4", mock_uuid4):
+            yield
 
     @pytest.mark.anyio
     @pytest.mark.acp_snapshot

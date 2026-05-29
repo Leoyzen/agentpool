@@ -72,8 +72,9 @@ from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
+from collections.abc import AsyncGenerator, AsyncIterator
+
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
 
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent

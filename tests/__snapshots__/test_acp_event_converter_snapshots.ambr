@@ -700,3 +700,318 @@
     }),
   ])
 # ---
+# name: TestZedModeSnapshots.test_zed_mixed_events[asyncio]
+  list([
+    dict({
+      '_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'field_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': 'Starting analyzer subagent',
+      'tool_call_id': '00000000-0000-0000-0000-000000000004',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Need to analyze',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **analyzer**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Let me check',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`analyzer`] Using tool: ``grep``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`analyzer`] `grep`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' - all good!',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestZedModeSnapshots.test_zed_text_stream[asyncio]
+  list([
+    dict({
+      '_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'field_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': 'Starting assistant subagent',
+      'tool_call_id': '00000000-0000-0000-0000-000000000003',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **assistant**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Hello',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' world',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '!',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestZedModeSnapshots.test_zed_thinking_stream[asyncio]
+  list([
+    dict({
+      '_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'field_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': 'Starting researcher subagent',
+      'tool_call_id': '00000000-0000-0000-0000-000000000003',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Analyzing',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' the',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' problem',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestZedModeSnapshots.test_zed_tool_call[asyncio]
+  list([
+    dict({
+      '_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'field_meta': dict({
+        'subagent_session_info': dict({
+          'message_end_index': None,
+          'message_start_index': None,
+          'session_id': 'child_sess_001',
+        }),
+        'tool_name': 'task',
+      }),
+      'kind': 'other',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': 'Starting coder subagent',
+      'tool_call_id': '00000000-0000-0000-0000-000000000004',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coder**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': "I'll search for files",
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`coder`] Using tool: ``search``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`coder`] `search`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': '00000000-0000-0000-0000-000000000001',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
