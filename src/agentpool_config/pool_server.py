@@ -171,13 +171,14 @@ class ACPPoolServerConfig(BasePoolServerConfig):
     )
     """Whether to raise exceptions during server start."""
 
-    subagent_display_mode: Literal["inline", "tool_box"] = Field(
+    subagent_display_mode: Literal["inline", "tool_box", "zed"] = Field(
         default="tool_box",
         title="Subagent display mode",
     )
     """How to display nested agent output in ACP clients:
     - "tool_box": Displays subagent output in a tool box (current default)
     - "inline": Displays subagent output inline with the main agent's text
+    - "zed": Zed editor compatibility mode (experimental)
     """
 
     transport: Literal["stdio", "streamable-http"] = Field(

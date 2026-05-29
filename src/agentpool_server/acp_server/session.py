@@ -192,10 +192,11 @@ class ACPSession:
     manager: ACPSessionManager | None = None
     """Session manager for managing sessions. Used for session management commands."""
 
-    subagent_display_mode: Literal["inline", "tool_box"] = "tool_box"
+    subagent_display_mode: Literal["inline", "tool_box", "zed"] = "tool_box"
     """How to display subagent output:
     - 'inline': Subagent output flows into main message stream
     - 'tool_box': Subagent output contained in the tool call's progress box (default)
+    - 'zed': Zed editor compatibility mode (experimental)
     """
 
     def __post_init__(self) -> None:

@@ -15,6 +15,8 @@ import os
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 import uuid
 
+from pydantic import BaseModel
+
 from pydantic_ai import (
     NativeToolCallPart,
     NativeToolReturnPart,
@@ -100,16 +102,16 @@ ACPSessionUpdate = (
 # ============================================================================
 
 
-def _get_display_mode() -> Literal["legacy", "inline", "tool_box"]:
+def _get_display_mode() -> Literal["legacy", "inline", "tool_box", "zed"]:
     """Get the subagent display mode from environment variable.
 
     Reads from ACP_SUBAGENT_DISPLAY_MODE env var, defaults to "legacy".
 
     Returns:
-        Display mode value: "legacy", "inline", or "tool_box"
+        Display mode value: "legacy", "inline", "tool_box", or "zed"
     """
     mode = os.getenv("ACP_SUBAGENT_DISPLAY_MODE", "legacy")
-    if mode not in ("legacy", "inline", "tool_box"):
+    if mode not in ("legacy", "inline", "tool_box", "zed"):
         return "legacy"
     return mode  # type: ignore[return-value]
 
@@ -165,6 +167,18 @@ class _SubagentToolBoxState:
     created_at: float = field(default_factory=lambda: __import__("time").time())
 
 
+class SubagentSessionInfo(BaseModel):
+    """Metadata for subagent session tracking in ACP field_meta.
+
+    Carried on AnnotatedObject.field_meta to communicate subagent
+    session boundaries to ACP clients (e.g. Zed).
+    """
+
+    session_id: str
+    message_start_index: int | None = None
+    message_end_index: int | None = None
+
+
 # ============================================================================
 # Event Converter
 # ============================================================================
@@ -188,12 +202,12 @@ class ACPEventConverter:
 
     # Feature flag for subagent display mode
     # Reads from ACP_SUBAGENT_DISPLAY_MODE env var, defaults to "legacy" for backward compatibility
-    _display_mode: Literal["legacy", "inline", "tool_box"] = field(
+    _display_mode: Literal["legacy", "inline", "tool_box", "zed"] = field(
         default_factory=_get_display_mode,
     )
 
     # Legacy mode fields (deprecated)
-    subagent_display_mode: Literal["legacy", "inline", "tool_box"] = "legacy"
+    subagent_display_mode: Literal["legacy", "inline", "tool_box", "zed"] = "legacy"
     """How to display subagent output. Deprecated: Use ACP_SUBAGENT_DISPLAY_MODE env var instead."""
 
     # Internal state
@@ -214,11 +228,6 @@ class ACPEventConverter:
 
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
-    """Accumulated content per subagent (for tool_box mode)."""
-
-    _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    """Message ID for the current agent response."""
-    """Accumulated content per subagent (for tool_box mode)."""
 
     # New state management
     _subagent_inline_states: dict[str, _SubagentInlineState] = field(default_factory=dict)
@@ -226,6 +235,9 @@ class ACPEventConverter:
 
     _subagent_toolbox_states: dict[str, _SubagentToolBoxState] = field(default_factory=dict)
     """Tool_box subagent states keyed by composite key."""
+
+    _subagent_tool_map: dict[str, str] = field(default_factory=dict)
+    """Maps tool_call_id -> child_session_id for subagent tool calls."""
 
     MAX_STATES: int = 100
     """Maximum number of subagent states to prevent DoS attacks."""
@@ -252,13 +264,6 @@ class ACPEventConverter:
         self._subagent_toolbox_states.clear()
         self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
-        """Reset converter state for a new run."""
-        self._tool_states.clear()
-        self._current_tool_inputs.clear()
-        self._subagent_headers.clear()
-        self._subagent_content.clear()
-        self._subagent_inline_states.clear()
-        self._subagent_toolbox_states.clear()
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
         """Cancel all pending tool calls.
@@ -334,6 +339,37 @@ class ACPEventConverter:
             for key, state in self._subagent_toolbox_states.items()
             if state.created_at > cutoff_time
         }
+
+    def _build_subagent_field_meta(
+        self,
+        child_session_id: str,
+        tool_call_id: str,
+    ) -> dict[str, Any] | None:
+        """Build field_meta dict for subagent session tracking.
+
+        Returns None when child_session_id is empty, indicating no subagent
+        session info should be attached.
+
+        Args:
+            child_session_id: The child subagent session ID.
+            tool_call_id: The tool call ID associated with the subagent.
+
+        Returns:
+            Dict with subagent_session_info and tool_name for zed mode,
+            or None if child_session_id is empty.
+        """
+        if not child_session_id:
+            return None
+
+        session_info = SubagentSessionInfo(session_id=child_session_id)
+        return {
+            "subagent_session_info": session_info.model_dump(),
+            "tool_name": "task",
+        }
+
+    def cleanup(self) -> None:
+        """Clear subagent tool map. Idempotent — safe to call multiple times."""
+        self._subagent_tool_map.clear()
 
     def _get_or_create_inline_state(self, source_name: str, depth: int) -> _SubagentInlineState:
         """Get existing inline state or create a new one.
@@ -729,7 +765,6 @@ class ACPEventConverter:
                 self.reset()
                 # Clean up all subagent states when stream completes
                 # Prevents memory leaks by removing accumulated state
-                self.reset()
 
             case PlanUpdateEvent(entries=entries):
                 acp_entries = [

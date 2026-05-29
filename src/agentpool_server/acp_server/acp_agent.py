@@ -225,8 +225,8 @@ class AgentPoolACPAgent(ACPAgent):
     server: ACPServer | None = field(default=None)
     """Reference to the ACPServer for pool hot-switching."""
 
-    subagent_display_mode: Literal["inline", "tool_box"] = "tool_box"
-    """Display mode for subagent outputs (inline or tool_box)."""
+    subagent_display_mode: Literal["inline", "tool_box", "zed"] = "tool_box"
+    """Display mode for subagent outputs (inline, tool_box, or zed)."""
 
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""

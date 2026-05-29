@@ -69,7 +69,7 @@ class ACPSessionManager:
         session_id: str | None = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
+        subagent_display_mode: Literal["inline", "tool_box", "zed"] = "tool_box",
         parent_session_id: str | None = None,
     ) -> str:
         """Create a new ACP session.
@@ -197,7 +197,7 @@ class ACPSessionManager:
         acp_agent: AgentPoolACPAgent,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
+        subagent_display_mode: Literal["inline", "tool_box", "zed"] = "tool_box",
     ) -> ACPSession | None:
         """Resume a session from storage.
 

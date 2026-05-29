@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
     from syrupy import SnapshotAssertion  # type: ignore[attr-defined]
 
+from pydantic import BaseModel
+
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from tests.fixtures.subagent_events import TEST_EVENT_SEQUENCES
 
@@ -43,8 +45,14 @@ async def collect_updates(converter: ACPEventConverter, event) -> list[dict[str,
     updates: list[dict[str, object]] = []
     async for update in converter.convert(event):
         # Convert Pydantic models to dict for snapshot comparison
-        if hasattr(update, "model_dump"):
-            updates.append(update.model_dump(exclude_none=True))
+        if isinstance(update, BaseModel):
+            d = update.model_dump(exclude_none=True)
+            # Explicitly preserve _meta (field_meta alias) for zed-mode snapshots.
+            # model_dump(exclude_none=True) naturally includes _meta when field_meta
+            # is set, but we ensure it here for clarity and future-proofing.
+            if "field_meta" in update.model_fields and update.field_meta is not None:
+                d["_meta"] = update.field_meta
+            updates.append(d)
         else:
             # Fallback for non-Pydantic objects
             updates.append({"_str": str(update)})
@@ -106,6 +114,85 @@ def legacy_converter() -> Generator[ACPEventConverter]:
             os.environ.pop("ACP_SUBAGENT_DISPLAY_MODE", None)
         else:
             os.environ["ACP_SUBAGENT_DISPLAY_MODE"] = original
+
+
+@pytest.fixture
+def zed_converter() -> Generator[ACPEventConverter]:
+    """Converter configured for zed mode."""
+    import os
+
+    # Set feature flag to zed mode
+    original = os.environ.get("ACP_SUBAGENT_DISPLAY_MODE")
+    os.environ["ACP_SUBAGENT_DISPLAY_MODE"] = "zed"
+    try:
+        converter = ACPEventConverter()
+        yield converter
+    finally:
+        # Restore original value
+        if original is None:
+            os.environ.pop("ACP_SUBAGENT_DISPLAY_MODE", None)
+        else:
+            os.environ["ACP_SUBAGENT_DISPLAY_MODE"] = original
+
+
+class TestZedModeSnapshots:
+    """Snapshot tests for zed subagent mode."""
+
+    @pytest.mark.anyio
+    @pytest.mark.acp_snapshot
+    async def test_zed_text_stream(
+        self, zed_converter: ACPEventConverter, snapshot: SnapshotAssertion
+    ):
+        """Zed mode: Text stream with SpawnSessionStart prefix."""
+        events = TEST_EVENT_SEQUENCES["zed_text_stream"]("assistant")
+
+        all_updates = []
+        for event in events:
+            all_updates.extend(await collect_updates(zed_converter, event))
+
+        assert all_updates == snapshot
+
+    @pytest.mark.anyio
+    @pytest.mark.acp_snapshot
+    async def test_zed_thinking_stream(
+        self, zed_converter: ACPEventConverter, snapshot: SnapshotAssertion
+    ):
+        """Zed mode: Thinking stream with SpawnSessionStart prefix."""
+        events = TEST_EVENT_SEQUENCES["zed_thinking_stream"]("researcher")
+
+        all_updates = []
+        for event in events:
+            all_updates.extend(await collect_updates(zed_converter, event))
+
+        assert all_updates == snapshot
+
+    @pytest.mark.anyio
+    @pytest.mark.acp_snapshot
+    async def test_zed_tool_call(
+        self, zed_converter: ACPEventConverter, snapshot: SnapshotAssertion
+    ):
+        """Zed mode: Tool calls with SpawnSessionStart prefix."""
+        events = TEST_EVENT_SEQUENCES["zed_tool_call"]("coder")
+
+        all_updates = []
+        for event in events:
+            all_updates.extend(await collect_updates(zed_converter, event))
+
+        assert all_updates == snapshot
+
+    @pytest.mark.anyio
+    @pytest.mark.acp_snapshot
+    async def test_zed_mixed_events(
+        self, zed_converter: ACPEventConverter, snapshot: SnapshotAssertion
+    ):
+        """Zed mode: Mixed events with SpawnSessionStart prefix."""
+        events = TEST_EVENT_SEQUENCES["zed_mixed_events"]("analyzer")
+
+        all_updates = []
+        for event in events:
+            all_updates.extend(await collect_updates(zed_converter, event))
+
+        assert all_updates == snapshot
 
 
 class TestToolBoxModeSnapshots:

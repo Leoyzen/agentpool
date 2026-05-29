@@ -30,13 +30,15 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SubagentDisplayMode = Literal["inline", "tool_box"]
+SubagentDisplayMode = Literal["inline", "tool_box", "zed"]
 
 
 def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
     """Normalize config strings to the ACP literal union."""
     if value == "inline":
         return "inline"
+    if value == "zed":
+        return "zed"
     return "tool_box"
 
 
@@ -243,6 +245,11 @@ class ACPServer(BaseServer):
             type(self.transport).__name__ if not isinstance(self.transport, str) else self.transport
         )
         self.log.info("Starting ACP server", transport=transport_name)
+        if self.subagent_display_mode == "zed":
+            self.log.warning(
+                "ACP subagent display mode is set to 'zed'. "
+                "This mode is experimental and may not be fully supported by all ACP clients."
+            )
         # Resolve agent instance from name
         default_agent = self._resolve_default_agent()
         self.log.info("Using default agent", agent=default_agent.name)

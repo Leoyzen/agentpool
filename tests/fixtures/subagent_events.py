@@ -42,6 +42,7 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     SubAgentEvent,
 )
+from tests.fixtures.zed_subagent_events import ZED_TEST_EVENT_SEQUENCES
 
 
 if TYPE_CHECKING:
@@ -437,7 +438,7 @@ def nested_subagent_events() -> list[SubAgentEvent]:
 # Parameterized Test Data
 # ============================================================================
 
-TEST_EVENT_SEQUENCES: dict[str, Callable[..., list[SubAgentEvent]]] = {
+TEST_EVENT_SEQUENCES: dict[str, Callable[..., list[Any]]] = {
     "text_stream": text_stream_events,
     "thinking_stream": thinking_stream_events,
     "tool_call": tool_call_events,
@@ -445,6 +446,7 @@ TEST_EVENT_SEQUENCES: dict[str, Callable[..., list[SubAgentEvent]]] = {
     "tool_call_error": tool_call_error_events,
     "long_text": long_text_events,
     "nested_subagents": nested_subagent_events,
+    **ZED_TEST_EVENT_SEQUENCES,
 }
 
 
