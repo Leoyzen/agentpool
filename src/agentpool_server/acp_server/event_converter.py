@@ -10,6 +10,7 @@ This separation enables easy testing without mocks.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 import os
 from typing import TYPE_CHECKING, Any, Literal, assert_never
@@ -71,14 +72,12 @@ from agentpool.agents.events import (
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
-
-from collections.abc import AsyncGenerator, AsyncIterator
-
 if TYPE_CHECKING:
-
+    from acp.agent.notifications import ACPNotifications
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.tools.base import ToolKind
+    from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
 
@@ -179,6 +178,20 @@ class SubagentSessionInfo(BaseModel):
     message_end_index: int | None = None
 
 
+@dataclass
+class _ChildSessionState:
+    """Lightweight state for an active child ACP subsession.
+
+    Holds the child's event converter and notification channel so that
+    inner subagent events can be routed to the child session independently.
+    """
+
+    session_id: str
+    converter: ACPEventConverter
+    notifications: ACPNotifications
+    message_count: int = 0
+
+
 # ============================================================================
 # Event Converter
 # ============================================================================
@@ -237,7 +250,23 @@ class ACPEventConverter:
     """Tool_box subagent states keyed by composite key."""
 
     _subagent_tool_map: dict[str, str] = field(default_factory=dict)
-    """Maps tool_call_id -> child_session_id for subagent tool calls."""
+    """Maps child_session_id -> tool_call_id for subagent tool calls."""
+
+    # RFC-0027 Wave 3: Child subsession state
+    _session_manager: ACPSessionManager | None = field(default=None, repr=False)
+    """ACP session manager for creating child sessions."""
+
+    _parent_session_id: str | None = field(default=None)
+    """Parent session ID for creating child sessions."""
+
+    _client: Any | None = field(default=None, repr=False)
+    """ACP client for child session notifications."""
+
+    _child_sessions: dict[str, _ChildSessionState] = field(default_factory=dict, repr=False)
+    """Active child sessions keyed by child_session_id."""
+
+    _subagent_message_counts: dict[str, int] = field(default_factory=dict, repr=False)
+    """Message count per child_session_id for index tracking."""
 
     MAX_STATES: int = 100
     """Maximum number of subagent states to prevent DoS attacks."""
@@ -264,6 +293,9 @@ class ACPEventConverter:
         self._subagent_toolbox_states.clear()
         self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
+        # RFC-0027 Wave 3: Clean up child sessions and message counts
+        self._child_sessions.clear()
+        self._subagent_message_counts.clear()
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
         """Cancel all pending tool calls.
@@ -344,6 +376,8 @@ class ACPEventConverter:
         self,
         child_session_id: str,
         tool_call_id: str,
+        message_start_index: int | None = None,
+        message_end_index: int | None = None,
     ) -> dict[str, Any] | None:
         """Build field_meta dict for subagent session tracking.
 
@@ -353,6 +387,8 @@ class ACPEventConverter:
         Args:
             child_session_id: The child subagent session ID.
             tool_call_id: The tool call ID associated with the subagent.
+            message_start_index: Optional start index for message tracking (zed mode).
+            message_end_index: Optional end index for message tracking (zed mode).
 
         Returns:
             Dict with subagent_session_info and tool_name for zed mode,
@@ -361,15 +397,21 @@ class ACPEventConverter:
         if not child_session_id:
             return None
 
-        session_info = SubagentSessionInfo(session_id=child_session_id)
+        session_info = SubagentSessionInfo(
+            session_id=child_session_id,
+            message_start_index=message_start_index,
+            message_end_index=message_end_index,
+        )
         return {
             "subagent_session_info": session_info.model_dump(),
             "tool_name": "task",
         }
 
     def cleanup(self) -> None:
-        """Clear subagent tool map. Idempotent — safe to call multiple times."""
+        """Clear subagent tool map and child sessions. Idempotent — safe to call multiple times."""
         self._subagent_tool_map.clear()
+        self._child_sessions.clear()
+        self._subagent_message_counts.clear()
 
     def _get_or_create_inline_state(self, source_name: str, depth: int) -> _SubagentInlineState:
         """Get existing inline state or create a new one.
@@ -786,7 +828,44 @@ class ACPEventConverter:
             ):
                 if self._display_mode == "zed" and child_session_id:
                     tool_call_id = tc_id or str(uuid.uuid4())
-                    meta = self._build_subagent_field_meta(child_session_id, tool_call_id)
+                    self._subagent_message_counts[child_session_id] = 0
+                    # RFC-0027 Wave 3: Create independent ACP child subsession
+                    if (
+                        self._session_manager
+                        and self._parent_session_id
+                        and self._client
+                        and child_session_id not in self._child_sessions
+                    ):
+                        try:
+                            await self._session_manager.create_child_session(
+                                parent_session_id=self._parent_session_id,
+                                agent_name=source_name,
+                                agent_type="acp",
+                            )
+                        except (RuntimeError, ValueError, OSError, AttributeError):
+                            logger.warning(
+                                "Failed to create child session, falling back to parent-only",
+                                child_session_id=child_session_id,
+                                exc_info=True,
+                            )
+                        else:
+                            from acp.agent.notifications import ACPNotifications
+
+                            child_converter = ACPEventConverter(
+                                subagent_display_mode=self._display_mode
+                            )
+                            child_notifications = ACPNotifications(
+                                client=self._client,
+                                session_id=child_session_id,
+                            )
+                            self._child_sessions[child_session_id] = _ChildSessionState(
+                                session_id=child_session_id,
+                                converter=child_converter,
+                                notifications=child_notifications,
+                            )
+                    meta = self._build_subagent_field_meta(
+                        child_session_id, tool_call_id, message_start_index=0
+                    )
                     self._subagent_tool_map[child_session_id] = tool_call_id
                     yield ToolCallStart(
                         tool_call_id=tool_call_id,
@@ -809,52 +888,162 @@ class ACPEventConverter:
             ):
                 match self._display_mode:
                     case "zed" if child_session_id:
-                        mapped_id = self._subagent_tool_map.get(child_session_id)
-                        tool_call_id = mapped_id or str(uuid.uuid4())
-                        if not mapped_id:
-                            self._subagent_tool_map[child_session_id] = tool_call_id
-                        meta = self._build_subagent_field_meta(
-                            child_session_id, tool_call_id
-                        )
-                        match inner_event:
-                            case PartStartEvent(part=TextPart(content=text)):
-                                if text:
-                                    yield ToolCallProgress(
-                                        tool_call_id=tool_call_id,
-                                        content=[ContentToolCallContent.text(text=text)],
-                                        field_meta=meta,
-                                    )
-                            case PartDeltaEvent(delta=TextPartDelta(content_delta=text)):
-                                if text:
-                                    yield ToolCallProgress(
-                                        tool_call_id=tool_call_id,
-                                        content=[ContentToolCallContent.text(text=text)],
-                                        field_meta=meta,
-                                    )
-                            case PartStartEvent(part=ThinkingPart(content=text)):
-                                if text:
-                                    yield ToolCallProgress(
-                                        tool_call_id=tool_call_id,
-                                        content=[ContentToolCallContent.text(text=text)],
-                                        field_meta=meta,
-                                    )
-                            case PartDeltaEvent(
-                                delta=ThinkingPartDelta(content_delta=thinking_text)
+                        # RFC-0027 Wave 3: Route to child session if one exists
+                        child_state = self._child_sessions.get(child_session_id)
+                        if child_state:
+                            # Route inner event to child session's converter
+                            async for child_update in child_state.converter.convert(
+                                inner_event
                             ):
-                                if thinking_text:
+                                await child_state.notifications.send_update(
+                                    child_update
+                                )
+
+                            # On stream complete: emit parent ToolCallProgress and clean up
+                            if isinstance(inner_event, StreamCompleteEvent):
+                                count = child_state.message_count
+                                message_end_index = (
+                                    count - 1 if count > 0 else None
+                                )
+                                mapped_id = self._subagent_tool_map.get(
+                                    child_session_id
+                                )
+                                if mapped_id:
+                                    meta = self._build_subagent_field_meta(
+                                        child_session_id,
+                                        mapped_id,
+                                        message_end_index=message_end_index,
+                                    )
                                     yield ToolCallProgress(
-                                        tool_call_id=tool_call_id,
-                                        content=[ContentToolCallContent.text(text=thinking_text)],
+                                        tool_call_id=mapped_id,
+                                        status="completed",
                                         field_meta=meta,
                                     )
-                            case StreamCompleteEvent():
-                                yield ToolCallProgress(
-                                    tool_call_id=tool_call_id,
-                                    status="completed",
-                                    field_meta=meta,
+                                self._child_sessions.pop(child_session_id, None)
+                            else:
+                                # Increment message count for end_index tracking
+                                child_state.message_count += 1
+                                self._subagent_message_counts[
+                                    child_session_id
+                                ] = child_state.message_count
+                        else:
+                            # No child session: fall back to parent-only behavior
+                            mapped_id = self._subagent_tool_map.get(
+                                child_session_id
+                            )
+                            tool_call_id = mapped_id or str(uuid.uuid4())
+                            if not mapped_id:
+                                self._subagent_tool_map[child_session_id] = (
+                                    tool_call_id
                                 )
-                            case _:
-                                pass
+                            match inner_event:
+                                case StreamCompleteEvent():
+                                    count = self._subagent_message_counts.get(
+                                        child_session_id, 0
+                                    )
+                                    message_end_index = (
+                                        count - 1 if count > 0 else None
+                                    )
+                                    meta = self._build_subagent_field_meta(
+                                        child_session_id,
+                                        tool_call_id,
+                                        message_end_index=message_end_index,
+                                    )
+                                    yield ToolCallProgress(
+                                        tool_call_id=tool_call_id,
+                                        status="completed",
+                                        field_meta=meta,
+                                    )
+                                case _:
+                                    self._subagent_message_counts[
+                                        child_session_id
+                                    ] = (
+                                        self._subagent_message_counts.get(
+                                            child_session_id, 0
+                                        )
+                                        + 1
+                                    )
+                                    match inner_event:
+                                        case PartStartEvent(
+                                            part=TextPart(content=text)
+                                        ):
+                                            if text:
+                                                meta = (
+                                                    self._build_subagent_field_meta(
+                                                        child_session_id,
+                                                        tool_call_id,
+                                                    )
+                                                )
+                                                yield ToolCallProgress(
+                                                    tool_call_id=tool_call_id,
+                                                    content=[
+                                                        ContentToolCallContent.text(
+                                                            text=text
+                                                        )
+                                                    ],
+                                                    field_meta=meta,
+                                                )
+                                        case PartDeltaEvent(
+                                            delta=TextPartDelta(content_delta=text)
+                                        ):
+                                            if text:
+                                                meta = (
+                                                    self._build_subagent_field_meta(
+                                                        child_session_id,
+                                                        tool_call_id,
+                                                    )
+                                                )
+                                                yield ToolCallProgress(
+                                                    tool_call_id=tool_call_id,
+                                                    content=[
+                                                        ContentToolCallContent.text(
+                                                            text=text
+                                                        )
+                                                    ],
+                                                    field_meta=meta,
+                                                )
+                                        case PartStartEvent(
+                                            part=ThinkingPart(content=text)
+                                        ):
+                                            if text:
+                                                meta = (
+                                                    self._build_subagent_field_meta(
+                                                        child_session_id,
+                                                        tool_call_id,
+                                                    )
+                                                )
+                                                yield ToolCallProgress(
+                                                    tool_call_id=tool_call_id,
+                                                    content=[
+                                                        ContentToolCallContent.text(
+                                                            text=text
+                                                        )
+                                                    ],
+                                                    field_meta=meta,
+                                                )
+                                        case PartDeltaEvent(
+                                            delta=ThinkingPartDelta(
+                                                content_delta=thinking_text
+                                            )
+                                        ):
+                                            if thinking_text:
+                                                meta = (
+                                                    self._build_subagent_field_meta(
+                                                        child_session_id,
+                                                        tool_call_id,
+                                                    )
+                                                )
+                                                yield ToolCallProgress(
+                                                    tool_call_id=tool_call_id,
+                                                    content=[
+                                                        ContentToolCallContent.text(
+                                                            text=thinking_text
+                                                        )
+                                                    ],
+                                                    field_meta=meta,
+                                                )
+                                        case _:
+                                            pass
                     case "inline":
                         async for update in self._convert_subagent_inline(
                             source_name, source_type, inner_event, depth

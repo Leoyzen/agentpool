@@ -259,6 +259,42 @@ class ACPSessionManager:
 
             return session
 
+    async def create_child_session(
+        self,
+        parent_session_id: str,
+        agent_name: str,
+        agent_type: str = "acp",
+    ) -> str:
+        """Create a child session for a subagent.
+
+        Delegates to the pool's SessionManager to create a persistent
+        child session record that inherits project_id/cwd from parent.
+
+        Args:
+            parent_session_id: The parent session ID
+            agent_name: The agent name for the child session
+            agent_type: The type of agent (native, acp, etc.)
+
+        Returns:
+            The new child session ID
+        """
+        if self._pool.sessions is None:
+            msg = "Pool has no session manager for child session creation"
+            raise RuntimeError(msg)
+
+        child_session_id = await self._pool.sessions.create_child_session(
+            parent_session_id=parent_session_id,
+            agent_name=agent_name,
+            agent_type=agent_type,
+        )
+        logger.info(
+            "Created child session via ACP session manager",
+            child_session_id=child_session_id,
+            parent_session_id=parent_session_id,
+            agent_name=agent_name,
+        )
+        return child_session_id
+
     async def close_session(self, session_id: str, *, delete: bool = False) -> None:
         """Close and optionally delete a session.
 

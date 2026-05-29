@@ -706,7 +706,7 @@
       '_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -714,7 +714,7 @@
       'field_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -803,7 +803,7 @@
       '_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -811,7 +811,7 @@
       'field_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -877,7 +877,7 @@
       '_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -885,7 +885,7 @@
       'field_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -940,7 +940,7 @@
       '_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',
@@ -948,7 +948,7 @@
       'field_meta': dict({
         'subagent_session_info': dict({
           'message_end_index': None,
-          'message_start_index': None,
+          'message_start_index': 0,
           'session_id': 'child_sess_001',
         }),
         'tool_name': 'task',

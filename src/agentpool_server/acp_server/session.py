@@ -618,7 +618,12 @@ class ACPSession:
             self.log.debug("Processing prompt", content_items=len(non_command_content))
             event_count = 0
             # Create a new event converter for this prompt
-            converter = ACPEventConverter(subagent_display_mode=self.subagent_display_mode)
+            converter = ACPEventConverter(
+                subagent_display_mode=self.subagent_display_mode,
+                _session_manager=self.manager,
+                _parent_session_id=self.session_id,
+                _client=self.client,
+            )
             self._current_converter = converter  # Track for cancellation
 
             try:  # Use the session's persistent input provider
