@@ -12,13 +12,10 @@ The 3 rules (evaluated in order):
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-
-
-if TYPE_CHECKING:
-    from agentpool_server.opencode_server.models.events import GlobalEvent
+from agentpool_server.opencode_server.models.events import GlobalEvent
 
 
 RoutingReason = Literal[

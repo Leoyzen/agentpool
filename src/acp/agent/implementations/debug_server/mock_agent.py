@@ -13,7 +13,6 @@ from acp.agent.implementations.debug_server.models import DebugSession
 from acp.agent.protocol import Agent
 from acp.schema import (
     AuthenticateResponse,
-    CloseSessionResponse,
     CreateTerminalResponse,
     # CurrentModelUpdate,
     ForkSessionResponse,
@@ -25,6 +24,7 @@ from acp.schema import (
     ReadTextFileResponse,
     ResumeSessionResponse,
     SessionInfo,
+    CloseSessionResponse,
     WriteTextFileResponse,
 )
 
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from acp.schema import (
         AuthenticateRequest,
         CancelNotification,
-        CloseSessionRequest,
         CreateTerminalRequest,
         ForkSessionRequest,
         InitializeRequest,
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
         ReadTextFileRequest,
         ResumeSessionRequest,
         SetSessionConfigOptionRequest,
+        CloseSessionRequest,
         WriteTextFileRequest,
     )
 

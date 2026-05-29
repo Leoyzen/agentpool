@@ -1109,8 +1109,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                                 tool_name = _strip_mcp_prefix(raw_tool_name)
                                 if tc_id:
                                     tool_call_display_names[tc_id] = tool_name
-                                    # Initialize with empty dict,
-                                # will be filled by input_json_delta events
+                                    # Initialize with empty dict, will be filled by input_json_delta events
                                     tool_call_inputs[tc_id] = {}
                                 tool_accumulator.start(tc_id, tool_name)
                                 # Track for permission matching - callback uses raw name

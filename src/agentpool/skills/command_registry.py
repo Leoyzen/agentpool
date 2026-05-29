@@ -191,8 +191,7 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
             count = 0
             for skill in skills:
                 # Build skill URI using the actual provider name from skill metadata
-                # The provider name in metadata is the real source
-                # (e.g., "local" or MCP server name)
+                # The provider name in metadata is the real source (e.g., "local" or MCP server name)
                 provider_name = skill.metadata.get("provider") if skill.metadata else None
                 if provider_name is None:
                     provider_name = self._skill_provider.name

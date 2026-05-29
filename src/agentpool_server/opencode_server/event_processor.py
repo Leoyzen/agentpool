@@ -7,8 +7,10 @@ state, enabling stateless recursive processing.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 import contextlib
 from typing import TYPE_CHECKING, Any
+
 
 from pydantic_ai import FunctionToolCallEvent
 from pydantic_ai.messages import (
@@ -76,7 +78,7 @@ from agentpool_server.opencode_server.models.parts import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
     from agentpool.agents.events import ToolCallContentItem
     from agentpool.agents.events.events import RichAgentStreamEvent
@@ -85,8 +87,6 @@ if TYPE_CHECKING:
     from agentpool_server.opencode_server.models.parts import ToolState
 
 logger = get_logger(__name__)
-
-_MAX_SUBAGENT_DEPTH = 5
 
 
 class EventProcessor:
@@ -719,12 +719,10 @@ class EventProcessor:
             OpenCode Event objects for broadcasting to appropriate sessions.
         """
         # 1. Check and cap depth at 5
-        if subagent_event.depth >= _MAX_SUBAGENT_DEPTH:
+        if subagent_event.depth >= 5:
             logger.warning(
-                "Subagent recursion depth %s >= %s, processing at depth %s",
+                "Subagent recursion depth %s >= 5, processing at depth 5",
                 subagent_event.depth,
-                _MAX_SUBAGENT_DEPTH,
-                _MAX_SUBAGENT_DEPTH,
             )
             depth = 5
         else:
@@ -900,11 +898,7 @@ class EventProcessor:
 
         # 9. Handle StreamCompleteEvent - finalize child session and update parent
         # Skip if the subagent already errored (RunErrorEvent was processed)
-        if (
-            isinstance(wrapped_event, StreamCompleteEvent)
-            and wrapped_event.message
-            and not child_ctx.is_errored
-        ):
+        if isinstance(wrapped_event, StreamCompleteEvent) and wrapped_event.message and not child_ctx.is_errored:
             msg = wrapped_event.message
             content = str(msg.content) if msg.content else "(no output)"
 

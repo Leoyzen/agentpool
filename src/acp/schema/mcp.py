@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence  # noqa: TC003
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, HttpUrl
 
 from acp.schema.base import AnnotatedObject, Schema
 from acp.schema.common import EnvVariable  # noqa: TC001
-
-
-if TYPE_CHECKING:
-    from pydantic import HttpUrl
 
 
 class HttpHeader(AnnotatedObject):

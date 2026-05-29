@@ -803,7 +803,7 @@ class StorageManager:
                 self._generate_title_core(session_id, f"user: {prompt[:500]}"),
                 timeout=15.0,
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning(
                 "Title generation timed out (15s)",
                 session_id=session_id,

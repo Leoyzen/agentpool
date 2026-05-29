@@ -109,13 +109,12 @@ class ZedStorageProvider(StorageProvider):
                 cursor = conn.execute(query, params)
                 threads = cursor.fetchall()
                 conn.close()
+                return threads
             except FileNotFoundError:
                 return []
             except sqlite3.Error as e:
                 logger.warning("Failed to list Zed threads", error=str(e))
                 return []
-            else:
-                return threads
 
         return await asyncio.to_thread(_list_threads_sync)
 

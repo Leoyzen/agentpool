@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from agentpool.resource_providers import ResourceProvider
     from agentpool.tools.base import Tool
     from agentpool.ui.base import InputProvider
-    from agentpool_config.workers import AgentWorkerConfig
 
 ToolMode = Literal["codemode"]
 
@@ -248,6 +247,8 @@ class NativeAgentConfig(BaseAgentConfig):
         - Plain string: "worker_name" -> {"type": "agent", "name": "worker_name"}
         - Dict with type: {"type": "agent", "name": "worker_name"} (unchanged)
         """
+        from agentpool_config.workers import AgentWorkerConfig
+
         if workers := data.get("workers"):
             resolved_workers: list[dict[str, Any] | AgentWorkerConfig] = []
             for worker in workers:
@@ -390,7 +391,8 @@ class NativeAgentConfig(BaseAgentConfig):
 
                 # Check parameter count
                 if len(params) not in (1, 2):
-                    self._raise_history_processor_error(len(params))
+                    msg = f"History processor must take 1 or 2 arguments, got {len(params)}"
+                    raise ValueError(msg)
 
                 # Parameter names are not restricted - users can use any valid Python names
                 # Removed restrictive check for 'messages', 'msgs', 'history' to improve flexibility

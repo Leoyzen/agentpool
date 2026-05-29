@@ -24,7 +24,6 @@ from acp.client.implementations import NoOpClient
 from acp.schema import (
     AuthenticateRequest,
     CancelNotification,
-    CloseSessionRequest,
     ForkSessionRequest,
     InitializeRequest,
     ListSessionsRequest,
@@ -34,6 +33,7 @@ from acp.schema import (
     ResumeSessionRequest,
     SetSessionModelRequest,
     SetSessionModeRequest,
+    CloseSessionRequest,
 )
 from acp.transports import spawn_stdio_transport
 

@@ -20,7 +20,6 @@ from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEP
 
 
 __all__ = [
-    "MAX_DELEGATION_DEPTH",
     "ACPAgent",
     "AGUIAgent",
     "Agent",
@@ -29,6 +28,7 @@ __all__ = [
     "CodexAgent",
     "DelegationDepthError",
     "Interactions",
+    "MAX_DELEGATION_DEPTH",
     "PromptInjectionManager",
     "SystemPrompts",
     "detailed_print_handler",

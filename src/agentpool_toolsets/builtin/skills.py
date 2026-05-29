@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -106,10 +105,9 @@ async def _load_reference_content(
                     skill.name, reference_path
                 )
                 content = content_bytes.decode("utf-8")
+                return f"\n\n## Reference: {reference_path}\n\n{content}"
             except Exception as e:
                 raise ReferenceNotFoundError(f"Reference not found: {reference_path}") from e
-            else:
-                return f"\n\n## Reference: {reference_path}\n\n{content}"
         raise ReferenceNotFoundError(
             f"Cannot load reference {reference_path}: no skill provider available"
         )
@@ -204,20 +202,21 @@ async def load_skill(  # noqa: PLR0911
                 instructions = ref_content
             except Exception as e:  # noqa: BLE001
                 return f"Failed to load reference {ref_path!r}: {e}"
-        # Full skill loading: get main instructions
-        # For virtual paths (PurePosixPath), fetch from provider
-        elif isinstance(skill.skill_path, PurePosixPath):
-            if ctx.pool.skill_provider is not None:
-                try:
-                    instructions = await ctx.pool.skill_provider.get_skill_instructions(
-                        skill.name
-                    )
-                except Exception as e:  # noqa: BLE001
-                    return f"Failed to load skill instructions for {skill.name!r}: {e}"
-            else:
-                instructions = ""
         else:
-            instructions = skill.load_instructions()
+            # Full skill loading: get main instructions
+            # For virtual paths (PurePosixPath), fetch from provider
+            if isinstance(skill.skill_path, PurePosixPath):
+                if ctx.pool.skill_provider is not None:
+                    try:
+                        instructions = await ctx.pool.skill_provider.get_skill_instructions(
+                            skill.name
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        return f"Failed to load skill instructions for {skill.name!r}: {e}"
+                else:
+                    instructions = ""
+            else:
+                instructions = skill.load_instructions()
     else:
         # Bare skill name - use skill_resolver to search across all providers
         # This supports dynamic skill discovery from MCP servers with proper priority
@@ -334,8 +333,10 @@ async def list_skills(ctx: AgentContext) -> str:
     # Also get skills from skill_provider (MCP-based skills)
     provider_skills: list[Skill] = []
     if ctx.pool.skill_provider is not None:
-        with contextlib.suppress(Exception):
+        try:
             provider_skills = await ctx.pool.skill_provider.get_skills()
+        except Exception:
+            pass
 
     all_skills = visible_skills + provider_skills
 

@@ -162,7 +162,7 @@ class BashTool(Tool[ToolResult]):
         if not is_valid:
             logger.warning(
                 "Bash command validation failed",
-                command=command[:_MAX_CMD_LEN] if len(command) > _MAX_CMD_LEN else command,
+                command=command[:100] if len(command) > 100 else command,
                 error=validation_error,
             )
             return ToolResult(
@@ -172,9 +172,6 @@ class BashTool(Tool[ToolResult]):
 
         # Check if we're running in ACP - terminal streams client-side
         from exxec.acp_provider import ACPExecutionEnvironment
-
-_MAX_CMD_LEN = 100
-
 
         is_acp = isinstance(env, ACPExecutionEnvironment)
 

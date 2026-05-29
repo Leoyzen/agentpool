@@ -12,6 +12,10 @@ from agentpool.tools.base import ToolResult
 from agentpool.utils.todos import (
     PRIORITY_LABELS,
     STATUS_ICONS,
+    PlanEntry,
+    TodoPriority,
+    TodoStatus,
+    TodoTracker,
 )
 
 
@@ -19,12 +23,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentpool.tools.base import Tool
-    from agentpool.utils.todos import (
-        PlanEntry,
-        TodoPriority,
-        TodoStatus,
-        TodoTracker,
-    )
 
 PlanToolMode = Literal["granular", "declarative"]
 

@@ -51,9 +51,6 @@ from agentpool_storage.models import ConversationData as ConvData, TokenUsage
 from agentpool_storage.opencode_provider import helpers
 
 
-_COMPACT_THRESHOLD = 2
-
-
 if TYPE_CHECKING:
     from agentpool.messaging import ChatMessage, TokenCost
     from agentpool_config.session import SessionQuery
@@ -174,7 +171,7 @@ def _get_filtered_conversations_sync(
 
         usage = TokenUsage(total=total_tokens, prompt=0, completion=0) if total_tokens else None
         filtered_messages = chat_messages
-        if compact and len(chat_messages) > _COMPACT_THRESHOLD:
+        if compact and len(chat_messages) > 2:
             filtered_messages = [chat_messages[0], chat_messages[-1]]
 
         conv_data = ConvData(

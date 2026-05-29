@@ -318,7 +318,7 @@ def resolve_config(  # noqa: PLR0915
             pass  # Fallback config errors are non-fatal
 
     # Convert primary_path to absolute path if not already absolute
-    absolute_primary_path = str(Path(primary_path).resolve()) if primary_path else None
+    absolute_primary_path = os.path.abspath(primary_path) if primary_path else None
 
     return ResolvedConfig(
         data=merged_data,

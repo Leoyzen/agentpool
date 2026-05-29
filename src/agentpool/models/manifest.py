@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from functools import cached_property
-from pathlib import Path
+import os
 from typing import TYPE_CHECKING, Annotated, Any, Self
 
 from llmling_models_config import AnyModelConfig, StringModelConfig
@@ -619,7 +619,7 @@ class AgentsManifest(Schema):
         try:
             data = yamling.load_yaml_file(path, resolve_inherit=True)
             path_str = str(path)
-            absolute_config_path = str(Path(path_str).resolve())
+            absolute_config_path = os.path.abspath(path_str)
 
             # IMPORTANT: Enter ConfigContextManager BEFORE model_validate
             # This ensures CONFIG_DIR is set when ConfigPath fields are validated

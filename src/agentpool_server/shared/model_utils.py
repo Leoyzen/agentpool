@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from llmling_models_config import (
     AnthropicModelConfig,
+    AnyModelConfig,
     FallbackModelConfig,
     GeminiModelConfig,
     OpenAIModelConfig,
@@ -27,9 +28,6 @@ from agentpool_server.shared.constants import (
 
 
 if TYPE_CHECKING:
-    from llmling_models_config import (
-        AnyModelConfig,
-    )
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     from acp.schema import SessionModelState
@@ -307,7 +305,10 @@ async def build_model_state_for_acp(
 
     all_ids = [m.model_id for m in acp_models_from_tokonomics]
     current_model = agent.model_name
-    current_model_id = current_model if current_model and current_model in all_ids else all_ids[0]
+    if current_model and current_model in all_ids:
+        current_model_id = current_model
+    else:
+        current_model_id = all_ids[0]
 
     return SessionModelState(
         available_models=acp_models_from_tokonomics,
