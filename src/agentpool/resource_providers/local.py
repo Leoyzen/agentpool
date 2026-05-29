@@ -125,6 +125,7 @@ class LocalResourceProvider(ResourceProvider):
         try:
             skill = self._registry.get(name)
             self._cache[name] = skill
+            return skill
         except Exception as e:
             available = list(self._registry.keys())
             raise SkillNotFoundError(name, available) from e

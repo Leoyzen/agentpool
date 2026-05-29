@@ -240,6 +240,13 @@ class ResourceProvider:
             ),
         )
 
+    async def get_skills(self) -> list[Any]:
+        """Get all available skills from this provider.
+
+        Returns:
+            List of Skill objects
+        """
+        return []
 
     async def get_skill(self, name: str) -> Any:
         """Get a specific skill by name.
