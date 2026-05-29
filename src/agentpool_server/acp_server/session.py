@@ -318,23 +318,14 @@ class ACPSession:
         and registers them as slashed commands in the session's command_store
         so they are included in available_commands_update notifications to ACP clients.
         """
-        from agentpool_config.commands import CommandConfig
-
         pool = self.agent_pool
-        if not pool or not pool.manifest.commands:
+        commands = pool.manifest.get_command_configs()
+        if commands is None:
             self.log.debug("No manifest commands to register")
             return
 
         cmd_count = 0
-        for cmd_name, cmd_config in pool.manifest.commands.items():
-            # Skip string shorthand (should be CommandConfig object)
-            if isinstance(cmd_config, str):
-                self.log.debug(
-                    "Skipping shorthand command",
-                    name=cmd_name,
-                    type=type(cmd_config).__name__,
-                )
-                continue
+        for cmd_name, cmd_config in commands.items():
 
             try:
                 # Convert CommandConfig to slashed Command
