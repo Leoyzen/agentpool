@@ -82,11 +82,13 @@ class AcpMcpTransport(ClientTransport):
 
         forwarder = asyncio.create_task(_forward_to_client())
         try:
-            # Note: session.initialize() is NOT called here.
-            # When this transport is used via fastmcp.Client (MCPClient),
-            # the Client will call initialize() as part of its own connection
-            # lifecycle. Calling it here would cause a double-initialize.
-            yield session
+            # Enter ClientSession context to start _receive_loop()
+            async with session:
+                # Note: session.initialize() is NOT called here.
+                # When this transport is used via fastmcp.Client (MCPClient),
+                # the Client will call initialize() as part of its own connection
+                # lifecycle. Calling it here would cause a double-initialize.
+                yield session
         finally:
             forwarder.cancel()
             try:
@@ -94,4 +96,9 @@ class AcpMcpTransport(ClientTransport):
                     await forwarder
             except Exception:
                 logger.exception("Error in MCP-over-ACP forwarder task")
+            # Re-open connection streams if _receive_loop closed them
+            if self._connection._to_session_receive is None or getattr(
+                self._connection._to_session_receive, "_closed", False
+            ):
+                await self._connection.open()
             self._forwarder_task = None
