@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from mcp import ClientSession
+from fastmcp.client.transports import ClientTransport
 
 from agentpool.log import get_logger
 
@@ -23,17 +24,11 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class AcpMcpTransport:
+class AcpMcpTransport(ClientTransport):
     """fastmcp ClientTransport that tunnels MCP over ACP.
 
-    This transport is used by pydantic-ai's MCP client to communicate
+    This transport is used by fastmcp's Client to communicate
     with an MCP server over the existing ACP connection.
-
-    Usage:
-        transport = AcpMcpTransport(connection)
-        async with transport.connect_session() as session:
-            # Use session as normal fastmcp ClientSession
-            tools = await session.list_tools()
     """
 
     def __init__(self, connection: AcpMcpConnection) -> None:
