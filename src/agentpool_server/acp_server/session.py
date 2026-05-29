@@ -27,6 +27,7 @@ from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
+from agentpool_config.commands import CommandConfig
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
@@ -227,10 +228,14 @@ class ACPSession:
         if isinstance(self.agent, Agent):
             self.agent.sys_prompts.prompts.append(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
         if isinstance(self.agent, ACPAgent):
-            async def permission_callback(params: RequestPermissionRequest) -> RequestPermissionResponse:
+
+            async def permission_callback(
+                params: RequestPermissionRequest,
+            ) -> RequestPermissionResponse:
                 forwarded = params.model_copy(update={"session_id": self.session_id})
                 response = await self.requests.client.request_permission(forwarded)
                 return response
+
             self.agent.acp_permission_callback = permission_callback
 
         # Subscribe to state changes for THIS agent only
@@ -238,8 +243,10 @@ class ACPSession:
         with suppress(Exception):
             self.agent.state_updated.disconnect(self._on_state_updated)
         self.agent.state_updated.connect(self._on_state_updated)
-        # Register skill commands from pool's skill_commands registry
+        # Register skill commands from pool's SkillCommandRegistry
         self._register_skill_commands()
+        # Register global commands from manifest.commands (e.g., static commands like start_eval)
+        self._register_manifest_commands()
 
         self.log.info("Created ACP session", current_agent=self.agent.name)
 
@@ -303,6 +310,47 @@ class ACPSession:
             self.acp_agent.tasks.create_task(self.send_available_commands_update())
         except Exception:
             self.log.exception("Failed to schedule command update")
+
+    def _register_manifest_commands(self) -> None:
+        """Register global commands from manifest to command_store.
+
+        Loads commands defined in manifest.commands (like static commands)
+        and registers them as slashed commands in the session's command_store
+        so they are included in available_commands_update notifications to ACP clients.
+        """
+        pool = self.agent_pool
+        commands = pool.manifest.get_command_configs()
+        if commands is None:
+            self.log.debug("No manifest commands to register")
+            return
+
+        cmd_count = 0
+        for cmd_name, cmd_config in commands.items():
+
+            try:
+                # Convert CommandConfig to slashed Command
+                slashed_cmd = cmd_config.get_slashed_command(category="manifest")
+                # Register in session's command_store
+                self.command_store.register_command(slashed_cmd)
+                cmd_count += 1
+                self.log.debug(
+                    "Registered manifest command",
+                    name=cmd_name,
+                    type=cmd_config.type,
+                )
+            except Exception:
+                self.log.exception(
+                    "Failed to register manifest command",
+                    name=cmd_name,
+                    config_type=type(cmd_config).__name__
+                    if hasattr(cmd_config, "type")
+                    else "unknown",
+                )
+
+        if cmd_count > 0:
+            # Schedule update to notify client of new commands
+            self._notify_command_update()
+            self.log.info("Registered manifest commands", count=cmd_count)
 
     async def _on_state_updated(
         self, state: ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged
@@ -632,7 +680,9 @@ class ACPSession:
                 try:
                     await provider.__aexit__(None, None, None)
                 except Exception:
-                    self.log.exception("Error cleaning up session MCP provider", provider=provider.name)
+                    self.log.exception(
+                        "Error cleaning up session MCP provider", provider=provider.name
+                    )
             self.session_mcp_providers.clear()
 
             # NEW: Disconnect state_updated signal to prevent stale callbacks
@@ -647,7 +697,9 @@ class ACPSession:
             # Unregister skill command callback to prevent memory leak
             if hasattr(self, "_skill_command_callback"):
                 skill_registry = getattr(self.agent_pool, "skill_commands", None)
-                if skill_registry is not None and hasattr(skill_registry, "_command_change_handlers"):
+                if skill_registry is not None and hasattr(
+                    skill_registry, "_command_change_handlers"
+                ):
                     try:
                         skill_registry._command_change_handlers.remove(self._skill_command_callback)
                     except ValueError:
