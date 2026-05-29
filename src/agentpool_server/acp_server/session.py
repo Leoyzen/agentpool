@@ -619,6 +619,7 @@ class ACPSession:
             event_count = 0
             # Create a new event converter for this prompt
             converter = ACPEventConverter(
+                _display_mode=self.subagent_display_mode,
                 subagent_display_mode=self.subagent_display_mode,
                 _session_manager=self.manager,
                 _parent_session_id=self.session_id,

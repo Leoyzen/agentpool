@@ -400,8 +400,13 @@ class ACPEventConverter:
         if not child_session_id:
             return None
 
+        # Use actual ACP session ID if a child session was created
+        actual_session_id = child_session_id
+        if child_session_id in self._child_sessions:
+            actual_session_id = self._child_sessions[child_session_id].session_id
+
         session_info = SubagentSessionInfo(
-            session_id=child_session_id,
+            session_id=actual_session_id,
             message_start_index=message_start_index,
             message_end_index=message_end_index,
         )
@@ -844,12 +849,12 @@ class ACPEventConverter:
                         and child_session_id not in self._child_sessions
                     ):
                         try:
-                            await self._session_manager.create_child_session(
+                            actual_child_session_id = await self._session_manager.create_child_session(
                                 parent_session_id=self._parent_session_id,
                                 agent_name=source_name,
                                 agent_type="acp",
                             )
-                        except (RuntimeError, ValueError, OSError, AttributeError):
+                        except Exception:
                             logger.warning(
                                 "Failed to create child session, falling back to parent-only",
                                 child_session_id=child_session_id,
@@ -859,14 +864,15 @@ class ACPEventConverter:
                             from acp.agent.notifications import ACPNotifications
 
                             child_converter = ACPEventConverter(
-                                subagent_display_mode=self._display_mode
+                                _display_mode=self._display_mode,
+                                subagent_display_mode=self._display_mode,
                             )
                             child_notifications = ACPNotifications(
                                 client=self._client,
-                                session_id=child_session_id,
+                                session_id=actual_child_session_id,
                             )
                             self._child_sessions[child_session_id] = _ChildSessionState(
-                                session_id=child_session_id,
+                                session_id=actual_child_session_id,
                                 converter=child_converter,
                                 notifications=child_notifications,
                             )
@@ -927,6 +933,8 @@ class ACPEventConverter:
                                         field_meta=meta,
                                     )
                                 self._child_sessions.pop(child_session_id, None)
+                                self._subagent_message_counts.pop(child_session_id, None)
+                                self._subagent_tool_map.pop(child_session_id, None)
                             else:
                                 # Increment message count for end_index tracking
                                 child_state.message_count += 1

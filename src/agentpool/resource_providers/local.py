@@ -61,6 +61,7 @@ class LocalResourceProvider(ResourceProvider):
         self._registry = SkillsRegistry(skills_dirs=self.skills_dirs)
         self._cache: TTLCache[str, Skill] = TTLCache(maxsize=1000, ttl=cache_ttl)
         self._cache_valid = False
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def __aenter__(self) -> Self:
         """Async context entry - discover skills and connect callbacks.
@@ -248,7 +249,9 @@ class LocalResourceProvider(ResourceProvider):
             event = self.create_change_event("skills")
             try:
                 loop = asyncio.get_running_loop()
-                task_ref = loop.create_task(self.skills_changed.emit(event))
+                task = loop.create_task(self.skills_changed.emit(event))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             except RuntimeError:
                 # No running loop - can't emit signal
                 pass
@@ -261,7 +264,9 @@ class LocalResourceProvider(ResourceProvider):
             event = self.create_change_event("skills")
             try:
                 loop = asyncio.get_running_loop()
-                task_ref = loop.create_task(self.skills_changed.emit(event))
+                task = loop.create_task(self.skills_changed.emit(event))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             except RuntimeError:
                 # No running loop - can't emit signal
                 pass

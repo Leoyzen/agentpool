@@ -1,11 +1,11 @@
 ---
 rfc_id: RFC-0027
 title: ACP Subagent Zed 兼容性
-status: DRAFT
+status: IMPLEMENTED
 author: yuchen.liu
 reviewers: []
 created: 2026-04-24
-last_updated: 2026-04-24
+last_updated: 2026-05-29
 ---
 
 # RFC-0027: ACP Subagent Zed 兼容性

@@ -95,6 +95,7 @@ class ZedStorageProvider(StorageProvider):
         """
 
         def _list_threads_sync():
+            conn = None
             try:
                 conn = sqlite3.connect(self.db_path)
                 query = "SELECT id, summary, updated_at FROM threads"
@@ -108,13 +109,15 @@ class ZedStorageProvider(StorageProvider):
                     params.append(limit)
                 cursor = conn.execute(query, params)
                 threads = cursor.fetchall()
-                conn.close()
                 return threads
             except FileNotFoundError:
                 return []
             except sqlite3.Error as e:
                 logger.warning("Failed to list Zed threads", error=str(e))
                 return []
+            finally:
+                if conn is not None:
+                    conn.close()
 
         return await asyncio.to_thread(_list_threads_sync)
 
@@ -122,12 +125,12 @@ class ZedStorageProvider(StorageProvider):
         """Load a single thread by ID."""
 
         def _load_thread_sync():
+            conn = None
             try:
                 conn = sqlite3.connect(self.db_path)
                 query = "SELECT data_type, data FROM threads WHERE id = ? LIMIT 1"
                 cursor = conn.execute(query, (thread_id,))
                 row = cursor.fetchone()
-                conn.close()
                 if row is None:
                     return None
 
@@ -138,6 +141,9 @@ class ZedStorageProvider(StorageProvider):
             except (sqlite3.Error, Exception) as e:  # noqa: BLE001
                 logger.warning("Failed to load Zed thread", thread_id=thread_id, error=str(e))
                 return None
+            finally:
+                if conn is not None:
+                    conn.close()
 
         return await asyncio.to_thread(_load_thread_sync)
 
@@ -274,6 +280,7 @@ class ZedStorageProvider(StorageProvider):
         """Get counts of conversations and messages."""
         conv_count = 0
         msg_count = 0
+        conn = None
         try:
             conn = await self._get_connection()
             cursor = conn.execute("SELECT data_type, data FROM threads")
@@ -283,11 +290,13 @@ class ZedStorageProvider(StorageProvider):
                 if (messages := thread_dict.get("messages")) is not None:
                     conv_count += 1
                     msg_count += len(messages)
-            conn.close()
         except FileNotFoundError:
             pass
         except sqlite3.Error as e:
             logger.warning("Failed to count Zed threads", error=str(e))
+        finally:
+            if conn is not None:
+                conn.close()
         return conv_count, msg_count
 
     async def get_session_title(self, session_id: str) -> str | None:
