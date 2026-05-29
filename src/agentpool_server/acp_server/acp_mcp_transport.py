@@ -10,8 +10,8 @@ from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
 import anyio
-from mcp import ClientSession
 from fastmcp.client.transports import ClientTransport
+from mcp import ClientSession
 
 from agentpool.log import get_logger
 

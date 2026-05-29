@@ -79,7 +79,7 @@ class MCPResourceProvider(ResourceProvider):
     @property
     def transport_type(self) -> Literal["stdio", "http", "sse", "acp"]:
         """Return the type of connection used by the MCP server."""
-        from agentpool_config import (
+        from agentpool_config.mcp_server import (
             AcpMCPServerConfig,
             SSEMCPServerConfig,
             StdioMCPServerConfig,

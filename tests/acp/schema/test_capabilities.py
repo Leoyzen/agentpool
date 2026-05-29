@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from acp.schema.capabilities import AgentCapabilities
+import pytest
+
+from acp.schema.capabilities import AgentCapabilities, McpCapabilities
 
 
 class TestAgentCapabilities:

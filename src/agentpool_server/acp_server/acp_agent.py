@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-
-import anyio
 from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
 import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+import anyio
+
 from acp import Agent as ACPAgent
 from acp.schema import (
+    CloseSessionResponse,
     DisableProvidersRequest,
     DisableProvidersResponse,
     ForkSessionResponse,
@@ -37,9 +38,7 @@ from acp.schema import (
     SetSessionModelResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
-    CloseSessionResponse,
 )
-from acp.schema.mcp import AcpMcpServer
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
 from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
@@ -57,6 +56,7 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         CancelNotification,
         ClientCapabilities,
+        CloseSessionRequest,
         ForkSessionRequest,
         Implementation,
         InitializeRequest,
@@ -68,8 +68,8 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        CloseSessionRequest,
     )
+    from acp.schema.mcp import AcpMcpServer
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.models.agents import NativeAgentConfig
@@ -384,7 +384,7 @@ class AgentPoolACPAgent(ACPAgent):
                             agent.tools.add_provider(
                                 self.agent_pool.mcp.get_aggregating_provider()
                             )
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             logger.debug(
                                 "Failed to add pool-level MCP provider to session agent",
                                 exc_info=True,
@@ -983,7 +983,7 @@ class AgentPoolACPAgent(ACPAgent):
             "acpId": server.id,
         }
         response = await self.client.send_request("mcp/connect", params)
-        connection_id = response.get("connectionId", "")
+        connection_id = str(response.get("connectionId", ""))
         if not connection_id:
             msg = "Client did not return connectionId for mcp/connect"
             raise ValueError(msg)
@@ -1277,7 +1277,21 @@ class AgentPoolACPAgent(ACPAgent):
                     session_id=session.session_id,
                 )
 
-        # 4. Clean up all per-session agents
+        # 4. Disconnect all ACP MCP servers before cleaning up session agents
+        try:
+            for conn_id in list(self._mcp_manager.get_connection_ids()):
+                try:
+                    await self.disconnect_acp_mcp_server(conn_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to disconnect ACP MCP server during pool swap",
+                        connection_id=conn_id,
+                    )
+            await self._mcp_manager.close_all()
+        except Exception:
+            logger.exception("Failed to close MCP connections during pool swap")
+
+        # 5. Clean up all per-session agents
         await self.cleanup_all_session_agents()
 
         try:

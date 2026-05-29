@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 from pydantic import Field
 
 from acp.schema.base import Response
-from acp.schema.providers import ProviderInfo
 from acp.schema.capabilities import AgentCapabilities
 from acp.schema.common import AuthMethod, Implementation
+from acp.schema.providers import ProviderInfo  # noqa: TC001
 from acp.schema.session_state import (  # noqa: TC001
     SessionConfigOption,
     SessionInfo,
