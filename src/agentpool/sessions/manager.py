@@ -51,6 +51,7 @@ class SessionManager:
         parent_session_id: str,
         agent_name: str,
         agent_type: str = "native",
+        child_session_id: str | None = None,
     ) -> str:
         """Create a child session for a subagent.
 
@@ -58,13 +59,15 @@ class SessionManager:
             parent_session_id: The parent session ID
             agent_name: The agent name for the child session
             agent_type: The type of agent (native, claude, etc.)
+            child_session_id: Optional pre-generated child session ID.
+                When provided, this ID is used instead of generating a new one.
 
         Returns:
             The new child session ID
         """
         from agentpool.utils.identifiers import generate_session_id
 
-        child_session_id = generate_session_id()
+        child_session_id = child_session_id or generate_session_id()
 
         if self.store:
             from agentpool.sessions.models import SessionData

@@ -7,18 +7,18 @@ and auto-resume capabilities for agent sessions.
 from __future__ import annotations
 
 import asyncio
-import copy
-import time
 from collections.abc import Awaitable, Callable
+import contextlib
+import copy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Final
+import time
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
-    from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.delegation import AgentPool
 
 
@@ -28,6 +28,20 @@ logger = get_logger(__name__)
 DEFAULT_QUEUE_MAXSIZE: Final[int] = 1000
 DEFAULT_MAX_AUTO_RESUME: Final[int] = 10
 DEFAULT_SESSION_TTL_SECONDS: Final[float] = 3600.0
+
+
+class SessionLifecyclePolicy:
+    """Session lifecycle policy constants and helpers."""
+
+    VALID: ClassVar[tuple[str, str, str]] = ("independent", "cascade", "bound")
+
+    @classmethod
+    def default(cls) -> str:
+        return "cascade"
+
+    @classmethod
+    def is_valid(cls, policy: str) -> bool:
+        return policy in cls.VALID
 
 
 @dataclass
@@ -57,6 +71,8 @@ class SessionState:
     is_per_session_agent: bool = False
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     is_closing: bool = False
+    parent_session_id: str | None = None
+    lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
 
 
 class EventBus:
@@ -77,34 +93,33 @@ class EventBus:
         Args:
             max_queue_size: Maximum size for subscriber queues.
         """
-        self._subscribers: dict[
-            str, list[asyncio.Queue[RichAgentStreamEvent[Any] | None]]
-        ] = {}
+        self._subscribers: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
+        self._session_tree: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
         self._max_queue_size = max_queue_size
 
     async def subscribe(
-        self, session_id: str
-    ) -> asyncio.Queue[RichAgentStreamEvent[Any] | None]:
+        self, session_id: str, scope: str = "session"
+    ) -> asyncio.Queue[Any]:
         """Subscribe to events for a session.
 
         Args:
             session_id: The session to subscribe to.
+            scope: Subscription scope - "session" (exact match),
+                "descendants" (self + children), or "subtree" (self + parent + siblings).
 
         Returns:
             A queue to consume events from.
         """
-        queue: asyncio.Queue[RichAgentStreamEvent[Any] | None] = asyncio.Queue(
-            maxsize=self._max_queue_size
-        )
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=self._max_queue_size)
         async with self._lock:
-            self._subscribers.setdefault(session_id, []).append(queue)
+            self._subscribers.setdefault(session_id, []).append((queue, scope))
         return queue
 
     async def unsubscribe(
         self,
         session_id: str,
-        queue: asyncio.Queue[RichAgentStreamEvent[Any] | None],
+        queue: asyncio.Queue[Any],
     ) -> None:
         """Unsubscribe from events.
 
@@ -117,12 +132,48 @@ class EventBus:
         async with self._lock:
             if session_id in self._subscribers:
                 self._subscribers[session_id] = [
-                    q for q in self._subscribers[session_id] if q is not queue
+                    item for item in self._subscribers[session_id] if item[0] is not queue
                 ]
                 if not self._subscribers[session_id]:
                     del self._subscribers[session_id]
 
-    async def publish(self, session_id: str, event: RichAgentStreamEvent[Any]) -> None:
+    def _get_parent(self, session_id: str) -> str | None:
+        """Find the parent of a session in the session tree."""
+        for parent_id, children in self._session_tree.items():
+            if session_id in children:
+                return parent_id
+        return None
+
+    def _is_descendant(self, child_id: str, parent_id: str) -> bool:
+        """Check if child_id is a descendant of parent_id."""
+        children = self._session_tree.get(parent_id, [])
+        return child_id in children or any(
+            self._is_descendant(child_id, child) for child in children
+        )
+
+    def _are_siblings(self, sid1: str, sid2: str) -> bool:
+        """Check if two sessions share the same parent."""
+        parent1 = self._get_parent(sid1)
+        parent2 = self._get_parent(sid2)
+        return parent1 is not None and parent1 == parent2
+
+    def _should_receive(self, published_sid: str, subscriber_sid: str, scope: str) -> bool:
+        """Determine if a published event should reach a subscriber."""
+        if scope == "session":
+            return published_sid == subscriber_sid
+        if scope == "descendants":
+            return published_sid == subscriber_sid or self._is_descendant(
+                published_sid, subscriber_sid
+            )
+        if scope == "subtree":
+            return (
+                published_sid == subscriber_sid
+                or published_sid == self._get_parent(subscriber_sid)
+                or self._are_siblings(published_sid, subscriber_sid)
+            )
+        return published_sid == subscriber_sid
+
+    async def publish(self, session_id: str, event: Any) -> None:
         """Publish an event to all subscribers for a session.
 
         If a subscriber's queue is full, drops the oldest event.
@@ -136,10 +187,14 @@ class EventBus:
             event: The event to broadcast.
         """
         async with self._lock:
-            queues = list(self._subscribers.get(session_id, []))
+            queues: list[tuple[asyncio.Queue[Any], str]] = []
+            for subscriber_sid, subscribers in self._subscribers.items():
+                for queue, scope in subscribers:
+                    if self._should_receive(session_id, subscriber_sid, scope):
+                        queues.append((queue, scope))
 
-        dead_queues: list[asyncio.Queue[RichAgentStreamEvent[Any] | None]] = []
-        for queue in queues:
+        dead_queues: list[asyncio.Queue[Any]] = []
+        for queue, _scope in queues:
             copied_event = copy.copy(event)
             try:
                 queue.put_nowait(copied_event)
@@ -160,14 +215,14 @@ class EventBus:
         if dead_queues:
             dead_set = set(dead_queues)
             async with self._lock:
-                if session_id in self._subscribers:
-                    self._subscribers[session_id] = [
-                        q
-                        for q in self._subscribers[session_id]
-                        if q not in dead_set
+                for subscriber_sid in list(self._subscribers):
+                    self._subscribers[subscriber_sid] = [
+                        item
+                        for item in self._subscribers[subscriber_sid]
+                        if item[0] not in dead_set
                     ]
-                    if not self._subscribers[session_id]:
-                        del self._subscribers[session_id]
+                    if not self._subscribers[subscriber_sid]:
+                        del self._subscribers[subscriber_sid]
 
     async def close_session(self, session_id: str) -> None:
         """Close all subscriptions for a session.
@@ -178,7 +233,8 @@ class EventBus:
             session_id: The session to close subscriptions for.
         """
         async with self._lock:
-            queues = self._subscribers.pop(session_id, [])
+            subscribers = self._subscribers.pop(session_id, [])
+            queues = [queue for queue, _scope in subscribers]
 
         for queue in queues:
             while True:
@@ -198,7 +254,7 @@ class EventBus:
             A snapshot mapping session IDs to subscriber counts.
         """
         async with self._lock:
-            return {sid: len(qs) for sid, qs in self._subscribers.items()}
+            return {sid: len(items) for sid, items in self._subscribers.items()}
 
 
 class SessionController:
@@ -229,6 +285,7 @@ class SessionController:
         self._cleanup_callback = cleanup_callback
         self._sessions: dict[str, SessionState] = {}
         self._session_agents: dict[str, BaseAgent[Any, Any]] = {}
+        self._children: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
         self._session_ttl_seconds: float = DEFAULT_SESSION_TTL_SECONDS
         self._cleanup_task: asyncio.Task[Any] | None = None
@@ -239,6 +296,8 @@ class SessionController:
         self,
         session_id: str,
         agent_name: str | None = None,
+        parent_session_id: str | None = None,
+        lifecycle_policy: str | None = None,
         **metadata: Any,
     ) -> SessionState:
         """Get or create a session.
@@ -249,6 +308,8 @@ class SessionController:
         Args:
             session_id: Unique identifier for the session.
             agent_name: Name of the agent to associate with the session.
+            parent_session_id: Optional parent session ID for hierarchical sessions.
+            lifecycle_policy: Optional lifecycle policy override.
             **metadata: Arbitrary metadata to attach to the session.
 
         Returns:
@@ -259,13 +320,15 @@ class SessionController:
 
         async with self._lock:
             return await self._get_or_create_session_locked(
-                session_id, agent_name, **metadata
+                session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
             )
 
     async def _get_or_create_session_locked(
         self,
         session_id: str,
         agent_name: str | None = None,
+        parent_session_id: str | None = None,
+        lifecycle_policy: str | None = None,
         **metadata: Any,
     ) -> SessionState:
         """Get or create a session - caller MUST hold self._lock.
@@ -276,6 +339,8 @@ class SessionController:
         Args:
             session_id: Unique identifier for the session.
             agent_name: Name of the agent to associate with the session.
+            parent_session_id: Optional parent session ID for hierarchical sessions.
+            lifecycle_policy: Optional lifecycle policy override.
             **metadata: Arbitrary metadata to attach to the session.
 
         Returns:
@@ -286,12 +351,22 @@ class SessionController:
             state.last_active_at = time.monotonic()
             return state
 
+        effective_policy = lifecycle_policy or (
+            self._sessions.get(parent_session_id, SessionState("", "")).lifecycle_policy
+            if parent_session_id and parent_session_id in self._sessions
+            else SessionLifecyclePolicy.default()
+        )
+
         state = SessionState(
             session_id=session_id,
             agent_name=agent_name or self.pool.main_agent.name or "default",
+            parent_session_id=parent_session_id,
+            lifecycle_policy=effective_policy,
             metadata=metadata,
         )
         self._sessions[session_id] = state
+        if parent_session_id:
+            self._children.setdefault(parent_session_id, []).append(session_id)
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
         return state
 
@@ -366,15 +441,38 @@ class SessionController:
             session.agent = base_agent
             return base_agent
 
+    async def _close_session_unlocked(self, session_id: str) -> None:
+        """Close a session without acquiring the main lock (caller must hold lock)."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return
+        session.is_closing = True
+        session.closed_at = time.monotonic()
+        # Recursively close children, respecting their lifecycle policies
+        children = self._children.pop(session_id, [])
+        for child_id in children:
+            child_session = self._sessions.get(child_id)
+            if child_session is not None and child_session.lifecycle_policy == "independent":
+                continue
+            await self._close_session_unlocked(child_id)
+        self._session_agents.pop(session_id, None)
+        self._sessions.pop(session_id, None)
+        # Remove from parent's children list
+        if session.parent_session_id and session.parent_session_id in self._children:
+            self._children[session.parent_session_id] = [
+                cid for cid in self._children[session.parent_session_id] if cid != session_id
+            ]
+
     async def close_session(self, session_id: str) -> None:
         """Close a session and clean up resources.
 
         Order matters:
         1. Mark session as closing (prevents new turns from starting)
-        2. Remove from tracking dicts
-        3. Acquire turn_lock to wait for active turn to complete
-        4. Exit agent context if per-session
-        5. Clean up session state
+        2. Handle child sessions based on lifecycle policy
+        3. Remove from tracking dicts
+        4. Acquire turn_lock to wait for active turn to complete
+        5. Exit agent context if per-session
+        6. Clean up session state
 
         Args:
             session_id: The session to close.
@@ -386,8 +484,26 @@ class SessionController:
 
             session.is_closing = True
             session.closed_at = time.monotonic()
+
+            # Handle child sessions based on lifecycle policy
+            children = self._children.pop(session_id, [])
+            if children:
+                for child_id in children:
+                    child_session = self._sessions.get(child_id)
+                    if (
+                        child_session is not None
+                        and child_session.lifecycle_policy == "independent"
+                    ):
+                        continue
+                    await self._close_session_unlocked(child_id)
+
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
+            # Remove from parent's children list
+            if session.parent_session_id and session.parent_session_id in self._children:
+                self._children[session.parent_session_id] = [
+                    cid for cid in self._children[session.parent_session_id] if cid != session_id
+                ]
 
         turn_completed = False
         acquired = False
@@ -433,6 +549,31 @@ class SessionController:
             The session state, or None if not found.
         """
         return self._sessions.get(session_id)
+
+    def get_children(self, session_id: str) -> list[str]:
+        """Get child session IDs for a session.
+
+        Args:
+            session_id: The parent session ID.
+
+        Returns:
+            List of child session IDs.
+        """
+        return list(self._children.get(session_id, []))
+
+    def get_parent(self, session_id: str) -> SessionState | None:
+        """Get the parent session state for a session.
+
+        Args:
+            session_id: The child session ID.
+
+        Returns:
+            The parent session state, or None if not found.
+        """
+        session = self._sessions.get(session_id)
+        if session is None or session.parent_session_id is None:
+            return None
+        return self._sessions.get(session.parent_session_id)
 
     def _count_mcp_processes(self) -> int:
         """Count active MCP processes across all per-session agents.
@@ -594,10 +735,8 @@ class TurnRunner:
         from agentpool.agents.context import AgentRunContext
 
         run_ctx = AgentRunContext(
-            session_id=session_id,
             deps=kwargs.get("deps"),
         )
-        run_ctx.event_bus = self.event_bus
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()
 
@@ -993,6 +1132,8 @@ class SessionPool:
         self,
         session_id: str,
         agent_name: str | None = None,
+        parent_session_id: str | None = None,
+        lifecycle_policy: str | None = None,
         **metadata: Any,
     ) -> SessionState:
         """Create or get a session.
@@ -1000,12 +1141,26 @@ class SessionPool:
         Args:
             session_id: Unique identifier for the session.
             agent_name: Name of the agent to associate with the session.
+            parent_session_id: Optional parent session ID for hierarchical sessions.
+            lifecycle_policy: Optional lifecycle policy override.
             **metadata: Arbitrary metadata to attach to the session.
 
         Returns:
             The session state.
         """
-        return await self.sessions.get_or_create_session(session_id, agent_name, **metadata)
+        state = await self.sessions.get_or_create_session(
+            session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
+        )
+        # Persist parent-child relationship via SessionManager for
+        # project_id/cwd inheritance and legacy compatibility.
+        if parent_session_id is not None:
+            await self.pool.sessions.create_child_session(
+                parent_session_id=parent_session_id,
+                agent_name=agent_name or state.agent_name,
+                agent_type=metadata.get("agent_type", "native"),
+                child_session_id=session_id,
+            )
+        return state
 
     async def close_session(self, session_id: str) -> None:
         """Close a session.

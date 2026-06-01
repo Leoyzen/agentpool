@@ -101,7 +101,7 @@ agents:
         orch = pool.get_agent("orchestrator")
         child_session_id_from_spawn: str | None = None
 
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
 
@@ -185,7 +185,7 @@ agents:
 
     async with AgentPool(manifest) as pool:
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_count += 1
 
@@ -258,7 +258,7 @@ agents:
 
     async with AgentPool(manifest) as pool:
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
             elif isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
@@ -304,7 +304,7 @@ agents:
 
     async with AgentPool(manifest) as pool:
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_depth_default = event.depth
 
@@ -482,7 +482,7 @@ agents:
         await worker.set_model(TestModel(custom_output_text="Worker result"))
 
         child_session_id: str | None = None
-        async for event in main_agent.run_stream("Run worker"):
+        async for event in main_agent.run_stream("Run worker", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id = event.child_session_id
 
@@ -790,7 +790,7 @@ agents:
         agent_b.agent_pool = pool
 
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate to team"):
+        async for event in orch.run_stream("Delegate to team", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 all_child_ids.append(event.child_session_id)
 

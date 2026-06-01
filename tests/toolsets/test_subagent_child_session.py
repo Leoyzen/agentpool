@@ -66,7 +66,7 @@ agents:
     async with AgentPool(manifest) as pool:
         orchestrator = pool.get_agent("orchestrator")
 
-        async for event in orchestrator.run_stream("Delegate"):
+        async for event in orchestrator.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_count += 1
 
@@ -109,7 +109,7 @@ agents:
     async with AgentPool(manifest) as pool:
         orchestrator = pool.get_agent("orchestrator")
 
-        async for event in orchestrator.run_stream("Delegate"):
+        async for event in orchestrator.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
             elif isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
@@ -162,7 +162,7 @@ agents:
 
         child_session_id_from_spawn: str | None = None
 
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
 
@@ -353,7 +353,7 @@ agents:
         orch = pool.get_agent("orchestrator")
 
         # With depth=0 (default top-level), child should be depth=1
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_depth = event.depth
 

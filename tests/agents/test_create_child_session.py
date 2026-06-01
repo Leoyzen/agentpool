@@ -28,6 +28,7 @@ async def test_create_child_session_with_pool(mock_node: MagicMock) -> None:
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
     mock_pool.sessions = SessionManager(pool=mock_pool, store=store)
+    mock_pool.session_pool = None
 
     mock_node.agent_pool = mock_pool
 
@@ -64,6 +65,7 @@ async def test_create_child_session_with_explicit_parent(mock_node: MagicMock) -
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
     mock_pool.sessions = SessionManager(pool=mock_pool, store=store)
+    mock_pool.session_pool = None
 
     mock_node.agent_pool = mock_pool
 
@@ -114,6 +116,7 @@ async def test_create_child_session_pool_without_sessions(mock_node: MagicMock) 
     """When pool exists but sessions is None, falls back to generate_session_id."""
     mock_pool = MagicMock()
     mock_pool.sessions = None
+    mock_pool.session_pool = None
 
     mock_node.agent_pool = mock_pool
 

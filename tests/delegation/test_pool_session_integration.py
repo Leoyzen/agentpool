@@ -371,7 +371,7 @@ class TestMixedMode:
             agent = pool.get_agent("test_agent")
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="enabled"))
-            result = await agent.run("hello")
+            result = await agent.run("hello", session_id="ses_test")
             assert result.data == "enabled"
 
     @pytest.mark.integration
@@ -386,7 +386,7 @@ class TestMixedMode:
             agent = pool.get_agent("test_agent")
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="disabled"))
-            result = await agent.run("hello")
+            result = await agent.run("hello", session_id="ses_test")
             assert result.data == "disabled"
 
     @pytest.mark.integration
@@ -405,14 +405,14 @@ class TestMixedMode:
             agent_enabled = pool_enabled.get_agent("test_agent")
             assert isinstance(agent_enabled, Agent)
             await agent_enabled.set_model(TestModel(custom_output_text="same"))
-            result_enabled = await agent_enabled.run("hello")
+            result_enabled = await agent_enabled.run("hello", session_id="ses_test")
 
         # With SessionPool disabled
         async with AgentPool(basic_manifest) as pool_disabled:
             agent_disabled = pool_disabled.get_agent("test_agent")
             assert isinstance(agent_disabled, Agent)
             await agent_disabled.set_model(TestModel(custom_output_text="same"))
-            result_disabled = await agent_disabled.run("hello")
+            result_disabled = await agent_disabled.run("hello", session_id="ses_test")
 
         assert result_enabled.data == result_disabled.data
         assert result_enabled.data == "same"
@@ -497,7 +497,7 @@ class TestRollback:
             agent = pool.get_agent("test_agent")
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="before"))
-            result_before = await agent.run("hello")
+            result_before = await agent.run("hello", session_id="ses_test")
             assert result_before.data == "before"
 
         pool_after = AgentPool(basic_manifest, enable_session_pool=False)
@@ -505,5 +505,5 @@ class TestRollback:
             agent_after = pool_after.get_agent("test_agent")
             assert isinstance(agent_after, Agent)
             await agent_after.set_model(TestModel(custom_output_text="after"))
-            result_after = await agent_after.run("hello")
+            result_after = await agent_after.run("hello", session_id="ses_test")
             assert result_after.data == "after"

@@ -12,7 +12,6 @@ session updates.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
@@ -114,7 +113,7 @@ class ACPProtocolHandler:
             )
             return
 
-        queue = await session_pool.event_bus.subscribe(session_id)
+        queue = await session_pool.event_bus.subscribe(session_id, scope="descendants")
         self._consumer_queues[session_id] = queue
 
         # Create a per-session converter so tool-call state is isolated

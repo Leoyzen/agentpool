@@ -357,6 +357,101 @@ async def test_background_task_child_agent_events_reach_event_bus(
     assert subagent_events[0].source_name == "bg-task"
 
 
+@pytest.mark.anyio
+async def test_background_task_events_reach_acp_client_after_end_turn(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """Background task events emitted after StreamCompleteEvent reach EventBus.
+
+    This is a **red flag test** — if it fails, post-end-turn background events
+    are lost before reaching the ACP client.
+
+    Scenario:
+    1. Agent stream yields RunStartedEvent then StreamCompleteEvent (end_turn)
+    2. In the generator's cleanup (finally), a background task event is queued
+       to run_ctx.event_queue
+    3. _run_turn_unlocked's event consumer is still running and should pick it up
+    4. Event reaches EventBus and thus the ACP client
+
+    Expected: SubAgentEvent published to EventBus after end_turn.
+    """
+    from agentpool import ChatMessage
+    from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent, SubAgentEvent
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        try:
+            yield RunStartedEvent(session_id="sess-1", run_id="run-1")
+            yield StreamCompleteEvent(
+                message=ChatMessage(content="main done", role="assistant"),
+            )
+        finally:
+            # Simulate background task emitting event after main stream completes
+            await run_ctx.event_queue.put(
+                SubAgentEvent(
+                    source_name="bg-task-post-turn",
+                    source_type="background",
+                    event=StreamCompleteEvent(
+                        message=ChatMessage(content="background done", role="assistant"),
+                    ),
+                    child_session_id="child-sess",
+                    parent_session_id="sess-1",
+                )
+            )
+
+    agent = MagicMock()
+    agent._active_run_ctx = None
+    agent._current_run_ctx = None
+    agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+
+    # Subscribe to EventBus BEFORE running the turn
+    event_queue = await turn_runner.event_bus.subscribe("sess-1")
+    event_bus_events: list[Any] = []
+
+    async def _bus_consumer() -> None:
+        """Consume events from pre-subscribed queue."""
+        try:
+            while True:
+                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                if event is None:
+                    break
+                event_bus_events.append(event)
+        except TimeoutError:
+            pass  # No more events
+
+    # Start EventBus consumer
+    consumer_task = asyncio.create_task(_bus_consumer())
+
+    # Run the turn
+    await turn_runner.run_turn("sess-1", "initial")
+
+    # Wait for EventBus consumer
+    await asyncio.sleep(0.1)
+    await turn_runner.event_bus.publish("sess-1", None)  # sentinel
+    await consumer_task
+
+    # Filter for SubAgentEvent
+    subagent_events = [e for e in event_bus_events if isinstance(e, SubAgentEvent)]
+
+    # RED FLAG: background task events after end_turn must reach EventBus
+    assert len(subagent_events) == 1, (
+        f"post-end-turn background events LOST: found {len(subagent_events)} SubAgentEvent(s) "
+        f"in EventBus, expected 1. "
+        f"Total events in bus: {len(event_bus_events)}. "
+        f"Event consumer did not pick up background task event after stream completion."
+    )
+    assert subagent_events[0].source_name == "bg-task-post-turn"
+
+
 # ---------------------------------------------------------------------------
 # run_turn – serialization
 # ---------------------------------------------------------------------------

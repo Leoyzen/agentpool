@@ -249,9 +249,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     ) -> str:
         """Create a child session for a subagent delegation.
 
-        When the agent pool and its session manager are available, the child
-        session is persisted via ``SessionManager.create_child_session()`` so
-        that parent-child relationships, project context, and working directory
+        When the agent pool and its session pool are available, the child
+        session is created via ``SessionPool.create_session()`` so that
+        parent-child relationships, project context, and working directory
         are inherited automatically.  When no pool is present (e.g. during
         standalone or test runs) a new session ID is generated without
         persistence.
@@ -266,19 +266,32 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             The child session ID string.
         """
         pool = self.node.agent_pool
-        if pool is not None and pool.sessions is not None:
+        if pool is not None:
             effective_parent = parent_session_id or self.node.session_id
-            # pool.sessions is SessionManager — create_child_session requires
-            # a non-None parent_session_id; fall back gracefully.
             if effective_parent is None:
                 from agentpool.utils.identifiers import generate_session_id
 
                 return generate_session_id()
-            return await pool.sessions.create_child_session(
-                parent_session_id=effective_parent,
-                agent_name=agent_name,
-                agent_type=agent_type,
-            )
+
+            if pool.session_pool is not None:
+                from agentpool.utils.identifiers import generate_session_id
+
+                child_session = await pool.session_pool.create_session(
+                    session_id=generate_session_id(),
+                    agent_name=agent_name,
+                    parent_session_id=effective_parent,
+                    agent_type=agent_type,
+                )
+                return child_session.session_id
+
+            # Fallback to old path when session_pool is not enabled
+            if pool.sessions is not None:
+                return await pool.sessions.create_child_session(
+                    parent_session_id=effective_parent,
+                    agent_name=agent_name,
+                    agent_type=agent_type,
+                )
+
         # No pool available — generate an ephemeral ID without persistence.
         from agentpool.utils.identifiers import generate_session_id
 

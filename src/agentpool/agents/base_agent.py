@@ -676,16 +676,28 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         from agentpool.utils.identifiers import generate_session_id
 
         # Initialize session_id once for the entire run (including queued prompts)
+        effective_session_id = session_id
+        if effective_session_id is None:
+            if self.agent_pool is None:
+                # Standalone mode: generate ephemeral session ID
+                effective_session_id = generate_session_id()
+            elif self.session_id is not None:
+                # Re-use existing session_id for backward compatibility
+                effective_session_id = self.session_id
+            else:
+                msg = "session_id is required when agent is part of a pool"
+                raise ValueError(msg)
+
         if self.session_id is None:
-            self.session_id = session_id or generate_session_id()
+            self.session_id = effective_session_id
             self.parent_session_id = parent_session_id
             user_prompts = [str(p) for p in prompts if isinstance(p, str)]
             initial_prompt = user_prompts[-1] if user_prompts else None
             await self.log_session(
                 initial_prompt, model=self.model_name, parent_session_id=self.parent_session_id
             )
-        elif session_id and self.session_id != session_id:
-            self.session_id = session_id
+        elif effective_session_id and self.session_id != effective_session_id:
+            self.session_id = effective_session_id
             self.parent_session_id = parent_session_id
 
         # Create per-run context for state isolation

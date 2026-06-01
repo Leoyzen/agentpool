@@ -45,7 +45,7 @@ class _TestAgent(BaseAgent):
         wait_for_connections: bool | None = None,
         store_history: bool = True,
     ) -> AsyncIterator[Any]:
-        async for _ in []:
+        if False:
             yield
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
@@ -239,6 +239,27 @@ def test_is_turn_active_false_after_clearing_background_run_ctx(agent: _TestAgen
 
     agent._background_run_ctx = None
     assert agent.is_turn_active() is False
+
+
+# ---------------------------------------------------------------------------
+# Standalone agent generates ephemeral session
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_baseagent_standalone_generates_ephemeral_session() -> None:
+    """BaseAgent without an agent_pool generates an ephemeral session_id during run_stream."""
+    agent = _TestAgent(name="standalone-test")
+    assert agent.agent_pool is None
+    assert agent.session_id is None
+
+    async with agent:
+        async for _event in agent.run_stream("hello"):
+            pass
+
+    assert agent.session_id is not None
+    assert isinstance(agent.session_id, str)
+    assert len(agent.session_id) > 0
 
 
 # ---------------------------------------------------------------------------

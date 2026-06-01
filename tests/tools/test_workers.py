@@ -246,7 +246,7 @@ async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker: do something"):
+        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 events.append(event)
 
@@ -279,7 +279,7 @@ async def test_worker_emits_subagent_events(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker: do something"):
+        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
             if isinstance(event, SubAgentEvent):
                 subagent_events.append(event)
 
@@ -317,7 +317,7 @@ async def test_worker_session_isolation(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker twice"):
+        async for event in main_agent.run_stream("Ask worker twice", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -372,7 +372,7 @@ teams:
         await main_agent.set_model(main_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask team to do something"):
+        async for event in main_agent.run_stream("Ask team to do something", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -402,7 +402,7 @@ async def test_worker_spawn_depth_equals_parent_depth_plus_one(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect SpawnSessionStart events via run_stream
-        async for event in main_agent.run_stream("Ask worker: do something"):
+        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -430,7 +430,7 @@ async def test_worker_child_session_has_correct_parent(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker: do something"):
+        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -474,7 +474,7 @@ async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
             try:
                 # Run at max depth by providing a pre-configured depth
                 async for event in main_agent.run_stream(
-                    "Ask worker: do something", depth=MAX_DELEGATION_DEPTH
+                    "Ask worker: do something", depth=MAX_DELEGATION_DEPTH, session_id="ses_test"
                 ):
                     if isinstance(event, SpawnSessionStart):
                         pass  # Should not reach here
@@ -503,7 +503,7 @@ async def test_subagent_event_depth_propagation(tmp_path: Path):
         await main_agent.set_model(main_model)
         await worker.set_model(worker_model)
 
-        async for event in main_agent.run_stream("Ask worker: do something"):
+        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
             elif isinstance(event, SubAgentEvent):
