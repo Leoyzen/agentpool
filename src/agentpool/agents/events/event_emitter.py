@@ -365,12 +365,17 @@ class StreamEventEmitter:
         else:
             await self._context.agent._event_queue.put(event)
 
-        # Forward to EventBus if SessionPool is active
-        if StreamEventEmitter._event_bus is not None:
+        # Forward to EventBus — prefer run_ctx-level injection, fall back to class-level
+        event_bus = None
+        if self._context.run_ctx is not None:
+            event_bus = getattr(self._context.run_ctx, "event_bus", None)
+        if event_bus is None:
+            event_bus = StreamEventEmitter._event_bus
+        if event_bus is not None:
             session_id = getattr(self._context.agent, "session_id", None)
             if session_id:
                 try:
-                    await StreamEventEmitter._event_bus.publish(session_id, event)
+                    await event_bus.publish(session_id, event)
                 except Exception:
                     logger.debug(
                         "EventBus publish failed, event already in agent queue",

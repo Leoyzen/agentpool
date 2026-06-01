@@ -285,6 +285,7 @@ async def test_background_task_child_agent_events_reach_event_bus(
         child_agent = MagicMock()
         child_agent.session_id = "sess-1"  # Same session for EventBus routing
         child_run_ctx = AgentRunContext(session_id="child-sess", deps=None)
+        child_run_ctx.event_bus = turn_runner.event_bus
         child_ctx = MagicMock()
         child_ctx.agent = child_agent
         child_ctx.run_ctx = child_run_ctx
@@ -318,9 +319,6 @@ async def test_background_task_child_agent_events_reach_event_bus(
 
     await _setup_session(controller, "sess-1", agent, mock_pool)
 
-    # Activate EventBus forwarding (normally done by SessionPool.start())
-    StreamEventEmitter.set_event_bus(turn_runner.event_bus)
-
     # Subscribe to EventBus BEFORE running the turn
     event_queue = await turn_runner.event_bus.subscribe("sess-1")
 
@@ -345,9 +343,6 @@ async def test_background_task_child_agent_events_reach_event_bus(
     await asyncio.sleep(0.1)
     await turn_runner.event_bus.publish("sess-1", None)  # sentinel
     await consumer_task
-
-    # Cleanup
-    StreamEventEmitter.set_event_bus(None)
 
     # Filter for SubAgentEvent
     subagent_events = [e for e in event_bus_events if isinstance(e, SubAgentEvent)]
