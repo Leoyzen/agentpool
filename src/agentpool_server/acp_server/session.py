@@ -23,7 +23,8 @@ from acp.agent.acp_requests import ACPRequests
 from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
-from agentpool import Agent, AgentPool
+from acp.schema.mcp import AcpMcpServer
+from agentpool import Agent, AgentPool  # noqa: TC001
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
@@ -412,34 +413,81 @@ class ACPSession:
         if not self.mcp_servers:
             return
         self.log.info("Initializing MCP servers", server_count=len(self.mcp_servers))
-        # Create session-level MCP providers (isolated from pool-level agent)
-        for server in self.mcp_servers:
-            cfg = convert_acp_mcp_server_to_config(server)
-            try:
-                # Skip if already registered for this session
-                if any(p.server.client_id == cfg.client_id for p in self.session_mcp_providers):
-                    self.log.debug(
-                        "MCP server already registered for session, skipping",
-                        server_name=cfg.name,
-                    )
-                    continue
 
-                provider = MCPResourceProvider(
-                    server=cfg,
-                    name=f"session_{self.session_id}_{cfg.display_name}",
-                    source="node",
-                    accessible_roots=getattr(self.agent.env, "accessible_roots", None),
-                )
-                provider = await provider.__aenter__()
-                self.session_mcp_providers.append(provider)
-                self.log.info(
-                    "Added session MCP server",
-                    server_name=cfg.name,
-                    session_id=self.session_id,
+        async def _init_server(server: Any) -> None:
+            try:
+                with anyio.fail_after(5):
+                    # ACP-transport MCP servers are connected by the agent initiating
+                    # mcp/connect to the client (Agent -> Client per ACP spec)
+                    if isinstance(server, AcpMcpServer):
+                        self.log.info(
+                            "Connecting ACP MCP server via mcp/connect",
+                            server_name=server.name,
+                        )
+                        connection_id = await self.acp_agent.connect_acp_mcp_server(server)
+                        conn = self.acp_agent._mcp_manager.get_connection(connection_id)
+                        if conn is None:
+                            raise RuntimeError(
+                                f"AcpMcpConnection not found for {connection_id}"
+                            )
+                        from agentpool_server.acp_server.acp_mcp_transport import (
+                            AcpMcpTransport,
+                        )
+
+                        transport = AcpMcpTransport(
+                            conn, timeout=getattr(server, "timeout", None) or 10.0
+                        )
+                        cfg = convert_acp_mcp_server_to_config(server)
+                        provider = MCPResourceProvider(
+                            server=cfg,
+                            name=f"session_{self.session_id}_{cfg.display_name}",
+                            source="node",
+                            accessible_roots=getattr(self.agent.env, "accessible_roots", None),
+                            transport=transport,
+                        )
+                        provider = await provider.__aenter__()
+                        self.session_mcp_providers.append(provider)
+                        self.log.info(
+                            "Added session ACP MCP server",
+                            server_name=cfg.name,
+                            session_id=self.session_id,
+                        )
+                        return
+
+                    cfg = convert_acp_mcp_server_to_config(server)
+                    # Skip if already registered for this session
+                    if any(p.server.client_id == cfg.client_id for p in self.session_mcp_providers):
+                        self.log.debug(
+                            "MCP server already registered for session, skipping",
+                            server_name=cfg.name,
+                        )
+                        return
+
+                    provider = MCPResourceProvider(
+                        server=cfg,
+                        name=f"session_{self.session_id}_{cfg.display_name}",
+                        source="node",
+                        accessible_roots=getattr(self.agent.env, "accessible_roots", None),
+                    )
+                    provider = await provider.__aenter__()
+                    self.session_mcp_providers.append(provider)
+                    self.log.info(
+                        "Added session MCP server",
+                        server_name=cfg.name,
+                        session_id=self.session_id,
+                    )
+            except TimeoutError:
+                self.log.warning(
+                    "MCP server initialization timed out",
+                    server_name=server.name,
                 )
             except Exception:
-                self.log.exception("Failed to setup MCP server", server_name=cfg.name)
-                # Don't fail session creation, just log the error
+                self.log.exception(
+                    "Failed to setup MCP server",
+                    server_name=server.name,
+                )
+
+        await asyncio.gather(*[_init_server(s) for s in self.mcp_servers])
         # Register MCP prompts as commands after all servers are added
         try:
             await self._register_mcp_prompts_as_commands()
@@ -678,6 +726,19 @@ class ACPSession:
             # Clean up session-level MCP providers
             for provider in self.session_mcp_providers:
                 try:
+                    # For ACP-transport providers, notify client before closing
+                    if provider.transport_type == "acp":
+                        try:
+                            transport = provider.client._external_transport
+                            if transport is not None:
+                                await self.acp_agent.disconnect_acp_mcp_server(
+                                    transport.connection_id
+                                )
+                        except Exception:
+                            self.log.exception(
+                                "Error disconnecting ACP MCP server",
+                                provider=provider.name,
+                            )
                     await provider.__aexit__(None, None, None)
                 except Exception:
                     self.log.exception(

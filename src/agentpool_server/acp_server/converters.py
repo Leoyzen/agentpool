@@ -28,6 +28,7 @@ from acp.schema import (
     TextContentBlock,
     TextResourceContents,
 )
+from acp.schema.mcp import AcpMcpServer
 from agentpool.log import get_logger
 from agentpool.utils.pydantic_ai_helpers import (
     format_uri_as_link,
@@ -35,6 +36,7 @@ from agentpool.utils.pydantic_ai_helpers import (
     uri_to_path_reference,
 )
 from agentpool_config.mcp_server import (
+    AcpMCPServerConfig,
     SSEMCPServerConfig,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
@@ -75,6 +77,12 @@ def convert_acp_mcp_server_to_config(
 
 
 @overload
+def convert_acp_mcp_server_to_config(
+    acp_server: AcpMcpServer,
+) -> AcpMCPServerConfig: ...
+
+
+@overload
 def convert_acp_mcp_server_to_config(acp_server: McpServer) -> MCPServerConfig: ...
 
 
@@ -97,6 +105,8 @@ def convert_acp_mcp_server_to_config(acp_server: McpServer) -> MCPServerConfig:
         case HttpMcpServer(name=name, url=url):
             h = acp_server.get_headers_dict()
             return StreamableHTTPMCPServerConfig(name=name, url=HttpUrl(url), headers=h)
+        case AcpMcpServer(name=name, id=acp_id):
+            return AcpMCPServerConfig(name=name, acp_id=acp_id)
         case _ as unreachable:
             assert_never(unreachable)
 

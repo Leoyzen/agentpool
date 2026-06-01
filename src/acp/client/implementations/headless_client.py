@@ -283,3 +283,8 @@ class HeadlessACPClient(Client):
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         """Handle extension notifications."""
         logger.debug("Extension notification", method=method)
+
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Handle raw requests (for standard ACP methods like mcp/connect)."""
+        logger.debug("Raw request", method=method)
+        return {"ok": True, "method": method, "params": params}

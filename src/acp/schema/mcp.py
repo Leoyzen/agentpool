@@ -88,4 +88,17 @@ class StdioMcpServer(BaseMcpServer):
         return {env.name: env.value for env in self.env}
 
 
-McpServer = HttpMcpServer | SseMcpServer | StdioMcpServer
+class AcpMcpServer(BaseMcpServer):
+    """ACP channel transport configuration.
+
+    Only available when the Agent capabilities indicate `mcp_capabilities.acp` is `true`.
+    """
+
+    type: Literal["acp"] = Field(default="acp", init=False)
+    """ACP transport type."""
+
+    id: str
+    """Component-generated unique identifier for routing."""
+
+
+McpServer = HttpMcpServer | SseMcpServer | StdioMcpServer | AcpMcpServer

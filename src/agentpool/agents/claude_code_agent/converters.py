@@ -188,6 +188,7 @@ def convert_mcp_servers_to_sdk_format(
     from urllib.parse import urlparse
 
     from agentpool_config.mcp_server import (
+        AcpMCPServerConfig,
         SSEMCPServerConfig,
         StdioMCPServerConfig,
         StreamableHTTPMCPServerConfig,
@@ -206,6 +207,10 @@ def convert_mcp_servers_to_sdk_format(
                 name = server.command
             case SSEMCPServerConfig() | StreamableHTTPMCPServerConfig():
                 name = urlparse(str(server.url)).hostname or f"server_{idx}"
+            case AcpMCPServerConfig():
+                raise NotImplementedError(
+                    "ACP transport MCP servers not supported by Claude Code agent"
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -224,6 +229,10 @@ def convert_mcp_servers_to_sdk_format(
                 config = {"type": "http", "url": str(url)}
                 if server.headers:
                     config["headers"] = server.headers
+            case AcpMCPServerConfig():
+                raise NotImplementedError(
+                    "ACP transport MCP servers not supported by Claude Code agent"
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 

@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-
-import anyio
 from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
 import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+import anyio
+
 from acp import Agent as ACPAgent
 from acp.schema import (
+    CloseSessionResponse,
     DisableProvidersRequest,
     DisableProvidersResponse,
     ForkSessionResponse,
@@ -37,10 +38,10 @@ from acp.schema import (
     SetSessionModelResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
-    CloseSessionResponse,
 )
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
+from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
 from agentpool_server.acp_server.provider_router import ProviderRouter
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
         AuthenticateRequest,
         CancelNotification,
         ClientCapabilities,
+        CloseSessionRequest,
         ForkSessionRequest,
         Implementation,
         InitializeRequest,
@@ -66,8 +68,8 @@ if TYPE_CHECKING:
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
         SetSessionModeRequest,
-        CloseSessionRequest,
     )
+    from acp.schema.mcp import AcpMcpServer
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.models.agents import NativeAgentConfig
@@ -229,6 +231,9 @@ class AgentPoolACPAgent(ACPAgent):
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
 
+    _mcp_manager: AcpMcpConnectionManager = field(init=False)
+    """Manager for MCP-over-ACP connection lifecycle."""
+
     def __post_init__(self) -> None:
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
@@ -247,8 +252,11 @@ class AgentPoolACPAgent(ACPAgent):
         # Setup skill command bridge if pool has skill commands configured
         self._setup_skill_bridge()
 
+        # Initialize MCP-over-ACP connection manager
+        self._mcp_manager = AcpMcpConnectionManager()
         # RFC-0034: Initialize provider router with None manifest (will be updated in initialize)
         self.provider_router = ProviderRouter(None)
+        # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
         if (
             self.agent_pool
@@ -376,7 +384,7 @@ class AgentPoolACPAgent(ACPAgent):
                             agent.tools.add_provider(
                                 self.agent_pool.mcp.get_aggregating_provider()
                             )
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             logger.debug(
                                 "Failed to add pool-level MCP provider to session agent",
                                 exc_info=True,
@@ -543,6 +551,7 @@ class AgentPoolACPAgent(ACPAgent):
             fork_session=True,
             http_mcp_servers=True,
             sse_mcp_servers=True,
+            acp_mcp_servers=True,
             audio_prompts=True,
             embedded_context_prompts=True,
             image_prompts=True,
@@ -938,7 +947,83 @@ class AgentPoolACPAgent(ACPAgent):
         Returns:
             Response dictionary.
         """
-        return {}
+        match method:
+            case "mcp/message":
+                connection_id = params.get("connectionId", "")
+                message = params.get("message", {})
+                conn = self._mcp_manager.get_connection(connection_id)
+                if conn is not None:
+                    self.tasks.create_task(conn.handle_client_message(message))
+                else:
+                    logger.warning(
+                        "Received MCP message for unknown connection",
+                        connection_id=connection_id,
+                    )
+                return {}
+            case _:
+                return {}
+
+    async def connect_acp_mcp_server(self, server: AcpMcpServer) -> str:
+        """Connect to an ACP-transport MCP server by requesting connection from client.
+
+        Initiates mcp/connect to the client per ACP spec. The client returns a
+        connectionId which is used to establish the local AcpMcpConnection.
+
+        Args:
+            server: The ACP MCP server configuration.
+
+        Returns:
+            The connectionId returned by the client.
+
+        Raises:
+            ValueError: If the client does not return a connectionId.
+            TimeoutError: If the client does not respond to mcp/connect within 10s.
+        """
+        params = {
+            "server": server.model_dump(by_alias=True, exclude_none=True),
+            "acpId": server.id,
+        }
+        with anyio.fail_after(10):
+            response = await self.client.send_request("mcp/connect", params)
+        connection_id = str(response.get("connectionId", ""))
+        if not connection_id:
+            msg = "Client did not return connectionId for mcp/connect"
+            raise ValueError(msg)
+
+        async def send_to_client(message: dict[str, Any]) -> Any:
+            # message is already wrapped as {"connectionId": conn_id, "message": mcp_msg}
+            # by AcpMcpConnection.send_to_client. Pass through directly.
+            with anyio.fail_after(30):
+                return await self.client.send_request("mcp/message", message)
+
+        await self._mcp_manager.create_connection(
+            connection_id, server, send_to_client
+        )
+        logger.info(
+            "ACP MCP server connected",
+            server_name=server.name,
+            connection_id=connection_id,
+        )
+        return connection_id
+
+    async def disconnect_acp_mcp_server(self, connection_id: str) -> None:
+        """Disconnect from an ACP-transport MCP server.
+
+        Sends mcp/disconnect to the client and cleans up the local connection.
+
+        Args:
+            connection_id: The connection ID to disconnect.
+        """
+        try:
+            await self.client.send_request(
+                "mcp/disconnect", {"connectionId": connection_id}
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send mcp/disconnect to client",
+                connection_id=connection_id,
+            )
+        await self._mcp_manager.remove_connection(connection_id)
 
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         return None
@@ -946,6 +1031,19 @@ class AgentPoolACPAgent(ACPAgent):
     async def close(self) -> None:
         """Close the agent and clean up all resources."""
         logger.info("Closing AgentPoolACPAgent")
+        try:
+            # Notify client to disconnect all ACP MCP servers before closing locally
+            for conn_id in list(self._mcp_manager.get_connection_ids()):
+                try:
+                    await self.disconnect_acp_mcp_server(conn_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to disconnect ACP MCP server during shutdown",
+                        connection_id=conn_id,
+                    )
+            await self._mcp_manager.close_all()
+        except Exception:
+            logger.exception("Failed to close MCP connections during agent shutdown")
         await self.cleanup_all_session_agents()
 
     async def set_session_mode(
@@ -1176,7 +1274,21 @@ class AgentPoolACPAgent(ACPAgent):
                     session_id=session.session_id,
                 )
 
-        # 4. Clean up all per-session agents
+        # 4. Disconnect all ACP MCP servers before cleaning up session agents
+        try:
+            for conn_id in list(self._mcp_manager.get_connection_ids()):
+                try:
+                    await self.disconnect_acp_mcp_server(conn_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to disconnect ACP MCP server during pool swap",
+                        connection_id=conn_id,
+                    )
+            await self._mcp_manager.close_all()
+        except Exception:
+            logger.exception("Failed to close MCP connections during pool swap")
+
+        # 5. Clean up all per-session agents
         await self.cleanup_all_session_agents()
 
         try:

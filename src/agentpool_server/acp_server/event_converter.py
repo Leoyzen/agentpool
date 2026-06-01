@@ -632,7 +632,7 @@ class ACPEventConverter:
             case ToolCallProgressEvent(
                 tool_call_id=tool_call_id,
                 title=title,
-                # status=status,
+                status=status,
                 items=items,
                 progress=progress,
                 total=total,
@@ -689,14 +689,11 @@ class ACPEventConverter:
                     elif message:
                         effective_title = message
 
-                # TODO: Progress events shouldn't control completion status.
-                # The file_operation helper sets status="completed" on success, but that's
-                # emitted mid-operation (before content display). Only FunctionToolResultEvent
-                # should mark a tool as completed. For now, hardcode in_progress.
+                # Use the actual status from the event (failed, completed, in_progress)
                 yield ToolCallProgress(
                     tool_call_id=tool_call_id,
                     title=effective_title,
-                    status="in_progress",
+                    status=status or "in_progress",
                     content=acp_content or None,
                     locations=locations or None,
                 )

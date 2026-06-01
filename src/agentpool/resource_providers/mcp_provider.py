@@ -45,6 +45,7 @@ class MCPResourceProvider(ResourceProvider):
         source: Literal["pool", "node"] = "node",
         sampling_callback: SamplingHandler[Any, Any] | None = None,
         accessible_roots: list[str] | None = None,
+        transport: Any | None = None,
     ) -> None:
         from agentpool.mcp_server import MCPClient
         from agentpool_config.mcp_server import BaseMCPServerConfig
@@ -69,15 +70,17 @@ class MCPResourceProvider(ResourceProvider):
             tool_change_callback=self._on_tools_changed,
             prompt_change_callback=self._on_prompts_changed,
             resource_change_callback=self._on_resources_changed,
+            transport=transport,
         )
 
     def __repr__(self) -> str:
         return f"MCPResourceProvider({self.server!r}, source={self.source!r})"
 
     @property
-    def transport_type(self) -> Literal["stdio", "http", "sse"]:
+    def transport_type(self) -> Literal["stdio", "http", "sse", "acp"]:
         """Return the type of connection used by the MCP server."""
-        from agentpool_config import (
+        from agentpool_config.mcp_server import (
+            AcpMCPServerConfig,
             SSEMCPServerConfig,
             StdioMCPServerConfig,
             StreamableHTTPMCPServerConfig,
@@ -90,6 +93,8 @@ class MCPResourceProvider(ResourceProvider):
                 return "http"
             case SSEMCPServerConfig():
                 return "sse"
+            case AcpMCPServerConfig():
+                return "acp"
             case _ as unreachable:
                 assert_never(unreachable)  # ty: ignore[type-assertion-failure]
 

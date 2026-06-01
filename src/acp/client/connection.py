@@ -199,6 +199,10 @@ class ClientSideConnection(Agent):
     async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
         await self._conn.send_notification(f"_{method}", params)
 
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send a raw request without the _ prefix (for standard ACP methods)."""
+        return await self._conn.send_request(method, params)  # type: ignore[no-any-return]
+
     async def close(self) -> None:
         await self._conn.close()
 
@@ -266,10 +270,16 @@ async def _handle_client_method(  # noqa: PLR0911
         case "terminal/kill":
             kill_request = KillTerminalCommandRequest.model_validate(params)
             return await client.kill_terminal(kill_request)
+        case "mcp/connect":
+            return await client.ext_method("mcp/connect", params or {})
+        case "mcp/disconnect":
+            return await client.ext_method("mcp/disconnect", params or {})
+        case "mcp/message":
+            return await client.ext_method("mcp/message", params or {})
         case str() if method.startswith("_") and is_notification:
             await client.ext_notification(method[1:], params or {})
             return None
-        case str() if method.startswith("_") and is_notification:
+        case str() if method.startswith("_"):
             return await client.ext_method(method[1:], params or {})
         case _:
             raise RequestError.method_not_found(method)

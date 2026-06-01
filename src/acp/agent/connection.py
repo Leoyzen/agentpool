@@ -251,6 +251,10 @@ class AgentSideConnection(Client):
         resp = await self._conn.send_request("terminal/kill", dct)
         return KillTerminalCommandResponse.model_validate(resp)
 
+    async def send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send a raw request to the client (for standard ACP methods like mcp/connect)."""
+        return await self._conn.send_request(method, params)  # type: ignore[no-any-return]
+
     async def close(self) -> None:
         """Close the connection."""
         await self._conn.close()

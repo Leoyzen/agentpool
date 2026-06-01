@@ -1,19 +1,89 @@
 {
-  "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-rfc0033/.sisyphus/plans/rfc-0033-mcp-over-acp.md",
+  "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-mcp-over-acp/.omo/plans/rfc-0033-mcp-over-acp.md",
   "started_at": "2026-05-26T12:49:00.770Z",
   "session_ids": [
     "ses_19bab2ecaffe95v27aQvAFVcxw",
     "ses_19baa932dffe1YaaYkBbShmH5P",
     "ses_19baa6abeffeHAWtW3kAkIb9cR",
-    "ses_19baa4262ffeB1oIO0U6MhlKr2"
+    "ses_19baa4262ffeB1oIO0U6MhlKr2",
+    "ses_18d8f09feffesB30zHCJzxDAVi",
+    "ses_18d6fb659ffezZ152vwEJKUKTX",
+    "ses_18d6fa741ffeDA9p6gR0V0c9Wv",
+    "ses_18d6f9b77ffeh0URQDKOI0aalD",
+    "ses_18d6f85edffey0zOp9Ag8v69Lr"
   ],
   "plan_name": "rfc-0033-mcp-over-acp",
-  "worktree_path": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-rfc0033",
+  "worktree_path": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-mcp-over-acp",
   "session_origins": {
     "ses_19bab2ecaffe95v27aQvAFVcxw": "direct",
     "ses_19baa932dffe1YaaYkBbShmH5P": "appended",
     "ses_19baa6abeffeHAWtW3kAkIb9cR": "appended",
-    "ses_19baa4262ffeB1oIO0U6MhlKr2": "appended"
+    "ses_19baa4262ffeB1oIO0U6MhlKr2": "appended",
+    "ses_18d6fb659ffezZ152vwEJKUKTX": "appended",
+    "ses_18d6fa741ffeDA9p6gR0V0c9Wv": "appended",
+    "ses_18d6f9b77ffeh0URQDKOI0aalD": "appended",
+    "ses_18d6f85edffey0zOp9Ag8v69Lr": "appended"
   },
-  "task_sessions": {}
+  "task_sessions": {
+    "todo:1": {
+      "task_key": "todo:1",
+      "task_label": "1",
+      "task_title": "`ClientSession._send()` 发送 `SessionMessage` 到 `from_session`",
+      "session_id": "ses_18d28dafaffer605NjDrfnN8bE",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-05-29T08:29:13.992Z",
+      "started_at": "2026-05-29T08:29:13.992Z",
+      "status": "running"
+    }
+  },
+  "active_work_id": "rfc-0033-mcp-over-acp-legacy",
+  "agent": "atlas",
+  "schema_version": 2,
+  "works": {
+    "rfc-0033-mcp-over-acp-legacy": {
+      "work_id": "rfc-0033-mcp-over-acp-legacy",
+      "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-mcp-over-acp/.omo/plans/rfc-0033-mcp-over-acp.md",
+      "plan_name": "rfc-0033-mcp-over-acp",
+      "started_at": "2026-05-26T12:49:00.770Z",
+      "session_ids": [
+        "ses_19bab2ecaffe95v27aQvAFVcxw",
+        "ses_19baa932dffe1YaaYkBbShmH5P",
+        "ses_19baa6abeffeHAWtW3kAkIb9cR",
+        "ses_19baa4262ffeB1oIO0U6MhlKr2",
+        "ses_18d8f09feffesB30zHCJzxDAVi",
+        "ses_18d6fb659ffezZ152vwEJKUKTX",
+        "ses_18d6fa741ffeDA9p6gR0V0c9Wv",
+        "ses_18d6f9b77ffeh0URQDKOI0aalD",
+        "ses_18d6f85edffey0zOp9Ag8v69Lr"
+      ],
+      "session_origins": {
+        "ses_19bab2ecaffe95v27aQvAFVcxw": "direct",
+        "ses_19baa932dffe1YaaYkBbShmH5P": "appended",
+        "ses_19baa6abeffeHAWtW3kAkIb9cR": "appended",
+        "ses_19baa4262ffeB1oIO0U6MhlKr2": "appended",
+        "ses_18d6fb659ffezZ152vwEJKUKTX": "appended",
+        "ses_18d6fa741ffeDA9p6gR0V0c9Wv": "appended",
+        "ses_18d6f9b77ffeh0URQDKOI0aalD": "appended",
+        "ses_18d6f85edffey0zOp9Ag8v69Lr": "appended"
+      },
+      "agent": "atlas",
+      "worktree_path": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-mcp-over-acp",
+      "task_sessions": {
+        "todo:1": {
+          "task_key": "todo:1",
+          "task_label": "1",
+          "task_title": "`ClientSession._send()` 发送 `SessionMessage` 到 `from_session`",
+          "session_id": "ses_18d28dafaffer605NjDrfnN8bE",
+          "agent": "Sisyphus-Junior",
+          "category": "deep",
+          "updated_at": "2026-05-29T08:29:13.992Z",
+          "started_at": "2026-05-29T08:29:13.992Z",
+          "status": "running"
+        }
+      },
+      "updated_at": "2026-05-29T08:29:13.992Z"
+    }
+  },
+  "updated_at": "2026-05-29T08:29:13.992Z"
 }

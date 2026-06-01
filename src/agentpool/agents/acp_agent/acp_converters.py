@@ -83,10 +83,12 @@ if TYPE_CHECKING:
         ToolCallContent,
         ToolCallLocation,
     )
+    from acp.schema.mcp import AcpMcpServer
     from agentpool.agents.events import RichAgentStreamEvent, ToolCallContentItem
     from agentpool.agents.modes import ModeCategory, ModeInfo
     from agentpool.messaging.messages import ChatMessage
     from agentpool_config.mcp_server import (
+        AcpMCPServerConfig,
         MCPServerConfig,
         SSEMCPServerConfig,
         StdioMCPServerConfig,
@@ -366,6 +368,10 @@ def mcp_config_to_acp(config: StreamableHTTPMCPServerConfig) -> HttpMcpServer: .
 
 
 @overload
+def mcp_config_to_acp(config: AcpMCPServerConfig) -> AcpMcpServer: ...
+
+
+@overload
 def mcp_config_to_acp(config: MCPServerConfig) -> McpServer: ...
 
 
@@ -382,8 +388,9 @@ def mcp_config_to_acp(config: MCPServerConfig) -> McpServer:
         ACP-compatible McpServer instance, or None if conversion not possible
     """
     from acp.schema.common import EnvVariable
-    from acp.schema.mcp import HttpMcpServer, SseMcpServer, StdioMcpServer
+    from acp.schema.mcp import AcpMcpServer, HttpMcpServer, SseMcpServer, StdioMcpServer
     from agentpool_config.mcp_server import (
+        AcpMCPServerConfig,
         SSEMCPServerConfig,
         StdioMCPServerConfig,
         StreamableHTTPMCPServerConfig,
@@ -404,6 +411,9 @@ def mcp_config_to_acp(config: MCPServerConfig) -> McpServer:
 
         case StreamableHTTPMCPServerConfig(url=url):
             return HttpMcpServer(name=config.name or str(url), url=url)
+
+        case AcpMCPServerConfig(acp_id=acp_id):
+            return AcpMcpServer(name=config.name or config.client_id, id=acp_id)
 
         case _ as unreachable:
             assert_never(unreachable)

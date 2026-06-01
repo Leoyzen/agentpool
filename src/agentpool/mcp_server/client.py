@@ -27,6 +27,7 @@ from agentpool.mcp_server.message_handler import MCPMessageHandler
 from agentpool.tools.base import FunctionTool
 from agentpool.utils.signatures import create_modified_signature
 from agentpool_config.mcp_server import (
+    AcpMCPServerConfig,
     SSEMCPServerConfig,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
@@ -79,6 +80,7 @@ class MCPClient:
         client_title: str | None = None,
         client_website_url: str | None = None,
         client_icon_path: str | None = None,
+        transport: ClientTransport | None = None,
     ) -> None:
         # Mutable handler swapped per call_tool for dynamic elicitation
         self._current_elicitation_handler: ElicitationHandler | None = None
@@ -94,7 +96,14 @@ class MCPClient:
         self._client_title = client_title
         self._client_website_url = client_website_url
         self._client_icon_path = client_icon_path
-        self._client = self._get_client(self.config)
+        # If a pre-built transport is provided (e.g. AcpMcpTransport), use it directly.
+        # Otherwise build the client from config as usual.
+        self._external_transport: ClientTransport | None = None
+        if transport is not None:
+            self._external_transport = transport
+            self._client = self._get_client_from_transport(transport)
+        else:
+            self._client = self._get_client(self.config)
 
     @property
     def connected(self) -> bool:
@@ -113,7 +122,8 @@ class MCPClient:
             await self._client.__aenter__()  # type: ignore[no-untyped-call]
         except Exception as first_error:
             # OAuth fallback for HTTP/SSE if not already using OAuth
-            if not isinstance(self.config, StdioMCPServerConfig) and not self.config.auth.oauth:
+            if (not isinstance(self.config, (StdioMCPServerConfig, AcpMCPServerConfig))
+                    and not self.config.auth.oauth):
                 try:
                     with contextlib.suppress(Exception):
                         await self._client.__aexit__(None, None, None)  # type: ignore[no-untyped-call]
@@ -197,6 +207,12 @@ class MCPClient:
             case StreamableHTTPMCPServerConfig(url=url, headers=headers, auth=auth):
                 transport = StreamableHttpTransport(url=url, headers=headers)
                 oauth = auth.oauth
+
+            case AcpMCPServerConfig():
+                raise NotImplementedError(
+                    "ACP-transport MCP servers are managed by the ACP agent directly. "
+                    "Use AcpMcpConnectionManager to establish connections."
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -231,6 +247,46 @@ class MCPClient:
             sampling_handler=self._sampling_callback,
             message_handler=msg_handler,
             auth="oauth" if (force_oauth or oauth) else None,
+            client_info=client_info,
+        )
+
+    def _get_client_from_transport(self, transport: ClientTransport) -> fastmcp.Client[Any]:
+        """Create a FastMCP client from a pre-built transport (e.g. AcpMcpTransport).
+
+        This bypasses config-based transport creation and is used for ACP-transport
+        MCP servers where the transport is built externally.
+        """
+        import fastmcp
+        from mcp.types import Icon, Implementation
+
+        msg_handler = self._message_handler or MCPMessageHandler(
+            self,
+            self._tool_change_callback,
+            self._prompt_change_callback,
+            self._resource_change_callback,
+        )
+
+        client_info: Implementation | None = None
+        if self._client_name:
+            icons: list[Icon] | None = None
+            if self._client_icon_path:
+                icons = [Icon(src=self._client_icon_path)]
+            client_info = Implementation(
+                name=self._client_name,
+                version=version("agentpool"),
+                title=self._client_title,
+                websiteUrl=self._client_website_url,
+                icons=icons,
+            )
+
+        return fastmcp.Client(
+            transport,
+            log_handler=self._log_handler,
+            roots=self._accessible_roots,
+            timeout=self.config.timeout,
+            elicitation_handler=self._forwarding_elicitation_callback,
+            sampling_handler=self._sampling_callback,
+            message_handler=msg_handler,
             client_info=client_info,
         )
 
@@ -416,8 +472,12 @@ class MCPClient:
 
         try:
             result = await self._client.call_tool(
-                name, arguments, progress_handler=progress_handler, meta=meta
+                name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
             )
+            if result.is_error:
+                # MCP tool returned an error - return it as content so LLM can see it
+                error_text = extract_text_content(result.content)
+                return ToolReturn(return_value=f"Tool error: {error_text}", content=error_text)
             content = await from_mcp_content(result.content)
             # Decision logic for return type
             match (result.data is not None, bool(content)):
