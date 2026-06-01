@@ -624,10 +624,25 @@ class TurnRunner:
             name=f"event_consumer_{session_id}",
         )
         try:
+            # Process prompts and handle injections/queued prompts
+            # like BaseAgent.run_stream() does.
             async for event in agent._run_stream_once(
                 run_ctx, *prompts, session_id=session_id, **kwargs
             ):
                 await self.event_bus.publish(session_id, event)
+
+            # After _run_stream_once completes, flush unconsumed injections
+            # to queued prompts and continue processing if any remain.
+            run_ctx.injection_manager.flush_pending_to_queue()
+            while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
+                current_prompts = run_ctx.injection_manager.pop_queued()
+                if current_prompts is None:
+                    break
+                async for event in agent._run_stream_once(
+                    run_ctx, *current_prompts, session_id=session_id, **kwargs
+                ):
+                    await self.event_bus.publish(session_id, event)
+                run_ctx.injection_manager.flush_pending_to_queue()
         finally:
             # Signal the event queue consumer to stop
             await run_ctx.event_queue.put(None)
