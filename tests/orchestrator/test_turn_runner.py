@@ -60,6 +60,7 @@ def mock_agent() -> MagicMock:
     agent._active_run_ctx = None
     agent._current_run_ctx = None
     agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
 
     async def _fake_stream(
         run_ctx: AgentRunContext,
@@ -79,6 +80,7 @@ def mock_agent_with_delay() -> MagicMock:
     agent._active_run_ctx = None
     agent._current_run_ctx = None
     agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
 
     async def _fake_stream(
         run_ctx: AgentRunContext,
@@ -235,6 +237,7 @@ async def test_run_loop_drains_on_exception(
     agent._active_run_ctx = None
     agent._current_run_ctx = None
     agent._background_run_ctx = None
+    agent.get_active_run_context.return_value = None
 
     async def broken_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         raise RuntimeError("boom")
@@ -458,6 +461,7 @@ async def test_turn_cancellation_stops_current_turn(
     agent._active_run_ctx = None
     agent._current_run_ctx = None
     agent._background_run_ctx = None
+    agent.get_active_run_context.return_value = None
 
     async def slow_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         for _ in range(100):
@@ -485,6 +489,7 @@ async def test_run_loop_cancellation(
     agent._active_run_ctx = None
     agent._current_run_ctx = None
     agent._background_run_ctx = None
+    agent.get_active_run_context.return_value = None
 
     async def slow_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         await asyncio.sleep(10)
