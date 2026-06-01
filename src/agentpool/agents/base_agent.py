@@ -598,6 +598,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         iteration completes, the message is automatically queued for the
         next iteration.
 
+        If no active run context exists (e.g., after end_turn), delegates to
+        SessionPool.inject_prompt() to trigger auto-resume.
+
         Args:
             message: Message to inject
 
@@ -613,6 +616,23 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
         if run_ctx is not None:
             run_ctx.injection_manager.inject(message)
+            return
+
+        # No active run context — delegate to SessionPool for auto-resume
+        if self.agent_pool is not None:
+            session_pool = self.agent_pool.session_pool
+            if session_pool is not None and self.session_id is not None:
+                # Fire-and-forget: create task to inject via SessionPool
+                import asyncio
+
+                asyncio.create_task(session_pool.inject_prompt(self.session_id, message))
+                return
+
+        # No pool or session_pool available — log warning
+        self.log.warning(
+            "inject_prompt called but no active run context or session pool available",
+            agent_name=self.name,
+        )
 
     def has_queued_prompts(self) -> bool:
         """Check if there are queued prompts waiting to be processed."""

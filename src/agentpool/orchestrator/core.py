@@ -741,20 +741,33 @@ class TurnRunner:
         run_ctx.current_task = asyncio.current_task()
 
         agent._active_run_ctx = run_ctx
+        # Cache whether EventBus is set on StreamEventEmitter to avoid repeated imports
+        _stream_event_bus_set = False
+        try:
+            from agentpool.agents.events import StreamEventEmitter
+
+            _stream_event_bus_set = StreamEventEmitter._event_bus is not None
+        except ImportError:
+            pass
 
         async def _consume_event_queue() -> None:
             """Consume events from run_ctx.event_queue and publish to EventBus.
 
-            Background tasks and injected prompts emit events to
-            run_ctx.event_queue. This consumer ensures those events
-            reach the EventBus even after the main stream completes.
+            Acts as a fallback EventBus publisher for events that are only
+            put into run_ctx.event_queue (e.g., by legacy code or direct
+            queue access). When StreamEventEmitter._event_bus is set,
+            events are already published directly by _emit(); this consumer
+            only prevents queue buildup.
             """
             try:
                 while True:
                     event = await run_ctx.event_queue.get()
                     if event is None:
                         break
-                    await self.event_bus.publish(session_id, event)
+                    # Fallback: only publish if _event_bus wasn't set when
+                    # the event was emitted (legacy path)
+                    if not _stream_event_bus_set:
+                        await self.event_bus.publish(session_id, event)
             except asyncio.CancelledError:
                 pass
 
@@ -1109,6 +1122,10 @@ class SessionPool:
     async def start(self) -> None:
         """Start the session pool and background tasks."""
         await self.sessions.start_cleanup_task()
+        from agentpool.agents.events import StreamEventEmitter
+
+        StreamEventEmitter.set_event_bus(self.event_bus)
+        logger.info("SessionPool started, EventBus registered with StreamEventEmitter")
 
     async def shutdown(self) -> None:
         """Shutdown the session pool and cancel background tasks."""
@@ -1122,6 +1139,10 @@ class SessionPool:
                     "Failed to close session during shutdown",
                     session_id=session_id,
                 )
+        from agentpool.agents.events import StreamEventEmitter
+
+        StreamEventEmitter.set_event_bus(None)
+        logger.info("SessionPool shut down, EventBus unregistered")
 
     @property
     def event_bus(self) -> EventBus:
