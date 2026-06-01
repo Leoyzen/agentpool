@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,43 @@ class SessionPoolMetrics:
     event_bus_queue_depth: dict[str, int]
     session_lifetime_seconds: float
     turn_latency_ms: float
+    turn_latency_p99: float = 0.0
+
+    def to_prometheus(self) -> str:
+        """Return metrics in Prometheus exposition format.
+
+        All metric names use the ``agentpool_`` prefix and the same
+        label names as the existing Grafana dashboards so no dashboard
+        changes are required.
+
+        Returns:
+            Multi-line string in Prometheus text format.
+        """
+        lines: list[str] = []
+
+        lines.append("# TYPE agentpool_sessions_total gauge")
+        lines.append(f"agentpool_sessions_total {self.active_sessions}")
+
+        lines.append("# TYPE agentpool_active_turns_total gauge")
+        lines.append(f"agentpool_active_turns_total {self.active_turns}")
+
+        lines.append("# TYPE agentpool_auto_resume_total counter")
+        lines.append(f"agentpool_auto_resume_total {self.auto_resume_count}")
+
+        lines.append("# TYPE agentpool_event_bus_subscribers gauge")
+        for session_id, count in self.event_bus_queue_depth.items():
+            sid = session_id.replace('"', '\\"')
+            lines.append(
+                f'agentpool_event_bus_subscribers{{session_id="{sid}"}} {count}'
+            )
+
+        lines.append("# TYPE agentpool_session_lifetime_seconds gauge")
+        lines.append(f"agentpool_session_lifetime_seconds {self.session_lifetime_seconds:.3f}")
+
+        lines.append("# TYPE agentpool_turn_latency_ms summary")
+        lines.append(f'agentpool_turn_latency_ms{{quantile="0.99"}} {self.turn_latency_p99:.3f}')
+
+        return "\n".join(lines)
 
 
 class MetricsCollector:
@@ -80,11 +118,14 @@ class MetricsCollector:
 
         turn_timings = self.session_pool.turns._turn_timings
         if turn_timings:
-            avg_turn_latency_ms = sum(
-                (end - start) * 1000 for start, end in turn_timings
-            ) / len(turn_timings)
+            latencies_ms = [(end - start) * 1000 for start, end in turn_timings]
+            avg_turn_latency_ms = sum(latencies_ms) / len(latencies_ms)
+            sorted_latencies = sorted(latencies_ms)
+            p99_index = math.ceil(0.99 * len(sorted_latencies)) - 1
+            p99_turn_latency_ms = sorted_latencies[max(0, p99_index)]
         else:
             avg_turn_latency_ms = 0.0
+            p99_turn_latency_ms = 0.0
 
         subscriber_counts = await self.session_pool.event_bus.get_subscriber_counts()
         return SessionPoolMetrics(
@@ -94,4 +135,5 @@ class MetricsCollector:
             event_bus_queue_depth=subscriber_counts,
             session_lifetime_seconds=avg_session_lifetime,
             turn_latency_ms=avg_turn_latency_ms,
+            turn_latency_p99=p99_turn_latency_ms,
         )

@@ -529,24 +529,13 @@ class ACPSession:
         with suppress(Exception):
             self.agent.state_updated.disconnect(self._on_state_updated)
 
-        # Remove old per-session agent
-        if self.acp_agent:
-            await self.acp_agent.remove_session_agent(self.session_id)
+        # Remove session-specific mutations from old agent before switching
+        if isinstance(self.agent, Agent):
+            if self.get_cwd_context in self.agent.sys_prompts.prompts:
+                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-        # Create new per-session agent for the target agent type
-        if self.acp_agent:
-            new_agent = await self.acp_agent.get_or_create_session_agent(
-                self.session_id, input_provider=None, agent_name=agent_name
-            )
-            # If get_or_create_session_agent fell back to default_agent
-            # (because agent_name is not in acp_agent's manifest),
-            # use the pool agent directly
-            if new_agent.name != agent_name:
-                new_agent = agents[agent_name]
-            self.agent = new_agent
-        else:
-            # Fallback: shared agent (shouldn't happen in production)
-            self.agent = agents[agent_name]
+        # Switch to the pool agent directly (per-session agents now managed by SessionPool)
+        self.agent = agents[agent_name]
 
         # Re-apply session-specific mutations
         self.agent.env = self.acp_env

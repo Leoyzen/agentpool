@@ -57,15 +57,31 @@ class ACPProtocolHandler:
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._consumer_queues: dict[str, asyncio.Queue[RichAgentStreamEvent[Any] | None]] = {}
 
+    def _should_use_session_pool(self) -> bool:
+        """Check whether the current main agent has the per-agent canary flag.
+
+        Returns:
+            True if ``agent.metadata.use_session_pool`` is set and truthy,
+            False otherwise (falls back to the legacy session path).
+        """
+        try:
+            agent = self.agent_pool.main_agent
+        except RuntimeError:
+            return False
+        return bool(agent.metadata.get("use_session_pool", False))
+
     def _ensure_event_consumer(self, session_id: str) -> None:
         """Subscribe to EventBus once per session and start consumer loop.
 
         If a consumer task already exists and has not finished, this is a
-        no-op.
+        no-op.  Skips creation when the per-agent canary flag is disabled.
 
         Args:
             session_id: The session to ensure a consumer for.
         """
+        if not self._should_use_session_pool():
+            return
+
         task = self._consumer_tasks.get(session_id)
         if task is not None and not task.done():
             return
@@ -139,21 +155,32 @@ class ACPProtocolHandler:
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],
-    ) -> PromptResponse:
+    ) -> PromptResponse | None:
         """Process a prompt through the SessionPool.
 
         Ensures the session exists (via ``SessionPool.create_session``) and
         that an event consumer is running before delegating the prompt to
         ``SessionPool.process_prompt()``.
 
+        When the per-agent canary flag is disabled, returns ``None`` so the
+        caller can fall back to the legacy session path.
+
         Args:
             session_id: The ACP session identifier.
             prompt: ACP content blocks from the prompt request.
 
         Returns:
-            A ``PromptResponse`` with the stop reason.
+            A ``PromptResponse`` with the stop reason, or ``None`` when the
+            per-agent flag is disabled.
         """
         from agentpool_server.acp_server.converters import from_acp_content
+
+        if not self._should_use_session_pool():
+            logger.debug(
+                "Per-agent canary flag off, skipping SessionPool",
+                session_id=session_id,
+            )
+            return None
 
         session_pool = self.agent_pool.session_pool
         if session_pool is None:
@@ -188,9 +215,18 @@ class ACPProtocolHandler:
         waits for it to finish, then delegates to
         ``SessionPool.close_session()``.
 
+        Skips SessionPool cleanup when the per-agent canary flag is disabled.
+
         Args:
             session_id: The session to close.
         """
+        if not self._should_use_session_pool():
+            logger.debug(
+                "Per-agent canary flag off, skipping SessionPool close",
+                session_id=session_id,
+            )
+            return
+
         session_pool = self.agent_pool.session_pool
 
         # Signal the consumer loop to exit via EventBus sentinel

@@ -5,6 +5,12 @@ When ``opencode.use_session_pool=True``, this handler manages per-session
 EventBus subscriptions, event forwarding, message delegation, and session
 lifecycle. When disabled, the handler raises errors so callers fall back to
 the legacy ServerState session management code.
+
+Per-agent canary:
+    Individual agents can opt into SessionPool via
+    ``agent.metadata.use_session_pool: true``.  When set, it overrides the
+    global ``opencode.use_session_pool`` flag for that agent.  This allows
+    gradual rollout agent-by-agent without affecting the entire pool.
 """
 
 from __future__ import annotations
@@ -57,26 +63,74 @@ class OpenCodeProtocolHandler:
         self._consumer_tasks: dict[str, asyncio.Task[Any]] = {}
         self._lock = asyncio.Lock()
 
-    @property
-    def _use_session_pool(self) -> bool:
-        """Whether the OpenCode protocol should use SessionPool."""
-        return self._agent_pool.manifest.opencode.use_session_pool
+    def _agent_uses_session_pool(self, agent_name: str | None = None) -> bool:
+        """Return whether SessionPool should be used for *agent_name*.
+
+        Resolution order:
+
+        1. **Per-agent override** — if *agent_name* is given and the
+           corresponding agent config has ``metadata.use_session_pool`` set
+           (bool), that value wins.
+        2. **Global fallback** — otherwise the global
+           ``opencode.use_session_pool`` manifest flag is returned.
+
+        Args:
+            agent_name: Name of the agent to check.  ``None`` falls back to
+                the global flag immediately.
+
+        Returns:
+            ``True`` if SessionPool is enabled for the agent.
+        """
+        global_flag = self._agent_pool.manifest.opencode.use_session_pool
+        if agent_name is None:
+            return global_flag
+
+        cfg = self._agent_pool.manifest.agents.get(agent_name)
+        if cfg is None:
+            return global_flag
+
+        metadata = getattr(cfg, "metadata", None)
+        if not isinstance(metadata, dict):
+            return global_flag
+
+        per_agent = metadata.get("use_session_pool")
+        if isinstance(per_agent, bool):
+            return per_agent
+
+        return global_flag
 
     @property
     def _session_pool(self) -> SessionPool | None:
         """Get the active SessionPool from the agent pool."""
         return self._agent_pool.session_pool
 
-    async def _ensure_event_consumer(self, session_id: str) -> None:
+    async def _ensure_event_consumer(
+        self,
+        session_id: str,
+        agent_name: str | None = None,
+    ) -> None:
         """Subscribe to the EventBus once per session and start the consumer loop.
 
         Idempotent: subsequent calls for the same session_id are no-ops.
 
+        If the per-agent canary flag (or global flag) disables SessionPool,
+        the consumer is *not* started so that the legacy ServerState path can
+        take over.
+
         Args:
             session_id: The session to subscribe to.
+            agent_name: Optional agent name for per-agent canary checks.
         """
         async with self._lock:
             if session_id in self._consumer_tasks:
+                return
+
+            if not self._agent_uses_session_pool(agent_name):
+                logger.debug(
+                    "SessionPool disabled for agent, skipping event consumer",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                )
                 return
 
             session_pool = self._session_pool
@@ -163,9 +217,9 @@ class OpenCodeProtocolHandler:
         match event:
             case StreamCompleteEvent():
                 return SessionIdleEvent.create(session_id=session_id)
-            case RunErrorEvent(error=error):
+            case RunErrorEvent(message=msg):
                 return SessionErrorEvent.from_exception(
-                    exception=Exception(str(error)),
+                    exception=Exception(str(msg)),
                     session_id=session_id,
                 )
             case _:
@@ -175,7 +229,12 @@ class OpenCodeProtocolHandler:
                 # OpenCode PartUpdatedEvent, PartDeltaEvent, etc.
                 return None
 
-    async def handle_message(self, session_id: str, message: str) -> None:
+    async def handle_message(
+        self,
+        session_id: str,
+        message: str,
+        agent_name: str | None = None,
+    ) -> None:
         """Process a user message through the SessionPool.
 
         Ensures the session exists, starts the event consumer, and delegates
@@ -184,11 +243,12 @@ class OpenCodeProtocolHandler:
         Args:
             session_id: The target session ID.
             message: The user prompt/message to process.
+            agent_name: Optional agent name for per-agent canary checks.
 
         Raises:
             RuntimeError: If SessionPool is disabled or not initialized.
         """
-        if not self._use_session_pool:
+        if not self._agent_uses_session_pool(agent_name):
             msg = "OpenCode use_session_pool is disabled"
             raise RuntimeError(msg)
 
@@ -197,7 +257,7 @@ class OpenCodeProtocolHandler:
             msg = "SessionPool is not initialized"
             raise RuntimeError(msg)
 
-        await self._ensure_event_consumer(session_id)
+        await self._ensure_event_consumer(session_id, agent_name)
         await session_pool.create_session(session_id)
         await session_pool.process_prompt(session_id, message)
 

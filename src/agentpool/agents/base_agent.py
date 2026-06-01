@@ -248,6 +248,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Internal filesystem for tool/session state (can get written to via AgentContext)
         self._internal_fs = IsolatedMemoryFileSystem()
         self.staged_content = StagedContent()
+        self.metadata: dict[str, Any] = {}
 
     @property
     def _current_run_ctx(self) -> AgentRunContext | None:

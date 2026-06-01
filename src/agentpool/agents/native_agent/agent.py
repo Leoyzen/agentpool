@@ -157,6 +157,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         history_processors: Sequence[Callable[..., Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -205,6 +206,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
             history_processors: History processors (deprecated - use session=MemoryConfig(history_processors=[...]))
+            metadata: Arbitrary metadata for the agent (e.g., feature flags)
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -280,6 +282,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             commands=all_commands,
             hooks=hooks,
         )
+        self.metadata = dict(metadata) if metadata else {}
         self.tool_confirmation_mode: ToolConfirmationMode = tool_confirmation_mode
         # Store builtin tools for pydantic-ai
         self._builtin_tools = list(builtin_tools) if builtin_tools else []
@@ -526,6 +529,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             builtin_tools=config.get_builtin_tools() or None,
             usage_limits=config.usage_limits,
             providers=config.model_providers,
+            metadata=getattr(config, "metadata", None),
         )
 
     async def __aenter__(self) -> Self:
