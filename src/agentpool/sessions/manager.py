@@ -51,6 +51,7 @@ class SessionManager:
         parent_session_id: str,
         agent_name: str,
         agent_type: str = "native",
+        child_session_id: str | None = None,
     ) -> str:
         """Create a child session for a subagent.
 
@@ -58,13 +59,15 @@ class SessionManager:
             parent_session_id: The parent session ID
             agent_name: The agent name for the child session
             agent_type: The type of agent (native, claude, etc.)
+            child_session_id: Optional explicit child session ID. If provided,
+                this ID is used instead of generating a new one.
 
         Returns:
-            The new child session ID
+            The child session ID
         """
         from agentpool.utils.identifiers import generate_session_id
 
-        child_session_id = generate_session_id()
+        session_id = child_session_id or generate_session_id()
 
         if self.store:
             from agentpool.sessions.models import SessionData
@@ -81,7 +84,7 @@ class SessionManager:
 
             # Create session data with parent-child relationship
             session_data = SessionData(
-                session_id=child_session_id,
+                session_id=session_id,
                 agent_name=agent_name,
                 agent_type=agent_type,
                 parent_id=parent_session_id,
@@ -97,12 +100,12 @@ class SessionManager:
 
         logger.debug(
             "Created child session",
-            child_session_id=child_session_id,
+            child_session_id=session_id,
             parent_session_id=parent_session_id,
             agent_name=agent_name,
         )
 
-        return child_session_id
+        return session_id
 
     async def get_child_sessions(self, parent_session_id: str) -> list[str]:
         """Get all child sessions for a parent session.

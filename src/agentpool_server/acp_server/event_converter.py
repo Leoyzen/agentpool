@@ -853,6 +853,7 @@ class ACPEventConverter:
                                 parent_session_id=self._parent_session_id,
                                 agent_name=source_name,
                                 agent_type="acp",
+                                child_session_id=child_session_id,
                             )
                         except Exception:
                             logger.warning(
@@ -969,6 +970,9 @@ class ACPEventConverter:
                                         status="completed",
                                         field_meta=meta,
                                     )
+                                    # Clean up subagent state to prevent memory accumulation
+                                    self._subagent_message_counts.pop(child_session_id, None)
+                                    self._subagent_tool_map.pop(child_session_id, None)
                                 case _:
                                     self._subagent_message_counts[
                                         child_session_id

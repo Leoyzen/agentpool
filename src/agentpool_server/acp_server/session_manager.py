@@ -181,7 +181,10 @@ class ACPSessionManager:
                 self._active[session_id] = session
                 logger.info("Created ACP session", session_id=session_id, agent=session_agent.name)
             except Exception:
-                # Session creation failed - clean up the orphaned agent
+                # Session creation failed - clean up the orphaned agent and session
+                if "session" in locals() and session is not None:
+                    with contextlib.suppress(Exception):
+                        await session.close()
                 with contextlib.suppress(TypeError, AttributeError):
                     await acp_agent.remove_session_agent(session_id)
                 raise
@@ -266,6 +269,7 @@ class ACPSessionManager:
         parent_session_id: str,
         agent_name: str,
         agent_type: str = "acp",
+        child_session_id: str | None = None,
     ) -> str:
         """Create a child session for a subagent.
 
@@ -276,26 +280,30 @@ class ACPSessionManager:
             parent_session_id: The parent session ID
             agent_name: The agent name for the child session
             agent_type: The type of agent (native, acp, etc.)
+            child_session_id: Optional explicit child session ID to use.
+                If provided, ensures the persistent session ID matches
+                the client-facing session ID for consistency.
 
         Returns:
-            The new child session ID
+            The child session ID
         """
         if self._pool.sessions is None:
             msg = "Pool has no session manager for child session creation"
             raise RuntimeError(msg)
 
-        child_session_id = await self._pool.sessions.create_child_session(
+        actual_child_session_id = await self._pool.sessions.create_child_session(
             parent_session_id=parent_session_id,
             agent_name=agent_name,
             agent_type=agent_type,
+            child_session_id=child_session_id,
         )
         logger.info(
             "Created child session via ACP session manager",
-            child_session_id=child_session_id,
+            child_session_id=actual_child_session_id,
             parent_session_id=parent_session_id,
             agent_name=agent_name,
         )
-        return child_session_id
+        return actual_child_session_id
 
     async def close_session(self, session_id: str, *, delete: bool = False) -> None:
         """Close and optionally delete a session.
