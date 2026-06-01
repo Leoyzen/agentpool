@@ -538,6 +538,31 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         finally:
             self._background_task = None
 
+    def get_active_run_context(self) -> AgentRunContext | None:
+        """Get the currently active run context.
+
+        Public API for external callers (e.g., SessionPool) to check if a
+        turn is active and access the run context without relying on
+        private attributes.
+
+        The lookup order is:
+        1. _current_run_ctx (ContextVar, task-local)
+        2. _active_run_ctx (instance attribute, cross-task)
+        3. _background_run_ctx (instance attribute, background tasks)
+
+        Returns:
+            The active run context, or None if no turn is running.
+        """
+        return self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
+
+    def is_turn_active(self) -> bool:
+        """Check if a turn is currently running.
+
+        Returns:
+            True if there is an active run context, False otherwise.
+        """
+        return self.get_active_run_context() is not None
+
     def queue_prompt(self, *prompts: PromptCompatible) -> None:
         """Queue a prompt to be processed after the current run completes.
 

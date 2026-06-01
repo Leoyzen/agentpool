@@ -1,9 +1,9 @@
 ## 1. BaseAgent Public API Extension
 
-- [ ] 1.1 Add `get_active_run_context()` public method to BaseAgent
-- [ ] 1.2 Add `is_turn_active()` helper method to BaseAgent
-- [ ] 1.3 Add unit tests for new BaseAgent APIs
-- [ ] 1.4 Verify no regression in existing BaseAgent tests
+- [x] 1.1 Add `get_active_run_context()` public method to BaseAgent
+- [x] 1.2 Add `is_turn_active()` helper method to BaseAgent
+- [x] 1.3 Add unit tests for new BaseAgent APIs
+- [x] 1.4 Verify no regression in existing BaseAgent tests
 
 ## 2. SessionPool Core Infrastructure
 
