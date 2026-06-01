@@ -274,8 +274,15 @@ class OpenCodeProtocolHandler:
             task = self._consumer_tasks.pop(session_id, None)
             if task is not None and not task.done():
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception(
+                        "Unexpected exception during consumer task cancellation",
+                        session_id=session_id,
+                    )
 
             queue = self._event_bus_subscriptions.pop(session_id, None)
             session_pool = self._session_pool

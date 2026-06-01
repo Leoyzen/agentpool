@@ -137,7 +137,22 @@ class ACPProtocolHandler:
                             update=update,
                         )
                         await self.client.session_update(notification)
-                except Exception:
+                except (ConnectionResetError, BrokenPipeError) as e:
+                    logger.debug(
+                        "Client connection closed gracefully",
+                        session_id=session_id,
+                        error=str(e),
+                    )
+                    break
+                except Exception as e:
+                    import anyio
+                    if isinstance(e, (anyio.ClosedResourceError, anyio.EndOfStream)):
+                        logger.debug(
+                            "Stream closed gracefully",
+                            session_id=session_id,
+                            error=str(e),
+                        )
+                        break
                     logger.exception(
                         "Failed to convert or send event",
                         session_id=session_id,
@@ -240,8 +255,22 @@ class ACPProtocolHandler:
                 await asyncio.wait_for(task, timeout=5.0)
             except TimeoutError:
                 task.cancel()
-                with suppress(asyncio.CancelledError):
+                try:
                     await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception(
+                        "Unexpected exception during consumer task cancellation",
+                        session_id=session_id,
+                    )
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(
+                    "Unexpected exception in consumer task during graceful shutdown",
+                    session_id=session_id,
+                )
 
         self._consumer_queues.pop(session_id, None)
 

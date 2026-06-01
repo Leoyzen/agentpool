@@ -254,6 +254,9 @@ class SessionController:
         Returns:
             The session state.
         """
+        if not session_id or not session_id.strip():
+            raise ValueError("session_id cannot be empty or whitespace")
+
         async with self._lock:
             return await self._get_or_create_session_locked(
                 session_id, agent_name, **metadata
@@ -497,10 +500,16 @@ class SessionController:
 
         for session_id in expired_sessions:
             logger.info("Closing expired session", session_id=session_id)
-            if self._cleanup_callback is not None:
-                await self._cleanup_callback(session_id)
-            else:
-                await self.close_session(session_id)
+            try:
+                if self._cleanup_callback is not None:
+                    await self._cleanup_callback(session_id)
+                else:
+                    await self.close_session(session_id)
+            except Exception:
+                logger.exception(
+                    "Failed to close expired session during cleanup",
+                    session_id=session_id,
+                )
 
 
 class TurnRunner:
@@ -823,9 +832,6 @@ class TurnRunner:
             if session is None or session.is_closing:
                 return
 
-            if session.turn_lock.locked():
-                return
-
             async with session.turn_lock:
                 if session.is_closing:
                     return
@@ -920,7 +926,13 @@ class SessionPool:
         await self.sessions.stop_cleanup_task()
         active_sessions = list(self.sessions._sessions.keys())
         for session_id in active_sessions:
-            await self.close_session(session_id)
+            try:
+                await self.close_session(session_id)
+            except Exception:
+                logger.exception(
+                    "Failed to close session during shutdown",
+                    session_id=session_id,
+                )
 
     @property
     def event_bus(self) -> EventBus:
