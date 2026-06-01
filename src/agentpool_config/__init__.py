@@ -12,6 +12,7 @@ from agentpool_config.builtin_tools import BuiltinToolConfig
 
 from agentpool_config.forward_targets import ForwardingTarget
 from agentpool_config.session import SessionQuery
+from agentpool_config.session_pool import ACPConfig, OpenCodeConfig, SessionPoolConfig
 from agentpool_config.teams import TeamConfig
 from agentpool_config.mcp_server import (
     BaseMCPServerConfig,
@@ -67,6 +68,7 @@ AnyToolConfig = Annotated[
 ]
 __all__ = [
     "DEFAULT_SKILLS_PATHS",
+    "ACPConfig",
     "AnyToolConfig",
     "BaseEventHandlerConfig",
     "BaseHookConfig",
@@ -83,9 +85,11 @@ __all__ = [
     "HooksConfig",
     "MCPServerConfig",
     "NativeAgentToolConfig",
+    "OpenCodeConfig",
     "PromptHookConfig",
     "ResolvedConfig",
     "SSEMCPServerConfig",
+    "SessionPoolConfig",
     "SessionQuery",
     "SkillCommandConfig",
     "SkillSlashConfig",

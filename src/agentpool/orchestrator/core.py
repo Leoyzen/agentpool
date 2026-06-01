@@ -154,7 +154,7 @@ class EventBus:
                         dead_queues.append(queue)
                 except asyncio.QueueFull:
                     dead_queues.append(queue)
-            except Exception:
+            except (RuntimeError, ConnectionError):
                 dead_queues.append(queue)
 
         if dead_queues:
@@ -394,7 +394,7 @@ class SessionController:
                 await asyncio.wait_for(lock.acquire(), timeout=30.0)
                 acquired = True
                 turn_completed = True
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "Timeout waiting for turn to complete during close_session",
                     session_id=session_id,
@@ -703,7 +703,9 @@ class TurnRunner:
             self._post_turn_injections.setdefault(session_id, []).append(message)
 
         logger.debug("Queued injection for next turn", session_id=session_id)
-        asyncio.create_task(self._trigger_auto_resume(session_id))
+        _ = asyncio.create_task(  # noqa: RUF006
+            self._trigger_auto_resume(session_id)
+        )
         return False
 
     async def queue_prompt(self, session_id: str, *prompts: Any) -> bool:
@@ -740,7 +742,9 @@ class TurnRunner:
                 return False
             self._post_turn_prompts.setdefault(session_id, []).append(prompts)
 
-        asyncio.create_task(self._trigger_auto_resume(session_id))
+        _ = asyncio.create_task(  # noqa: RUF006
+            self._trigger_auto_resume(session_id)
+        )
         return False
 
     async def _process_queued_work(

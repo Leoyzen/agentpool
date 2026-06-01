@@ -28,6 +28,7 @@ from agentpool_config.mcp_server import BaseMCPServerConfig, MCPServerConfig
 from agentpool_config.observability import ObservabilityConfig
 from agentpool_config.output_types import StructuredResponseConfig
 from agentpool_config.pool_server import ACPPoolServerConfig, MCPPoolServerConfig
+from agentpool_config.session_pool import ACPConfig, OpenCodeConfig, SessionPoolConfig
 from agentpool_config.skills import SkillsConfig
 from agentpool_config.storage import StorageConfig
 from agentpool_config.system_prompts import PromptLibraryConfig
@@ -340,6 +341,43 @@ class AgentsManifest(Schema):
             - ./my-skills
             - s3://bucket/skills
           include_default: true
+        ```
+    """
+
+    session_pool: SessionPoolConfig = Field(default_factory=SessionPoolConfig)
+    """Session pool configuration for session lifecycle management.
+
+    Controls session TTL, auto-resume, event bus, and queue sizing.
+
+    Example:
+        ```yaml
+        session_pool:
+          enable_auto_resume: true
+          enable_event_bus: true
+          session_ttl_seconds: 3600.0
+          max_auto_resume: 10
+          max_queue_size: 1000
+          mcp_max_processes: 100
+        ```
+    """
+
+    acp: ACPConfig = Field(default_factory=ACPConfig)
+    """ACP protocol-specific configuration.
+
+    Example:
+        ```yaml
+        acp:
+          use_session_pool: true
+        ```
+    """
+
+    opencode: OpenCodeConfig = Field(default_factory=OpenCodeConfig)
+    """OpenCode protocol-specific configuration.
+
+    Example:
+        ```yaml
+        opencode:
+          use_session_pool: true
         ```
     """
 

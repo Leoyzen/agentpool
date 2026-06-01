@@ -43,8 +43,10 @@ if TYPE_CHECKING:
     from agentpool.delegation.teamrun import TeamRun
     from agentpool.messaging.compaction import CompactionPipeline
     from agentpool.models.manifest import AgentsManifest
+    from agentpool.orchestrator import SessionPool
     from agentpool.resource_providers.base import ResourceProvider
     from agentpool.ui.base import InputProvider
+    from agentpool_config.session_pool import SessionPoolConfig
     from agentpool_config.task import Job
 
 
@@ -76,6 +78,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         parallel_load: bool = True,
         event_handlers: list[AnyEventHandlerType] | None = None,
         main_agent_name: str | None = None,
+        enable_session_pool: bool = False,
+        session_pool_config: SessionPoolConfig | None = None,
     ):
         """Initialize agent pool with immediate agent creation.
 
@@ -87,6 +91,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             parallel_load: Whether to load nodes in parallel (async)
             event_handlers: Event handlers to pass through to all agents
             main_agent_name: Name of the main agent (overrides manifest.default_agent)
+            enable_session_pool: Whether to enable the SessionPool orchestration layer
+            session_pool_config: Optional override for SessionPool configuration
 
         Raises:
             ValueError: If manifest contains invalid node configurations
@@ -198,6 +204,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             self.pool_talk = TeamTalk[Any].from_nodes(list(self.nodes.values()))
             self._enter_lock = Lock()  # Initialize async safety fields
             self._running_count = 0
+            self._enable_session_pool = enable_session_pool
+            self._session_pool_config = session_pool_config or self.manifest.session_pool
+            self._session_pool: SessionPool | None = None
 
     async def __aenter__(self) -> Self:
         """Enter async context and initialize all agents."""
@@ -240,6 +249,24 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 else:
                     for init in node_inits:
                         await init
+                # Initialize SessionPool if enabled
+                if self._enable_session_pool:
+                    from agentpool.orchestrator import SessionPool
+
+                    cfg = self._session_pool_config
+                    self._session_pool = SessionPool(
+                        pool=self,
+                        enable_auto_resume=cfg.enable_auto_resume,
+                        enable_event_bus=cfg.enable_event_bus,
+                        max_auto_resume=cfg.max_auto_resume,
+                    )
+                    # Configure additional SessionPool settings
+                    self._session_pool.sessions._session_ttl_seconds = (
+                        cfg.session_ttl_seconds
+                    )
+                    self._session_pool.sessions._mcp_max_processes = cfg.mcp_max_processes
+                    self._session_pool.turns.event_bus._max_queue_size = cfg.max_queue_size
+                    await self._session_pool.start()
 
             except Exception as e:
                 await self.cleanup()
@@ -261,6 +288,10 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         async with self._enter_lock:
             self._running_count -= 1
             if self._running_count == 0:
+                # Shutdown SessionPool if active
+                if self._session_pool is not None:
+                    await self._session_pool.shutdown()
+                    self._session_pool = None
                 # Remove MCP aggregating provider from all agents
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 for agent in self.get_agents().values():
@@ -278,6 +309,42 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     def is_running(self) -> bool:
         """Check if the agent pool is running."""
         return bool(self._running_count)
+
+    @property
+    def session_pool(self) -> SessionPool | None:
+        """Get the active SessionPool if enabled.
+
+        Returns the SessionPool instance when session pool orchestration
+        is enabled, or None if not initialized.
+        """
+        return self._session_pool
+
+    async def create_session(
+        self,
+        session_id: str,
+        agent_name: str | None = None,
+        **metadata: Any,
+    ) -> Any:
+        """Create or get a session through the SessionPool.
+
+        Convenience method that delegates to the SessionPool's
+        create_session method when the session pool is enabled.
+
+        Args:
+            session_id: Unique identifier for the session.
+            agent_name: Name of the agent to associate with the session.
+            **metadata: Arbitrary metadata to attach to the session.
+
+        Returns:
+            The session state from the SessionPool.
+
+        Raises:
+            RuntimeError: If the SessionPool is not enabled.
+        """
+        if self._session_pool is None:
+            msg = "SessionPool is not enabled. Use enable_session_pool=True to enable."
+            raise RuntimeError(msg)
+        return await self._session_pool.create_session(session_id, agent_name, **metadata)
 
     @property
     def skill_commands(self) -> SkillCommandRegistry | None:
