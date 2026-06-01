@@ -327,7 +327,6 @@ class ACPSession:
 
         cmd_count = 0
         for cmd_name, cmd_config in commands.items():
-
             try:
                 # Convert CommandConfig to slashed Command
                 slashed_cmd = cmd_config.get_slashed_command(category="manifest")
@@ -427,9 +426,7 @@ class ACPSession:
                         connection_id = await self.acp_agent.connect_acp_mcp_server(server)
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
-                            raise RuntimeError(
-                                f"AcpMcpConnection not found for {connection_id}"
-                            )
+                            raise RuntimeError(f"AcpMcpConnection not found for {connection_id}")
                         from agentpool_server.acp_server.acp_mcp_transport import (
                             AcpMcpTransport,
                         )
