@@ -579,6 +579,10 @@ class TurnRunner:
         Internal method used by both run_turn() (single turn) and run_loop()
         (auto-resume loop) to avoid reentrancy issues with asyncio.Lock.
 
+        Events are published to the EventBus from two sources:
+        1. The main agent stream (_run_stream_once)
+        2. The run_ctx event_queue (background tasks, inject_prompt, etc.)
+
         Args:
             session_id: The session to run the turn for.
             *prompts: Prompts to pass to the agent.
@@ -598,13 +602,43 @@ class TurnRunner:
 
         agent._active_run_ctx = run_ctx
 
+        async def _consume_event_queue() -> None:
+            """Consume events from run_ctx.event_queue and publish to EventBus.
+
+            Background tasks and injected prompts emit events to
+            run_ctx.event_queue. This consumer ensures those events
+            reach the EventBus even after the main stream completes.
+            """
+            try:
+                while True:
+                    event = await run_ctx.event_queue.get()
+                    if event is None:
+                        break
+                    await self.event_bus.publish(session_id, event)
+            except asyncio.CancelledError:
+                pass
+
         turn_start = time.monotonic()
+        event_consumer = asyncio.create_task(
+            _consume_event_queue(),
+            name=f"event_consumer_{session_id}",
+        )
         try:
             async for event in agent._run_stream_once(
                 run_ctx, *prompts, session_id=session_id, **kwargs
             ):
                 await self.event_bus.publish(session_id, event)
         finally:
+            # Signal the event queue consumer to stop
+            await run_ctx.event_queue.put(None)
+            # Wait for it to finish (with timeout to prevent hanging)
+            try:
+                await asyncio.wait_for(event_consumer, timeout=5.0)
+            except TimeoutError:
+                event_consumer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await event_consumer
+
             turn_end = time.monotonic()
             self._turn_timings.append((turn_start, turn_end))
             if len(self._turn_timings) > self._max_turn_timing_history:
