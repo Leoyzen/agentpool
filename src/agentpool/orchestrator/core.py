@@ -968,10 +968,16 @@ class SessionPool:
 
     async def start(self) -> None:
         """Start the session pool and background tasks."""
+        from agentpool.agents.events.event_emitter import StreamEventEmitter
+
+        StreamEventEmitter.set_event_bus(self.event_bus)
         await self.sessions.start_cleanup_task()
 
     async def shutdown(self) -> None:
         """Shutdown the session pool and cancel background tasks."""
+        from agentpool.agents.events.event_emitter import StreamEventEmitter
+
+        StreamEventEmitter.set_event_bus(None)
         await self.sessions.stop_cleanup_task()
         active_sessions = list(self.sessions._sessions.keys())
         for session_id in active_sessions:

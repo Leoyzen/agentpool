@@ -114,6 +114,255 @@ async def _setup_session(
 
 
 # ---------------------------------------------------------------------------
+# RED FLAG TEST – inject_prompt must trigger second iteration
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_inject_prompt_triggers_second_iteration(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """inject_prompt during an active turn MUST trigger a second _run_stream_once.
+
+    This is a **red flag test** — if it fails, inject_prompt is broken.
+
+    Scenario:
+    1. run_turn starts → calls _run_stream_once (iteration 1)
+    2. During iteration 1, a tool calls inject_prompt("msg")
+       → message goes into run_ctx.injection_manager._pending_injections
+    3. Iteration 1 completes
+    4. flush_pending_to_queue() moves "msg" to _queued_prompts
+    5. while has_queued() → pop_queued() → _run_stream_once (iteration 2)
+    6. Iteration 2 processes the injected message
+
+    Expected: _run_stream_once called exactly TWICE.
+    """
+    call_count = 0
+    received_prompts: list[tuple[Any, ...]] = []
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        nonlocal call_count
+        call_count += 1
+        received_prompts.append(prompts)
+
+        if call_count == 1:
+            # Simulate a tool injecting a prompt mid-turn
+            run_ctx.injection_manager.inject("injected message")
+            yield RunStartedEvent(session_id="sess-1", run_id="run-1")
+        else:
+            yield RunStartedEvent(session_id="sess-1", run_id="run-2")
+
+    agent = MagicMock()
+    agent._active_run_ctx = None
+    agent._current_run_ctx = None
+    agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "initial")
+
+    # RED FLAG: if this is 1 instead of 2, inject_prompt is silently broken
+    assert call_count == 2, (
+        f"inject_prompt BROKEN: _run_stream_once called {call_count} time(s), "
+        f"expected 2 (initial + injected). "
+        f"Queued prompts were not processed after flush."
+    )
+    assert received_prompts[1] == ("injected message",), (
+        f"Second iteration should process injected prompt, got {received_prompts[1]}"
+    )
+
+
+@pytest.mark.anyio
+async def test_post_turn_inject_prompt_triggers_auto_resume(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """inject_prompt AFTER turn ends MUST trigger auto-resume.
+
+    This is a **red flag test** — if it fails, post-turn inject_prompt is broken.
+
+    Scenario:
+    1. run_turn completes
+    2. Caller calls turn_runner.inject_prompt("sess-1", "msg")
+       → msg goes to _post_turn_injections
+       → _trigger_auto_resume fires
+    3. Auto-resume should process the injection in a new turn
+
+    Expected: _run_stream_once called TWICE (initial + auto-resume).
+    """
+    call_count = 0
+    received_prompts: list[tuple[Any, ...]] = []
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        nonlocal call_count
+        call_count += 1
+        received_prompts.append(prompts)
+        yield RunStartedEvent(session_id="sess-1", run_id=f"run-{call_count}")
+
+    agent = MagicMock()
+    agent._active_run_ctx = None
+    agent._current_run_ctx = None
+    agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+
+    # 1. Initial turn completes
+    await turn_runner.run_turn("sess-1", "initial")
+    assert call_count == 1
+
+    # 2. Post-turn injection (simulates tool calling inject after turn ended)
+    injected = await turn_runner.inject_prompt("sess-1", "late message")
+    assert injected is False  # Queued, not injected into active turn
+
+    # 3. Wait for auto-resume to fire and complete
+    await asyncio.sleep(0.1)
+
+    # RED FLAG: auto-resume should have triggered a second turn
+    assert call_count == 2, (
+        f"post-turn inject_prompt BROKEN: _run_stream_once called {call_count} time(s), "
+        f"expected 2 (initial + auto-resume). "
+        f"_trigger_auto_resume did not process queued injection."
+    )
+    assert received_prompts[1] == ("late message",), (
+        f"Auto-resume should process injected prompt, got {received_prompts[1]}"
+    )
+
+
+@pytest.mark.anyio
+async def test_background_task_child_agent_events_reach_event_bus(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """Background task child-agent events MUST reach EventBus.
+
+    This is a **red flag test** — if it fails, background task events are lost.
+
+    Scenario (real-world from xeno-agent):
+    1. SessionPool calls _run_stream_once for lead agent
+    2. Lead agent's tool spawns a background task (subagent)
+    3. Subagent creates its OWN run_ctx with its OWN event_queue
+    4. Subagent calls ctx.events.emit_event(SubAgentEvent(...))
+       → event goes to subagent's run_ctx.event_queue
+       → StreamEventEmitter._emit forwards to EventBus (when SessionPool active)
+    5. ACP/OpenCode handler receives event via EventBus
+
+    Expected: SubAgentEvent published to EventBus.
+    """
+    from agentpool.agents.events import SubAgentEvent, StreamCompleteEvent
+    from agentpool.agents.events.event_emitter import StreamEventEmitter
+    from agentpool import ChatMessage
+
+    event_bus_events: list[Any] = []
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        # Lead agent starts background task
+        yield RunStartedEvent(session_id="sess-1", run_id="run-1")
+
+        # Simulate background task creating its own run_ctx and emitting events
+        # via StreamEventEmitter (what xeno-agent's BackgroundTaskProvider does)
+        child_run_ctx = AgentRunContext(session_id="child-sess", deps=None)
+        child_run_ctx.cancelled = False
+
+        # Create a mock AgentContext for the child
+        child_agent = MagicMock()
+        child_agent.session_id = "sess-1"  # Same session for EventBus routing
+        child_run_ctx = AgentRunContext(session_id="child-sess", deps=None)
+        child_ctx = MagicMock()
+        child_ctx.agent = child_agent
+        child_ctx.run_ctx = child_run_ctx
+        child_ctx.tool_name = "background_task"
+        child_ctx.tool_call_id = "tc-1"
+
+        # Use StreamEventEmitter (real code path)
+        emitter = StreamEventEmitter(child_ctx)
+        await emitter.emit_event(
+            SubAgentEvent(
+                source_name="bg-task",
+                source_type="background",
+                event=StreamCompleteEvent(
+                    message=ChatMessage(content="background done", role="assistant"),
+                ),
+                child_session_id="child-sess",
+                parent_session_id="sess-1",
+            )
+        )
+
+        yield StreamCompleteEvent(
+            message=ChatMessage(content="lead done", role="assistant"),
+        )
+
+    agent = MagicMock()
+    agent._active_run_ctx = None
+    agent._current_run_ctx = None
+    agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+
+    # Activate EventBus forwarding (normally done by SessionPool.start())
+    StreamEventEmitter.set_event_bus(turn_runner.event_bus)
+
+    # Subscribe to EventBus BEFORE running the turn
+    event_queue = await turn_runner.event_bus.subscribe("sess-1")
+
+    async def _bus_consumer() -> None:
+        """Consume events from pre-subscribed queue."""
+        try:
+            while True:
+                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                if event is None:
+                    break
+                event_bus_events.append(event)
+        except TimeoutError:
+            pass  # No more events
+
+    # Start EventBus consumer
+    consumer_task = asyncio.create_task(_bus_consumer())
+
+    # Run the turn
+    await turn_runner.run_turn("sess-1", "initial")
+
+    # Wait for EventBus consumer
+    await asyncio.sleep(0.1)
+    await turn_runner.event_bus.publish("sess-1", None)  # sentinel
+    await consumer_task
+
+    # Cleanup
+    StreamEventEmitter.set_event_bus(None)
+
+    # Filter for SubAgentEvent
+    subagent_events = [e for e in event_bus_events if isinstance(e, SubAgentEvent)]
+
+    # RED FLAG: background task events must reach EventBus
+    assert len(subagent_events) == 1, (
+        f"background task events LOST: found {len(subagent_events)} SubAgentEvent(s) "
+        f"in EventBus, expected 1. "
+        f"Total events in bus: {len(event_bus_events)}. "
+        f"StreamEventEmitter did not forward to EventBus."
+    )
+    assert subagent_events[0].source_name == "bg-task"
+
+
+# ---------------------------------------------------------------------------
 # run_turn – serialization
 # ---------------------------------------------------------------------------
 

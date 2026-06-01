@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentpool.agents.events import (
     CustomEvent,
@@ -13,7 +13,7 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
-
+from agentpool.log import get_logger
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from agentpool.agents.events.events import ToolCallStatus
     from agentpool.tools.base import ToolKind
     from agentpool.utils.todos import PlanEntry
+
+logger = get_logger(__name__)
 
 
 class StreamEventEmitter:
@@ -345,9 +347,33 @@ class StreamEventEmitter:
     # Private helpers
     # =========================================================================
 
+    _event_bus: ClassVar[Any | None] = None
+    """Optional EventBus for forwarding events (set by SessionPool)."""
+
+    @classmethod
+    def set_event_bus(cls, event_bus: Any | None) -> None:
+        """Set the global EventBus for event forwarding.
+
+        Called by SessionPool when starting/shutting down.
+        """
+        cls._event_bus = event_bus
+
     async def _emit(self, event: RichAgentStreamEvent[Any]) -> None:
-        """Internal method to emit events to the agent's queue."""
+        """Internal method to emit events to the agent's queue and EventBus."""
         if self._context.run_ctx is not None:
             await self._context.run_ctx.event_queue.put(event)
         else:
             await self._context.agent._event_queue.put(event)
+
+        # Forward to EventBus if SessionPool is active
+        if StreamEventEmitter._event_bus is not None:
+            session_id = getattr(self._context.agent, "session_id", None)
+            if session_id:
+                try:
+                    await StreamEventEmitter._event_bus.publish(session_id, event)
+                except Exception:
+                    logger.debug(
+                        "EventBus publish failed, event already in agent queue",
+                        session_id=session_id,
+                        event_type=type(event).__name__,
+                    )
