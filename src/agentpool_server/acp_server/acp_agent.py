@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
+    from agentpool_server.acp_server.handler import ACPProtocolHandler
     from agentpool_server.acp_server.server import ACPServer
 
 logger = get_logger(__name__)
@@ -234,6 +235,9 @@ class AgentPoolACPAgent(ACPAgent):
     _mcp_manager: AcpMcpConnectionManager = field(init=False)
     """Manager for MCP-over-ACP connection lifecycle."""
 
+    _protocol_handler: ACPProtocolHandler | None = field(init=False, default=None)
+    """SessionPool-backed protocol handler when ``acp.use_session_pool`` is enabled."""
+
     def __post_init__(self) -> None:
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
@@ -268,6 +272,23 @@ class AgentPoolACPAgent(ACPAgent):
                 if cfg.name is None:
                     cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent.name})
                 self._agent_config = cfg
+
+        # Initialize SessionPool-backed protocol handler if feature flag is enabled
+        if (
+            self.agent_pool
+            and self.agent_pool.manifest.acp.use_session_pool
+        ):
+            from agentpool_server.acp_server.event_converter import ACPEventConverter
+            from agentpool_server.acp_server.handler import ACPProtocolHandler
+
+            self._protocol_handler = ACPProtocolHandler(
+                agent_pool=self.agent_pool,
+                event_converter=ACPEventConverter(
+                    subagent_display_mode=self.subagent_display_mode,
+                ),
+                client=self.client,
+            )
+            logger.info("ACPProtocolHandler initialized for SessionPool mode")
 
     # NEW: Per-session agent registry (RFC-0031)
     _agent_config: NativeAgentConfig | None = field(init=False, default=None)
@@ -816,6 +837,13 @@ class AgentPoolACPAgent(ACPAgent):
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
 
+        # Delegate to SessionPool-backed handler when feature flag is enabled
+        if self._protocol_handler is not None:
+            return await self._protocol_handler.handle_prompt(
+                params.session_id,
+                params.prompt,
+            )
+
         logger.info("Processing prompt", session_id=params.session_id)
         session = self.session_manager.get_session(params.session_id)
         # Auto-recreate session if not found (e.g., after pool swap)
@@ -886,6 +914,11 @@ class AgentPoolACPAgent(ACPAgent):
         Cancels any ongoing work (like session/cancel) and then
         closes the session and releases all associated resources.
         """
+        # Delegate to SessionPool-backed handler when feature flag is enabled
+        if self._protocol_handler is not None:
+            await self._protocol_handler.close_session(params.session_id)
+            return CloseSessionResponse()
+
         logger.info("Stopping session", session_id=params.session_id)
         try:
             # Cancel ongoing work first

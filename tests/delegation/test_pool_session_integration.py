@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
+from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.orchestrator import SessionPool
 from agentpool_config.session_pool import SessionPoolConfig
 
@@ -264,3 +264,246 @@ opencode:
         assert manifest.session_pool.max_queue_size == 2000
         assert manifest.acp.use_session_pool is True
         assert manifest.opencode.use_session_pool is False
+
+
+# =============================================================================
+# Group 3.7: AgentPool + SessionPool Integration
+# =============================================================================
+
+
+class TestAgentPoolSessionPoolIntegration:
+    """Test AgentPool and SessionPool work together end-to-end."""
+
+    @pytest.mark.integration
+    async def test_create_session_returns_proper_session_id(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """create_session should return a SessionState with the correct session_id."""
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool:
+            state = await pool.create_session("my-session-123")
+            assert state.session_id == "my-session-123"
+
+    @pytest.mark.integration
+    async def test_session_pool_property_returns_active_pool(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """AgentPool.session_pool should return the initialized SessionPool."""
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool:
+            sp = pool.session_pool
+            assert sp is not None
+            assert isinstance(sp, SessionPool)
+            assert sp.pool is pool
+
+    @pytest.mark.integration
+    async def test_create_session_with_agent_name_and_metadata(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """create_session should propagate agent_name and metadata to SessionPool."""
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool:
+            state = await pool.create_session(
+                "session-with-meta",
+                agent_name="test_agent",
+                project="test-project",
+                version="1.0",
+            )
+            assert state.agent_name == "test_agent"
+            assert state.metadata.get("project") == "test-project"
+            assert state.metadata.get("version") == "1.0"
+
+    @pytest.mark.integration
+    async def test_multiple_sessions_can_be_created(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Multiple sessions should coexist in the SessionPool."""
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool:
+            state1 = await pool.create_session("session-1")
+            state2 = await pool.create_session("session-2")
+            state3 = await pool.create_session("session-3")
+
+            assert state1.session_id == "session-1"
+            assert state2.session_id == "session-2"
+            assert state3.session_id == "session-3"
+
+            # All should be tracked by the SessionController
+            sp = pool.session_pool
+            assert sp is not None
+            assert sp.sessions.get_session("session-1") is not None
+            assert sp.sessions.get_session("session-2") is not None
+            assert sp.sessions.get_session("session-3") is not None
+
+
+# =============================================================================
+# Group 3.8: Mixed-mode tests (SessionPool enabled/disabled)
+# =============================================================================
+
+
+class TestMixedMode:
+    """Test agents work consistently with or without SessionPool."""
+
+    @pytest.mark.integration
+    async def test_agent_run_with_session_pool_enabled(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Agent should produce output when SessionPool is enabled."""
+        from pydantic_ai.models.test import TestModel
+
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool:
+            agent = pool.get_agent("test_agent")
+            assert isinstance(agent, Agent)
+            await agent.set_model(TestModel(custom_output_text="enabled"))
+            result = await agent.run("hello")
+            assert result.data == "enabled"
+
+    @pytest.mark.integration
+    async def test_agent_run_with_session_pool_disabled(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Agent should produce output when SessionPool is disabled."""
+        from pydantic_ai.models.test import TestModel
+
+        async with AgentPool(basic_manifest) as pool:
+            agent = pool.get_agent("test_agent")
+            assert isinstance(agent, Agent)
+            await agent.set_model(TestModel(custom_output_text="disabled"))
+            result = await agent.run("hello")
+            assert result.data == "disabled"
+
+    @pytest.mark.integration
+    async def test_same_agent_api_in_both_modes(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Agent API should behave identically regardless of SessionPool mode."""
+        from pydantic_ai.models.test import TestModel
+
+        # With SessionPool enabled
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool_enabled:
+            agent_enabled = pool_enabled.get_agent("test_agent")
+            assert isinstance(agent_enabled, Agent)
+            await agent_enabled.set_model(TestModel(custom_output_text="same"))
+            result_enabled = await agent_enabled.run("hello")
+
+        # With SessionPool disabled
+        async with AgentPool(basic_manifest) as pool_disabled:
+            agent_disabled = pool_disabled.get_agent("test_agent")
+            assert isinstance(agent_disabled, Agent)
+            await agent_disabled.set_model(TestModel(custom_output_text="same"))
+            result_disabled = await agent_disabled.run("hello")
+
+        assert result_enabled.data == result_disabled.data
+        assert result_enabled.data == "same"
+
+    @pytest.mark.integration
+    async def test_get_agent_returns_same_type_in_both_modes(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """get_agent should return the same agent type regardless of SessionPool."""
+        async with AgentPool(
+            basic_manifest,
+            enable_session_pool=True,
+        ) as pool_enabled:
+            agent_enabled = pool_enabled.get_agent("test_agent")
+
+        async with AgentPool(basic_manifest) as pool_disabled:
+            agent_disabled = pool_disabled.get_agent("test_agent")
+
+        assert type(agent_enabled) is Agent
+        assert type(agent_disabled) is Agent
+
+
+# =============================================================================
+# Group 3.9: Rollback tests (feature flag off after being on)
+# =============================================================================
+
+
+class TestRollback:
+    """Test restarting AgentPool without SessionPool after it was enabled."""
+
+    @pytest.mark.integration
+    async def test_restart_without_session_pool_after_enabled(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Start with SessionPool, close, then restart without it."""
+        pool = AgentPool(basic_manifest, enable_session_pool=True)
+
+        # First run: SessionPool enabled
+        async with pool:
+            assert pool.session_pool is not None
+            state = await pool.create_session("session-1")
+            assert state.session_id == "session-1"
+
+        # Second run: SessionPool disabled
+        pool2 = AgentPool(basic_manifest, enable_session_pool=False)
+        async with pool2:
+            assert pool2.session_pool is None
+            with pytest.raises(RuntimeError, match="SessionPool is not enabled"):
+                await pool2.create_session("session-2")
+
+    @pytest.mark.integration
+    async def test_restart_with_same_pool_instance_disabled(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Reuse same pool config but toggle enable_session_pool off."""
+        pool = AgentPool(basic_manifest, enable_session_pool=True)
+
+        async with pool:
+            assert pool.session_pool is not None
+            await pool.create_session("session-a")
+
+        # New pool instance with same manifest but disabled
+        pool_disabled = AgentPool(basic_manifest, enable_session_pool=False)
+        async with pool_disabled:
+            assert pool_disabled.session_pool is None
+            assert pool_disabled._enable_session_pool is False
+
+    @pytest.mark.integration
+    async def test_agent_functionality_preserved_after_rollback(
+        self,
+        basic_manifest: AgentsManifest,
+    ) -> None:
+        """Agent should still work after toggling SessionPool off."""
+        from pydantic_ai.models.test import TestModel
+
+        pool = AgentPool(basic_manifest, enable_session_pool=True)
+
+        async with pool:
+            agent = pool.get_agent("test_agent")
+            assert isinstance(agent, Agent)
+            await agent.set_model(TestModel(custom_output_text="before"))
+            result_before = await agent.run("hello")
+            assert result_before.data == "before"
+
+        pool_after = AgentPool(basic_manifest, enable_session_pool=False)
+        async with pool_after:
+            agent_after = pool_after.get_agent("test_agent")
+            assert isinstance(agent_after, Agent)
+            await agent_after.set_model(TestModel(custom_output_text="after"))
+            result_after = await agent_after.run("hello")
+            assert result_after.data == "after"

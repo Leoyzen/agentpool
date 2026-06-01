@@ -140,6 +140,11 @@ class ServerState:
     # Per-session locks for agent creation (prevents duplicate creation under
     # concurrent get_or_create_agent calls for the same session_id).
     _session_agent_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # OpenCode protocol handler for SessionPool integration.
+    # When opencode.use_session_pool=True, this handler routes session events
+    # and message processing through the SessionPool instead of the legacy
+    # ServerState session management code.
+    protocol_handler: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
