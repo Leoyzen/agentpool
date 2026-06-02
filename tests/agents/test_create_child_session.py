@@ -139,24 +139,6 @@ async def test_create_child_session_no_pool(mock_node: MagicMock) -> None:
     assert child_id.startswith("ses_")
 
 
-async def test_create_child_session_pool_without_sessions(mock_node: MagicMock) -> None:
-    """When pool exists but session_pool is None, falls back to generate_session_id."""
-    mock_pool = MagicMock()
-    mock_pool.session_pool = None
-
-    mock_node.agent_pool = mock_pool
-
-    ctx = AgentContext(node=mock_node)
-    child_id = await ctx.create_child_session(
-        agent_name="coder",
-        agent_type="native",
-    )
-
-    assert child_id is not None
-    assert len(child_id) > 0
-    assert child_id.startswith("ses_")
-
-
 async def test_create_child_session_no_node_session_id(mock_node: MagicMock) -> None:
     """When node has no session_id and no explicit parent, fallback to generate_session_id."""
     mock_node.session_id = None

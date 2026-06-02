@@ -12,6 +12,7 @@ from exxec.models import ExecutionResult
 import pytest
 
 from agentpool import Agent, AgentContext
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import ToolCallProgressEvent
 from agentpool.tool_impls.bash import BashTool
 from agentpool.tool_impls.execute_code import ExecuteCodeTool
@@ -24,20 +25,22 @@ if TYPE_CHECKING:
     from agentpool.agents.events import RichAgentStreamEvent
 
 
-def drain_event_queue(agent: Agent) -> list[RichAgentStreamEvent]:
-    """Drain all events from the agent's event queue."""
+def drain_event_queue(agent_ctx: AgentContext) -> list[RichAgentStreamEvent]:
+    """Drain all events from the agent context's event queue."""
     events: list[RichAgentStreamEvent] = []
-    while not agent._event_queue.empty():
+    if agent_ctx.run_ctx is None:
+        return events
+    while not agent_ctx.run_ctx.event_queue.empty():
         try:
-            events.append(agent._event_queue.get_nowait())
+            events.append(agent_ctx.run_ctx.event_queue.get_nowait())
         except asyncio.QueueEmpty:
             break
     return events
 
 
-def get_progress_events(agent: Agent) -> list[ToolCallProgressEvent]:
-    """Get all ToolCallProgressEvent from the agent's queue."""
-    events = drain_event_queue(agent)
+def get_progress_events(agent_ctx: AgentContext) -> list[ToolCallProgressEvent]:
+    """Get all ToolCallProgressEvent from the agent context's queue."""
+    events = drain_event_queue(agent_ctx)
     return [e for e in events if isinstance(e, ToolCallProgressEvent)]
 
 
@@ -64,6 +67,7 @@ def agent_ctx(test_agent: Agent[None]) -> AgentContext:
         tool_call_id="test_call_123",
         tool_name="test_tool",
         tool_input={"command": "echo", "args": ["hello"]},
+        run_ctx=AgentRunContext(),
     )
 
 
@@ -107,7 +111,7 @@ class TestCodeExecution:
         assert "42" in result
 
         # Check events were emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) >= 1
 
     async def test_execute_code_failure(self, agent_ctx: AgentContext, test_agent: Agent):
@@ -134,7 +138,7 @@ class TestCodeExecution:
         assert "NameError" in result
 
         # Check events were emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) >= 1
 
     async def test_execute_code_exception(self, agent_ctx: AgentContext, test_agent: Agent):
@@ -173,7 +177,7 @@ class TestCodeExecution:
         assert "hello world" in result
 
         # Check events were emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) >= 1
 
     async def test_execute_command_with_output_limit(
@@ -223,7 +227,7 @@ class TestProcessLifecycle:
         assert "echo" in result
 
         # Check event was emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
         assert "Running: echo" in str(events[0].title)
 
@@ -250,7 +254,7 @@ class TestProcessLifecycle:
         assert "Command not found" in result or "Failed" in result
 
         # Check event was emitted with failure
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
 
     async def test_get_process_output_running(self, agent_ctx: AgentContext, test_agent: Agent):
@@ -268,7 +272,7 @@ class TestProcessLifecycle:
         # Start a process first
         start_result = await tools.start_process(agent_ctx, command="sleep", args=["10"])
         process_id = extract_process_id(start_result)
-        drain_event_queue(test_agent)  # Clear start event
+        drain_event_queue(agent_ctx)  # Clear start event
 
         result = await tools.get_process_output(agent_ctx, process_id)
         # Tools now return formatted strings
@@ -276,7 +280,7 @@ class TestProcessLifecycle:
         assert "output line 1" in result
 
         # Check event was emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
 
     async def test_get_process_output_completed(self, agent_ctx: AgentContext, test_agent: Agent):
@@ -316,7 +320,7 @@ class TestProcessLifecycle:
         # Start a process first
         start_result = await tools.start_process(agent_ctx, command="echo", args=["done"])
         process_id = extract_process_id(start_result)
-        drain_event_queue(test_agent)  # Clear start event
+        drain_event_queue(agent_ctx)  # Clear start event
 
         result = await tools.wait_for_process(agent_ctx, process_id)
         # Tools now return formatted strings
@@ -324,7 +328,7 @@ class TestProcessLifecycle:
         assert "Process completed" in result
 
         # Check event was emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
         assert "Process exited" in str(events[0].title)
 
@@ -357,7 +361,7 @@ class TestProcessLifecycle:
         # Start a process first
         start_result = await tools.start_process(agent_ctx, command="sleep", args=["100"])
         process_id = extract_process_id(start_result)
-        drain_event_queue(test_agent)  # Clear start event
+        drain_event_queue(agent_ctx)  # Clear start event
 
         result = await tools.kill_process(agent_ctx, process_id)
         # Tools now return formatted strings
@@ -366,7 +370,7 @@ class TestProcessLifecycle:
         assert "terminated" in result.lower()
 
         # Check event was emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
         assert "Killed process" in str(events[0].title)
 
@@ -381,7 +385,7 @@ class TestProcessLifecycle:
         assert "Error" in result or "not found" in result.lower()
 
         # Check event was emitted with failure
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
 
     async def test_release_process_success(self, agent_ctx: AgentContext, test_agent: Agent):
@@ -392,7 +396,7 @@ class TestProcessLifecycle:
         # Start a process first
         start_result = await tools.start_process(agent_ctx, command="echo")
         process_id = extract_process_id(start_result)
-        drain_event_queue(test_agent)  # Clear start event
+        drain_event_queue(agent_ctx)  # Clear start event
 
         result = await tools.release_process(agent_ctx, process_id)
         # Tools now return formatted strings
@@ -401,7 +405,7 @@ class TestProcessLifecycle:
         assert "released" in result.lower()
 
         # Check event was emitted
-        events = get_progress_events(test_agent)
+        events = get_progress_events(agent_ctx)
         assert len(events) == 1
         assert "Released process" in str(events[0].title)
 

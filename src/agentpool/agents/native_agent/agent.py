@@ -812,33 +812,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         return PydanticAgent(**agent_kwargs)
 
-    async def _process_node_stream(
-        self,
-        run_ctx: AgentRunContext,
-        node_stream: AsyncIterator[Any],
-        *,
-        pending_tcs: dict[str, BaseToolCallPart],
-        message_id: str,
-    ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
-        """Process events from a node stream (ModelRequest or CallTools).
-
-        Args:
-            run_ctx: Per-run context for state isolation
-            node_stream: Stream of events from the node
-            pending_tcs: Dictionary of pending tool calls
-            message_id: Current message ID
-
-        Yields:
-            Processed stream events
-        """
-        async with merge_queue_into_iterator(node_stream, run_ctx.event_queue) as merged:
-            async for event in merged:
-                if run_ctx.cancelled:
-                    break
-                yield event
-                if combined := process_tool_event(self.name, event, pending_tcs, message_id):
-                    yield combined
-
     async def _stream_events(  # noqa: PLR0915
         self,
         run_ctx: AgentRunContext,
@@ -917,17 +890,47 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         # Stream events from node (model request or tool call)
                         if isinstance(node, ModelRequestNode | CallToolsNode):
                             async with node.stream(agent_run.ctx) as stream:
-                                async with merge_queue_into_iterator(
-                                    stream, run_ctx.event_queue
-                                ) as merged:  # type: ignore[arg-type]
-                                    async for event in merged:
+                                if run_ctx.event_bus is not None:
+                                    # EventBus mode: TurnRunner manages event routing.
+                                    # Tool events go directly to EventBus via
+                                    # StreamEventEmitter; combined events are
+                                    # published by process_tool_event.
+                                    async for event in stream:
                                         if run_ctx.cancelled or iteration_done.is_set():
                                             break
                                         await event_queue.put(event)
-                                        if combined := process_tool_event(
-                                            self.name, event, pending_tcs, message_id
+                                        if combined := await process_tool_event(
+                                            self.name,
+                                            event,  # type: ignore[arg-type]
+                                            pending_tcs,
+                                            message_id,
+                                            run_ctx,
                                         ):
-                                            await event_queue.put(combined)
+                                            await run_ctx.event_bus.publish(
+                                                self.session_id,  # type: ignore[arg-type]
+                                                combined,
+                                            )
+                                else:
+                                    # Standalone mode: merge run_ctx.event_queue
+                                    # for backward compatibility.
+                                    async with merge_queue_into_iterator(
+                                        stream, run_ctx.event_queue
+                                    ) as merged:  # type: ignore[arg-type]
+                                        async for event in merged:
+                                            if (
+                                                run_ctx.cancelled
+                                                or iteration_done.is_set()
+                                            ):
+                                                break
+                                            await event_queue.put(event)  # type: ignore[arg-type]
+                                            if combined := await process_tool_event(
+                                                self.name,
+                                                event,  # type: ignore[arg-type]
+                                                pending_tcs,
+                                                message_id,
+                                                run_ctx,
+                                            ):
+                                                await event_queue.put(combined)
 
                     # Build response message
                     response_time = time.perf_counter() - start_time

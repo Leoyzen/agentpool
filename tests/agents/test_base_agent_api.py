@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic_ai.models.test import TestModel
 
 from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var
 from agentpool.agents.context import AgentRunContext
+from agentpool.orchestrator.core import SessionState
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +86,25 @@ def agent() -> _TestAgent:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _mock_session_pool(agent: _TestAgent, run_ctx: AgentRunContext) -> None:
+    """Mock agent_pool.session_pool so _get_session_run_ctx() returns run_ctx."""
+    session_state = SessionState(session_id="test-session", agent_name="test")
+    session_state.active_run_ctx = run_ctx
+    session_controller = MagicMock()
+    session_controller.get_session.return_value = session_state
+    session_pool = MagicMock()
+    session_pool.sessions = session_controller
+    agent_pool = MagicMock()
+    agent_pool.session_pool = session_pool
+    agent.agent_pool = agent_pool
+    agent.session_id = "test-session"
+
+
+# ---------------------------------------------------------------------------
 # get_active_run_context — no active turn
 # ---------------------------------------------------------------------------
 
@@ -94,14 +115,14 @@ def test_get_active_run_context_returns_none_when_idle(agent: _TestAgent) -> Non
 
 
 # ---------------------------------------------------------------------------
-# get_active_run_context — _active_run_ctx
+# get_active_run_context — SessionPool fallback
 # ---------------------------------------------------------------------------
 
 
-def test_get_active_run_context_returns_active_run_ctx(agent: _TestAgent) -> None:
-    """When _active_run_ctx is set, it is returned."""
+def test_get_active_run_context_returns_session_run_ctx(agent: _TestAgent) -> None:
+    """When session.active_run_ctx is set, it is returned."""
     ctx = AgentRunContext()
-    agent._active_run_ctx = ctx
+    _mock_session_pool(agent, ctx)
 
     result = agent.get_active_run_context()
 
@@ -146,11 +167,11 @@ async def test_get_active_run_context_returns_current_run_ctx(agent: _TestAgent)
 
 
 @pytest.mark.asyncio
-async def test_get_active_run_context_prefers_current_over_active(agent: _TestAgent) -> None:
-    """_current_run_ctx takes precedence over _active_run_ctx."""
+async def test_get_active_run_context_prefers_current_over_session(agent: _TestAgent) -> None:
+    """_current_run_ctx takes precedence over SessionPool fallback."""
     current_ctx = AgentRunContext()
-    active_ctx = AgentRunContext()
-    agent._active_run_ctx = active_ctx
+    session_ctx = AgentRunContext()
+    _mock_session_pool(agent, session_ctx)
     token = _current_run_ctx_var.set(current_ctx)
     try:
         result = agent.get_active_run_context()
@@ -159,16 +180,16 @@ async def test_get_active_run_context_prefers_current_over_active(agent: _TestAg
         _current_run_ctx_var.reset(token)
 
 
-def test_get_active_run_context_prefers_active_over_background(agent: _TestAgent) -> None:
-    """_active_run_ctx takes precedence over _background_run_ctx."""
-    active_ctx = AgentRunContext()
+def test_get_active_run_context_prefers_session_over_background(agent: _TestAgent) -> None:
+    """SessionPool fallback takes precedence over _background_run_ctx."""
+    session_ctx = AgentRunContext()
     background_ctx = AgentRunContext()
-    agent._active_run_ctx = active_ctx
+    _mock_session_pool(agent, session_ctx)
     agent._background_run_ctx = background_ctx
 
     result = agent.get_active_run_context()
 
-    assert result is active_ctx
+    assert result is session_ctx
 
 
 @pytest.mark.asyncio
@@ -195,9 +216,9 @@ def test_is_turn_active_false_when_idle(agent: _TestAgent) -> None:
     assert agent.is_turn_active() is False
 
 
-def test_is_turn_active_true_with_active_run_ctx(agent: _TestAgent) -> None:
-    """is_turn_active() returns True when _active_run_ctx is set."""
-    agent._active_run_ctx = AgentRunContext()
+def test_is_turn_active_true_with_session_run_ctx(agent: _TestAgent) -> None:
+    """is_turn_active() returns True when session.active_run_ctx is set."""
+    _mock_session_pool(agent, AgentRunContext())
     assert agent.is_turn_active() is True
 
 
@@ -223,12 +244,22 @@ async def test_is_turn_active_true_with_current_run_ctx(agent: _TestAgent) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_is_turn_active_false_after_clearing_active_run_ctx(agent: _TestAgent) -> None:
-    """After clearing _active_run_ctx, is_turn_active() returns False."""
-    agent._active_run_ctx = AgentRunContext()
+def test_is_turn_active_false_after_clearing_session_run_ctx(agent: _TestAgent) -> None:
+    """After clearing session.active_run_ctx, is_turn_active() returns False."""
+    session_state = SessionState(session_id="test-session", agent_name="test")
+    session_state.active_run_ctx = AgentRunContext()
+    session_controller = MagicMock()
+    session_controller.get_session.return_value = session_state
+    session_pool = MagicMock()
+    session_pool.sessions = session_controller
+    agent_pool = MagicMock()
+    agent_pool.session_pool = session_pool
+    agent.agent_pool = agent_pool
+    agent.session_id = "test-session"
+
     assert agent.is_turn_active() is True
 
-    agent._active_run_ctx = None
+    session_state.active_run_ctx = None
     assert agent.is_turn_active() is False
 
 
@@ -280,15 +311,6 @@ async def test_is_turn_active_during_run_stream() -> None:
 
     async def check_turn() -> str:
         """Tool that records is_turn_active() mid-stream."""
-        from agentpool.agents.context import AgentContext
-
-        # We need to get the agent from the tool context.
-        # In pydantic-ai tools, we can use RunContext or AgentContext.
-        # Since we're testing BaseAgent APIs, we use AgentContext.
-        # But in practice, for a simple test, we can capture the agent via closure.
-        # However, the native agent tools don't have direct access to the agent
-        # instance unless we use AgentContext.
-        # For simplicity, we'll use a closure over the agent reference.
         turn_active_values.append(agent.is_turn_active())
         return "ok"
 

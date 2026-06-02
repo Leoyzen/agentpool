@@ -119,14 +119,14 @@ async def test_subagent_event_lineage(test_pool):
     child_session_id = "child-789"
 
     captured_events = []
-    # Mock parent._event_queue.put to capture events
-    original_put = parent._event_queue.put
+    # Mock ctx.events.emit_event to capture events
+    original_emit = ctx.events.emit_event
 
-    async def mock_put(event):
+    async def mock_emit(event):
         captured_events.append(event)
-        await original_put(event)
+        await original_emit(event)
 
-    parent._event_queue.put = mock_put
+    ctx.events.emit_event = mock_emit
 
     # We need a stream from the child
     child_stream = child.run_stream(

@@ -7,7 +7,7 @@ and auto-resume capabilities for agent sessions.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 import copy
 from dataclasses import dataclass, field
@@ -15,6 +15,7 @@ from datetime import datetime
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
+from agentpool.agents.context import AgentRunContext
 from agentpool.log import get_logger
 from agentpool.sessions.models import SessionData
 
@@ -76,6 +77,8 @@ class SessionState:
     is_closing: bool = False
     parent_session_id: str | None = None
     lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
+    active_run_ctx: AgentRunContext | None = None
+    """Active run context for cross-task access (replaces agent._active_run_ctx)."""
 
 
 class EventBus:
@@ -464,6 +467,11 @@ class SessionController:
                         input_provider=input_provider,
                         pool=self.pool,
                     )
+                # Preserve runtime model configuration from shared agent
+                base_model = getattr(base_agent, "_model", None)
+                if base_model is not None:
+                    agent._model = base_model
+                    agent.model_settings = getattr(base_agent, "model_settings", None)
                 agent.session_id = session_id
                 await agent.__aenter__()
                 self._session_agents[session_id] = agent
@@ -776,8 +784,12 @@ class TurnRunner:
             **kwargs: Additional arguments passed to the agent.
         """
         agent = await self.sessions.get_or_create_session_agent(session_id)
+        # Ensure shared agents have session_id set (get_or_create_session_agent
+        # only sets it for per-session agents)
+        agent.session_id = session_id
         _session = self.sessions.get_session(session_id)
 
+        from agentpool.agents.base_agent import _current_run_ctx_var
         from agentpool.agents.context import AgentRunContext
 
         run_ctx = AgentRunContext(
@@ -785,43 +797,33 @@ class TurnRunner:
         )
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()
+        run_ctx.event_bus = self.event_bus
+        run_ctx.session_id = session_id
+        _current_run_ctx_var.set(run_ctx)
 
-        agent._active_run_ctx = run_ctx
-        # Cache whether EventBus is set on StreamEventEmitter to avoid repeated imports
-        _stream_event_bus_set = False
-        try:
-            from agentpool.agents.events import StreamEventEmitter
+        if _session is not None:
+            _session.active_run_ctx = run_ctx
 
-            _stream_event_bus_set = StreamEventEmitter._event_bus is not None
-        except ImportError:
-            pass
-
+        # Consume events from run_ctx.event_queue and publish to EventBus.
+        # This is needed because StreamEventEmitter no longer has a global
+        # EventBus set, so tool events go into run_ctx.event_queue.
         async def _consume_event_queue() -> None:
-            """Consume events from run_ctx.event_queue and publish to EventBus.
-
-            Acts as a fallback EventBus publisher for events that are only
-            put into run_ctx.event_queue (e.g., by legacy code or direct
-            queue access). When StreamEventEmitter._event_bus is set,
-            events are already published directly by _emit(); this consumer
-            only prevents queue buildup.
-            """
+            """Consume events from run_ctx.event_queue and publish to EventBus."""
             try:
                 while True:
                     event = await run_ctx.event_queue.get()
                     if event is None:
                         break
-                    # Fallback: only publish if _event_bus wasn't set when
-                    # the event was emitted (legacy path)
-                    if not _stream_event_bus_set:
-                        await self.event_bus.publish(session_id, event)
+                    await self.event_bus.publish(session_id, event)
             except asyncio.CancelledError:
                 pass
 
-        turn_start = time.monotonic()
         event_consumer = asyncio.create_task(
             _consume_event_queue(),
             name=f"event_consumer_{session_id}",
         )
+
+        turn_start = time.monotonic()
         try:
             # Process prompts and handle injections/queued prompts
             # like BaseAgent.run_stream() does.
@@ -849,20 +851,18 @@ class TurnRunner:
             # and dropping the message in a dead pending queue.
             run_ctx.completed = True
 
-            # CRITICAL: Clear _active_run_ctx BEFORE any await to prevent
+            # CRITICAL: Clear session.active_run_ctx BEFORE any await to prevent
             # race condition where inject_prompt returns True but message
             # gets stuck in pending (flush_pending_to_queue() already passed).
-            agent._active_run_ctx = None
+            if _session is not None:
+                _session.active_run_ctx = None
 
-            # Signal the event queue consumer to stop
-            await run_ctx.event_queue.put(None)
-            # Wait for it to finish (with timeout to prevent hanging)
-            try:
-                await asyncio.wait_for(event_consumer, timeout=5.0)
-            except TimeoutError:
-                event_consumer.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await event_consumer
+            _current_run_ctx_var.set(None)
+
+            # Cancel the event consumer task
+            event_consumer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await event_consumer
 
             turn_end = time.monotonic()
             self._turn_timings.append((turn_start, turn_end))
@@ -1193,10 +1193,7 @@ class SessionPool:
     async def start(self) -> None:
         """Start the session pool and background tasks."""
         await self.sessions.start_cleanup_task()
-        from agentpool.agents.events import StreamEventEmitter
-
-        StreamEventEmitter.set_event_bus(self.event_bus)
-        logger.info("SessionPool started, EventBus registered with StreamEventEmitter")
+        logger.info("SessionPool started")
 
     async def shutdown(self) -> None:
         """Shutdown the session pool and cancel background tasks."""
@@ -1210,10 +1207,7 @@ class SessionPool:
                     "Failed to close session during shutdown",
                     session_id=session_id,
                 )
-        from agentpool.agents.events import StreamEventEmitter
-
-        StreamEventEmitter.set_event_bus(None)
-        logger.info("SessionPool shut down, EventBus unregistered")
+        logger.info("SessionPool shut down")
 
     @property
     def event_bus(self) -> EventBus:
@@ -1293,6 +1287,57 @@ class SessionPool:
             await self.turns.run_loop(session_id, *prompts, **kwargs)
         else:
             await self.turns.run_turn(session_id, *prompts, **kwargs)
+
+    async def run_stream(self, session_id: str, *prompts: str) -> AsyncIterator[Any]:
+        """Process prompts and yield events from the EventBus.
+
+        Convenience method for tests and standalone clients that want
+        an async iterator over session events.
+
+        Args:
+            session_id: The session to process the prompt for.
+            *prompts: Prompts to process.
+
+        Yields:
+            Events published to the EventBus for this session.
+        """
+        queue = await self.event_bus.subscribe(session_id)
+        process_task = asyncio.create_task(self.process_prompt(session_id, *prompts))
+        get_task: asyncio.Task[Any] | None = None
+        try:
+            while not process_task.done():
+                if get_task is None:
+                    get_task = asyncio.create_task(queue.get())
+                done, _pending = await asyncio.wait(
+                    {process_task, get_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if get_task in done:
+                    event = get_task.result()
+                    get_task = None
+                    if event is not None:
+                        yield event
+            if get_task is not None and not get_task.done():
+                get_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await get_task
+                get_task = None
+            while not queue.empty():
+                event = queue.get_nowait()
+                if event is not None:
+                    yield event
+            if (exc := process_task.exception()) is not None:
+                raise exc
+        finally:
+            if get_task is not None and not get_task.done():
+                get_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await get_task
+            if not process_task.done():
+                process_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await process_task
+            await self.event_bus.unsubscribe(session_id, queue)
 
     async def inject_prompt(self, session_id: str, message: str) -> bool:
         """Inject a message into a session.

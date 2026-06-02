@@ -84,10 +84,7 @@ async def test_post_turn_inject_prompt_triggers_auto_resume_with_per_session_age
 
     # Use MagicMock to simulate a per-session agent
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
     agent._run_stream_once = _fake_stream
 
     mock_pool = MagicMock()
@@ -159,10 +156,7 @@ async def test_session_pool_inject_prompt_triggers_auto_resume() -> None:
         )
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
     agent._run_stream_once = _fake_stream
 
     mock_pool = MagicMock()
@@ -279,8 +273,9 @@ async def test_per_session_agent_session_id_set() -> None:
         session_id = "test-session"
         await session_pool.create_session(session_id, agent_name="test_agent")
 
-        # Run a turn to create per-session agent
-        await session_pool.process_prompt(session_id, "hello")
+        # Run a turn via run_stream to create per-session agent
+        async for _ in session_pool.run_stream(session_id, "hello"):
+            pass
 
         # Get the session and check agent
         session = session_pool.sessions.get_session(session_id)
@@ -291,8 +286,9 @@ async def test_per_session_agent_session_id_set() -> None:
             f"expected {session_id!r}, got {session.agent.session_id!r}"
         )
 
-        # Run a turn to verify no AssertionError
-        await session_pool.process_prompt(session_id, "hello")
+        # Run another turn via run_stream to verify no AssertionError
+        async for _ in session_pool.run_stream(session_id, "hello"):
+            pass
 
 
 # -----------------------------------------------------------------------------

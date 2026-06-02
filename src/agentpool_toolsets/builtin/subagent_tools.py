@@ -327,7 +327,7 @@ class SubagentTools(StaticResourceProvider):
 
         # Create and persist child session via SessionManager (or generate
         # ephemeral ID when no pool / sessions are available).
-        parent_session_id = ctx.node.session_id or ""
+        parent_session_id = getattr(ctx.node, "session_id", None) or ""
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
             agent_type=node.agent_type,

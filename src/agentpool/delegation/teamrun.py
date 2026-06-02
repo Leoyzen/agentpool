@@ -287,9 +287,9 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
         # Resolve the parent session id for this team execution.
         # The caller's parent_session_id takes priority, then session_id (for
-        # backward compat), then the team's own session.
+        # backward compat).
         parent_session_id: str | None = (
-            parent_session_id_kwarg or session_id_kwarg or self.session_id
+            parent_session_id_kwarg or session_id_kwarg
         )
 
         child_depth = depth + 1

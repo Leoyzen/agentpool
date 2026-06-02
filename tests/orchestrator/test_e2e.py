@@ -49,9 +49,6 @@ def mock_pool() -> MagicMock:
 def mock_agent_full_lifecycle() -> MagicMock:
     """Return a mocked BaseAgent that yields a complete event lifecycle."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
 
     async def _stream(
         run_ctx: AgentRunContext,
@@ -92,9 +89,6 @@ def mock_agent_full_lifecycle() -> MagicMock:
 def mock_agent_with_text(text: str = "response") -> MagicMock:
     """Return a mocked BaseAgent that yields text and completes."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
 
     async def _stream(
         run_ctx: AgentRunContext,
@@ -256,9 +250,6 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
 
     # Create two agents with distinct response text
     agent_a = MagicMock()
-    agent_a._active_run_ctx = None
-    agent_a._current_run_ctx = None
-    agent_a._background_run_ctx = None
 
     async def _stream_a(
         run_ctx: AgentRunContext,
@@ -275,9 +266,6 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     agent_a._run_stream_once = _stream_a
 
     agent_b = MagicMock()
-    agent_b._active_run_ctx = None
-    agent_b._current_run_ctx = None
-    agent_b._background_run_ctx = None
 
     async def _stream_b(
         run_ctx: AgentRunContext,
@@ -368,9 +356,6 @@ async def test_concurrent_sessions_turn_serialization_per_session(
     await session_pool.start()
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
 
     turn_starts: dict[str, list[float]] = {"sess-1": [], "sess-2": []}
     turn_ends: dict[str, list[float]] = {"sess-1": [], "sess-2": []}
@@ -434,9 +419,6 @@ async def test_concurrent_sessions_event_bus_isolation(
     await session_pool.start()
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
 
     async def _stream(
         run_ctx: AgentRunContext,

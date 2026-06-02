@@ -238,6 +238,8 @@ async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
         worker = pool.get_agent("worker")
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         # Set up test model to trigger worker tool
         main_model = TestModel(call_tools=["ask_worker"])
@@ -246,7 +248,7 @@ async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
             if isinstance(event, SpawnSessionStart):
                 events.append(event)
 
@@ -272,6 +274,8 @@ async def test_worker_emits_subagent_events(tmp_path: Path):
         worker = pool.get_agent("worker")
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         main_model = TestModel(call_tools=["ask_worker"])
         worker_model = TestModel(custom_output_text="Worker output")
@@ -279,7 +283,7 @@ async def test_worker_emits_subagent_events(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
             if isinstance(event, SubAgentEvent):
                 subagent_events.append(event)
 
@@ -309,6 +313,8 @@ async def test_worker_session_isolation(tmp_path: Path):
         worker = pool.get_agent("worker")
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         # Set up test model to call worker twice
         main_model = TestModel(call_tools=["ask_worker", "ask_worker"])
@@ -317,7 +323,7 @@ async def test_worker_session_isolation(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker twice", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask worker twice"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -367,12 +373,14 @@ teams:
     async with AgentPool(manifest) as pool:
         main_agent = pool.get_agent("main")
         assert isinstance(main_agent, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         main_model = TestModel(call_tools=["ask_my_team"])
         await main_agent.set_model(main_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask team to do something", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask team to do something"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -394,6 +402,8 @@ async def test_worker_spawn_depth_equals_parent_depth_plus_one(tmp_path: Path):
         worker = pool.get_agent("worker")
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         # Set up test model to trigger worker tool at depth 0 (top-level)
         main_model = TestModel(call_tools=["ask_worker"])
@@ -402,7 +412,7 @@ async def test_worker_spawn_depth_equals_parent_depth_plus_one(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect SpawnSessionStart events via run_stream
-        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -423,6 +433,8 @@ async def test_worker_child_session_has_correct_parent(tmp_path: Path):
         worker = pool.get_agent("worker")
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         main_model = TestModel(call_tools=["ask_worker"])
         worker_model = TestModel(custom_output_text="Worker result")
@@ -430,7 +442,7 @@ async def test_worker_child_session_has_correct_parent(tmp_path: Path):
         await worker.set_model(worker_model)
 
         # Collect events through run_stream
-        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
 
@@ -497,13 +509,15 @@ async def test_subagent_event_depth_propagation(tmp_path: Path):
         worker = pool.get_agent("worker")
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
         main_model = TestModel(call_tools=["ask_worker"])
         worker_model = TestModel(custom_output_text="Worker result")
         await main_agent.set_model(main_model)
         await worker.set_model(worker_model)
 
-        async for event in main_agent.run_stream("Ask worker: do something", session_id="ses_test"):
+        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
             elif isinstance(event, SubAgentEvent):

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -57,10 +57,7 @@ def turn_runner(controller: SessionController) -> TurnRunner:
 def mock_agent() -> MagicMock:
     """Return a mocked BaseAgent with _run_stream_once."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
 
     async def _fake_stream(
         run_ctx: AgentRunContext,
@@ -77,10 +74,7 @@ def mock_agent() -> MagicMock:
 def mock_agent_with_delay() -> MagicMock:
     """Return a mocked BaseAgent whose stream takes a noticeable time."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
 
     async def _fake_stream(
         run_ctx: AgentRunContext,
@@ -110,6 +104,25 @@ async def _setup_session(
     state.agent = agent
     controller._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent
+
+    # Configure mock to support new get_active_run_context behavior
+    # (ContextVar for same-task, session.active_run_ctx for cross-task)
+    from agentpool.agents.base_agent import _current_run_ctx_var
+
+    def _mock_get_active_run_context() -> AgentRunContext | None:
+        run_ctx = _current_run_ctx_var.get()
+        if run_ctx is not None and not run_ctx.completed:
+            return run_ctx
+        session = controller.get_session(session_id)
+        if session is not None:
+            run_ctx = session.active_run_ctx
+            if run_ctx is not None and not run_ctx.completed:
+                return run_ctx
+        if agent._background_run_ctx is not None and not agent._background_run_ctx.completed:
+            return agent._background_run_ctx
+        return None
+
+    agent.get_active_run_context.side_effect = _mock_get_active_run_context
     return state
 
 
@@ -158,10 +171,7 @@ async def test_inject_prompt_triggers_second_iteration(
             yield RunStartedEvent(session_id="sess-1", run_id="run-2")
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
     agent._run_stream_once = _fake_stream
 
     await _setup_session(controller, "sess-1", agent, mock_pool)
@@ -211,10 +221,7 @@ async def test_post_turn_inject_prompt_triggers_auto_resume(
         yield RunStartedEvent(session_id="sess-1", run_id=f"run-{call_count}")
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
     agent._run_stream_once = _fake_stream
 
     await _setup_session(controller, "sess-1", agent, mock_pool)
@@ -262,9 +269,9 @@ async def test_background_task_child_agent_events_reach_event_bus(
 
     Expected: SubAgentEvent published to EventBus.
     """
-    from agentpool.agents.events import SubAgentEvent, StreamCompleteEvent
-    from agentpool.agents.events.event_emitter import StreamEventEmitter
     from agentpool import ChatMessage
+    from agentpool.agents.events import StreamCompleteEvent, SubAgentEvent
+    from agentpool.agents.events.event_emitter import StreamEventEmitter
 
     event_bus_events: list[Any] = []
 
@@ -293,7 +300,7 @@ async def test_background_task_child_agent_events_reach_event_bus(
         child_ctx.tool_call_id = "tc-1"
 
         # Use StreamEventEmitter (real code path)
-        emitter = StreamEventEmitter(child_ctx)
+        emitter = StreamEventEmitter(child_ctx, event_bus=child_run_ctx.event_bus)
         await emitter.emit_event(
             SubAgentEvent(
                 source_name="bg-task",
@@ -311,10 +318,7 @@ async def test_background_task_child_agent_events_reach_event_bus(
         )
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
     agent._run_stream_once = _fake_stream
 
     await _setup_session(controller, "sess-1", agent, mock_pool)
@@ -392,7 +396,9 @@ async def test_background_task_events_reach_acp_client_after_end_turn(
             )
         finally:
             # Simulate background task emitting event after main stream completes
-            await run_ctx.event_queue.put(
+            # via EventBus (new pattern: StreamEventEmitter publishes directly)
+            await turn_runner.event_bus.publish(
+                "sess-1",
                 SubAgentEvent(
                     source_name="bg-task-post-turn",
                     source_type="background",
@@ -401,14 +407,11 @@ async def test_background_task_events_reach_acp_client_after_end_turn(
                     ),
                     child_session_id="child-sess",
                     parent_session_id="sess-1",
-                )
+                ),
             )
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
     agent._run_stream_once = _fake_stream
 
     await _setup_session(controller, "sess-1", agent, mock_pool)
@@ -573,9 +576,6 @@ async def test_run_loop_drains_on_exception(
 ) -> None:
     """If the turn loop raises, queued work is drained so it does not leak."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
     agent.get_active_run_context.return_value = None
 
     async def broken_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
@@ -797,9 +797,6 @@ async def test_turn_cancellation_stops_current_turn(
 ) -> None:
     """Cancelling the task running run_turn aborts the turn."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
     agent.get_active_run_context.return_value = None
 
     async def slow_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
@@ -825,9 +822,6 @@ async def test_run_loop_cancellation(
 ) -> None:
     """Cancelling the task running run_loop raises CancelledError."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
     agent.get_active_run_context.return_value = None
 
     async def slow_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
@@ -924,16 +918,14 @@ async def test_run_turn_passes_input_provider_to_agent(
 ) -> None:
     """input_provider must be forwarded to agent._run_stream_once so
     elicitation flows through the ACP protocol instead of falling back
-    to StdlibInputProvider."""
+    to StdlibInputProvider.
+    """
     from agentpool.ui.base import InputProvider
 
     calls: list[dict[str, Any]] = []
 
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
-    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+    agent.get_active_run_context.return_value = None
 
     async def _capture_stream(
         run_ctx: AgentRunContext,

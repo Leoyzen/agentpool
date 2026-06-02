@@ -141,7 +141,9 @@ class OpenCodeProtocolHandler:
                 )
                 return
 
-            queue = await session_pool.event_bus.subscribe(session_id)
+            queue = await session_pool.event_bus.subscribe(
+                session_id, scope="descendants"
+            )
             self._event_bus_subscriptions[session_id] = queue
             task = asyncio.create_task(
                 self._event_consumer_loop(session_id, queue),

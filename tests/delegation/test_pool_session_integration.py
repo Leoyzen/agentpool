@@ -33,13 +33,14 @@ class TestSessionPoolLifecycle:
     """Test SessionPool initialization and shutdown within AgentPool."""
 
     @pytest.mark.integration
-    async def test_session_pool_not_initialized_by_default(
+    async def test_session_pool_always_initialized(
         self,
         basic_manifest: AgentsManifest,
     ) -> None:
-        """SessionPool should be None by default (opt-in)."""
+        """SessionPool should always be initialized."""
         async with AgentPool(basic_manifest) as pool:
-            assert pool.session_pool is None
+            assert pool.session_pool is not None
+            assert isinstance(pool.session_pool, SessionPool)
 
     @pytest.mark.integration
     async def test_session_pool_initialized_when_enabled(
@@ -156,25 +157,12 @@ class TestCreateSession:
     """Test AgentPool.create_session() convenience method."""
 
     @pytest.mark.integration
-    async def test_create_session_raises_when_disabled(
+    async def test_create_session_returns_state(
         self,
         basic_manifest: AgentsManifest,
     ) -> None:
-        """create_session should raise RuntimeError when SessionPool is disabled."""
+        """create_session should return a SessionState."""
         async with AgentPool(basic_manifest) as pool:
-            with pytest.raises(RuntimeError, match="SessionPool is not enabled"):
-                await pool.create_session("test-session")
-
-    @pytest.mark.integration
-    async def test_create_session_when_enabled(
-        self,
-        basic_manifest: AgentsManifest,
-    ) -> None:
-        """create_session should return a SessionState when enabled."""
-        async with AgentPool(
-            basic_manifest,
-            enable_session_pool=True,
-        ) as pool:
             state = await pool.create_session("test-session", agent_name="test_agent")
             assert state.session_id == "test-session"
             assert state.agent_name == "test_agent"
@@ -185,10 +173,7 @@ class TestCreateSession:
         basic_manifest: AgentsManifest,
     ) -> None:
         """create_session should pass metadata through to SessionPool."""
-        async with AgentPool(
-            basic_manifest,
-            enable_session_pool=True,
-        ) as pool:
+        async with AgentPool(basic_manifest) as pool:
             state = await pool.create_session(
                 "test-session",
                 agent_name="test_agent",
@@ -441,57 +426,39 @@ class TestMixedMode:
 # =============================================================================
 
 
-class TestRollback:
-    """Test restarting AgentPool without SessionPool after it was enabled."""
+class TestRestart:
+    """Test restarting AgentPool maintains SessionPool."""
 
     @pytest.mark.integration
-    async def test_restart_without_session_pool_after_enabled(
+    async def test_restart_maintains_session_pool(
         self,
         basic_manifest: AgentsManifest,
     ) -> None:
-        """Start with SessionPool, close, then restart without it."""
-        pool = AgentPool(basic_manifest, enable_session_pool=True)
+        """SessionPool should be available after restarting AgentPool."""
+        pool = AgentPool(basic_manifest)
 
-        # First run: SessionPool enabled
+        # First run
         async with pool:
             assert pool.session_pool is not None
             state = await pool.create_session("session-1")
             assert state.session_id == "session-1"
 
-        # Second run: SessionPool disabled
-        pool2 = AgentPool(basic_manifest, enable_session_pool=False)
+        # Second run: SessionPool still available
+        pool2 = AgentPool(basic_manifest)
         async with pool2:
-            assert pool2.session_pool is None
-            with pytest.raises(RuntimeError, match="SessionPool is not enabled"):
-                await pool2.create_session("session-2")
+            assert pool2.session_pool is not None
+            state2 = await pool2.create_session("session-2")
+            assert state2.session_id == "session-2"
 
     @pytest.mark.integration
-    async def test_restart_with_same_pool_instance_disabled(
+    async def test_agent_functionality_preserved_after_restart(
         self,
         basic_manifest: AgentsManifest,
     ) -> None:
-        """Reuse same pool config but toggle enable_session_pool off."""
-        pool = AgentPool(basic_manifest, enable_session_pool=True)
-
-        async with pool:
-            assert pool.session_pool is not None
-            await pool.create_session("session-a")
-
-        # New pool instance with same manifest but disabled
-        pool_disabled = AgentPool(basic_manifest, enable_session_pool=False)
-        async with pool_disabled:
-            assert pool_disabled.session_pool is None
-            assert pool_disabled._enable_session_pool is False
-
-    @pytest.mark.integration
-    async def test_agent_functionality_preserved_after_rollback(
-        self,
-        basic_manifest: AgentsManifest,
-    ) -> None:
-        """Agent should still work after toggling SessionPool off."""
+        """Agent should still work after restarting AgentPool."""
         from pydantic_ai.models.test import TestModel
 
-        pool = AgentPool(basic_manifest, enable_session_pool=True)
+        pool = AgentPool(basic_manifest)
 
         async with pool:
             agent = pool.get_agent("test_agent")
@@ -500,7 +467,7 @@ class TestRollback:
             result_before = await agent.run("hello", session_id="ses_test")
             assert result_before.data == "before"
 
-        pool_after = AgentPool(basic_manifest, enable_session_pool=False)
+        pool_after = AgentPool(basic_manifest)
         async with pool_after:
             agent_after = pool_after.get_agent("test_agent")
             assert isinstance(agent_after, Agent)

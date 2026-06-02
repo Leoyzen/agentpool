@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
 
 from anyenv.signals import Signal
@@ -115,16 +115,11 @@ class MessageNode[TDeps, TResult](ABC):
         self.log = logger.bind(agent_name=self._name)
         self.agent_pool = agent_pool
         self.description = description
-        self.session_id: str | None = None
-        self.parent_session_id: str | None = None
-        self.session_title: str | None = None
         self.connections = ConnectionManager(self)
         cfgs = list(event_configs) if event_configs else None
         self._events = EventManager(
             configs=cfgs,
             event_callbacks=[_event_handler],
-            session_id=self.session_id,
-            parent_session_id=self.parent_session_id,
             source_name=self._name,
         )
         name_ = f"node_{self._name}"
@@ -133,9 +128,11 @@ class MessageNode[TDeps, TResult](ABC):
 
     async def log_session(
         self,
+        session_id: str | None = None,
         initial_prompt: str | None = None,
         model: str | None = None,
         parent_session_id: str | None = None,
+        session_title_setter: Callable[[str], None] | None = None,
     ) -> None:
         """Log conversation to storage if enabled.
 
@@ -144,44 +141,32 @@ class MessageNode[TDeps, TResult](ABC):
         For wrapped agents (Claude Code), set session_id from SDK session first.
 
         Args:
+            session_id: Optional session ID for the conversation.
             initial_prompt: Optional initial prompt to trigger title generation.
             model: Requested model identifier for this session.
             parent_session_id: Optional parent session ID.
+            session_title_setter: Optional callback for setting conversation title.
         """
-
-        def _set_session_title(title: str) -> None:
-            """Callback for setting conversation title (called by storage manager)."""
-            self.session_title = title
-
-        if self.enable_db_logging and self.storage and self.session_id:
+        if self.enable_db_logging and self.storage and session_id:
             await self.storage.log_session(
-                session_id=self.session_id,
+                session_id=session_id,
                 node_name=self.name,
                 model=model,
                 initial_prompt=initial_prompt,
                 parent_session_id=parent_session_id,
-                on_title_generated=_set_session_title,
+                on_title_generated=session_title_setter,
             )
 
-    async def emit_agent_event(self, event: RichAgentStreamEvent[Any]) -> None:
+    async def emit_agent_event(
+        self, event: RichAgentStreamEvent[Any], source_session_id: str | None = None
+    ) -> None:
         """Emit an agent stream event via the event manager.
 
         Args:
             event: The agent stream event to emit
+            source_session_id: Optional ID of the session that produced the event
         """
-        await self._events.emit_agent_event(event, source_session_id=self.session_id)
-
-    def set_session_context(self, session_id: str, parent_session_id: str | None = None) -> None:
-        """Set session context for the node and its event manager.
-
-        Args:
-            session_id: The session ID to set
-            parent_session_id: Optional parent session ID
-        """
-        self.session_id = session_id
-        self.parent_session_id = parent_session_id
-        self._events.session_id = session_id
-        self._events.parent_session_id = parent_session_id
+        await self._events.emit_agent_event(event, source_session_id=source_session_id)
 
     async def __aenter__(self) -> Self:
         """Initialize base message node."""
@@ -477,13 +462,23 @@ class MessageNode[TDeps, TResult](ABC):
             **kwargs,
         )
 
-    async def get_message_history(self, limit: int | None = None) -> list[ChatMessage[Any]]:
-        """Get message history from storage."""
+    async def get_message_history(
+        self, session_id: str | None = None, limit: int | None = None
+    ) -> list[ChatMessage[Any]]:
+        """Get message history from storage.
+
+        Args:
+            session_id: Optional session ID to query history for.
+            limit: Maximum number of messages to return.
+
+        Returns:
+            List of chat messages from the session.
+        """
         from agentpool_config.session import SessionQuery
 
-        if not self.enable_db_logging or not self.storage:
+        if not self.enable_db_logging or not self.storage or not session_id:
             return []
-        query = SessionQuery(name=self.session_id, limit=limit)
+        query = SessionQuery(name=session_id, limit=limit)
         return await self.storage.filter_messages(query)
 
     async def log_message(self, message: ChatMessage[Any]) -> None:

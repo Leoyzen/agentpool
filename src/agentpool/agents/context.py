@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 import time
 from typing import TYPE_CHECKING, Any, Literal
 import uuid
-import warnings
 
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
@@ -20,63 +19,13 @@ if TYPE_CHECKING:
 
     from agentpool import Agent
     from agentpool.agents.events import StreamEventEmitter
+    from agentpool.orchestrator.core import EventBus
     from agentpool.tools.base import Tool
 
 
 ConfirmationResult = Literal["allow", "skip", "abort_run", "abort_chain"]
 
 logger = get_logger(__name__)
-
-
-class _DeprecatedField:
-    """Descriptor that emits a DeprecationWarning when the field is accessed.
-
-    The value is stored in the instance ``__dict__`` under a private key
-    (``_deprecated_<name>``) so that ``dataclasses.asdict()`` — which calls
-    ``getattr()`` — continues to work correctly.
-
-    Because this is a *data descriptor* (it defines both ``__get__`` and
-    ``__set__``), it takes precedence over the instance ``__dict__`` entry
-    that the dataclass ``__init__`` would normally create.
-
-    Args:
-        default_factory: Callable that produces the default value when the
-            field has not been set yet.
-        msg: Custom deprecation message.  When *None* a generic message is
-            constructed from the owning class and field names.
-    """
-
-    def __init__(
-        self,
-        default_factory: Any,
-        *,
-        msg: str | None = None,
-    ) -> None:
-        self._default_factory = default_factory
-        self._msg = msg
-        self._name: str = ""
-        self._private_key: str = ""
-
-    def __set_name__(self, owner: type, name: str) -> None:
-        self._name = name
-        self._private_key = f"_deprecated_{name}"
-
-    def __get__(self, instance: Any, owner: type | None = None) -> Any:
-        if instance is None:
-            # Class-level access (e.g. introspection) — return the descriptor.
-            return self
-        value = instance.__dict__.get(self._private_key)
-        if value is None and self._private_key not in instance.__dict__:
-            value = self._default_factory()
-            instance.__dict__[self._private_key] = value
-        msg = self._msg or f"{type(instance).__name__}.{self._name} is deprecated"
-        warnings.warn(msg, DeprecationWarning, stacklevel=2)
-        return value
-
-    def __set__(self, instance: Any, value: Any) -> None:
-        msg = self._msg or f"{type(instance).__name__}.{self._name} is deprecated"
-        warnings.warn(msg, DeprecationWarning, stacklevel=2)
-        instance.__dict__[self._private_key] = value
 
 
 @dataclass(kw_only=True)
@@ -87,19 +36,14 @@ class AgentRunContext:
     ensuring isolation between concurrent runs. It is separate from AgentContext
     which is the PydanticAI context passed to tools.
 
-    !!! warning "Deprecated"
-        ``session_id`` is deprecated.  Session IDs are now managed by
-        ``SessionManager`` / ``ensure_session`` on the agent itself.  Accessing
-        or setting ``session_id`` on ``AgentRunContext`` emits a
-        ``DeprecationWarning``.
-
     Attributes:
         cancelled: Whether the run has been cancelled.
         current_task: The asyncio.Task for the current run, if any.
         depth: Current delegation depth (0 = top-level run).
         event_queue: Queue for streaming events from this run.
+        event_bus: Optional event bus for cross-session event routing.
         injection_manager: Manages prompt injection and queuing for this run.
-        session_id: **Deprecated** — use agent-level ``session_id`` instead.
+        session_id: Session ID for this run.
         deps: Optional dependencies passed to the run.
         start_time: Timestamp when the run started (for metrics).
     """
@@ -116,16 +60,14 @@ class AgentRunContext:
     event_queue: asyncio.Queue[Any] = field(default_factory=asyncio.Queue)
     """Queue for streaming events from this run."""
 
+    event_bus: EventBus | None = None
+    """Optional event bus for cross-session event routing."""
+
     injection_manager: PromptInjectionManager = field(default_factory=PromptInjectionManager)
     """Manages prompt injection and queuing for this run."""
 
-    # DEPRECATED: session_id on AgentRunContext is a dead field.  Session IDs
-    # are now managed by SessionManager / ensure_session on the agent.  The
-    # _DeprecatedField descriptor (assigned after the class body) emits
-    # DeprecationWarning on every access but preserves full backward
-    # compatibility (including dataclasses.asdict()).
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    """**Deprecated** — session IDs are managed by SessionManager."""
+    """Session ID for this run."""
 
     deps: Any = None
     """Optional dependencies passed to the run."""
@@ -135,18 +77,6 @@ class AgentRunContext:
 
     completed: bool = False
     """Whether the run has completed (stream finished)."""
-
-
-# Replace the plain dataclass attribute with a data descriptor that intercepts
-# all reads and writes.  The dataclass machinery has already registered
-# ``session_id`` in ``AgentRunContext.__dataclass_fields__`` so asdict() and
-# other introspection continue to work.  Because _DeprecatedField defines both
-# __get__ and __set__ it is a *data descriptor* and takes precedence over the
-# instance __dict__ entry — guaranteeing that every access emits the warning.
-AgentRunContext.session_id = _DeprecatedField(  # type: ignore[assignment]
-    default_factory=lambda: uuid.uuid4().hex,
-    msg="AgentRunContext.session_id is deprecated — use agent-level session_id instead",
-)
 
 
 @dataclass(kw_only=True)
@@ -197,18 +127,22 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             tool_call_id=self.tool_call_id or "",
             tool_input=self.tool_input,
         )
-        # Use run_ctx.event_queue for per-run isolation, fallback to agent queue
+        # Use run_ctx.event_bus when available (session pool mode), else event_queue (standalone)
         if self.run_ctx is not None:
-            await self.run_ctx.event_queue.put(progress_event)
+            if self.run_ctx.event_bus is not None:
+                await self.run_ctx.event_bus.publish(self.run_ctx.session_id, progress_event)
+            else:
+                await self.run_ctx.event_queue.put(progress_event)
         else:
-            await self.agent._event_queue.put(progress_event)
+            logger.debug("report_progress called with no active run context — event dropped")
 
     @property
     def events(self) -> StreamEventEmitter:
         """Get event emitter with context automatically injected."""
         from agentpool.agents.events import StreamEventEmitter
 
-        return StreamEventEmitter(self)
+        event_bus = getattr(self.run_ctx, "event_bus", None) if self.run_ctx else None
+        return StreamEventEmitter(self, event_bus=event_bus)
 
     async def handle_confirmation(self, tool: Tool, args: dict[str, Any]) -> ConfirmationResult:
         """Handle tool execution confirmation.
@@ -270,22 +204,21 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         """
         pool = self.node.agent_pool
         if pool is not None:
-            effective_parent = parent_session_id or self.node.session_id
+            effective_parent = parent_session_id or getattr(self.node, "session_id", None)
             if effective_parent is None:
                 from agentpool.utils.identifiers import generate_session_id
 
                 return generate_session_id()
 
-            if pool.session_pool is not None:
-                from agentpool.utils.identifiers import generate_session_id
+            from agentpool.utils.identifiers import generate_session_id
 
-                child_session = await pool.session_pool.create_session(
-                    session_id=generate_session_id(),
-                    agent_name=agent_name,
-                    parent_session_id=effective_parent,
-                    agent_type=agent_type,
-                )
-                return child_session.session_id
+            child_session = await pool.session_pool.create_session(
+                session_id=generate_session_id(),
+                agent_name=agent_name,
+                parent_session_id=effective_parent,
+                agent_type=agent_type,
+            )
+            return child_session.session_id
 
         # No pool available — generate an ephemeral ID without persistence.
         from agentpool.utils.identifiers import generate_session_id

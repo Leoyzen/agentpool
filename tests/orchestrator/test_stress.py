@@ -48,9 +48,6 @@ def mock_pool() -> MagicMock:
 def mock_agent() -> MagicMock:
     """Return a mocked BaseAgent that yields a single event instantly."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
 
     async def _stream(
         run_ctx: AgentRunContext,
@@ -67,9 +64,6 @@ def mock_agent() -> MagicMock:
 def mock_agent_with_delay() -> MagicMock:
     """Return a mocked BaseAgent with a small per-event delay."""
     agent = MagicMock()
-    agent._active_run_ctx = None
-    agent._current_run_ctx = None
-    agent._background_run_ctx = None
 
     async def _stream(
         run_ctx: AgentRunContext,

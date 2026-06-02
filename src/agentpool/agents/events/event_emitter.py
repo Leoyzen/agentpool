@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentpool.agents.events import (
     CustomEvent,
@@ -15,12 +15,14 @@ from agentpool.agents.events import (
 )
 from agentpool.log import get_logger
 
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentpool.agents.context import AgentContext
     from agentpool.agents.events import RichAgentStreamEvent, ToolCallContentItem
     from agentpool.agents.events.events import ToolCallStatus
+    from agentpool.orchestrator.core import EventBus
     from agentpool.tools.base import ToolKind
     from agentpool.utils.todos import PlanEntry
 
@@ -38,13 +40,15 @@ class StreamEventEmitter:
     the full pattern (aligned with ACP protocol).
     """
 
-    def __init__(self, context: AgentContext) -> None:
+    def __init__(self, context: AgentContext, event_bus: EventBus | None = None) -> None:
         """Initialize event emitter with agent context.
 
         Args:
             context: Agent context to extract metadata from
+            event_bus: Optional EventBus for forwarding events (set by SessionPool)
         """
         self._context = context
+        self._event_bus = event_bus
 
     # =========================================================================
     # Core methods - the essential API
@@ -347,38 +351,16 @@ class StreamEventEmitter:
     # Private helpers
     # =========================================================================
 
-    _event_bus: ClassVar[Any | None] = None
-    """Optional EventBus for forwarding events (set by SessionPool)."""
-
-    @classmethod
-    def set_event_bus(cls, event_bus: Any | None) -> None:
-        """Set the global EventBus for event forwarding.
-
-        Called by SessionPool when starting/shutting down.
-        """
-        cls._event_bus = event_bus
-
     async def _emit(self, event: RichAgentStreamEvent[Any]) -> None:
-        """Internal method to emit events to the agent's queue and EventBus."""
-        if self._context.run_ctx is not None:
-            await self._context.run_ctx.event_queue.put(event)
-        else:
-            await self._context.agent._event_queue.put(event)
-
-        # Forward to EventBus — prefer run_ctx-level injection, fall back to class-level
-        event_bus = None
-        if self._context.run_ctx is not None:
-            event_bus = getattr(self._context.run_ctx, "event_bus", None)
-        if event_bus is None:
-            event_bus = StreamEventEmitter._event_bus
-        if event_bus is not None:
+        """Internal method to emit events to EventBus or agent's queue."""
+        if self._event_bus is not None:
             session_id = getattr(self._context.agent, "session_id", None)
             if session_id:
                 try:
-                    await event_bus.publish(session_id, event)
+                    await self._event_bus.publish(session_id, event)
                 except Exception:
                     logger.debug(
-                        "EventBus publish failed, event already in agent queue",
+                        "EventBus publish failed",
                         session_id=session_id,
                         event_type=type(event).__name__,
                     )
@@ -388,9 +370,11 @@ class StreamEventEmitter:
                     agent_name=self._context.agent.name,
                     event_type=type(event).__name__,
                 )
+        elif self._context.run_ctx is not None:
+            await self._context.run_ctx.event_queue.put(event)
         else:
-            logger.error(
-                "DEBUG_EMIT: EventBus publish skipped: no event_bus available",
+            logger.debug(
+                "Event dropped: no run_ctx or event_bus available",
                 agent_name=self._context.agent.name,
                 event_type=type(event).__name__,
             )

@@ -44,6 +44,7 @@ import asyncio
 from contextlib import redirect_stderr, suppress
 from io import StringIO
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic_ai import PartDeltaEvent, TextPartDelta
@@ -51,6 +52,7 @@ from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent, ToolCallStartEvent
+from agentpool.orchestrator.core import SessionPool
 
 
 TEST_RESPONSE = "I am a test response"
@@ -80,8 +82,35 @@ def tool_call_agent() -> Agent[None]:
     )
 
 
+async def _setup_session_pool(agent: Agent[Any]) -> tuple[SessionPool, str]:
+    """Create a SessionPool with the given agent attached."""
+    mock_pool = MagicMock()
+    mock_pool.main_agent = agent
+    mock_pool.manifest = MagicMock()
+    mock_pool.manifest.agents = {}
+    mock_pool.storage = None
+
+    session_pool = SessionPool(mock_pool, enable_auto_resume=False)
+    await session_pool.start()
+
+    session_id = f"test-session-{agent.name}"
+    await session_pool.create_session(session_id, agent_name=agent.name)
+
+    # Attach agent to session
+    state = await session_pool.sessions.get_or_create_session(session_id)
+    state.agent = agent
+    session_pool.sessions._session_agents[session_id] = agent
+    mock_pool.get_agent.return_value = agent
+
+    # Link agent back to pool so interrupt() can resolve session state
+    mock_pool.session_pool = session_pool
+    agent.agent_pool = mock_pool
+    agent.session_id = session_id
+
+    return session_pool, session_id
+
+
 async def test_simple_break_after_n_events(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 1: Simple break after receiving N events.
 
     !!! warning "Known Issue"
@@ -93,200 +122,224 @@ async def test_simple_break_after_n_events(break_test_agent: Agent[None]):
     - _cancelled flag may or may not be set depending on timing
     - Conversation history may be 0 due to cleanup exceptions
     """
-    # Capture stderr to check for internal exceptions
-    stderr_capture = StringIO()
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    try:
+        # Capture stderr to check for internal exceptions
+        stderr_capture = StringIO()
 
-    with redirect_stderr(stderr_capture):
-        events = []
-        async for event in agent.run_stream("Hello"):
-            events.append(event)
-            if len(events) >= 3:
-                break
+        with redirect_stderr(stderr_capture):
+            events = []
+            async for event in session_pool.run_stream(session_id, "Hello"):
+                events.append(event)
+                if len(events) >= 3:
+                    break
 
-    # We collected some events
-    assert len(events) >= 3, f"Expected at least 3 events, got {len(events)}"
+        # We collected some events
+        assert len(events) >= 3, f"Expected at least 3 events, got {len(events)}"
 
-    # Check for internal exceptions in stderr
-    stderr_output = stderr_capture.getvalue()
-    if "RuntimeError" in stderr_output or "CancelledError" in stderr_output:
-        # Document the issue - do not fail the test, just note it
-        print(f"[ISSUE] Internal exceptions on break: {stderr_output[:500]}")
+        # Check for internal exceptions in stderr
+        stderr_output = stderr_capture.getvalue()
+        if "RuntimeError" in stderr_output or "CancelledError" in stderr_output:
+            # Document the issue - do not fail the test, just note it
+            print(f"[ISSUE] Internal exceptions on break: {stderr_output[:500]}")
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_break_with_exception_handling(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 2: Verify exception handling around break.
 
     !!! warning "Known Issue"
         While user code may not see exceptions, internal errors occur during
         generator cleanup that can corrupt agent state.
     """
-    user_exception = None
-
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
     try:
-        async for event in agent.run_stream("Test"):
-            break
-    except Exception as e:  # noqa: BLE001
-        user_exception = e
+        user_exception = None
 
-    # User code typically does not see exceptions (they are in cleanup)
-    # BUT internally there are errors
-    assert user_exception is None, "Exceptions should not propagate to user code"
+        try:
+            async for event in session_pool.run_stream(session_id, "Test"):
+                break
+        except Exception as e:  # noqa: BLE001
+            user_exception = e
+
+        # User code typically does not see exceptions (they are in cleanup)
+        # BUT internally there are errors
+        assert user_exception is None, "Exceptions should not propagate to user code"
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_conversation_history_after_break(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 3: Conversation history after break.
 
     !!! warning "Known Issue"
         Due to cleanup exceptions, conversation history is often not preserved
         correctly after a break.
     """
-    # Run and break
-    async for event in agent.run_stream("Test message"):
-        break  # Break immediately
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    try:
+        # Run and break
+        async for event in session_pool.run_stream(session_id, "Test message"):
+            break  # Break immediately
 
-    history = agent.conversation.get_history()
-    # Document behavior rather than assert correctness
-    print(f"[INFO] History length after break: {len(history)}")
+        history = break_test_agent.conversation.get_history()
+        # Document behavior rather than assert correctness
+        print(f"[INFO] History length after break: {len(history)}")
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_subsequent_run_after_break(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 4: Subsequent run_stream after break.
 
     !!! warning "Known Issue"
         After breaking, subsequent runs may fail with CancelledError due to
         leftover cancel scope state.
     """
-    # First run with break
-    async for event in agent.run_stream("First prompt"):
-        break
-
-    # Try second run - this may fail
-    second_run_succeeded = False
-    second_run_error = None
-
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
     try:
-        async for event in agent.run_stream("Second prompt"):
-            if isinstance(event, StreamCompleteEvent):
-                second_run_succeeded = True
-                break
-    except asyncio.CancelledError as e:
-        second_run_error = e
-    except Exception as e:  # noqa: BLE001
-        second_run_error = e
+        # First run with break
+        async for event in session_pool.run_stream(session_id, "First prompt"):
+            break
 
-    # Document the issue
-    if second_run_error:
-        print(f"[ISSUE] Second run failed: {type(second_run_error).__name__}: {second_run_error}")
-    else:
-        print(f"[INFO] Second run succeeded: {second_run_succeeded}")
+        # Try second run - this may fail
+        second_run_succeeded = False
+        second_run_error = None
+
+        try:
+            async for event in session_pool.run_stream(session_id, "Second prompt"):
+                if isinstance(event, StreamCompleteEvent):
+                    second_run_succeeded = True
+                    break
+        except asyncio.CancelledError as e:
+            second_run_error = e
+        except Exception as e:  # noqa: BLE001
+            second_run_error = e
+
+        # Document the issue
+        if second_run_error:
+            print(f"[ISSUE] Second run failed: {type(second_run_error).__name__}: {second_run_error}")
+        else:
+            print(f"[INFO] Second run succeeded: {second_run_succeeded}")
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_interrupt_vs_break(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 5: Compare interrupt() vs break behavior.
 
     Shows that interrupt() is the recommended approach instead of break.
     """
-    # Test interrupt() method
-    events = []
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    try:
+        # Test interrupt() method
+        events = []
 
-    # Start streaming in background task so we can interrupt it
-    async def stream_task():
-        async for event in agent.run_stream("Test"):
-            events.append(event)
+        # Start streaming in background task so we can interrupt it
+        async def stream_task():
+            async for event in session_pool.run_stream(session_id, "Test"):
+                events.append(event)
 
-    task = asyncio.create_task(stream_task())
-    await asyncio.sleep(0.1)  # Let it start
+        task = asyncio.create_task(stream_task())
+        await asyncio.sleep(0.1)  # Let it start
 
-    # Interrupt
-    await agent.interrupt()
+        # Interrupt
+        await break_test_agent.interrupt()
 
-    # Wait for task to finish
-    with suppress(asyncio.CancelledError):
-        await task
+        # Wait for task to finish
+        with suppress(asyncio.CancelledError):
+            await task
 
-    # Check interrupt worked
-    assert agent._cancelled is True, "_cancelled should be True after interrupt"
-    print(f"[INFO] Events collected before interrupt: {len(events)}")
+        # Check interrupt worked
+        assert break_test_agent._cancelled is True, "_cancelled should be True after interrupt"
+        print(f"[INFO] Events collected before interrupt: {len(events)}")
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_safe_pattern_complete_consumption(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 6: Safe pattern - consume until StreamCompleteEvent.
 
     !!! tip "Recommended Pattern"
         Instead of breaking, always consume until StreamCompleteEvent.
         This is the only reliable pattern currently.
     """
-    events = []
-    final_message = None
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    try:
+        events = []
+        final_message = None
 
-    # Safe pattern - do not break early, consume all events
-    async for event in agent.run_stream("Test"):
-        events.append(event)
-        if isinstance(event, StreamCompleteEvent):
-            final_message = event.message
-            break  # OK to break after StreamCompleteEvent
+        # Safe pattern - do not break early, consume all events
+        async for event in session_pool.run_stream(session_id, "Test"):
+            events.append(event)
+            if isinstance(event, StreamCompleteEvent):
+                final_message = event.message
+                break  # OK to break after StreamCompleteEvent
 
-    assert final_message is not None, "Should get final message"
-    assert len(events) > 0, "Should have events"
-    print(f"[INFO] Safe consumption: {len(events)} events")
+        assert final_message is not None, "Should get final message"
+        assert len(events) > 0, "Should have events"
+        print(f"[INFO] Safe consumption: {len(events)} events")
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_tool_call_detection_without_break(tool_call_agent: Agent[None]):
-    agent = tool_call_agent
     """Test 7: Tool call detection simulation without breaking.
 
     !!! tip "Recommended Pattern"
         For simulation use case, intercept events but do not break.
         Use a flag to track state and let the stream complete.
     """
+    session_pool, session_id = await _setup_session_pool(tool_call_agent)
+    try:
+        tool_detected = False
+        events = []
+        final_message = None
 
-    tool_detected = False
-    events = []
-    final_message = None
+        # Safe pattern - detect but do not break
+        async for event in session_pool.run_stream(session_id, "Trigger the tool"):
+            events.append(event)
 
-    # Safe pattern - detect but do not break
-    async for event in agent.run_stream("Trigger the tool"):
-        events.append(event)
+            if isinstance(event, ToolCallStartEvent):
+                tool_detected = True
+                print(f"[INFO] Tool call detected: {event.tool_name}")
+                # Do not break! Let it continue
 
-        if isinstance(event, ToolCallStartEvent):
-            tool_detected = True
-            print(f"[INFO] Tool call detected: {event.tool_name}")
-            # Do not break! Let it continue
+            if isinstance(event, StreamCompleteEvent):
+                final_message = event.message
+                break
 
-        if isinstance(event, StreamCompleteEvent):
-            final_message = event.message
-            break
-
-    print(f"[INFO] Tool detected: {tool_detected}, Total events: {len(events)}")
+        print(f"[INFO] Tool detected: {tool_detected}, Total events: {len(events)}")
+    finally:
+        await session_pool.shutdown()
 
 
 async def test_partial_text_collection(break_test_agent: Agent[None]):
-    agent = break_test_agent
     """Test 8: Collect partial text without breaking.
 
     !!! tip "Recommended Pattern"
         If you need partial results, collect text deltas but still
         consume the full stream.
     """
-    text_chunks = []
-    final_message = None
+    session_pool, session_id = await _setup_session_pool(break_test_agent)
+    try:
+        text_chunks = []
+        final_message = None
 
-    async for event in agent.run_stream("Generate text"):
-        match event:
-            case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
-                text_chunks.append(delta)
-            case StreamCompleteEvent(message=msg):
-                final_message = msg
-                break
+        async for event in session_pool.run_stream(session_id, "Generate text"):
+            match event:
+                case PartDeltaEvent(delta=TextPartDelta(content_delta=delta)):
+                    text_chunks.append(delta)
+                case StreamCompleteEvent(message=msg):
+                    final_message = msg
+                    break
 
-    partial_text = "".join(text_chunks)
-    print(f"[INFO] Collected text: {partial_text[:100]}...")
-    assert final_message is not None
+        partial_text = "".join(text_chunks)
+        print(f"[INFO] Collected text: {partial_text[:100]}...")
+        assert final_message is not None
+    finally:
+        await session_pool.shutdown()
 
 
 async def run_test_safely(test_name: str, test_func, agent: Agent[None]) -> bool:

@@ -201,8 +201,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
 
         # Resolve the parent session id for this team execution.
         # The caller's parent_session_id takes priority, then session_id (for
-        # backward compat), then the team's own session.
-        parent_sid: str | None = parent_session_id_kwarg or session_id_kwarg or self.session_id
+        # backward compat).
+        parent_sid: str | None = parent_session_id_kwarg or session_id_kwarg
 
         # Get nodes to run
         all_nodes = list(self.nodes)
@@ -214,11 +214,10 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         child_session_ids: dict[int, str] = {}
         for node in all_nodes:
             if self.agent_pool and self.agent_pool.session_pool:
-                pool_parent = parent_sid or self.session_id
-                if pool_parent:
+                if parent_sid:
                     child_state = await self.agent_pool.session_pool.create_session(
                         session_id=generate_session_id(),
-                        parent_session_id=pool_parent,
+                        parent_session_id=parent_sid,
                         agent_name=node.name,
                         agent_type=node.agent_type,
                     )

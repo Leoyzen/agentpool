@@ -150,16 +150,10 @@ class ACPServer(BaseServer):
         Returns:
             Configured ACP server instance with agent pool
         """
-        # Determine if session pool should be enabled from manifest
-        enable_session_pool = (
-            isinstance(config, AgentsManifest) and config.acp.use_session_pool
-        )
-
         # AgentPool handles both path and manifest
         pool = AgentPool(
             manifest=config,
             main_agent_name=agent,
-            enable_session_pool=enable_session_pool,
         )
 
         # Determine config_path for tracking
@@ -321,7 +315,6 @@ class ACPServer(BaseServer):
             new_manifest = AgentsManifest.from_file(config_path)
             new_pool = AgentPool(
                 manifest=new_manifest,
-                enable_session_pool=new_manifest.acp.use_session_pool,
             )
         # 2. Validate agent exists in new pool if specified
         agent_names = list(new_pool.all_agents.keys())

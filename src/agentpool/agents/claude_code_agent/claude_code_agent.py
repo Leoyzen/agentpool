@@ -924,6 +924,14 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             await fork_client.connect()
             client = fork_client
 
+        # Determine event source: event_bus when available, fallback to event_queue
+        event_bus_queue: asyncio.Queue[Any] | None = None
+        if run_ctx.event_bus is not None:
+            event_bus_queue = await run_ctx.event_bus.subscribe(run_ctx.session_id)
+            event_source: asyncio.Queue[Any] = event_bus_queue
+        else:
+            event_source = run_ctx.event_queue
+
         # Set deps/input_provider on tool bridge (ContextVar doesn't work - separate task)
         try:
             await client.query(prompt_text)
@@ -937,7 +945,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
                 self._tool_bridge.set_run_context(agent_ctx, input_provider, prompt=prompts),
-                merge_queue_into_iterator(stream, run_ctx.event_queue) as events,
+                merge_queue_into_iterator(stream, event_source) as events,
             ):
                 async for event_or_message in events:
                     # Check if it's a queued event (from tools via EventEmitter)
@@ -1217,6 +1225,10 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         finally:
             # Clear callback run context to prevent leaks
             self._callback_run_ctx = None
+            # Unsubscribe from event_bus if we subscribed
+            if event_bus_queue is not None and run_ctx.event_bus is not None:
+                with contextlib.suppress(Exception):
+                    await run_ctx.event_bus.unsubscribe(run_ctx.session_id, event_bus_queue)
             # Disconnect fork client if we created one
             if fork_client:
                 try:
