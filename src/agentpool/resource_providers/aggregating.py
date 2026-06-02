@@ -8,6 +8,7 @@ from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvi
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from pydantic_ai import ModelRequestPart
@@ -226,3 +227,11 @@ class AggregatingResourceProvider(ResourceProvider):
                 continue
 
         raise SkillNotFoundError(f"Reference {ref_path!r} not found for skill {skill_name!r}")
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

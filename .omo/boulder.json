@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-02T14:05:25.729Z",
+  "updated_at": "2026-06-02T14:30:48.193Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -46,9 +46,37 @@
       "session_id": "opencode:ses_177596e16ffeKHWZVu5pkSfgRW",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-06-02T14:05:25.729Z",
+      "updated_at": "2026-06-02T14:05:52.398Z",
       "started_at": "2026-06-02T14:05:25.729Z",
-      "status": "running"
+      "status": "completed",
+      "ended_at": "2026-06-02T14:05:52.398Z",
+      "elapsed_ms": 26669
+    },
+    "todo:10": {
+      "task_key": "todo:10",
+      "task_label": "10",
+      "task_title": "**Run full test suite for statelessness**",
+      "session_id": "opencode:ses_17752f43bffeDsiSkKUxh6TQU4",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "started_at": "2026-06-02T14:10:37.482Z",
+      "status": "completed",
+      "updated_at": "2026-06-02T14:13:30.803Z",
+      "ended_at": "2026-06-02T14:13:30.803Z",
+      "elapsed_ms": 173321
+    },
+    "todo:11": {
+      "task_key": "todo:11",
+      "task_label": "11",
+      "task_title": "**Add `as_capability()` to `ResourceProvider` base class**",
+      "session_id": "opencode:ses_1775108cdffe4xmjwd38gz6w3X",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-02T14:30:48.193Z",
+      "started_at": "2026-06-02T14:19:57.578Z",
+      "status": "completed",
+      "ended_at": "2026-06-02T14:30:48.193Z",
+      "elapsed_ms": 650615
     }
   },
   "works": {
@@ -195,7 +223,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-02T14:05:25.729Z",
+      "updated_at": "2026-06-02T14:30:48.193Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -237,9 +265,37 @@
           "session_id": "opencode:ses_177596e16ffeKHWZVu5pkSfgRW",
           "agent": "Sisyphus-Junior",
           "category": "quick",
-          "updated_at": "2026-06-02T14:05:25.729Z",
+          "updated_at": "2026-06-02T14:05:52.398Z",
           "started_at": "2026-06-02T14:05:25.729Z",
-          "status": "running"
+          "status": "completed",
+          "ended_at": "2026-06-02T14:05:52.398Z",
+          "elapsed_ms": 26669
+        },
+        "todo:10": {
+          "task_key": "todo:10",
+          "task_label": "10",
+          "task_title": "**Run full test suite for statelessness**",
+          "session_id": "opencode:ses_17752f43bffeDsiSkKUxh6TQU4",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "started_at": "2026-06-02T14:10:37.482Z",
+          "status": "completed",
+          "updated_at": "2026-06-02T14:13:30.803Z",
+          "ended_at": "2026-06-02T14:13:30.803Z",
+          "elapsed_ms": 173321
+        },
+        "todo:11": {
+          "task_key": "todo:11",
+          "task_label": "11",
+          "task_title": "**Add `as_capability()` to `ResourceProvider` base class**",
+          "session_id": "opencode:ses_1775108cdffe4xmjwd38gz6w3X",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-02T14:30:48.193Z",
+          "started_at": "2026-06-02T14:19:57.578Z",
+          "status": "completed",
+          "ended_at": "2026-06-02T14:30:48.193Z",
+          "elapsed_ms": 650615
         }
       }
     }

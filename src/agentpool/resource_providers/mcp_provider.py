@@ -17,6 +17,7 @@ from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from types import TracebackType
     from typing import Literal
@@ -72,6 +73,14 @@ class MCPResourceProvider(ResourceProvider):
             resource_change_callback=self._on_resources_changed,
             transport=transport,
         )
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def __repr__(self) -> str:
         return f"MCPResourceProvider({self.server!r}, source={self.source!r})"

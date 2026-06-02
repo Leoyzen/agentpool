@@ -8,6 +8,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from agentpool.tools.base import Tool
@@ -25,6 +26,14 @@ class FilteringResourceProvider(ResourceProvider):
         """
         self._provider = provider
         self._tool_filter = tool_filter
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to wrapped provider."""

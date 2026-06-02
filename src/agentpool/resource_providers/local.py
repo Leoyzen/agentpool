@@ -19,6 +19,7 @@ from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from types import TracebackType
 
     from upathtools import JoinablePathLike
@@ -219,6 +220,14 @@ class LocalResourceProvider(ResourceProvider):
         mime_type = self._detect_mime_type(target_path)
 
         return content, mime_type
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def _detect_mime_type(self, path: UPath) -> str:
         """Detect MIME type for a file path.

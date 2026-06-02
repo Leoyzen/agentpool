@@ -54,6 +54,7 @@ from agentpool_toolsets.fsspec_toolset.streaming_diff_parser import (
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     import fsspec
@@ -144,6 +145,14 @@ class FSSpecTools(ResourceProvider):
         self._edit_tool = edit_tool
         self._max_image_size = max_image_size
         self._max_image_bytes = max_image_bytes
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def _get_fs(self, agent_ctx: AgentContext) -> AsyncFileSystem:
         """Get filesystem, falling back to agent's env if not set."""

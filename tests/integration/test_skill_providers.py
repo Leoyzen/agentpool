@@ -18,6 +18,7 @@ from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from types import TracebackType
 
@@ -89,6 +90,14 @@ class MockLocalResourceProvider(ResourceProvider):
     async def emit_tools_changed(self) -> None:
         """Emit tools changed signal for testing."""
         await self.tools_changed.emit(self.create_change_event("tools"))
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
 
 class MockMCPResourceProvider(ResourceProvider):
@@ -825,3 +834,11 @@ class TestResourceAggregation:
         resources = await aggregator.get_resources()
 
         assert len(resources) == 2
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

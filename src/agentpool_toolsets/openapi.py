@@ -13,6 +13,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     import httpx
@@ -116,3 +117,11 @@ class OpenAPITools(ResourceProvider):
         response = await self._client.request(method=method, url=path, params=params, json=body)
         response.raise_for_status()
         return response.json()  # type: ignore[no-any-return]
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
