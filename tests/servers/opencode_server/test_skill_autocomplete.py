@@ -242,10 +242,11 @@ async def test_command_endpoint_skill_bridge_with_provider_for_virtual_skills(
 
 
 def _setup_pool_sessions(mock_pool: MagicMock) -> None:
-    """Set up mock pool.sessions.store so session creation works."""
+    """Set up mock pool.session_pool.sessions.store so session creation works."""
     mock_sessions = MagicMock()
     mock_sessions.store = AsyncMock()
-    mock_pool.sessions = mock_sessions
+    mock_pool.session_pool = MagicMock()
+    mock_pool.session_pool.sessions = mock_sessions
 
 
 # =============================================================================

@@ -103,7 +103,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.observability import registry
         from agentpool.prompts.manager import PromptManager
         from agentpool.resource_providers.skills_instruction import SkillsInstructionProvider
-        from agentpool.sessions import SessionManager
+
         from agentpool.skills.manager import SkillsManager
         from agentpool.storage import StorageManager
         from agentpool.utils.streams import FileOpsTracker
@@ -156,7 +156,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             for name, resource_config in self.manifest.resources.items():
                 self.vfs_registry.register_from_config(name, resource_config)
             session_store = self.manifest.storage.get_session_store()
-            self.sessions = SessionManager(pool=self, store=session_store)
+            self._session_store = session_store
             self.event_handlers = event_handlers or []
             self.connection_registry = ConnectionRegistry()
             servers = self.manifest.get_mcp_servers()
@@ -240,7 +240,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                         agent.tools.add_provider(self.skills_instruction_provider)
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
-                await self.exit_stack.enter_async_context(self.sessions)
+                if self._session_store is not None:
+                    await self.exit_stack.enter_async_context(self._session_store)
                 # Initialize agents and teams (can be parallel)
                 comps: list[AbstractAsyncContextManager[Any]] = [*agents, *teams]
                 node_inits = [self.exit_stack.enter_async_context(c) for c in comps]
@@ -256,6 +257,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                     cfg = self._session_pool_config
                     self._session_pool = SessionPool(
                         pool=self,
+                        store=self._session_store,
                         enable_auto_resume=cfg.enable_auto_resume,
                         enable_event_bus=cfg.enable_event_bus,
                         max_auto_resume=cfg.max_auto_resume,
@@ -318,6 +320,25 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         is enabled, or None if not initialized.
         """
         return self._session_pool
+
+    @property
+    def sessions(self) -> SessionPool | Any:
+        """Deprecated: use session_pool instead.
+
+        Returns the SessionPool instance when available.
+        """
+        if self._session_pool is not None:
+            return self._session_pool
+        # Fallback for backward compatibility during transition
+        return self._session_pool  # type: ignore[return-value]
+
+    @sessions.setter
+    def sessions(self, value: Any) -> None:
+        """Setter for test compatibility."""
+        from agentpool.orchestrator import SessionPool
+
+        if isinstance(value, SessionPool):
+            self._session_pool = value
 
     async def create_session(
         self,

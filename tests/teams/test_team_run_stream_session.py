@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -246,13 +246,16 @@ async def test_pool_backed_team_creates_child_sessions() -> None:
     agent_b = Agent(name="beta", model=model)
     team = Team([agent_a, agent_b])
 
-    # Create a mock pool with sessions
+    # Create a mock pool with session_pool
     mock_pool = AsyncMock()
     mock_sessions = AsyncMock()
-    mock_sessions.create_child_session = AsyncMock(
-        side_effect=["ses_child_alpha", "ses_child_beta"]
+    mock_sessions.create_session = AsyncMock(
+        side_effect=[
+            MagicMock(session_id="ses_child_alpha"),
+            MagicMock(session_id="ses_child_beta"),
+        ]
     )
-    mock_pool.sessions = mock_sessions
+    mock_pool.session_pool = mock_sessions
 
     # Set pool on team and members
     team.agent_pool = mock_pool
@@ -263,8 +266,8 @@ async def test_pool_backed_team_creates_child_sessions() -> None:
     async for event in team.run_stream("test", session_id="ses_parent"):
         events.append(event)
 
-    # create_child_session should have been called for each member
-    assert mock_sessions.create_child_session.call_count == 2
+    # create_session should have been called for each member
+    assert mock_sessions.create_session.call_count == 2
 
     # Verify SpawnSessionStart events use the child session IDs from pool
     spawn_events = [e for e in events if isinstance(e, SpawnSessionStart)]

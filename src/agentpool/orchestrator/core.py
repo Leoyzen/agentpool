@@ -11,15 +11,18 @@ from collections.abc import Awaitable, Callable
 import contextlib
 import copy
 from dataclasses import dataclass, field
+from datetime import datetime
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from agentpool.log import get_logger
+from agentpool.sessions.models import SessionData
 
 
 if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.delegation import AgentPool
+    from agentpool.sessions.store import SessionStore
 
 
 logger = get_logger(__name__)
@@ -87,16 +90,22 @@ class EventBus:
     - Sentinel-based queue shutdown
     """
 
-    def __init__(self, max_queue_size: int = DEFAULT_QUEUE_MAXSIZE) -> None:
+    def __init__(
+        self,
+        max_queue_size: int = DEFAULT_QUEUE_MAXSIZE,
+        session_controller: SessionController | None = None,
+    ) -> None:
         """Initialize the event bus.
 
         Args:
             max_queue_size: Maximum size for subscriber queues.
+            session_controller: Optional session controller for hierarchy queries.
         """
         self._subscribers: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
         self._session_tree: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
         self._max_queue_size = max_queue_size
+        self._session_controller = session_controller
 
     async def subscribe(
         self, session_id: str, scope: str = "session"
@@ -139,6 +148,10 @@ class EventBus:
 
     def _get_parent(self, session_id: str) -> str | None:
         """Find the parent of a session in the session tree."""
+        if self._session_controller is not None:
+            parent_state = self._session_controller.get_parent(session_id)
+            if parent_state is not None:
+                return parent_state.session_id
         for parent_id, children in self._session_tree.items():
             if session_id in children:
                 return parent_id
@@ -146,7 +159,10 @@ class EventBus:
 
     def _is_descendant(self, child_id: str, parent_id: str) -> bool:
         """Check if child_id is a descendant of parent_id."""
-        children = self._session_tree.get(parent_id, [])
+        if self._session_controller is not None:
+            children = self._session_controller.get_children(parent_id)
+        else:
+            children = self._session_tree.get(parent_id, [])
         return child_id in children or any(
             self._is_descendant(child_id, child) for child in children
         )
@@ -273,15 +289,18 @@ class SessionController:
     def __init__(
         self,
         pool: AgentPool[Any],
+        store: SessionStore | None = None,
         cleanup_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         """Initialize the session controller.
 
         Args:
             pool: The agent pool to resolve agents from.
+            store: Optional session store for persistence.
             cleanup_callback: Optional callback invoked when a session is cleaned up.
         """
         self.pool = pool
+        self.store = store
         self._cleanup_callback = cleanup_callback
         self._sessions: dict[str, SessionState] = {}
         self._session_agents: dict[str, BaseAgent[Any, Any]] = {}
@@ -322,6 +341,27 @@ class SessionController:
             return await self._get_or_create_session_locked(
                 session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
             )
+
+    def _state_to_data(self, state: SessionState) -> SessionData:
+        """Convert SessionState to persistable SessionData.
+
+        Args:
+            state: The session state to convert.
+
+        Returns:
+            Persistable session data.
+        """
+        return SessionData(
+            session_id=state.session_id,
+            agent_name=state.agent_name,
+            parent_id=state.parent_session_id,
+            project_id=state.metadata.get("project_id"),
+            cwd=state.metadata.get("cwd"),
+            agent_type=state.metadata.get("agent_type"),
+            created_at=datetime.fromtimestamp(state.created_at),
+            last_active=datetime.fromtimestamp(state.last_active_at),
+            metadata=state.metadata,
+        )
 
     async def _get_or_create_session_locked(
         self,
@@ -365,6 +405,8 @@ class SessionController:
             metadata=metadata,
         )
         self._sessions[session_id] = state
+        if self.store is not None:
+            await self.store.save(self._state_to_data(state))
         if parent_session_id:
             self._children.setdefault(parent_session_id, []).append(session_id)
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
@@ -457,6 +499,8 @@ class SessionController:
             await self._close_session_unlocked(child_id)
         self._session_agents.pop(session_id, None)
         self._sessions.pop(session_id, None)
+        if self.store is not None:
+            await self.store.delete(session_id)
         # Remove from parent's children list
         if session.parent_session_id and session.parent_session_id in self._children:
             self._children[session.parent_session_id] = [
@@ -499,6 +543,8 @@ class SessionController:
 
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
+            if self.store is not None:
+                await self.store.delete(session_id)
             # Remove from parent's children list
             if session.parent_session_id and session.parent_session_id in self._children:
                 self._children[session.parent_session_id] = [
@@ -680,7 +726,7 @@ class TurnRunner:
             max_auto_resume: Maximum auto-resume iterations.
         """
         self.sessions = session_controller
-        self.event_bus = EventBus()
+        self.event_bus = EventBus(session_controller=session_controller)
         self._post_turn_injections: dict[str, list[str]] = {}
         self._post_turn_prompts: dict[str, list[tuple[Any, ...]]] = {}
         self._injection_locks: dict[str, asyncio.Lock] = {}
@@ -1097,6 +1143,7 @@ class SessionPool:
     def __init__(
         self,
         pool: AgentPool[Any],
+        store: SessionStore | None = None,
         enable_auto_resume: bool = True,
         enable_event_bus: bool = True,
         max_auto_resume: int = DEFAULT_MAX_AUTO_RESUME,
@@ -1105,12 +1152,15 @@ class SessionPool:
 
         Args:
             pool: The agent pool to resolve agents from.
+            store: Optional session store for persistence.
             enable_auto_resume: Whether to enable auto-resume loop.
             enable_event_bus: Whether to enable cross-turn event routing.
             max_auto_resume: Maximum auto-resume iterations.
         """
         self.pool = pool
-        self.sessions = SessionController(pool, cleanup_callback=self.close_session)
+        self.sessions = SessionController(
+            pool, store=store, cleanup_callback=self.close_session
+        )
         self.turns = TurnRunner(
             self.sessions,
             enable_auto_resume=enable_auto_resume,
@@ -1169,18 +1219,14 @@ class SessionPool:
         Returns:
             The session state.
         """
+        if parent_session_id is not None and self.sessions.store is not None:
+            parent_data = await self.sessions.store.load(parent_session_id)
+            if parent_data is not None:
+                metadata.setdefault("project_id", parent_data.project_id)
+                metadata.setdefault("cwd", parent_data.cwd)
         state = await self.sessions.get_or_create_session(
             session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
         )
-        # Persist parent-child relationship via SessionManager for
-        # project_id/cwd inheritance and legacy compatibility.
-        if parent_session_id is not None:
-            await self.pool.sessions.create_child_session(
-                parent_session_id=parent_session_id,
-                agent_name=agent_name or state.agent_name,
-                agent_type=metadata.get("agent_type", "native"),
-                child_session_id=session_id,
-            )
         return state
 
     async def close_session(self, session_id: str) -> None:

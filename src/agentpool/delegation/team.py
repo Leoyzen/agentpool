@@ -213,14 +213,16 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         # when multiple team members share the same name.
         child_session_ids: dict[int, str] = {}
         for node in all_nodes:
-            if self.agent_pool and self.agent_pool.sessions:
+            if self.agent_pool and self.agent_pool.session_pool:
                 pool_parent = parent_sid or self.session_id
                 if pool_parent:
-                    child_sid = await self.agent_pool.sessions.create_child_session(
+                    child_state = await self.agent_pool.session_pool.create_session(
+                        session_id=generate_session_id(),
                         parent_session_id=pool_parent,
                         agent_name=node.name,
                         agent_type=node.agent_type,
                     )
+                    child_sid = child_state.session_id
                 else:
                     child_sid = generate_session_id()
             else:

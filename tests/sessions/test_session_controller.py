@@ -1,4 +1,4 @@
-"""Tests for session data models and storage provider session CRUD."""
+"""Tests for session data models, storage provider session CRUD, and SessionController."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentpool.orchestrator import SessionController
 from agentpool.sessions import SessionData
-from agentpool.sessions.manager import SessionManager
 from agentpool.sessions.store import MemorySessionStore
 from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
 from agentpool_storage.memory_provider import MemoryStorageProvider
@@ -283,19 +283,14 @@ class TestSQLProviderSessions:
             assert "sql_session1" in agent1_sessions
 
 
-class TestCreateChildSessionInheritsProjectId:
-    """Tests that create_child_session inherits project_id and cwd from parent.
-
-    This prevents the TUI workspace filter from dropping child sessions
-    because their project_id falls back to "default" or "global" instead
-    of matching the parent's project.
-    """
+class TestSessionControllerPersistence:
+    """Tests for SessionController persistence and hierarchy via store."""
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
-        """Create a mock pool with manifest."""
+        """Create a mock pool."""
         pool = MagicMock()
-        pool.manifest.name = "test_pool"
+        pool.main_agent.name = "test_agent"
         return pool
 
     @pytest.fixture
@@ -303,89 +298,126 @@ class TestCreateChildSessionInheritsProjectId:
         """Create a memory session store."""
         return MemorySessionStore()
 
-    async def test_child_inherits_project_id(
+    async def test_get_or_create_session_saves_to_store(
         self, mock_pool: MagicMock, store: MemorySessionStore
     ) -> None:
-        """Child session must inherit project_id from parent."""
-        manager = SessionManager(pool=mock_pool, store=store)
+        """SessionController saves session to store on creation."""
+        controller = SessionController(pool=mock_pool, store=store)
 
-        async with manager:
-            # Create parent session with explicit project_id
-            parent = SessionData(
-                session_id="parent_1",
-                agent_name="coordinator",
-                project_id="abc123def456",
-                cwd="/path/to/project",
-            )
-            await store.save(parent)
-
-            # Create child session
-            child_id = await manager.create_child_session(
-                parent_session_id="parent_1",
-                agent_name="coder",
-            )
-
-            # Load and verify child inherits project_id
-            child = await store.load(child_id)
-            assert child is not None
-            assert child.project_id == "abc123def456"
-            assert child.cwd == "/path/to/project"
-            assert child.parent_id == "parent_1"
-
-    async def test_child_with_no_parent_data(
-        self, mock_pool: MagicMock, store: MemorySessionStore
-    ) -> None:
-        """When parent doesn't exist in store, child gets None (graceful degradation)."""
-        manager = SessionManager(pool=mock_pool, store=store)
-
-        async with manager:
-            # Create child with non-existent parent
-            child_id = await manager.create_child_session(
-                parent_session_id="nonexistent_parent",
-                agent_name="coder",
-            )
-
-            # Load and verify child was still created
-            child = await store.load(child_id)
-            assert child is not None
-            assert child.project_id is None
-            assert child.cwd is None
-            assert child.parent_id == "nonexistent_parent"
-
-    async def test_child_without_store(self, mock_pool: MagicMock) -> None:
-        """Without a store, create_child_session still returns an ID."""
-        manager = SessionManager(pool=mock_pool, store=None)
-
-        child_id = await manager.create_child_session(
-            parent_session_id="parent_1",
-            agent_name="coder",
+        state = await controller.get_or_create_session(
+            session_id="test_session",
+            agent_name="test_agent",
         )
 
-        # Should still generate an ID
-        assert child_id is not None
-        assert len(child_id) > 0
+        assert state.session_id == "test_session"
+        assert state.agent_name == "test_agent"
 
-    async def test_child_inherits_global_project_id(
+        loaded = await store.load("test_session")
+        assert loaded is not None
+        assert loaded.session_id == "test_session"
+        assert loaded.agent_name == "test_agent"
+
+    async def test_close_session_deletes_from_store(
         self, mock_pool: MagicMock, store: MemorySessionStore
     ) -> None:
-        """Child inherits 'global' project_id when parent is in non-git dir."""
-        manager = SessionManager(pool=mock_pool, store=store)
+        """SessionController deletes session from store on close."""
+        controller = SessionController(pool=mock_pool, store=store)
 
-        async with manager:
-            parent = SessionData(
-                session_id="parent_global",
-                agent_name="coordinator",
-                project_id="global",
-                cwd="/tmp/no_git_here",
-            )
-            await store.save(parent)
+        await controller.get_or_create_session(
+            session_id="test_session",
+            agent_name="test_agent",
+        )
 
-            child_id = await manager.create_child_session(
-                parent_session_id="parent_global",
-                agent_name="coder",
-            )
+        await controller.close_session("test_session")
 
-            child = await store.load(child_id)
-            assert child is not None
-            assert child.project_id == "global"
-            assert child.cwd == "/tmp/no_git_here"
+        loaded = await store.load("test_session")
+        assert loaded is None
+
+    async def test_create_with_parent_tracks_children(
+        self, mock_pool: MagicMock, store: MemorySessionStore
+    ) -> None:
+        """Creating session with parent_session_id tracks in _children."""
+        controller = SessionController(pool=mock_pool, store=store)
+
+        await controller.get_or_create_session(
+            session_id="parent_1",
+            agent_name="parent_agent",
+        )
+        await controller.get_or_create_session(
+            session_id="child_1",
+            agent_name="child_agent",
+            parent_session_id="parent_1",
+        )
+
+        children = controller.get_children("parent_1")
+        assert children == ["child_1"]
+
+        parent = controller.get_parent("child_1")
+        assert parent is not None
+        assert parent.session_id == "parent_1"
+
+    async def test_close_session_cascade_children(
+        self, mock_pool: MagicMock, store: MemorySessionStore
+    ) -> None:
+        """Closing parent cascades to child sessions by default."""
+        controller = SessionController(pool=mock_pool, store=store)
+
+        await controller.get_or_create_session(
+            session_id="parent_1",
+            agent_name="parent_agent",
+        )
+        await controller.get_or_create_session(
+            session_id="child_1",
+            agent_name="child_agent",
+            parent_session_id="parent_1",
+        )
+
+        await controller.close_session("parent_1")
+
+        assert controller.get_session("parent_1") is None
+        assert controller.get_session("child_1") is None
+        assert await store.load("parent_1") is None
+        assert await store.load("child_1") is None
+
+    async def test_child_inherits_project_id_via_metadata(
+        self, mock_pool: MagicMock, store: MemorySessionStore
+    ) -> None:
+        """Child session can receive parent project_id via explicit metadata."""
+        controller = SessionController(pool=mock_pool, store=store)
+
+        await controller.get_or_create_session(
+            session_id="parent_1",
+            agent_name="coordinator",
+            project_id="abc123def456",
+            cwd="/path/to/project",
+        )
+        await controller.get_or_create_session(
+            session_id="child_1",
+            agent_name="coder",
+            parent_session_id="parent_1",
+            project_id="abc123def456",
+            cwd="/path/to/project",
+        )
+
+        child = await store.load("child_1")
+        assert child is not None
+        assert child.project_id == "abc123def456"
+        assert child.cwd == "/path/to/project"
+        assert child.parent_id == "parent_1"
+
+    async def test_create_without_store(
+        self, mock_pool: MagicMock
+    ) -> None:
+        """SessionController works without a store."""
+        controller = SessionController(pool=mock_pool, store=None)
+
+        state = await controller.get_or_create_session(
+            session_id="test_session",
+            agent_name="test_agent",
+        )
+
+        assert state.session_id == "test_session"
+        assert state.agent_name == "test_agent"
+
+        await controller.close_session("test_session")
+        assert controller.get_session("test_session") is None

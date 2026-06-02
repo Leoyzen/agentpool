@@ -157,6 +157,14 @@ def mock_pool(
     pool.sessions.store.delete = storage_manager.delete_session
     pool.sessions.store.load = storage_manager.load_session
     pool.sessions.store.list_sessions = AsyncMock(return_value=[])
+    # Mirror the same store on session_pool for the new access path
+    pool.session_pool = Mock()
+    pool.session_pool.sessions = Mock()
+    pool.session_pool.sessions.store = Mock()
+    pool.session_pool.sessions.store.save = storage_manager.save_session
+    pool.session_pool.sessions.store.delete = storage_manager.delete_session
+    pool.session_pool.sessions.store.load = storage_manager.load_session
+    pool.session_pool.sessions.store.list_sessions = AsyncMock(return_value=[])
     return pool
 
 

@@ -30,7 +30,7 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.delegation.teamrun import TeamRun
-from agentpool.sessions import SessionData, SessionManager
+from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 
 
@@ -332,6 +332,7 @@ agents:
 async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     """TG-10: ACP child session created via ACPSessionManager with
     parent_session_id inherits project_id and cwd from parent."""
+    from agentpool.orchestrator.core import SessionPool
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
     pool = AgentPool()
@@ -343,8 +344,8 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     pool.register("acp_agent", agent)
 
     store = MemorySessionStore()
-    sessions = SessionManager(pool=pool, store=store)
-    pool.sessions = sessions
+    session_pool = SessionPool(pool=pool, store=store)
+    pool._session_pool = session_pool
     pool.storage.generate_session_id = MagicMock(return_value="acp_top_001")  # type: ignore[assignment]
 
     # Create parent session with known project_id and cwd
@@ -711,7 +712,7 @@ async def test_spawn_and_subagent_depth_consistency() -> None:
 
 
 async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
-    """Both Team and TeamRun with pool.sessions should call
+    """Both Team and TeamRun with pool.session_pool should call
     create_child_session for each member."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
@@ -720,11 +721,20 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
     teamrun = TeamRun([agent_b], name="sequential_team")
 
     mock_pool = AsyncMock()
-    mock_sessions = AsyncMock()
-    mock_sessions.create_child_session = AsyncMock(
-        side_effect=["ses_child_team", "ses_child_teamrun"]
+    mock_session_pool = AsyncMock()
+
+    def _make_child_state(session_id: str):
+        m = MagicMock()
+        m.session_id = session_id
+        return m
+
+    mock_session_pool.create_session = AsyncMock(
+        side_effect=[
+            _make_child_state("ses_child_team"),
+            _make_child_state("ses_child_teamrun"),
+        ]
     )
-    mock_pool.sessions = mock_sessions
+    mock_pool.session_pool = mock_session_pool
 
     team.agent_pool = mock_pool
     agent_a.agent_pool = mock_pool
@@ -743,8 +753,8 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
     assert len(spawn_events) == 1
     assert spawn_events[0].child_session_id == "ses_child_teamrun"
 
-    # Both should have called create_child_session
-    assert mock_sessions.create_child_session.call_count == 2
+    # Both should have called create_session
+    assert mock_session_pool.create_session.call_count == 2
 
 
 # ---------------------------------------------------------------------------

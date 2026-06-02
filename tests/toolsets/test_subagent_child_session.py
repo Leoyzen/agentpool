@@ -153,10 +153,10 @@ agents:
 """)
 
     async with AgentPool(manifest) as pool:
-        # Swap in our observable store if the pool has a SessionManager
-        if pool.sessions is None:
-            pytest.skip("Pool has no SessionManager — cannot verify persistence")
-        pool.sessions.store = store  # type: ignore[union-attr]
+        # Swap in our observable store if the pool has a SessionPool
+        if pool.session_pool is None:
+            pytest.skip("Pool has no SessionPool — cannot verify persistence")
+        pool.session_pool.store = store
 
         orch = pool.get_agent("orchestrator")
 

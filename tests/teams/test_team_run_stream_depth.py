@@ -164,11 +164,13 @@ async def test_child_session_uses_pool_sessions_when_available():
     agent1 = _make_echo_agent("a1", "result")
     team = TeamRun([agent1], name="seq")
 
-    # Create mock pool with sessions
+    # Create mock pool with session_pool
     mock_pool = MagicMock(spec=AgentPool)
     mock_sessions = AsyncMock()
-    mock_sessions.create_child_session = AsyncMock(return_value="child-via-pool")
-    mock_pool.sessions = mock_sessions
+    mock_sessions.create_session = AsyncMock(
+        return_value=MagicMock(session_id="child-via-pool")
+    )
+    mock_pool.session_pool = mock_sessions
     team.agent_pool = mock_pool
 
     async with agent1:
@@ -177,8 +179,10 @@ async def test_child_session_uses_pool_sessions_when_available():
         assert len(spawn_events) == 1
         assert spawn_events[0].child_session_id == "child-via-pool"
 
-        # Verify create_child_session was called correctly
-        mock_sessions.create_child_session.assert_called_once_with(
+        # Verify create_session was called correctly
+        from unittest.mock import ANY
+        mock_sessions.create_session.assert_called_once_with(
+            session_id=ANY,
             parent_session_id="parent-via-pool",
             agent_name="a1",
             agent_type="agent",

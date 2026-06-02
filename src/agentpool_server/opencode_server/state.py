@@ -669,8 +669,8 @@ class ServerState:
 
                 # --- Store-first path ------------------------------------------
                 session_data = None
-                if self.pool.sessions is not None and self.pool.sessions.store is not None:
-                    session_data = await self.pool.sessions.store.load(session_id)
+                if self.pool.session_pool is not None and self.pool.session_pool.sessions.store is not None:
+                    session_data = await self.pool.session_pool.sessions.store.load(session_id)
                 if session_data is None:
                     session_data = await self.pool.storage.load_session(session_id)
 
@@ -760,8 +760,8 @@ class ServerState:
         # Persist to storage
         id_ = self.pool.manifest.config_file_path
         session_data = opencode_to_session_data(session, agent_name=self.agent.name, pool_id=id_)
-        if self.pool.sessions.store:
-            await self.pool.sessions.store.save(session_data)
+        if self.pool.session_pool is not None and self.pool.session_pool.sessions.store:
+            await self.pool.session_pool.sessions.store.save(session_data)
         else:
             await self.pool.storage.save_session(session_data)
 

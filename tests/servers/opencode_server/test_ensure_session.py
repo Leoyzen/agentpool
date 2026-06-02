@@ -26,7 +26,9 @@ def create_mock_agent() -> MagicMock:
     agent.agent_pool.manifest.config_file_path = "test_config.yml"
     agent.agent_pool.storage.save_session = AsyncMock()
     agent.agent_pool.storage.load_session = AsyncMock(return_value=None)
-    agent.agent_pool.sessions.store = None
+    agent.agent_pool.session_pool = MagicMock()
+    agent.agent_pool.session_pool.sessions = MagicMock()
+    agent.agent_pool.session_pool.sessions.store = None
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"
     return agent

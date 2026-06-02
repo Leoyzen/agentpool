@@ -306,12 +306,14 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
                 # Create child session for this member
                 pool = self.agent_pool
-                if pool is not None and pool.sessions is not None and parent_session_id is not None:
-                    child_sid = await pool.sessions.create_child_session(
+                if pool is not None and pool.session_pool is not None and parent_session_id is not None:
+                    child_state = await pool.session_pool.create_session(
+                        session_id=generate_session_id(),
                         parent_session_id=parent_session_id,
                         agent_name=node.name,
                         agent_type=node.agent_type,
                     )
+                    child_sid = child_state.session_id
                 else:
                     child_sid = generate_session_id()
 

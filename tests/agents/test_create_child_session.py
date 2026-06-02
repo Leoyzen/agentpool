@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentpool.agents.context import AgentContext
 from agentpool.sessions import SessionData
-from agentpool.sessions.manager import SessionManager
 from agentpool.sessions.store import MemorySessionStore
 
 
@@ -22,13 +21,42 @@ def mock_node() -> MagicMock:
     return node
 
 
+def _make_mock_session_pool(store: MemorySessionStore) -> MagicMock:
+    """Create a mock session_pool that persists via MemorySessionStore."""
+    session_pool = MagicMock()
+
+    async def mock_create_session(
+        *,
+        session_id: str,
+        agent_name: str,
+        parent_session_id: str | None = None,
+        agent_type: str = "native",
+        **kwargs: object,
+    ) -> MagicMock:
+        parent_data = None
+        if parent_session_id:
+            parent_data = await store.load(parent_session_id)
+        session_data = SessionData(
+            session_id=session_id,
+            agent_name=agent_name,
+            parent_id=parent_session_id,
+            agent_type=agent_type,
+            project_id=parent_data.project_id if parent_data else None,
+            cwd=parent_data.cwd if parent_data else None,
+        )
+        await store.save(session_data)
+        return MagicMock(session_id=session_id)
+
+    session_pool.create_session = mock_create_session
+    return session_pool
+
+
 async def test_create_child_session_with_pool(mock_node: MagicMock) -> None:
-    """When pool is available, create_child_session delegates to SessionManager."""
+    """When pool is available, create_child_session delegates to session_pool."""
     store = MemorySessionStore()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
-    mock_pool.sessions = SessionManager(pool=mock_pool, store=store)
-    mock_pool.session_pool = None
+    mock_pool.session_pool = _make_mock_session_pool(store)
 
     mock_node.agent_pool = mock_pool
 
@@ -64,8 +92,7 @@ async def test_create_child_session_with_explicit_parent(mock_node: MagicMock) -
     store = MemorySessionStore()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
-    mock_pool.sessions = SessionManager(pool=mock_pool, store=store)
-    mock_pool.session_pool = None
+    mock_pool.session_pool = _make_mock_session_pool(store)
 
     mock_node.agent_pool = mock_pool
 
@@ -113,9 +140,8 @@ async def test_create_child_session_no_pool(mock_node: MagicMock) -> None:
 
 
 async def test_create_child_session_pool_without_sessions(mock_node: MagicMock) -> None:
-    """When pool exists but sessions is None, falls back to generate_session_id."""
+    """When pool exists but session_pool is None, falls back to generate_session_id."""
     mock_pool = MagicMock()
-    mock_pool.sessions = None
     mock_pool.session_pool = None
 
     mock_node.agent_pool = mock_pool
@@ -137,7 +163,7 @@ async def test_create_child_session_no_node_session_id(mock_node: MagicMock) -> 
     store = MemorySessionStore()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"
-    mock_pool.sessions = SessionManager(pool=mock_pool, store=store)
+    mock_pool.session_pool = _make_mock_session_pool(store)
 
     mock_node.agent_pool = mock_pool
 
@@ -148,7 +174,7 @@ async def test_create_child_session_no_node_session_id(mock_node: MagicMock) -> 
     )
 
     # With no effective parent (node.session_id is None), the method
-    # falls back to generate_session_id() since create_child_session
+    # falls back to generate_session_id() since create_session
     # requires a non-None parent.
     assert child_id is not None
     assert len(child_id) > 0

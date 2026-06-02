@@ -284,14 +284,6 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                 )
                 return child_session.session_id
 
-            # Fallback to old path when session_pool is not enabled
-            if pool.sessions is not None:
-                return await pool.sessions.create_child_session(
-                    parent_session_id=effective_parent,
-                    agent_name=agent_name,
-                    agent_type=agent_type,
-                )
-
         # No pool available — generate an ephemeral ID without persistence.
         from agentpool.utils.identifiers import generate_session_id
 
