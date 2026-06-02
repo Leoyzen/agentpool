@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-02T13:58:15.872Z",
+  "updated_at": "2026-06-02T14:04:08.698Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -25,6 +25,19 @@
       "status": "completed",
       "ended_at": "2026-06-02T13:58:15.872Z",
       "elapsed_ms": 87788
+    },
+    "todo:5": {
+      "task_key": "todo:5",
+      "task_label": "5",
+      "task_title": "**Update `ClaudeCodeAgent` to use param-based session_id**",
+      "session_id": "opencode:ses_1775e8d0bffeITf1FqpIHoa1G0",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-02T14:04:08.698Z",
+      "started_at": "2026-06-02T14:01:09.442Z",
+      "status": "completed",
+      "ended_at": "2026-06-02T14:04:08.698Z",
+      "elapsed_ms": 179256
     }
   },
   "works": {
@@ -171,7 +184,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-02T13:58:15.872Z",
+      "updated_at": "2026-06-02T14:04:08.698Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -192,6 +205,19 @@
           "status": "completed",
           "ended_at": "2026-06-02T13:58:15.872Z",
           "elapsed_ms": 87788
+        },
+        "todo:5": {
+          "task_key": "todo:5",
+          "task_label": "5",
+          "task_title": "**Update `ClaudeCodeAgent` to use param-based session_id**",
+          "session_id": "opencode:ses_1775e8d0bffeITf1FqpIHoa1G0",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-02T14:04:08.698Z",
+          "started_at": "2026-06-02T14:01:09.442Z",
+          "status": "completed",
+          "ended_at": "2026-06-02T14:04:08.698Z",
+          "elapsed_ms": 179256
         }
       }
     }

@@ -222,7 +222,6 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         """Enter async context - initialize client and base resources."""
         await super().__aenter__()
         self._client = get_client(self.headers, self.timeout)
-        self._sdk_session_id = self.session_id
         if self._startup_command:  # Start server if startup command is provided
             self._startup_process = await start_process(self._startup_command, self._startup_delay)
         self.log.debug("AG-UI client initialized", endpoint=self.endpoint)
@@ -313,7 +312,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
 
         # Set thread_id from session_id (needed for AG-UI protocol)
         if self._sdk_session_id is None:
-            self._sdk_session_id = self.session_id
+            self._sdk_session_id = session_id
 
         run_id = str(uuid4())  # New run ID for each run
         # Track messages in pydantic-ai format: ModelRequest -> ModelResponse -> ModelRequest...
@@ -323,8 +322,8 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         initial_request = ModelRequest(parts=[UserPromptPart(content=prompts)])
         model_messages.append(initial_request)
         response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
-        assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
-        thread_id = self._sdk_session_id or self.session_id
+        assert session_id is not None  # Initialized by BaseAgent.run_stream()
+        thread_id = self._sdk_session_id or session_id
         yield RunStartedEvent(
             session_id=thread_id,
             run_id=run_id,
@@ -351,7 +350,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                     break
 
                 request_data = RunAgentInput(
-                    thread_id=self._sdk_session_id or self.session_id,
+                    thread_id=self._sdk_session_id or session_id,
                     run_id=run_id,
                     state={},
                     messages=messages,
@@ -437,7 +436,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid4()),
-                session_id=self.session_id,
+                session_id=session_id,
                 parent_id=user_msg.message_id,
                 messages=model_messages,
                 finish_reason="stop",
@@ -465,7 +464,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             role="assistant",
             name=self.name,
             message_id=message_id or str(uuid4()),
-            session_id=self.session_id,
+            session_id=session_id,
             parent_id=user_msg.message_id,
             messages=model_messages,
             usage=usage,

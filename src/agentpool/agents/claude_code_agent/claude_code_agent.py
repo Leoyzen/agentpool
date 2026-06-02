@@ -356,7 +356,6 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             agent_hooks=hooks,
             set_mode=self._set_mode,
             env=self.env,
-            get_session_id=lambda: self.session_id,
         )
         # Per-run context for async callbacks (e.g., _can_use_tool)
         # Set in _stream_events for each run to maintain concurrency safety
@@ -886,9 +885,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         #
         prompt_text = " ".join(str(p) for p in prompts)
         run_id = str(uuid.uuid4())
-        assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
+        assert session_id is not None  # Initialized by BaseAgent.run_stream()
         yield RunStartedEvent(
-            session_id=self.session_id,
+            session_id=session_id,
             run_id=run_id,
             agent_name=self.name,
             parent_session_id=parent_session_id,
@@ -1207,7 +1206,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid.uuid4()),
-                session_id=self.session_id,
+                session_id=session_id,
                 parent_id=user_msg.message_id,
                 model_name=resolved_model or self.model_name,
                 messages=model_messages,
@@ -1284,7 +1283,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             role="assistant",
             name=self.name,
             message_id=message_id or str(uuid.uuid4()),
-            session_id=self.session_id,
+            session_id=session_id,
             parent_id=user_msg.message_id,
             model_name=resolved_model or self.model_name,
             messages=model_messages,

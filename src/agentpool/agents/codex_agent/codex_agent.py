@@ -370,12 +370,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Generate IDs if not provided
         run_id = str(uuid4())
         final_message_id = message_id or str(uuid4())
-        final_session_id = session_id or self.session_id
         # Ensure session_id is set (should always be from base class)
-        if final_session_id is None:
+        if session_id is None:
             raise ValueError("session_id must be set")
         yield RunStartedEvent(
-            session_id=final_session_id, run_id=run_id, parent_session_id=parent_session_id
+            session_id=session_id, run_id=run_id, parent_session_id=parent_session_id
         )
         # Stream turn events with bridge context set
         accumulated_text: list[str] = []
@@ -479,7 +478,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             content=final_content,
             role="assistant",
             message_id=final_message_id,
-            session_id=final_session_id,
+            session_id=session_id,
             parent_id=parent_id,
             cost_info=cost_info,
             usage=request_usage,
