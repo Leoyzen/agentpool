@@ -472,7 +472,6 @@ class SessionController:
                 if base_model is not None:
                     agent._model = base_model
                     agent.model_settings = getattr(base_agent, "model_settings", None)
-                agent.session_id = session_id
                 await agent.__aenter__()
                 self._session_agents[session_id] = agent
                 session.agent = agent
@@ -784,9 +783,6 @@ class TurnRunner:
             **kwargs: Additional arguments passed to the agent.
         """
         agent = await self.sessions.get_or_create_session_agent(session_id)
-        # Ensure shared agents have session_id set (get_or_create_session_agent
-        # only sets it for per-session agents)
-        agent.session_id = session_id
         _session = self.sessions.get_session(session_id)
 
         from agentpool.agents.base_agent import _current_run_ctx_var
