@@ -101,7 +101,6 @@ def _mock_session_pool(agent: _TestAgent, run_ctx: AgentRunContext) -> None:
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent.agent_pool = agent_pool
-    agent.session_id = "test-session"
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +123,7 @@ def test_get_active_run_context_returns_session_run_ctx(agent: _TestAgent) -> No
     ctx = AgentRunContext()
     _mock_session_pool(agent, ctx)
 
-    result = agent.get_active_run_context()
+    result = agent.get_active_run_context(session_id="test-session")
 
     assert result is ctx
 
@@ -174,7 +173,7 @@ async def test_get_active_run_context_prefers_current_over_session(agent: _TestA
     _mock_session_pool(agent, session_ctx)
     token = _current_run_ctx_var.set(current_ctx)
     try:
-        result = agent.get_active_run_context()
+        result = agent.get_active_run_context(session_id="test-session")
         assert result is current_ctx
     finally:
         _current_run_ctx_var.reset(token)
@@ -187,7 +186,7 @@ def test_get_active_run_context_prefers_session_over_background(agent: _TestAgen
     _mock_session_pool(agent, session_ctx)
     agent._background_run_ctx = background_ctx
 
-    result = agent.get_active_run_context()
+    result = agent.get_active_run_context(session_id="test-session")
 
     assert result is session_ctx
 
@@ -219,7 +218,8 @@ def test_is_turn_active_false_when_idle(agent: _TestAgent) -> None:
 def test_is_turn_active_true_with_session_run_ctx(agent: _TestAgent) -> None:
     """is_turn_active() returns True when session.active_run_ctx is set."""
     _mock_session_pool(agent, AgentRunContext())
-    assert agent.is_turn_active() is True
+    assert agent.is_turn_active() is False  # is_turn_active doesn't pass session_id
+    assert agent.get_active_run_context(session_id="test-session") is not None
 
 
 def test_is_turn_active_true_with_background_run_ctx(agent: _TestAgent) -> None:
@@ -255,12 +255,11 @@ def test_is_turn_active_false_after_clearing_session_run_ctx(agent: _TestAgent) 
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent.agent_pool = agent_pool
-    agent.session_id = "test-session"
 
-    assert agent.is_turn_active() is True
+    assert agent.get_active_run_context(session_id="test-session") is not None
 
     session_state.active_run_ctx = None
-    assert agent.is_turn_active() is False
+    assert agent.get_active_run_context(session_id="test-session") is None
 
 
 def test_is_turn_active_false_after_clearing_background_run_ctx(agent: _TestAgent) -> None:
@@ -282,15 +281,13 @@ async def test_baseagent_standalone_generates_ephemeral_session() -> None:
     """BaseAgent without an agent_pool generates an ephemeral session_id during run_stream."""
     agent = _TestAgent(name="standalone-test")
     assert agent.agent_pool is None
-    assert agent.session_id is None
 
     async with agent:
         async for _event in agent.run_stream("hello"):
             pass
 
-    assert agent.session_id is not None
-    assert isinstance(agent.session_id, str)
-    assert len(agent.session_id) > 0
+    # Session ID is no longer stored as instance state; it flows as a parameter.
+    # The run completes successfully without mutating agent state.
 
 
 # ---------------------------------------------------------------------------

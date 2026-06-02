@@ -107,19 +107,48 @@ agents:
 ### Decision: EventBus adapter for capability hooks
 **Rationale**: pydantic-ai `Hooks` capability provides lifecycle callbacks (`before_run`, `after_run`, `before_tool_execute`, `after_tool_execute`), but these execute within pydantic-ai's internal loop. AgentPool's `EventBus`, protocol servers (ACP/AG-UI/OpenCode), and cross-session consumers depend on receiving these events. Without an adapter, protocol servers would stop receiving lifecycle events.
 
-**Approach**: Implement `EventBusHooksAdapter` — a pydantic-ai `Hooks` capability that wraps the user's `Hooks` capability and publishes lifecycle events to AgentPool's `EventBus`:
+**Approach**: Implement `EventBusHooksAdapter` — wraps a pydantic-ai `Hooks` capability and publishes lifecycle events to AgentPool's `EventBus`. Uses composition over inheritance to avoid `Hooks.__init__` signature mismatch (Hooks has 20+ hook function parameters). Session ID is resolved dynamically from the hook's run context:
+
 ```python
-class EventBusHooksAdapter(AbstractCapability):
-    def __init__(self, hooks: Hooks, event_bus: EventBus, session_id: str):
+class EventBusHooksAdapter:
+    """Wraps a Hooks capability, publishing lifecycle events to EventBus.
+    
+    Uses composition instead of inheriting Hooks directly to avoid
+    __init__ signature conflicts (Hooks has 20+ hook parameters).
+    """
+    
+    def __init__(self, hooks: Hooks, event_bus: EventBus):
         self._hooks = hooks
         self._event_bus = event_bus
-        self._session_id = session_id
     
-    async def before_tool_execute(self, ctx, tool_call):
-        await self._event_bus.publish(self._session_id, ToolCallStartEvent(...))
-        await self._hooks.before_tool_execute(ctx, tool_call)
+    def as_capability(self) -> Hooks:
+        """Return a Hooks capability that delegates to wrapped hooks + EventBus."""
+        # Build Hooks by mapping all hook methods to wrapped versions
+        return Hooks(
+            before_run=self._wrap_before_run(),
+            after_run=self._wrap_after_run(),
+            before_tool_execute=self._wrap_before_tool_execute(),
+            after_tool_execute=self._wrap_after_tool_execute(),
+            # ... all other hooks pass through transparently
+        )
     
-    # ... similar for after_tool_execute, before_run, after_run
+    def _get_session_id(self, ctx: RunContext[AgentContext[Any]]) -> str | None:
+        agent_ctx = ctx.deps
+        if agent_ctx.run_ctx is not None:
+            return agent_ctx.run_ctx.session_id
+        return None
+    
+    def _wrap_before_tool_execute(self):
+        original = self._hooks.before_tool_execute
+        async def wrapped(ctx, tool_call):
+            session_id = self._get_session_id(ctx)
+            if session_id:
+                await self._event_bus.publish(session_id, ToolCallStartEvent(...))
+            if original:
+                await original(ctx, tool_call)
+        return wrapped
+    
+    # ... similar wrappers for after_tool_execute, before_run, after_run, and all other hooks
 ```
 
 **Migration path**: This adapter is added in Phase 2a alongside the first `as_capability()` implementation. It ensures protocol servers continue to work throughout the migration.
@@ -195,21 +224,30 @@ class EventBusHooksAdapter(AbstractCapability):
    - Implement `CapabilityConfig` for YAML
    - Run full test suite
 
-4. **Phase 2d - Backward compat shims**
+4. **Phase 2d - Tool Confirmation Bridge**
+   - Map `Tool.requires_confirmation` to pydantic-ai approval mechanism
+   - Bridge denial signals to AgentPool `InputProvider` flow
+   - Run full test suite
+
+5. **Phase 2e - Backward compat shims**
    - Implement shims for `ToolManager`, `AgentHooks`, `MCPManager`
    - Add deprecation warnings
    - Run backward-compat tests
 
-5. **Phase 2e - Stabilization** (2+ weeks)
+6. **Phase 2f - Test Migration Inventory**
+   - Migrate all tests from old manager APIs to capability-based APIs
+   - Run complete test suite
+
+7. **Phase 2g - Stabilization** (2+ weeks)
    - Monitor for issues
    - Fix edge cases
    - Benchmark capability overhead
 
-6. **Phase 2f - Cleanup**
+8. **Phase 2h - Cleanup**
    - Remove shim layers (after 2 release cycles)
    - Update documentation
 
-7. **Phase 2g - Event thinning** (separate, after stabilization)
+9. **Phase 2i - Event thinning** (separate, after stabilization)
    - Audit `RichAgentStreamEvent` hierarchy
    - Propagate native events where safe
    - Update protocol servers to handle native events
@@ -220,4 +258,4 @@ Rollback: Revert to pre-change commit; shim layers keep old code paths.
 
 1. ~~Should we expose pydantic-ai capability config directly in YAML or keep AgentPool's abstraction?~~ **Resolved**: Yes, via `capabilities` field with `CapabilityConfig`.
 2. ~~How do `Tool.confirmation_mode` and `InputProvider` integrate with pydantic-ai's `ApprovalRequiredToolset`?~~ **Resolved**: `ApprovalRequiredToolset` marks tools needing approval; `InputProvider` handles actual UI confirmation.
-3. What is the deprecation timeline for shim layers? **Decision needed**: Target removal in v0.5.0 (2 release cycles after merge).
+3. ~~What is the deprecation timeline for shim layers?~~ **Resolved**: Target removal in v0.5.0 (2 release cycles after merge).

@@ -1,30 +1,42 @@
+## 0. Statelessness Prerequisite
+
+- [ ] 0.1 Make `NativeAgent._stream_events()` use `session_id` parameter instead of `self.session_id`
+- [ ] 0.2 Make `ClaudeCodeAgent._stream_events()` use param-based session_id
+- [ ] 0.3 Make `ACPAgent._stream_events()` use param-based session_id
+- [ ] 0.4 Remove `self.session_id` assertions from all agent types
+- [ ] 0.5 Verify all agents produce correct events without `self.session_id` mutation
+
 ## 1. AgentNode Prototype (Phase 3a)
 
-- [ ] 1.1 Create `AgentNode` dataclass extending `pydantic_graph.BaseNode[ChatMessage, AgentContext, ChatMessage]`
-- [ ] 1.2 Implement `AgentNode.run()` that wraps agent `process()` with session creation via `SessionPool`
-- [ ] 1.3 Handle event wrapping: collect agent events and return as `ChatMessage`
-- [ ] 1.4 Test `AgentNode` with single native agent in a simple graph
-- [ ] 1.5 Verify streaming events flow correctly through `AgentNode`
-- [ ] 1.6 Verify session tree is created correctly (parent = graph run, child = node execution)
-- [ ] 1.7 Benchmark `AgentNode` overhead vs direct `agent.run()`
+- [ ] 1.1 Define `GraphDeps` dataclass with fields: `session_id: str`, `event_bus: EventBus | None`, `prompt: ChatMessage | str`, `agent_deps: Any`
+- [ ] 1.2 Create `AgentNode` dataclass extending `pydantic_graph.BaseNode[ChatMessage, GraphDeps, ChatMessage]`
+- [ ] 1.3 Implement `AgentNode.run()` that wraps agent `_run_stream_once()` with session creation via `SessionPool`
+- [ ] 1.4 Handle event collection: iterate async iterator, extract `StreamCompleteEvent.message`; raise error if missing
+- [ ] 1.5 Test `AgentNode` with single native agent in a simple graph
+- [ ] 1.6 Verify streaming events flow correctly through `AgentNode`
+- [ ] 1.7 Verify session tree is created correctly (parent = graph run, child = node execution)
+- [ ] 1.8 Benchmark `AgentNode` overhead vs direct `agent.run()`
 
 ## 2. Parallel Team Graph — YAML Only (Phase 3b)
 
 - [ ] 2.1 Implement `ParallelTeamGraph` using `GraphBuilder` + `Fork` + `Join` for YAML config
 - [ ] 2.2 Map YAML `mode: parallel` team members to `AgentNode` instances in `Fork`
-- [ ] 2.3 Implement result collection via `Join` with `ChatMessage` union type
-- [ ] 2.4 Keep programmatic `agent & other` using `asyncio.gather()` (unchanged)
-- [ ] 2.5 Write tests for YAML parallel team graph execution
-- [ ] 2.6 Write backward-compat tests ensuring programmatic `Team` still works
-- [ ] 2.7 Benchmark YAML parallel graph vs `asyncio.gather()` for 2-3 agent teams
+- [ ] 2.3 Implement `Join` node that collects `list[ChatMessage]` from all forked branches
+- [ ] 2.4 Define parallel team output: `ChatMessage` with aggregated content from all members
+- [ ] 2.5 Keep programmatic `agent & other` using `asyncio.gather()` (unchanged)
+- [ ] 2.6 Write tests for YAML parallel team graph execution
+- [ ] 2.7 Write backward-compat tests ensuring programmatic `Team` still works
+- [ ] 2.8 Benchmark YAML parallel graph vs `asyncio.gather()` for 2-3 agent teams
 
 ## 3. Sequential Team Graph — YAML Only (Phase 3c)
 
 - [ ] 3.1 Implement `SequentialTeamGraph` using `GraphBuilder` sequential chaining
 - [ ] 3.2 Map YAML `mode: sequential` team members to chained `AgentNode` instances
-- [ ] 3.3 Keep programmatic `agent | other` using custom forwarding (unchanged)
-- [ ] 3.4 Write tests for YAML sequential team graph execution
-- [ ] 3.5 Write backward-compat tests ensuring programmatic `TeamRun` still works
+- [ ] 3.3 Pass initial `ChatMessage` state to `graph.run(state=..., deps=...)` for sequential chains
+- [ ] 3.4 Define sequential chain input: first node uses `ctx.deps.prompt`; subsequent nodes use `ctx.state` (previous node's output)
+- [ ] 3.5 Keep programmatic `agent | other` using custom forwarding (unchanged)
+- [ ] 3.6 Write tests for YAML sequential team graph execution
+- [ ] 3.7 Write backward-compat tests ensuring programmatic `TeamRun` still works
 
 ## 4. Conditional Workflows & Cycle Detection (Phase 3d)
 

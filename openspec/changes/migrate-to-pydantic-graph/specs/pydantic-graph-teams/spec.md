@@ -13,18 +13,11 @@ AgentPool SHALL implement YAML-defined parallel team execution using `pydantic_g
 
 #### Scenario: Parallel execution result collection
 - **WHEN** a YAML parallel team runs
-- **THEN** all member agents execute concurrently via `Fork`/`Join` and results are collected
+- **THEN** all member agents execute concurrently via `Fork`/`Join` and results are collected as `list[ChatMessage]`
 
-### Requirement: YAML sequential teams use GraphBuilder node chains
-AgentPool SHALL implement YAML-defined sequential team execution using `GraphBuilder` sequential node chains.
-
-#### Scenario: YAML sequential team graph construction
-- **WHEN** a YAML team config has `mode: sequential`
-- **THEN** `GraphBuilder` constructs a chain where each `AgentNode`'s output feeds the next
-
-#### Scenario: Programmatic sequential teams unchanged
-- **WHEN** a team is created programmatically via `agent | other`
-- **THEN** it continues to use custom forwarding and `Talk`, not graph execution
+#### Scenario: Parallel team output aggregation
+- **WHEN** a parallel team completes execution
+- **THEN** the `Join` node aggregates all member outputs into a single `ChatMessage` containing combined content from all agents
 
 ## MODIFIED Requirements
 

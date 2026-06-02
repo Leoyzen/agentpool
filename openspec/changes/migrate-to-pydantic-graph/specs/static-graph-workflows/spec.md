@@ -22,7 +22,7 @@ AgentPool SHALL reject cyclic YAML workflow definitions at build time.
 AgentPool SHALL keep `ConnectionManager` and `Talk` independent of graph execution for dynamic runtime connections.
 
 #### Scenario: Dynamic connections unchanged
-- **WHEN** `add_connection()` is called at runtime
+- **WHEN** `create_connection()` is called at runtime
 - **THEN** `ConnectionManager` handles it as before, independent of any graph execution
 
 #### Scenario: Static YAML connections use graph edges

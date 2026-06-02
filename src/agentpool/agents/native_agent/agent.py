@@ -843,9 +843,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # to prevent the LLM from seeing the same content twice.
         if history_list and history_list[-1] is user_msg:
             history_list = history_list[:-1]
-        assert self.session_id is not None  # Initialized by BaseAgent.run_stream()
+        assert session_id is not None  # Initialized by BaseAgent.run_stream()
         yield RunStartedEvent(
-            session_id=self.session_id,
+            session_id=session_id,
             run_id=run_id,
             agent_name=self.name,
             parent_session_id=parent_session_id,
@@ -907,7 +907,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                             run_ctx,
                                         ):
                                             await run_ctx.event_bus.publish(
-                                                self.session_id,  # type: ignore[arg-type]
+                                                session_id,  # type: ignore[arg-type]
                                                 combined,
                                             )
                                 else:
@@ -943,7 +943,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             role="assistant",
                             name=self.name,
                             message_id=message_id,
-                            session_id=self.session_id,
+                            session_id=session_id,
                             parent_id=user_msg.message_id,
                             response_time=response_time,
                             finish_reason="stop",
@@ -954,7 +954,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             agent_run.result,
                             agent_name=self.name,
                             message_id=message_id,
-                            session_id=self.session_id,
+                            session_id=session_id,
                             parent_id=user_msg.message_id,
                             response_time=time.perf_counter() - start_time,
                             metadata=None,

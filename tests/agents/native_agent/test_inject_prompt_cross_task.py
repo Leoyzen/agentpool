@@ -102,6 +102,8 @@ def fast_agent() -> Agent[None]:
 
 def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     """Mock agent_pool.session_pool so get_active_run_context() returns run_ctx."""
+    from unittest.mock import AsyncMock
+
     session_state = SessionState(session_id="test-session", agent_name="test")
     session_state.active_run_ctx = run_ctx
     session_controller = MagicMock()
@@ -110,8 +112,10 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     session_pool.sessions = session_controller
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
+    agent_pool.storage = MagicMock()
+    agent_pool.storage.log_message = AsyncMock()
+    agent_pool.storage.log_session = AsyncMock()
     agent.agent_pool = agent_pool
-    agent.session_id = "test-session"
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +155,7 @@ async def test_inject_prompt_from_different_task_with_session_pool(
     _mock_session_pool(slow_agent, run_ctx)
 
     # Call inject_prompt from THIS task (different from run_stream's task)
-    slow_agent.inject_prompt("Background task completed")
+    slow_agent.inject_prompt("Background task completed", session_id="test-session")
 
     # Verify the injection reached the injection manager via SessionPool fallback
     assert run_ctx.injection_manager.has_pending(), (
@@ -200,7 +204,7 @@ async def test_queue_prompt_from_different_task_with_session_pool(
     _mock_session_pool(slow_agent, run_ctx)
 
     # Queue a prompt from a different task
-    slow_agent.queue_prompt("Follow-up prompt")
+    slow_agent.queue_prompt("Follow-up prompt", session_id="test-session")
 
     assert run_ctx.injection_manager.has_queued(), (
         "queue_prompt() from a different task MUST deliver the prompt to "
@@ -250,7 +254,7 @@ async def test_has_queued_prompts_from_different_task_with_session_pool(
     run_ctx.injection_manager.queue("Test prompt")
 
     # Now check has_queued_prompts from a different task
-    assert slow_agent.has_queued_prompts(), (
+    assert slow_agent.has_queued_prompts(session_id="test-session"), (
         "has_queued_prompts() from a different task MUST check SessionPool fallback "
         "and return True when prompts are queued."
     )
@@ -298,7 +302,7 @@ async def test_has_pending_injections_from_different_task_with_session_pool(
     run_ctx.injection_manager.inject("Test injection")
 
     # Check has_pending_injections from a different task
-    assert slow_agent.has_pending_injections(), (
+    assert slow_agent.has_pending_injections(session_id="test-session"), (
         "has_pending_injections() from a different task MUST check SessionPool fallback "
         "and return True when injections are pending."
     )
@@ -347,7 +351,7 @@ async def test_clear_queued_prompts_from_different_task_with_session_pool(
     assert run_ctx.injection_manager.has_queued()
 
     # Clear from a different task
-    slow_agent.clear_queued_prompts()
+    slow_agent.clear_queued_prompts(session_id="test-session")
 
     assert not run_ctx.injection_manager.has_queued(), (
         "clear_queued_prompts() from a different task MUST clear the active "
@@ -400,7 +404,7 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
     _mock_session_pool(slow_agent, run_ctx)
 
     # Inject from a different task
-    slow_agent.inject_prompt("Follow-up from different task")
+    slow_agent.inject_prompt("Follow-up from different task", session_id="test-session")
 
     # The injection should be in the pending list
     assert run_ctx.injection_manager.has_pending(), (
@@ -506,7 +510,7 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
     _mock_session_pool(slow_agent, run_ctx)
 
     # Inject from a different task (simulates BackgroundTaskProvider._on_task_completed)
-    slow_agent.inject_prompt("Background task result notice")
+    slow_agent.inject_prompt("Background task result notice", session_id="test-session")
 
     # Verify the hook manager can find the injection via SessionPool fallback
     hook_mgr = slow_agent._hook_manager
@@ -514,7 +518,7 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
 
     # The hook manager should be able to access the injection_manager
     # via the SessionPool fallback
-    active_run_ctx = slow_agent.get_active_run_context()
+    active_run_ctx = slow_agent.get_active_run_context(session_id="test-session")
     assert active_run_ctx is not None, (
         "Hook manager must find run_ctx via SessionPool fallback"
     )

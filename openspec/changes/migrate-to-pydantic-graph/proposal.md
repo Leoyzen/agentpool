@@ -12,7 +12,7 @@ This change depends on `sessionpool-only-architecture` and `thin-pydantic-ai-wra
 
 - **BREAKING**: `Team` parallel execution for YAML-defined teams is reimplemented using `pydantic_graph.GraphBuilder` with `Fork` + `Join`. Programmatic team construction (`agent & other`) continues to use `asyncio.gather()`.
 - **BREAKING**: `TeamRun` sequential execution for YAML-defined teams is reimplemented via `GraphBuilder` sequential node chains. Programmatic pipeline construction (`agent | other`) keeps custom forwarding.
-- `AgentNode` is introduced as a `pydantic_graph.BaseNode` wrapper that encapsulates an AgentPool agent. It handles session creation, event wrapping, and result collection without modifying the agent's lifecycle.
+- `AgentNode` is introduced as a `pydantic_graph.BaseNode` wrapper that encapsulates an AgentPool agent. **Agent instances remain completely stateless** — session ID and all run-scoped state are passed via `AgentRunContext` and method parameters, never mutated on the agent instance.
 - `MessageNode` remains unchanged — it does NOT extend `BaseNode`. `ConnectionManager` / `Talk` remain independent for dynamic runtime connections.
 - YAML `teams:` configuration supports graph-based workflow definitions alongside legacy team definitions during migration.
 - Graph execution uses **builder-based `GraphRun`** (not deprecated legacy API).

@@ -1,3 +1,11 @@
+## 0. Statelessness Prerequisite
+
+- [ ] 0.1 Remove `self.session_id` mutation from `BaseAgent` (`__init__`, `set_session_context()`, `run_stream()`)
+- [ ] 0.2 Remove `agent.session_id = session_id` from `TurnRunner._run_turn_unlocked()`
+- [ ] 0.3 Make `NativeAgent._stream_events()` use `session_id` parameter instead of `self.session_id`
+- [ ] 0.4 Update `ClaudeCodeAgent`, `ACPAgent`, `AGUINode` to use param-based session_id
+- [ ] 0.5 Verify all agents work without `self.session_id` being set
+
 ## 1. Foundation: Capability Collection + EventBus Adapter (Phase 2a)
 
 - [ ] 1.1 Add `as_capability()` abstract method to `ResourceProvider` base class

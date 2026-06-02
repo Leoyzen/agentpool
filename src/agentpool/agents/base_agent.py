@@ -252,9 +252,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             enable_logging=enable_logging,
             event_configs=event_configs,
         )
-        self.session_id: str | None = None
-        self.parent_session_id: str | None = None
-        self.session_title: str | None = None
         self._infinite = False
         self.deps_type = deps_type  # or type(None)
         self._background_task: asyncio.Task[ChatMessage[Any]] | None = None
@@ -303,8 +300,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             session_id: The session ID to set
             parent_session_id: Optional parent session ID
         """
-        self.session_id = session_id
-        self.parent_session_id = parent_session_id
         self._events.session_id = session_id
         self._events.parent_session_id = parent_session_id
 
@@ -587,23 +582,27 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         finally:
             self._background_task = None
 
-    def _get_session_run_ctx(self) -> AgentRunContext | None:
+    def _get_session_run_ctx(self, session_id: str | None = None) -> AgentRunContext | None:
         """Get active run context from SessionPool for cross-task access.
+
+        Args:
+            session_id: Optional session ID to look up. Uses the provided
+                value directly instead of instance state.
 
         Returns:
             The session's active run context, or None if not found.
         """
-        if self.agent_pool is not None and self.session_id is not None:
+        if self.agent_pool is not None and session_id is not None:
             session_pool = self.agent_pool.session_pool
             assert session_pool is not None
-            session = session_pool.sessions.get_session(self.session_id)
+            session = session_pool.sessions.get_session(session_id)
             if session is not None:
                 run_ctx = session.active_run_ctx
                 if run_ctx is not None and not run_ctx.completed:
                     return run_ctx
         return None
 
-    def get_active_run_context(self) -> AgentRunContext | None:
+    def get_active_run_context(self, session_id: str | None = None) -> AgentRunContext | None:
         """Get the currently active run context.
 
         Public API for external callers (e.g., SessionPool) to check if a
@@ -614,13 +613,18 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         SessionPool's session.active_run_ctx for cross-task access, then
         _background_run_ctx.
 
+        Args:
+            session_id: Optional session ID for SessionPool lookup.
+                When provided, used for the SessionPool fallback instead of
+                instance state.
+
         Returns:
             The active run context, or None if no turn is running.
         """
         run_ctx = _current_run_ctx_var.get()
         if run_ctx is not None and not run_ctx.completed:
             return run_ctx
-        run_ctx = self._get_session_run_ctx()
+        run_ctx = self._get_session_run_ctx(session_id=session_id)
         if run_ctx is not None:
             return run_ctx
         if self._background_run_ctx is not None and not self._background_run_ctx.completed:
@@ -635,7 +639,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         return self.get_active_run_context() is not None
 
-    def queue_prompt(self, *prompts: PromptCompatible) -> None:
+    def queue_prompt(self, *prompts: PromptCompatible, session_id: str | None = None) -> None:
         """Queue a prompt to be processed after the current run completes.
 
         When called during an active run_stream, the queued prompt will be
@@ -644,6 +648,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
+            session_id: Optional session ID for SessionPool fallback lookup.
 
         Example:
             # In a tool implementation:
@@ -651,11 +656,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.queue_prompt("Now analyze the results")
                 return "Initial work done"
         """
-        run_ctx = self.get_active_run_context()
+        run_ctx = self.get_active_run_context(session_id=session_id)
         if run_ctx is not None:
             run_ctx.injection_manager.queue(*prompts)
 
-    def inject_prompt(self, message: str) -> None:
+    def inject_prompt(self, message: str, session_id: str | None = None) -> None:
         """Inject a message into the conversation mid-run.
 
         The message will be injected after the next tool completes (if the
@@ -668,6 +673,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         Args:
             message: Message to inject
+            session_id: Optional session ID. Falls back to the active run
+                context's session_id if available.
 
         Example:
             # In a tool implementation:
@@ -675,7 +682,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.inject_prompt("Also check the test coverage")
                 return "Changes made"
         """
-        run_ctx = self.get_active_run_context()
+        run_ctx = self.get_active_run_context(session_id=session_id)
         # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
         # has already finished (e.g., after end_turn).  If the turn is complete,
         # the message would be stuck in injection_manager.pending forever because
@@ -686,13 +693,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return
 
         # No active run context — delegate to SessionPool for auto-resume
-        if self.agent_pool is not None and self.session_id is not None:
+        effective_session_id = session_id or (run_ctx.session_id if run_ctx else None)
+        if self.agent_pool is not None and effective_session_id is not None:
             session_pool = self.agent_pool.session_pool
             assert session_pool is not None
             # Fire-and-forget: create task to inject via SessionPool
             import asyncio
 
-            asyncio.create_task(session_pool.inject_prompt(self.session_id, message))
+            asyncio.create_task(session_pool.inject_prompt(effective_session_id, message))
             return
 
         # No pool or session_id available — log warning
@@ -701,23 +709,35 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             agent_name=self.name,
         )
 
-    def has_queued_prompts(self) -> bool:
-        """Check if there are queued prompts waiting to be processed."""
-        run_ctx = self.get_active_run_context()
+    def has_queued_prompts(self, session_id: str | None = None) -> bool:
+        """Check if there are queued prompts waiting to be processed.
+
+        Args:
+            session_id: Optional session ID for SessionPool fallback lookup.
+        """
+        run_ctx = self.get_active_run_context(session_id=session_id)
         if run_ctx is not None:
             return run_ctx.injection_manager.has_queued()
         return False
 
-    def has_pending_injections(self) -> bool:
-        """Check if there are pending injections."""
-        run_ctx = self.get_active_run_context()
+    def has_pending_injections(self, session_id: str | None = None) -> bool:
+        """Check if there are pending injections.
+
+        Args:
+            session_id: Optional session ID for SessionPool fallback lookup.
+        """
+        run_ctx = self.get_active_run_context(session_id=session_id)
         if run_ctx is not None:
             return run_ctx.injection_manager.has_pending()
         return False
 
-    def clear_queued_prompts(self) -> None:
-        """Clear all queued prompts and pending injections."""
-        run_ctx = self.get_active_run_context()
+    def clear_queued_prompts(self, session_id: str | None = None) -> None:
+        """Clear all queued prompts and pending injections.
+
+        Args:
+            session_id: Optional session ID for SessionPool fallback lookup.
+        """
+        run_ctx = self.get_active_run_context(session_id=session_id)
         if run_ctx is not None:
             run_ctx.injection_manager.clear()
 
@@ -775,7 +795,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         ):
             from agentpool.utils.identifiers import generate_session_id
 
-            effective_session_id = session_id or self.session_id or generate_session_id()
+            effective_session_id = session_id or generate_session_id()
             session_pool = self.agent_pool.session_pool
 
             # Ensure session exists in SessionPool
@@ -786,7 +806,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     parent_session_id=parent_session_id,
                 )
 
-            async for event in session_pool.run_stream(effective_session_id, *prompts):
+            async for event in session_pool.run_stream(effective_session_id, *prompts):  # type: ignore[arg-type]
                 yield event
             return
 
@@ -794,37 +814,17 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         from agentpool.utils.identifiers import generate_session_id
 
         # Initialize session_id once for the entire run (including queued prompts)
-        effective_session_id = session_id
-        if effective_session_id is None:
-            if self.agent_pool is None:
-                # Standalone mode: generate ephemeral session ID
-                effective_session_id = generate_session_id()
-            elif self.session_id is not None:
-                # Re-use existing session_id for backward compatibility
-                effective_session_id = self.session_id
-            else:
-                msg = "session_id is required when agent is part of a pool"
-                raise ValueError(msg)
+        effective_session_id = session_id or generate_session_id()
 
-        if self.session_id is None:
-            self.session_id = effective_session_id
-            self.parent_session_id = parent_session_id
-            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
-            initial_prompt = user_prompts[-1] if user_prompts else None
+        user_prompts = [str(p) for p in prompts if isinstance(p, str)]
+        initial_prompt = user_prompts[-1] if user_prompts else None
 
-            def _set_session_title(title: str) -> None:
-                self.session_title = title
-
-            await self.log_session(
-                session_id=self.session_id,
-                initial_prompt=initial_prompt,
-                model=self.model_name,
-                parent_session_id=self.parent_session_id,
-                session_title_setter=_set_session_title,
-            )
-        elif effective_session_id and self.session_id != effective_session_id:
-            self.session_id = effective_session_id
-            self.parent_session_id = parent_session_id
+        await self.log_session(
+            session_id=effective_session_id,
+            initial_prompt=initial_prompt,
+            model=self.model_name,
+            parent_session_id=parent_session_id,
+        )
 
         # Create per-run context for state isolation
         run_ctx = AgentRunContext(deps=deps, depth=depth)
@@ -850,7 +850,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     *current_prompts,
                     store_history=store_history,
                     message_id=message_id,
-                    session_id=session_id,
+                    session_id=effective_session_id,
                     parent_session_id=parent_session_id,
                     parent_id=parent_id,
                     message_history=message_history,
@@ -929,7 +929,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         user_msg = ChatMessage.user_prompt(
             message=converted_prompts,
             parent_id=effective_parent_id,
-            session_id=self.session_id,
+            session_id=session_id,
         )
 
         # Resolve event handlers
@@ -963,7 +963,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     prompt=user_msg.content
                     if isinstance(user_msg.content, str)
                     else str(user_msg.content),
-                    session_id=self.session_id,
+                    session_id=session_id,
                 )
                 if pre_run_result.get("decision") == "deny":
                     reason = pre_run_result.get("reason", "Blocked by pre-run hook")
@@ -1011,7 +1011,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     agent_name=self.name,
                     prompt=prompt_str,
                     result=final_message.content,
-                    session_id=self.session_id,
+                    session_id=session_id,
                 )
 
             # Emit signal (always - for event handlers)
@@ -1239,7 +1239,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         )
         return self._cancelled or background_cancelled
 
-    async def interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+    async def interrupt(self, run_ctx: AgentRunContext | None = None, session_id: str | None = None) -> None:
         """Interrupt the currently running stream.
 
         Sets the cancelled flag, calls subclass-specific _interrupt(),
@@ -1251,6 +1251,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
+            session_id: Optional session ID for SessionPool fallback lookup.
         """
         self._cancelled = True
         # When no run_ctx is provided, try ContextVar first (same task),
@@ -1259,7 +1260,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if effective_run_ctx is None:
             effective_run_ctx = _current_run_ctx_var.get()
         if effective_run_ctx is None:
-            effective_run_ctx = self._get_session_run_ctx()
+            effective_run_ctx = self._get_session_run_ctx(session_id=session_id)
         if effective_run_ctx:
             effective_run_ctx.cancelled = True
         if self._background_run_ctx:
@@ -1357,7 +1358,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         ):
             from agentpool.utils.identifiers import generate_session_id
 
-            effective_session_id = session_id or self.session_id or generate_session_id()
+            effective_session_id = session_id or generate_session_id()
             session_pool = self.agent_pool.session_pool
 
             # Ensure session exists in SessionPool
@@ -1411,7 +1412,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             return final_message
 
         # Legacy path (standalone mode or AG-UI bypass)
-        final_message: ChatMessage[TResult] | None = None
+        final_message = None
         async for event in self.run_stream(
             *prompts,
             store_history=store_history,

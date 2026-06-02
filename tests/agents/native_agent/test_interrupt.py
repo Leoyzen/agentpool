@@ -113,7 +113,6 @@ def _mock_session_pool(agent: Agent, run_ctx: Any) -> None:
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent.agent_pool = agent_pool
-    agent.session_id = "test-session"
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +160,7 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
     _mock_session_pool(slow_agent, run_ctx)
 
     # Call interrupt with NO run_ctx (simulates OpenCode abort_session)
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
 
     # run_ctx.cancelled should be True after interrupt() via SessionPool fallback
     assert run_ctx.cancelled is True, (
