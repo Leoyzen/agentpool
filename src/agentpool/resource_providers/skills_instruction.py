@@ -9,7 +9,9 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai import RunContext
     from pydantic_ai.capabilities import AbstractCapability
+
     from agentpool.prompts.instructions import InstructionFunc
     from agentpool.resource_providers.aggregating import AggregatingResourceProvider
     from agentpool.skills.registry import SkillsRegistry
@@ -59,18 +61,23 @@ class SkillsInstructionProvider(ResourceProvider):
         """Return skill injection instruction functions (RFC-0007)."""
         return [self._generate_skills_instruction]
 
-    async def _generate_skills_instruction(self, ctx: AgentContext) -> str:
+    async def _generate_skills_instruction(
+        self,
+        ctx: RunContext[AgentContext[Any]],
+    ) -> str:
         """Generate XML-formatted skills section.
 
         This instruction function is called on each agent run.
+        Accepts pydantic-ai RunContext with AgentContext as deps.
         """
+        agent_ctx = ctx.deps
         # 1. Check for overrides in agent context
         injection_mode = self.injection_mode
         max_skills = self.max_skills
 
         # Traverse providers to find SkillsTools (usually named "skills")
         # and extract overrides if present.
-        node = ctx.node
+        node = agent_ctx.node
         if (tools := getattr(node, "tools", None)) and (
             providers := getattr(tools, "providers", None)
         ):

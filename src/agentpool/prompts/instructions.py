@@ -8,9 +8,15 @@ Instruction functions can be:
 - AgentContext: Takes only AgentContext
 - RunContext: Takes only RunContext (from pydantic-ai)
 - Both: Takes both AgentContext and RunContext
+- PydanticAI: Takes RunContext[AgentContext[Any]] — native pydantic-ai signature
 
 The InstructionFunc union type accepts any of these variants, allowing
 flexible prompt generation based on what context is available.
+
+For pydantic-ai compatibility, the preferred signature is:
+    def instruction(ctx: RunContext[AgentContext[Any]]) -> str:
+        agent_ctx = ctx.deps
+        return f"Using model: {agent_ctx.model_name}"
 """
 
 from __future__ import annotations
@@ -90,9 +96,28 @@ class BothContextsInstruction(Protocol):
     ) -> str | Awaitable[str]: ...
 
 
+@runtime_checkable
+class PydanticAIInstruction(Protocol):
+    """Instruction function compatible with pydantic-ai Agent.instructions.
+
+    Functions matching this protocol receive RunContext with AgentContext as deps,
+    which is the native pydantic-ai instruction signature. This allows instruction
+    functions to be passed directly to PydanticAgent(instructions=[func]).
+
+    The AgentContext can be accessed via ctx.deps, since AgentPool passes
+    AgentContext[TDeps] as the deps type when creating the PydanticAgent.
+    """
+
+    def __call__(self, ctx: RunContext[AgentContext[Any]]) -> str | Awaitable[str]: ...
+
+
 # Union type for all instruction function variants
 InstructionFunc = (
-    SimpleInstruction | AgentContextInstruction | RunContextInstruction | BothContextsInstruction
+    SimpleInstruction
+    | AgentContextInstruction
+    | RunContextInstruction
+    | BothContextsInstruction
+    | PydanticAIInstruction
 )
 
 

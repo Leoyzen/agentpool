@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from mcp import types
     from mcp.shared.context import RequestContext
     from mcp.types import SamplingMessage
+    from pydantic_ai.capabilities import MCP
 
     from agentpool_config.mcp_server import MCPServerConfig
 
@@ -182,6 +183,66 @@ class MCPManager:
     def get_aggregating_provider(self) -> AggregatingResourceProvider:
         """Get the aggregating provider that contains all MCP providers."""
         return self.aggregating_provider
+
+    def as_capability(self) -> list[MCP]:
+        """Return pydantic-ai MCP capabilities for all configured servers.
+
+        Each enabled server is converted to a pydantic-ai ``MCP`` capability
+        configured with the correct transport (stdio, SSE, or Streamable HTTP).
+        Servers using ACP transport are skipped since pydantic-ai does not
+        support ACP directly. Disabled servers are also skipped.
+
+        The returned capabilities are new instances; they do not share
+        connections with the providers managed by this manager. Existing
+        ``MCPManager`` lifecycle (``__aenter__`` / ``__aexit__``) is
+        unchanged.
+
+        Returns:
+            A list of ``pydantic_ai.capabilities.MCP`` instances, one per
+            configured and enabled server with a supported transport.
+        """
+        from pydantic_ai.capabilities import MCP
+        from agentpool_config.mcp_server import (
+            AcpMCPServerConfig,
+            SSEMCPServerConfig,
+            StdioMCPServerConfig,
+            StreamableHTTPMCPServerConfig,
+        )
+
+        capabilities: list[MCP] = []
+        for server in self.servers:
+            if not server.enabled:
+                continue
+
+            # ACP transport is not supported by pydantic-ai directly
+            if isinstance(server, AcpMCPServerConfig):
+                continue
+
+            pydantic_server = server.to_pydantic_ai()
+
+            # Derive a URL for the capability constructor. For HTTP-based
+            # transports we use the real endpoint; for stdio we synthesise
+            # a stable identifier URL.
+            match server:
+                case SSEMCPServerConfig():
+                    url = str(server.url)
+                case StreamableHTTPMCPServerConfig():
+                    url = str(server.url)
+                case StdioMCPServerConfig():
+                    url = f"mcp://stdio/{server.client_id}"
+                case _:
+                    url = f"mcp://{server.type}/{server.client_id}"
+
+            cap = MCP(
+                url=url,
+                local=pydantic_server,
+                native=False,
+                id=server.name or server.client_id,
+                allowed_tools=server.enabled_tools,
+            )
+            capabilities.append(cap)
+
+        return capabilities
 
     async def cleanup(self) -> None:
         """Clean up all MCP connections and providers."""

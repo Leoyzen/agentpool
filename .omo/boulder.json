@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-02T14:30:48.193Z",
+  "updated_at": "2026-06-02T14:42:24.329Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -77,6 +77,19 @@
       "status": "completed",
       "ended_at": "2026-06-02T14:30:48.193Z",
       "elapsed_ms": 650615
+    },
+    "todo:14": {
+      "task_key": "todo:14",
+      "task_label": "14",
+      "task_title": "**Implement `as_capability()` for custom tool providers**",
+      "session_id": "opencode:ses_177404309ffenOyAF0gfYnAl50",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-02T14:42:24.329Z",
+      "started_at": "2026-06-02T14:34:45.045Z",
+      "status": "completed",
+      "ended_at": "2026-06-02T14:42:24.329Z",
+      "elapsed_ms": 459284
     }
   },
   "works": {
@@ -223,7 +236,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-02T14:30:48.193Z",
+      "updated_at": "2026-06-02T14:42:24.329Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -296,6 +309,19 @@
           "status": "completed",
           "ended_at": "2026-06-02T14:30:48.193Z",
           "elapsed_ms": 650615
+        },
+        "todo:14": {
+          "task_key": "todo:14",
+          "task_label": "14",
+          "task_title": "**Implement `as_capability()` for custom tool providers**",
+          "session_id": "opencode:ses_177404309ffenOyAF0gfYnAl50",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-02T14:42:24.329Z",
+          "started_at": "2026-06-02T14:34:45.045Z",
+          "status": "completed",
+          "ended_at": "2026-06-02T14:42:24.329Z",
+          "elapsed_ms": 459284
         }
       }
     }

@@ -743,12 +743,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             pydantic_ai_tool = tool.to_pydantic_ai(function_override=wrapped)
             pydantic_ai_tools.append(pydantic_ai_tool)
 
-        # Collect and wrap instructions from all resource providers
+        # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
 
-        # Start with formatted system prompt as a static instruction
-        if self._formatted_system_prompt:
-            all_instructions.append(self._formatted_system_prompt)
+        # Start with system prompts in pydantic-ai format
+        system_instructions = await self.sys_prompts.to_pydantic_ai_instructions(self)
+        all_instructions.extend(system_instructions)
 
         # Collect instructions from all providers
         for provider in self.tools.providers:
