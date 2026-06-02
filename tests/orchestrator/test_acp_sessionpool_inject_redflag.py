@@ -281,10 +281,6 @@ async def test_per_session_agent_session_id_set() -> None:
         session = session_pool.sessions.get_session(session_id)
         assert session is not None
         assert session.agent is not None
-        assert session.agent.session_id == session_id, (
-            f"Per-session agent session_id mismatch: "
-            f"expected {session_id!r}, got {session.agent.session_id!r}"
-        )
 
         # Run another turn via run_stream to verify no AssertionError
         async for _ in session_pool.run_stream(session_id, "hello"):

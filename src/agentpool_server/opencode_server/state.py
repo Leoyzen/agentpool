@@ -275,7 +275,6 @@ class ServerState:
         target_agent = self.agent if agent is None else agent
         input_provider = self.ensure_input_provider(session_id)
         target_agent._input_provider = input_provider
-        target_agent.session_id = session_id
         return target_agent
 
     async def get_or_create_agent(self, session_id: str) -> BaseAgent[Any, Any]:
@@ -351,7 +350,6 @@ class ServerState:
                     input_provider=self.ensure_input_provider(session_id),
                     pool=pool,
                 )
-            agent.session_id = session_id
             return agent
         # Fallback for test environments where no config is available.
         # Bind the shared agent and return it.
