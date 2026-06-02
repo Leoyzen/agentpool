@@ -14,8 +14,11 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from acp.agent.acp_requests import ACPRequests
+from acp.schema.capabilities import ClientCapabilities
 from agentpool.log import get_logger
 from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.input_provider import ACPInputProvider
 
 
 if TYPE_CHECKING:
@@ -210,9 +213,17 @@ class ACPProtocolHandler:
         # Convert ACP content blocks to agent prompts
         contents = [from_acp_content(block, fs=None) for block in prompt]
 
+        # Create ACP input provider for elicitation and tool confirmations
+        # through the ACP protocol (not falling back to StdlibInputProvider)
+        acp_requests = ACPRequests(client=self.client, session_id=session_id)
+        session_proxy = _ACPSessionProxy(requests=acp_requests)
+        input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]
+
         stop_reason: StopReason = "end_turn"
         try:
-            await session_pool.process_prompt(session_id, *contents)
+            await session_pool.process_prompt(
+                session_id, *contents, input_provider=input_provider
+            )
         except asyncio.CancelledError:
             logger.info("Prompt processing cancelled", session_id=session_id)
             stop_reason = "cancelled"
@@ -292,3 +303,21 @@ class ACPProtocolHandler:
         from acp.schema import PromptResponse
 
         return PromptResponse(stop_reason=stop_reason)
+
+
+class _ACPSessionProxy:
+    """Lightweight proxy providing the subset of ACPSession that ACPInputProvider needs.
+
+    ACPProtocolHandler does not have a full ACPSession instance, but
+    ACPInputProvider only needs ``requests`` and ``client_capabilities``.
+    This proxy bridges the gap so elicitation/tool-confirmation flows
+    through the ACP protocol instead of falling back to StdlibInputProvider.
+    """
+
+    def __init__(
+        self,
+        requests: ACPRequests,
+        client_capabilities: ClientCapabilities | None = None,
+    ) -> None:
+        self.requests = requests
+        self.client_capabilities = client_capabilities or ClientCapabilities()

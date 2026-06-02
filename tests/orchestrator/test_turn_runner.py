@@ -909,3 +909,46 @@ async def test_drain_returns_empty_for_unknown_session(
     """Draining an unknown session returns an empty list."""
     assert await turn_runner._drain_post_turn_injections("missing") == []
     assert await turn_runner._drain_post_turn_prompts("missing") == []
+
+
+# ---------------------------------------------------------------------------
+# input_provider propagation (RED FLAG)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_run_turn_passes_input_provider_to_agent(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """input_provider must be forwarded to agent._run_stream_once so
+    elicitation flows through the ACP protocol instead of falling back
+    to StdlibInputProvider."""
+    from agentpool.ui.base import InputProvider
+
+    calls: list[dict[str, Any]] = []
+
+    agent = MagicMock()
+    agent._active_run_ctx = None
+    agent._current_run_ctx = None
+    agent._background_run_ctx = None
+    agent.get_active_run_context.side_effect = lambda: agent._active_run_ctx
+
+    async def _capture_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        calls.append(kwargs)
+        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
+
+    agent._run_stream_once = _capture_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+
+    fake_provider = MagicMock(spec=InputProvider)
+    await turn_runner.run_turn("sess-1", "hello", input_provider=fake_provider)
+
+    assert len(calls) == 1
+    assert calls[0].get("input_provider") is fake_provider
