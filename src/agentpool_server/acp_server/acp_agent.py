@@ -394,6 +394,7 @@ class AgentPoolACPAgent(ACPAgent):
             embedded_context_prompts=True,
             image_prompts=True,
             providers=True,
+            turn_complete=True,
         )
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:

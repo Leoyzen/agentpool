@@ -127,18 +127,29 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 path_for_loading = config_path
             case AgentsManifest():
                 manifest_obj = manifest
+                if manifest_obj.config_file_path is not None:
+                    config_path = to_upath(manifest_obj.config_file_path)
             case _:
                 raise ValueError(f"Invalid config type: {type(manifest)}")
 
         # Set up context manager if we have a config file path
         # This enables config-relative path resolution during manifest loading
-        logger.debug("AgentPool.__init__: config_path=%s, creating ConfigContextManager", config_path)
+        logger.debug(
+            "AgentPool.__init__: config_path=%s, creating ConfigContextManager", config_path
+        )
         with ConfigContextManager(config_path):
             if manifest_obj is None:
                 manifest_obj = AgentsManifest.from_file(path_for_loading)  # type: ignore[arg-type]
-            logger.debug("AgentPool.__init__: after manifest load, agents=%s", list(manifest_obj.agents.keys()))
+            logger.debug(
+                "AgentPool.__init__: after manifest load, agents=%s",
+                list(manifest_obj.agents.keys()),
+            )
             for name, cfg in manifest_obj.agents.items():
-                logger.debug("AgentPool.__init__: agent %s config_file_path=%s", name, getattr(cfg, 'config_file_path', 'N/A'))
+                logger.debug(
+                    "AgentPool.__init__: agent %s config_file_path=%s",
+                    name,
+                    getattr(cfg, "config_file_path", "N/A"),
+                )
 
             self._config_file_path = config_path
             self.manifest = manifest_obj
@@ -263,9 +274,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                         max_auto_resume=cfg.max_auto_resume,
                     )
                     # Configure additional SessionPool settings
-                    self._session_pool.sessions._session_ttl_seconds = (
-                        cfg.session_ttl_seconds
-                    )
+                    self._session_pool.sessions._session_ttl_seconds = cfg.session_ttl_seconds
                     self._session_pool.sessions._mcp_max_processes = cfg.mcp_max_processes
                     self._session_pool.turns.event_bus._max_queue_size = cfg.max_queue_size
                     await self._session_pool.start()

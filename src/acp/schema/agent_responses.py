@@ -297,6 +297,7 @@ class InitializeResponse(Response):
         close_session: bool = False,
         fork_session: bool = False,
         providers: bool = False,
+        turn_complete: bool = False,
         auth_methods: Sequence[AuthMethod] | None = None,
     ) -> Self:
         """Create an instance of InitializeResponse.
@@ -318,6 +319,7 @@ class InitializeResponse(Response):
             close_session: Whether the agent supports `session/close` (unstable).
             fork_session: Whether the agent supports `session/fork` (unstable).
             providers: Whether the agent supports `providers/*` methods.
+            turn_complete: Whether the agent emits `turn_complete` updates (unstable).
             auth_methods: The authentication methods supported by the agent.
         """
         caps = AgentCapabilities.create(
@@ -333,6 +335,7 @@ class InitializeResponse(Response):
             close_session=close_session,
             fork_session=fork_session,
             providers=providers,
+            turn_complete=turn_complete,
         )
         return cls(
             agent_info=Implementation(name=name, title=title, version=version),

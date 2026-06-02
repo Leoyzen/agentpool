@@ -133,6 +133,9 @@ class AgentRunContext:
     start_time: float = field(default_factory=time.perf_counter)
     """Timestamp when the run started (for metrics)."""
 
+    completed: bool = False
+    """Whether the run has completed (stream finished)."""
+
 
 # Replace the plain dataclass attribute with a data descriptor that intercepts
 # all reads and writes.  The dataclass machinery has already registered

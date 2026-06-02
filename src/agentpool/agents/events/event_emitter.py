@@ -382,3 +382,15 @@ class StreamEventEmitter:
                         session_id=session_id,
                         event_type=type(event).__name__,
                     )
+            else:
+                logger.error(
+                    "DEBUG_EMIT: EventBus publish skipped: agent has no session_id",
+                    agent_name=self._context.agent.name,
+                    event_type=type(event).__name__,
+                )
+        else:
+            logger.error(
+                "DEBUG_EMIT: EventBus publish skipped: no event_bus available",
+                agent_name=self._context.agent.name,
+                event_type=type(event).__name__,
+            )

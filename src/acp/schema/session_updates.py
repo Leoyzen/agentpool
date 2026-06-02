@@ -507,6 +507,24 @@ class SessionInfoUpdate(AnnotatedObject):
     """Additional metadata to merge, or None to leave unchanged."""
 
 
+class TurnCompleteUpdate(AnnotatedObject):
+    """Signal that all updates for the current prompt turn have been delivered.
+
+    Emitted once per prompt turn, after all other session_update notifications
+    for that turn. This gives clients a deterministic end-of-turn barrier and
+    removes the need for sleep-based heuristics after session/prompt resolves.
+
+    See: https://github.com/agentclientprotocol/agent-client-protocol/issues/554
+    """
+
+    session_update: Literal["turn_complete"] = Field(
+        default="turn_complete", init=False
+    )
+
+    stop_reason: Literal["end_turn", "max_tokens", "refusal", "cancelled"] = "end_turn"
+    """Why the turn stopped."""
+
+
 SessionUpdate = Annotated[
     (
         UserMessageChunk
@@ -521,6 +539,7 @@ SessionUpdate = Annotated[
         | ConfigOptionUpdate
         | SessionInfoUpdate
         | UsageUpdate
+        | TurnCompleteUpdate
     ),
     Field(discriminator="session_update"),
 ]

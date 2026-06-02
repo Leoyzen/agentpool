@@ -546,15 +546,18 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         turn is active and access the run context without relying on
         private attributes.
 
-        The lookup order is:
-        1. _current_run_ctx (ContextVar, task-local)
-        2. _active_run_ctx (instance attribute, cross-task)
-        3. _background_run_ctx (instance attribute, background tasks)
+        Checks instance attributes (_active_run_ctx, _background_run_ctx) first
+        because they are cross-task safe. Avoids checking _current_run_ctx
+        (ContextVar) which gets inherited by child tasks and causes false
+        positives when inject_prompt is called from a different task.
 
         Returns:
             The active run context, or None if no turn is running.
         """
-        return self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
+        run_ctx = self._active_run_ctx or self._background_run_ctx
+        if run_ctx is not None and not run_ctx.completed:
+            return run_ctx
+        return None
 
     def is_turn_active(self) -> bool:
         """Check if a turn is currently running.
@@ -614,7 +617,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # _active_run_ctx (cross-task accessible) or _background_run_ctx.
         # Same rationale as queue_prompt — see interrupt() for the same pattern.
         run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
-        if run_ctx is not None:
+        # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
+        # has already finished (e.g., after end_turn).  If the turn is complete,
+        # the message would be stuck in injection_manager.pending forever because
+        # flush_pending_to_queue() has already been called and won't be called
+        # again.  In that case, delegate to SessionPool for auto-resume.
+        if run_ctx is not None and not run_ctx.completed:
             run_ctx.injection_manager.inject(message)
             return
 

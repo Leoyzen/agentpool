@@ -44,6 +44,7 @@ from acp.schema import (
     ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
+    TurnCompleteUpdate,
     Usage,
     UsageUpdate,
 )
@@ -89,6 +90,7 @@ ACPSessionUpdate = (
     | ToolCallProgress
     | AgentPlanUpdate
     | UsageUpdate
+    | TurnCompleteUpdate
 )
 ACPSessionUpdate = (
     AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
@@ -705,27 +707,33 @@ class ACPEventConverter:
 
             case StreamCompleteEvent(message=message):
                 request_usage = message.usage
-                if request_usage.total_tokens > 0:
-                    thought = request_usage.details.get("reasoning_tokens") or None
-                    self.last_usage = Usage(
-                        total_tokens=request_usage.total_tokens,
-                        input_tokens=request_usage.input_tokens,
-                        output_tokens=request_usage.output_tokens,
-                        thought_tokens=thought,
-                        cached_read_tokens=request_usage.cache_read_tokens or None,
-                        cached_write_tokens=request_usage.cache_write_tokens or None,
+                thought = request_usage.details.get("reasoning_tokens") or None
+                self.last_usage = Usage(
+                    total_tokens=request_usage.total_tokens,
+                    input_tokens=request_usage.input_tokens,
+                    output_tokens=request_usage.output_tokens,
+                    thought_tokens=thought,
+                    cached_read_tokens=request_usage.cache_read_tokens or None,
+                    cached_write_tokens=request_usage.cache_write_tokens or None,
+                )
+                cost_obj: Cost | None = None
+                if message.cost_info and message.cost_info.total_cost:
+                    cost_obj = Cost(
+                        amount=float(message.cost_info.total_cost),
+                        currency="USD",
                     )
-                    cost_obj: Cost | None = None
-                    if message.cost_info and message.cost_info.total_cost:
-                        cost_obj = Cost(
-                            amount=float(message.cost_info.total_cost),
-                            currency="USD",
-                        )
-                    yield UsageUpdate(
-                        used=request_usage.total_tokens,
-                        size=request_usage.total_tokens,  # best approximation
-                        cost=cost_obj,
-                    )
+                # Always yield UsageUpdate on stream completion so clients
+                # know the turn has ended — especially critical for inject-
+                # triggered turns where no PromptResponse(stop_reason) is sent.
+                yield UsageUpdate(
+                    used=request_usage.total_tokens,
+                    size=request_usage.total_tokens,  # best approximation
+                    cost=cost_obj,
+                )
+                # Turn-complete signal: explicit end-of-turn barrier for clients.
+                # Based on draft RFD PR #644 (not yet merged into ACP spec).
+                # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
+                yield TurnCompleteUpdate(stop_reason="end_turn")
                 self.reset()
                 # Clean up all subagent states when stream completes
                 # Prevents memory leaks by removing accumulated state

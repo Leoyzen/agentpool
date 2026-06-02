@@ -107,9 +107,7 @@ class EventBus:
         self._max_queue_size = max_queue_size
         self._session_controller = session_controller
 
-    async def subscribe(
-        self, session_id: str, scope: str = "session"
-    ) -> asyncio.Queue[Any]:
+    async def subscribe(self, session_id: str, scope: str = "session") -> asyncio.Queue[Any]:
         """Subscribe to events for a session.
 
         Args:
@@ -178,9 +176,19 @@ class EventBus:
         if scope == "session":
             return published_sid == subscriber_sid
         if scope == "descendants":
-            return published_sid == subscriber_sid or self._is_descendant(
+            result = published_sid == subscriber_sid or self._is_descendant(
                 published_sid, subscriber_sid
             )
+            if not result:
+                logger.error(
+                    "DEBUG_EVENTBUS: _should_receive=False",
+                    published_sid=published_sid,
+                    subscriber_sid=subscriber_sid,
+                    scope=scope,
+                    session_controller_id=id(self._session_controller) if self._session_controller else None,
+                    children=self._session_controller._children if self._session_controller else None,
+                )
+            return result
         if scope == "subtree":
             return (
                 published_sid == subscriber_sid
@@ -208,6 +216,14 @@ class EventBus:
                 for queue, scope in subscribers:
                     if self._should_receive(session_id, subscriber_sid, scope):
                         queues.append((queue, scope))
+
+        logger.error(
+            "DEBUG_EVENTBUS: publish",
+            session_id=session_id,
+            event_type=type(event).__name__,
+            subscriber_count=len(queues),
+            subscribers=list(self._subscribers.keys()),
+        )
 
         dead_queues: list[asyncio.Queue[Any]] = []
         for queue, _scope in queues:
@@ -459,18 +475,20 @@ class SessionController:
 
                 if cfg.name is None:
                     cfg = cfg.model_copy(update={"name": agent_name})
-                agent = cfg.get_agent(
-                    input_provider=input_provider,
-                    pool=self.pool,
-                )
+                from agentpool_config.context import ConfigContextManager
+
+                with ConfigContextManager(self.pool._config_file_path):
+                    agent = cfg.get_agent(
+                        input_provider=input_provider,
+                        pool=self.pool,
+                    )
+                agent.session_id = session_id
                 await agent.__aenter__()
                 self._session_agents[session_id] = agent
                 session.agent = agent
                 session.is_per_session_agent = True
                 self._increment_mcp_count(agent)
-                logger.info(
-                    "Created session agent", session_id=session_id, agent_name=agent_name
-                )
+                logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
                 return agent
 
             logger.warning(
@@ -843,6 +861,17 @@ class TurnRunner:
                     await self.event_bus.publish(session_id, event)
                 run_ctx.injection_manager.flush_pending_to_queue()
         finally:
+            # CRITICAL: Mark run as completed BEFORE any await so that
+            # inject_prompt() sees completed=True and falls back to
+            # post-turn queuing instead of returning True (active turn)
+            # and dropping the message in a dead pending queue.
+            run_ctx.completed = True
+
+            # CRITICAL: Clear _active_run_ctx BEFORE any await to prevent
+            # race condition where inject_prompt returns True but message
+            # gets stuck in pending (flush_pending_to_queue() already passed).
+            agent._active_run_ctx = None
+
             # Signal the event queue consumer to stop
             await run_ctx.event_queue.put(None)
             # Wait for it to finish (with timeout to prevent hanging)
@@ -857,7 +886,6 @@ class TurnRunner:
             self._turn_timings.append((turn_start, turn_end))
             if len(self._turn_timings) > self._max_turn_timing_history:
                 self._turn_timings.pop(0)
-            agent._active_run_ctx = None
 
     async def run_turn(
         self,
@@ -933,33 +961,33 @@ class TurnRunner:
         """
         session = self.sessions.get_session(session_id)
         if session is None or session.agent is None or session.is_closing:
-            logger.warning(
-                "Cannot inject: session not found or closing", session_id=session_id
+            logger.error(
+                "DEBUG_INJECT: Cannot inject: session=%s agent=%s is_closing=%s",
+                session is not None,
+                session.agent is not None if session else False,
+                session.is_closing if session else False,
             )
             return False
 
         agent = session.agent
         run_ctx = agent.get_active_run_context()
-        if run_ctx is not None:
+        if run_ctx is not None and not run_ctx.completed:
             run_ctx.injection_manager.inject(message)
             return True
 
         lock = await self._get_injection_lock(session_id)
         async with lock:
             run_ctx = agent.get_active_run_context()
-            if run_ctx is not None:
+            if run_ctx is not None and not run_ctx.completed:
                 run_ctx.injection_manager.inject(message)
                 return True
             session = self.sessions.get_session(session_id)
             if session is None or session.is_closing:
-                logger.debug(
-                    "Session closed while waiting for lock, discarding injection",
-                    session_id=session_id,
-                )
+                logger.debug("DEBUG_INJECT: Session closed while waiting for lock")
                 return False
             self._post_turn_injections.setdefault(session_id, []).append(message)
 
-        logger.debug("Queued injection for next turn", session_id=session_id)
+        logger.debug("DEBUG_INJECT: Queued injection for next turn, triggering auto-resume")
         _ = asyncio.create_task(  # noqa: RUF006
             self._trigger_auto_resume(session_id)
         )
@@ -1021,29 +1049,36 @@ class TurnRunner:
             **kwargs: Additional arguments passed to the agent.
         """
         if session.is_closing:
-            logger.debug(
-                "Session is closing, skipping initial queued work", session_id=session_id
-            )
+            logger.debug("DEBUG_AUTO_RESUME: Session is closing, skipping queued work")
             return
 
         injections = await self._drain_post_turn_injections(session_id)
         prompts = await self._drain_post_turn_prompts(session_id)
 
+        logger.error(
+            "DEBUG_AUTO_RESUME: Drained injections=%s prompts=%s",
+            len(injections),
+            len(prompts),
+        )
+
         if injections:
+            logger.debug("DEBUG_AUTO_RESUME: Running turn with injections")
             await self._run_turn_unlocked(session_id, *injections, **kwargs)
+            logger.debug("DEBUG_AUTO_RESUME: Turn with injections completed")
 
         for prompt_group in prompts:
             await self._run_turn_unlocked(session_id, *prompt_group, **kwargs)
 
         for iteration in range(self._max_auto_resume):
             if session.is_closing:
-                logger.debug("Session closing during auto-resume", session_id=session_id)
+                logger.debug("DEBUG_AUTO_RESUME: Session closing during auto-resume")
                 break
 
             injections = await self._drain_post_turn_injections(session_id)
             prompts = await self._drain_post_turn_prompts(session_id)
 
             if not injections and not prompts:
+                logger.debug("DEBUG_AUTO_RESUME: No more queued work, stopping auto-resume")
                 break
 
             logger.info(
@@ -1075,21 +1110,27 @@ class TurnRunner:
         Args:
             session_id: The session to trigger auto-resume for.
         """
+        logger.debug("DEBUG_AUTO_RESUME: _trigger_auto_resume called for %s", session_id)
         try:
             session = self.sessions.get_session(session_id)
             if session is None or session.is_closing:
+                logger.debug("DEBUG_AUTO_RESUME: Session not found or closing")
                 return
 
             async with session.turn_lock:
                 if session.is_closing:
+                    logger.debug("DEBUG_AUTO_RESUME: Session closing after acquiring lock")
                     return
 
                 current_session = self.sessions.get_session(session_id)
                 if current_session is not session:
+                    logger.debug("DEBUG_AUTO_RESUME: Session changed")
                     return
 
                 if self._enable_auto_resume:
+                    logger.debug("DEBUG_AUTO_RESUME: Processing queued work")
                     await self._process_queued_work(session_id, session)
+                    logger.debug("DEBUG_AUTO_RESUME: Finished processing queued work")
                 else:
                     injections = await self._drain_post_turn_injections(session_id)
                     prompts = await self._drain_post_turn_prompts(session_id)
@@ -1158,9 +1199,7 @@ class SessionPool:
             max_auto_resume: Maximum auto-resume iterations.
         """
         self.pool = pool
-        self.sessions = SessionController(
-            pool, store=store, cleanup_callback=self.close_session
-        )
+        self.sessions = SessionController(pool, store=store, cleanup_callback=self.close_session)
         self.turns = TurnRunner(
             self.sessions,
             enable_auto_resume=enable_auto_resume,
