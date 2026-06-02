@@ -70,6 +70,26 @@ def handler(
         agent_pool=mock_pool,
         event_converter=mock_event_converter,
         client=mock_client,
+        client_capabilities=None,
+    )
+
+
+@pytest.fixture
+def handler_with_elicitation(
+    mock_pool: MagicMock,
+    mock_event_converter: MagicMock,
+    mock_client: MagicMock,
+) -> ACPProtocolHandler:
+    """Return an ACPProtocolHandler with elicitation capabilities."""
+    from acp.schema.capabilities import ClientCapabilities, ElicitationCapabilities
+
+    return ACPProtocolHandler(
+        agent_pool=mock_pool,
+        event_converter=mock_event_converter,
+        client=mock_client,
+        client_capabilities=ClientCapabilities(
+            elicitation=ElicitationCapabilities(form=True, url=True)
+        ),
     )
 
 
@@ -119,7 +139,8 @@ class TestHandlePromptInputProvider:
         mock_pool: MagicMock,
     ) -> None:
         """The ACPInputProvider must have client_capabilities so
-        capability-gated elicitation paths work correctly."""
+        capability-gated elicitation paths work correctly.
+        When no capabilities are passed, elicitation is not advertised."""
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
@@ -128,6 +149,28 @@ class TestHandlePromptInputProvider:
         call_kwargs = session_pool.process_prompt.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         assert input_provider.session.client_capabilities is not None
+        assert input_provider.session.client_capabilities.elicitation is None
+
+    @pytest.mark.anyio
+    async def test_handle_prompt_forwards_elicitation_capabilities(
+        self,
+        handler_with_elicitation: ACPProtocolHandler,
+        mock_pool: MagicMock,
+    ) -> None:
+        """When the handler is created with elicitation capabilities,
+        the ACPInputProvider must advertise them so elicitation/create
+        is used instead of falling back to request_permission."""
+        prompt = [TextContentBlock(text="hello")]
+
+        await handler_with_elicitation.handle_prompt("sess-1", prompt)
+
+        session_pool = mock_pool.session_pool
+        call_kwargs = session_pool.process_prompt.call_args.kwargs
+        input_provider = call_kwargs["input_provider"]
+        caps = input_provider.session.client_capabilities
+        assert caps.elicitation is not None
+        assert caps.elicitation.form is True
+        assert caps.elicitation.url is True
 
     @pytest.mark.anyio
     async def test_handle_prompt_skips_when_canary_disabled(
@@ -184,11 +227,12 @@ class TestACPSessionProxy:
 
     def test_proxy_defaults_capabilities(self) -> None:
         """When no capabilities are given, _ACPSessionProxy defaults to
-        an empty ClientCapabilities instance."""
+        an empty ClientCapabilities instance with no elicitation support."""
         from acp.schema.capabilities import ClientCapabilities
 
         proxy = _ACPSessionProxy(requests=MagicMock())
         assert isinstance(proxy.client_capabilities, ClientCapabilities)
+        assert proxy.client_capabilities.elicitation is None
 
     def test_proxy_accepts_custom_capabilities(self) -> None:
         """_ACPSessionProxy can be created with custom client capabilities."""

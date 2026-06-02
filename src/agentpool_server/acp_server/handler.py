@@ -15,7 +15,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from acp.agent.acp_requests import ACPRequests
-from acp.schema.capabilities import ClientCapabilities
+from acp.schema.capabilities import ClientCapabilities, ElicitationCapabilities
 from agentpool.log import get_logger
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
@@ -44,6 +44,8 @@ class ACPProtocolHandler:
         event_converter: Template converter used to derive per-session
             converters. The display mode is extracted from this instance.
         client: ACP client for sending session update notifications.
+        client_capabilities: Client capabilities for elicitation support
+            gating. If None, falls back to legacy request_permission.
     """
 
     def __init__(
@@ -51,11 +53,13 @@ class ACPProtocolHandler:
         agent_pool: AgentPool[Any],
         event_converter: ACPEventConverter,
         client: Client,
+        client_capabilities: ClientCapabilities | None = None,
     ) -> None:
         """Initialize the protocol handler."""
         self.agent_pool = agent_pool
         self._event_converter_template = event_converter
         self.client = client
+        self.client_capabilities = client_capabilities
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._consumer_queues: dict[str, asyncio.Queue[RichAgentStreamEvent[Any] | None]] = {}
 
@@ -216,7 +220,10 @@ class ACPProtocolHandler:
         # Create ACP input provider for elicitation and tool confirmations
         # through the ACP protocol (not falling back to StdlibInputProvider)
         acp_requests = ACPRequests(client=self.client, session_id=session_id)
-        session_proxy = _ACPSessionProxy(requests=acp_requests)
+        session_proxy = _ACPSessionProxy(
+            requests=acp_requests,
+            client_capabilities=self.client_capabilities,
+        )
         input_provider = ACPInputProvider(session=session_proxy)  # type: ignore[arg-type]
 
         stop_reason: StopReason = "end_turn"

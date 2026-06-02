@@ -287,6 +287,7 @@ class AgentPoolACPAgent(ACPAgent):
                     subagent_display_mode=self.subagent_display_mode,
                 ),
                 client=self.client,
+                client_capabilities=self.client_capabilities,
             )
             logger.info("ACPProtocolHandler initialized for SessionPool mode")
 
