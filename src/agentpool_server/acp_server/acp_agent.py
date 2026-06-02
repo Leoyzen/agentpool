@@ -374,6 +374,10 @@ class AgentPoolACPAgent(ACPAgent):
         self.client_info = params.client_info
         logger.info("Client info", request=params.model_dump_json())
         self._initialized = True
+        # Forward client capabilities to the SessionPool protocol handler so
+        # elicitation/create is used when the client supports it.
+        if self._protocol_handler is not None:
+            self._protocol_handler.client_capabilities = self.client_capabilities
         # Initialize provider router from current pool manifest
         pool = self.agent_pool
         manifest = pool.manifest if pool else None
