@@ -3,34 +3,47 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 import inspect
 from pathlib import Path
 import time
-import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
 from uuid import uuid4
+import warnings
 
 import logfire
 from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
+from pydantic_graph import End, GraphBuilder, Step, StepContext
+from pydantic_graph.graph_builder import EndMarker, ErrorMarker
+from pydantic_graph.id_types import NodeID
+
 
 try:
     from pydantic_ai import AgentRetries
     from pydantic_ai.capabilities import NativeTool, ProcessHistory
 except ImportError:
     AgentRetries = None  # type: ignore[misc,assignment]
-    from pydantic_ai.capabilities import BuiltinTool as NativeTool, HistoryProcessor as ProcessHistory
+    from pydantic_ai.capabilities import (
+        BuiltinTool as NativeTool,
+        HistoryProcessor as ProcessHistory,
+    )
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
-from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.agents.events import (
+    PartStartEvent,
+    RunErrorEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+)
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.messaging.graph_adapter import AgentPoolState
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
@@ -765,7 +778,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if not self.hooks:
             hooks_capability = self._hook_manager.as_capability()
             if run_ctx is not None and run_ctx.event_bus is not None:
-                from agentpool.agents.native_agent.eventbus_hooks_adapter import EventBusHooksAdapter
+                from agentpool.agents.native_agent.eventbus_hooks_adapter import (
+                    EventBusHooksAdapter,
+                )
                 hooks_capability = EventBusHooksAdapter(
                     hooks_capability, run_ctx.event_bus
                 ).as_capability()
@@ -858,6 +873,190 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         return PydanticAgent(**agent_kwargs)
 
+    async def _run_agentlet_core(
+        self,
+        *,
+        prompts: list[Any],
+        run_ctx: Any,
+        user_msg: ChatMessage[Any],
+        message_history: MessageHistory,
+        message_id: str,
+        session_id: str,
+        parent_id: str | None,
+        input_provider: Any | None,
+        deps: Any | None,
+        event_queue: asyncio.Queue[Any],
+        start_time: float,
+    ) -> ChatMessage[Any]:
+        """Run agentlet.iter() and feed events to *event_queue*.
+
+        This is the core streaming logic extracted from the former
+        ``agent_iteration_task`` closure.  It is reused both when the agent
+        runs standalone (via :meth:`_stream_events`) and when it executes as
+        a pydantic-graph step (via :meth:`_execute_node`).
+
+        Args:
+            prompts: Pre-converted pydantic-ai UserContent prompts.
+            run_ctx: Per-run context with cancellation state.
+            user_msg: The original user message.
+            message_history: Conversation history.
+            message_id: Message ID for the response.
+            session_id: Session ID for the response.
+            parent_id: Parent message ID.
+            input_provider: Optional input provider.
+            deps: Optional user dependencies.
+            event_queue: Queue to push streaming events onto.
+            start_time: perf_counter() at stream start.
+
+        Returns:
+            The final response ChatMessage.
+        """
+        from agentpool.agents.native_agent.helpers import extract_text_from_messages
+
+        history_list = message_history.get_history()
+        if history_list and history_list[-1] is user_msg:
+            history_list = history_list[:-1]
+
+        agentlet = await self.get_agentlet(None, self._output_type, input_provider, run_ctx)
+        agent_deps = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
+        if deps is not None:
+            agent_deps.data = deps
+
+        history = [m for run in history_list for m in run.to_pydantic_ai()]
+        response_msg: ChatMessage[Any] | None = None
+
+        try:
+            async with agentlet.iter(
+                prompts,
+                deps=agent_deps,
+                message_history=history,
+                usage_limits=self._default_usage_limits,
+            ) as agent_run:
+                pending_tcs: dict[str, BaseToolCallPart] = {}
+                async for node in agent_run:
+                    if run_ctx.cancelled:
+                        self.log.info("Stream cancelled by user")
+                        break
+                    if isinstance(node, End):
+                        break
+
+                    if isinstance(node, ModelRequestNode | CallToolsNode):
+                        async with node.stream(agent_run.ctx) as stream:
+                            if run_ctx.event_bus is not None:
+                                async for event in stream:
+                                    if run_ctx.cancelled:
+                                        break
+                                    await event_queue.put(event)
+                                    await process_tool_event(
+                                        self.name,
+                                        event,  # type: ignore[arg-type]
+                                        pending_tcs,
+                                        message_id,
+                                        run_ctx,
+                                    )
+                            else:
+                                async with merge_queue_into_iterator(
+                                    stream, run_ctx.event_queue
+                                ) as merged:  # type: ignore[arg-type]
+                                    async for event in merged:
+                                        if run_ctx.cancelled:
+                                            break
+                                        await event_queue.put(event)  # type: ignore[arg-type]
+                                        if combined := await process_tool_event(
+                                            self.name,
+                                            event,  # type: ignore[arg-type]
+                                            pending_tcs,
+                                            message_id,
+                                            run_ctx,
+                                        ):
+                                            await event_queue.put(combined)
+
+            response_time = time.perf_counter() - start_time
+            if run_ctx.cancelled:
+                partial_content = extract_text_from_messages(
+                    agent_run.all_messages(), include_interruption_note=True
+                )
+                response_msg = ChatMessage(
+                    content=partial_content,
+                    role="assistant",
+                    name=self.name,
+                    message_id=message_id,
+                    session_id=session_id,
+                    parent_id=user_msg.message_id,
+                    response_time=response_time,
+                    finish_reason="stop",
+                )
+                await event_queue.put(StreamCompleteEvent(message=response_msg))
+            elif agent_run.result:
+                response_msg = await ChatMessage.from_run_result(
+                    agent_run.result,
+                    agent_name=self.name,
+                    message_id=message_id,
+                    session_id=session_id,
+                    parent_id=user_msg.message_id,
+                    response_time=time.perf_counter() - start_time,
+                    metadata=None,
+                )
+            else:
+                raise RuntimeError("Stream completed without producing a result")
+        except asyncio.CancelledError:
+            self.log.info("Agent iteration cancelled")
+            raise
+        except BaseException:
+            self.log.exception("Agent iteration failed")
+            raise
+
+        return response_msg
+
+    async def _execute_node(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
+        """Execute agent as a pydantic-graph step node.
+
+        Detects graph context via *_state* in kwargs (injected by
+        :class:`~agentpool.messaging.graph_adapter.MessageNodeStep`) and
+        runs the core streaming logic, pushing events to the state's event
+        queue for the parent graph to drain.
+
+        Args:
+            *prompts: Input prompts passed from the graph.
+            **kwargs: Must contain ``_state`` (an
+                :class:`~agentpool.messaging.graph_adapter.AgentPoolState`).
+
+        Returns:
+            The final response ChatMessage.
+
+        Raises:
+            RuntimeError: If ``_state`` or required sub-keys are missing.
+        """
+        from agentpool.messaging.graph_adapter import AgentPoolState
+
+        state = kwargs.get("_state")
+        if not isinstance(state, AgentPoolState):
+            raise RuntimeError(
+                f"{self.__class__.__name__}._execute_node() requires _state in kwargs. "
+                "Use MessageNodeStep to wrap this agent for graph execution."
+            )
+
+        kw = state.kwargs
+        run_ctx = kw.get("run_ctx")
+        if run_ctx is None:
+            raise RuntimeError("run_ctx required in state.kwargs for graph execution")
+
+        result = await self._run_agentlet_core(
+            prompts=list(prompts),
+            run_ctx=run_ctx,
+            user_msg=kw["user_msg"],
+            message_history=kw["message_history"],
+            message_id=kw.get("message_id") or str(uuid4()),
+            session_id=kw["session_id"],
+            parent_id=kw.get("parent_id"),
+            input_provider=kw.get("input_provider"),
+            deps=kw.get("deps"),
+            event_queue=state.event_queue,
+            start_time=kw.get("start_time", time.perf_counter()),
+        )
+        state.result = result
+        return result
+
     async def _stream_events(  # noqa: PLR0915
         self,
         run_ctx: AgentRunContext,
@@ -875,147 +1074,122 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
-        from pydantic_graph import End
-
-        from agentpool.agents.native_agent.helpers import extract_text_from_messages
-
         message_id = message_id or str(uuid4())
         run_id = str(uuid4())
         start_time = time.perf_counter()
-        history_list = message_history.get_history()
-        # The user message was pre-added to conversation history by _run_stream_once()
-        # before calling this method, but it's also passed via `prompts` below.
-        # Exclude the last message from history if it matches the user message
-        # to prevent the LLM from seeing the same content twice.
-        if history_list and history_list[-1] is user_msg:
-            history_list = history_list[:-1]
         assert session_id is not None  # Initialized by BaseAgent.run_stream()
+
         yield RunStartedEvent(
             session_id=session_id,
             run_id=run_id,
             agent_name=self.name,
             parent_session_id=parent_session_id,
         )
-        agentlet = await self.get_agentlet(None, self._output_type, input_provider, run_ctx)
-        response_msg: ChatMessage[Any] | None = None
-        # Prepend pending context parts (prompts are already pydantic-ai UserContent format)
-        # Track tool call starts to combine with results later
-        # Create AgentContext with user deps stored in .data
-        agent_deps = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
-        if deps is not None:
-            agent_deps.data = deps
 
-        # Run the entire agent iteration in an isolated task to prevent CancelScope
-        # issues when consumer breaks from iteration. This ensures all pydantic-ai
-        # context managers (CancelScope, TaskGroup, ContextVar) exit in the correct task.
-        event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
+        # Standalone: wrap the agent in a single-node pydantic-graph so that
+        # Graph.iter() drives execution.  The custom step calls
+        # _run_agentlet_core() which pushes events to state.event_queue.
+        async def _agent_step(ctx: StepContext[AgentPoolState, Any, Any]) -> ChatMessage[Any]:
+            state = ctx.state
+            kw = state.kwargs
+            return await self._run_agentlet_core(
+                prompts=list(state.prompts),
+                run_ctx=kw["run_ctx"],
+                user_msg=kw["user_msg"],
+                message_history=kw["message_history"],
+                message_id=kw["message_id"],
+                session_id=kw["session_id"],
+                parent_id=kw.get("parent_id"),
+                input_provider=kw.get("input_provider"),
+                deps=kw.get("deps"),
+                event_queue=state.event_queue,
+                start_time=kw["start_time"],
+            )
+
+        builder = GraphBuilder(state_type=AgentPoolState, output_type=Any)
+        agent_step = Step(
+            id=NodeID(self.name),
+            call=_agent_step,
+            label=self.description or self.name,
+        )
+        builder.add_edge(builder.start_node, agent_step)
+        builder.add_edge(agent_step, builder.end_node)
+        graph = builder.build()
+
+        state = AgentPoolState(
+            node=self,
+            prompts=tuple(prompts),
+            kwargs={
+                "run_ctx": run_ctx,
+                "user_msg": user_msg,
+                "message_history": message_history,
+                "message_id": message_id,
+                "session_id": session_id,
+                "parent_id": parent_id,
+                "input_provider": input_provider,
+                "deps": deps,
+                "start_time": start_time,
+            },
+        )
+
+        response_msg: ChatMessage[Any] | None = None
+        graph_event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
         iteration_done = asyncio.Event()
         iteration_error: BaseException | None = None
-        response_msg: ChatMessage[Any] | None = None
-        response_time: float = 0.0
 
-        async def agent_iteration_task() -> None:
-            """Background task that runs agentlet.iter() and feeds events to queue."""
+        async def graph_iteration_task() -> None:
+            """Background task that runs graph.iter() and feeds events to queue."""
             nonlocal iteration_error, response_msg
-            history = [m for run in history_list for m in run.to_pydantic_ai()]
             try:
-                async with agentlet.iter(
-                    prompts,
-                    deps=agent_deps,
-                    message_history=history,
-                    usage_limits=self._default_usage_limits,
-                ) as agent_run:
-                    pending_tcs: dict[str, BaseToolCallPart] = {}
-                    async for node in agent_run:
-                        if run_ctx.cancelled or iteration_done.is_set():
-                            self.log.info("Stream cancelled by user")
-                            break
-                        if isinstance(node, End):
-                            break
+                async with graph.iter(
+                    state=state, deps=self._get_deps(), inputs=None
+                ) as graph_run:
+                    async for yield_item in graph_run:
+                        # Drain step-internal events from state.event_queue
+                        while not state.event_queue.empty():
+                            try:
+                                event = state.event_queue.get_nowait()
+                                await graph_event_queue.put(event)
+                            except asyncio.QueueEmpty:
+                                break
 
-                        # Stream events from node (model request or tool call)
-                        if isinstance(node, ModelRequestNode | CallToolsNode):
-                            async with node.stream(agent_run.ctx) as stream:
-                                if run_ctx.event_bus is not None:
-                                    # EventBus mode: TurnRunner manages event routing.
-                                    # Tool events go directly to EventBus via
-                                    # StreamEventEmitter; combined events are
-                                    # published by process_tool_event.
-                                    async for event in stream:
-                                        if run_ctx.cancelled or iteration_done.is_set():
-                                            break
-                                        await event_queue.put(event)
-                                        await process_tool_event(
-                                            self.name,
-                                            event,  # type: ignore[arg-type]
-                                            pending_tcs,
-                                            message_id,
-                                            run_ctx,
+                        # Map pydantic-graph yields to AgentPool events
+                        match yield_item:
+                            case Sequence() as tasks:
+                                for i, task in enumerate(tasks):
+                                    await graph_event_queue.put(
+                                        PartStartEvent.text(
+                                            index=i,
+                                            content=f"Starting step {task.node_id}",
                                         )
-                                else:
-                                    # Standalone mode: merge run_ctx.event_queue
-                                    # for backward compatibility.
-                                    async with merge_queue_into_iterator(
-                                        stream, run_ctx.event_queue
-                                    ) as merged:  # type: ignore[arg-type]
-                                        async for event in merged:
-                                            if (
-                                                run_ctx.cancelled
-                                                or iteration_done.is_set()
-                                            ):
-                                                break
-                                            await event_queue.put(event)  # type: ignore[arg-type]
-                                            if combined := await process_tool_event(
-                                                self.name,
-                                                event,  # type: ignore[arg-type]
-                                                pending_tcs,
-                                                message_id,
-                                                run_ctx,
-                                            ):
-                                                await event_queue.put(combined)
-
-                    # Build response message
-                    response_time = time.perf_counter() - start_time
-                    if run_ctx.cancelled:
-                        partial_content = extract_text_from_messages(
-                            agent_run.all_messages(), include_interruption_note=True
-                        )
-                        response_msg = ChatMessage(
-                            content=partial_content,
-                            role="assistant",
-                            name=self.name,
-                            message_id=message_id,
-                            session_id=session_id,
-                            parent_id=user_msg.message_id,
-                            response_time=response_time,
-                            finish_reason="stop",
-                        )
-                        await event_queue.put(StreamCompleteEvent(message=response_msg))
-                    elif agent_run.result:
-                        response_msg = await ChatMessage.from_run_result(
-                            agent_run.result,
-                            agent_name=self.name,
-                            message_id=message_id,
-                            session_id=session_id,
-                            parent_id=user_msg.message_id,
-                            response_time=time.perf_counter() - start_time,
-                            metadata=None,
-                        )
-                    else:
-                        raise RuntimeError("Stream completed without producing a result")
+                                    )
+                            case EndMarker() as end_marker:
+                                response_msg = end_marker.value
+                                break
+                            case ErrorMarker() as error_marker:
+                                await graph_event_queue.put(
+                                    RunErrorEvent(
+                                        message=str(error_marker.error),
+                                        agent_name=self.name,
+                                        run_id=run_id,
+                                    )
+                                )
+                                raise error_marker.error
             except asyncio.CancelledError:
-                self.log.info("Agent iteration task cancelled")
+                self.log.info("Graph iteration task cancelled")
             except BaseException as e:
                 iteration_error = e
             finally:
-                # Signal end of iteration
-                await event_queue.put(None)
+                # Drain any remaining step events
+                while not state.event_queue.empty():
+                    try:
+                        event = state.event_queue.get_nowait()
+                        await graph_event_queue.put(event)
+                    except asyncio.QueueEmpty:
+                        break
+                await graph_event_queue.put(None)
 
-        # Start the agent iteration task
-        iteration_task = asyncio.create_task(agent_iteration_task())
-        # NOTE: _iteration_task is single-session state. Concurrent run_stream
-        # calls on the same agent instance will overwrite this reference.
-        # See _active_run_ctx guard in base_agent.run_stream() for details.
+        iteration_task = asyncio.create_task(graph_iteration_task())
         if self._iteration_task is not None and not self._iteration_task.done():
             self.log.warning(
                 "Starting new stream while iteration_task is still active — "
@@ -1024,42 +1198,27 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._iteration_task = iteration_task
 
         try:
-            # Yield events from the queue
             while True:
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-                    if event is None:  # End of stream
+                    event = await asyncio.wait_for(graph_event_queue.get(), timeout=0.1)
+                    if event is None:
                         break
                     yield event
                 except TimeoutError:
-                    # On Python 3.12+, asyncio.wait_for() uses asyncio.timeout()
-                    # internally. When an *external* cancellation (e.g. from
-                    # anyio.fail_after in a tool call) arrives during the
-                    # wait_for, the nested timeout context manager can convert
-                    # the CancelledError into a TimeoutError. Detect this by
-                    # checking whether the current task is still being
-                    # cancelled, and re-raise as CancelledError so that callers
-                    # (especially _process_message_locked) handle it properly.
-                    # See: https://github.com/python/cpython/issues/111162
                     current = asyncio.current_task()
                     if current is not None and current.cancelling() > 0:
                         raise asyncio.CancelledError() from None
-                    # Check if we should exit
                     if run_ctx.cancelled:
                         break
                     continue
 
-            # Re-raise any error from iteration task
             if iteration_error is not None:
                 raise iteration_error
 
         finally:
-            # Signal iteration to stop
             iteration_done.set()
-            # Only set cancelled if iteration task was actually cancelled
             if iteration_task.cancelled():
                 run_ctx.cancelled = True
-            # Cancel task if still running
             if not iteration_task.done():
                 iteration_task.cancel()
                 try:
@@ -1068,11 +1227,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         timeout=2.0,
                     )
                 except (TimeoutError, asyncio.CancelledError):
-                    pass  # Cleanup will happen in background
-            # Clear the iteration task reference
+                    pass
             self._iteration_task = None
 
-        # Send additional enriched completion event
+        assert response_msg is not None
         yield StreamCompleteEvent(message=response_msg)
 
     def register_worker(

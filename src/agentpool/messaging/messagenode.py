@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
@@ -383,6 +385,11 @@ class MessageNode[TDeps, TResult](ABC):
         exit_condition: AsyncFilterFn | None = None,
     ) -> Talk[Any] | TeamTalk:
         """Create connection(s) to target(s)."""
+        warnings.warn(
+            "connect_to() is deprecated. Use YAML config or GraphBuilder instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # Handle callable case
         from agentpool.agents import Agent
         from agentpool.delegation.base_team import BaseTeam
@@ -434,9 +441,117 @@ class MessageNode[TDeps, TResult](ABC):
         """Stop forwarding results to another node."""
         self.connections.disconnect(other)
 
-    @abstractmethod
+    def _get_deps(self) -> TDeps | None:
+        """Return dependencies for graph execution.
+
+        Returns:
+            The node's dependencies, or None if not configured.
+        """
+        return None
+
+    def _build_single_node_graph(
+        self,
+    ) -> Any:
+        """Build a single-node pydantic-graph wrapping this node.
+
+        Returns:
+            An immutable Graph ready for execution.
+        """
+        from agentpool.messaging.graph_adapter import MessageNodeStep
+
+        return MessageNodeStep(self).build_single_node_graph()
+
+    async def _execute_node(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
+        """Core execution logic without graph wrapping.
+
+        Subclasses that do not override :meth:`run` must implement this
+        method. Subclasses that override :meth:`run` (the default for
+        all existing agent types) do not need to implement this method.
+
+        Args:
+            *prompts: Input prompts.
+            **kwargs: Additional execution arguments.
+
+        Returns:
+            The resulting ChatMessage.
+
+        Raises:
+            NotImplementedError: If neither ``run()`` nor ``_execute_node()``
+                is overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _execute_node() "
+            f"or override run() directly."
+        )
+
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
-        """Execute node with prompts. Implementation-specific run logic."""
+        """Execute node with prompts via pydantic-graph single-node graph.
+
+        Builds a single-node graph and runs it to completion. Subclasses
+        may override this method to provide custom execution logic; in
+        that case the graph-based path is bypassed.
+
+        Args:
+            *prompts: Input prompts.
+            **kwargs: Additional execution arguments.
+
+        Returns:
+            The resulting ChatMessage.
+        """
+        from agentpool.messaging.graph_adapter import AgentPoolState
+
+        graph = self._build_single_node_graph()
+        state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
+        return await graph.run(state=state, deps=self._get_deps(), inputs=None)
+
+    async def run_stream(
+        self,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
+        """Run with streaming output via pydantic-graph Graph.iter().
+
+        Uses :meth:`Graph.iter` to drive execution step-by-step.
+        For nodes that do not override :meth:`run_stream` (e.g. most
+        agent subclasses), this yields the final result wrapped in a
+        :class:`StreamCompleteEvent`. Agent subclasses typically override
+        this with rich event streaming.
+
+        Args:
+            *prompts: Input prompts.
+            **kwargs: Additional execution arguments.
+
+        Yields:
+            RichAgentStreamEvent tokens during execution.
+        """
+        from agentpool.agents.events import StreamCompleteEvent
+        from agentpool.messaging.graph_adapter import AgentPoolState
+
+        graph = self._build_single_node_graph()
+        state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
+
+        async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
+            async for _ in graph_run:
+                # Generic nodes do not produce intermediate stream events;
+                # drain the event queue in case a subclass pushed events.
+                while not state.event_queue.empty():
+                    try:
+                        event = state.event_queue.get_nowait()
+                        yield event  # type: ignore[misc]
+                    except asyncio.QueueEmpty:
+                        break
+
+        # Yield any remaining events after graph completion
+        while not state.event_queue.empty():
+            try:
+                event = state.event_queue.get_nowait()
+                yield event  # type: ignore[misc]
+            except asyncio.QueueEmpty:
+                break
+
+        # Yield the final result wrapped in StreamCompleteEvent
+        if state.result is not None:
+            yield StreamCompleteEvent(message=state.result)  # type: ignore[misc]
 
     async def run_message(
         self,

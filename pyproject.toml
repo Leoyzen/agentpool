@@ -58,6 +58,7 @@ dependencies = [
   "py-key-value-aio[disk]",
   "pydantic>=2.10.0",
   "pydantic-ai-slim[openai,google,anthropic,mistral,retries]==1.102.0",
+  "pydantic-graph",
   # Only add below (Copier)
   "pydocket>=0.16.1",
   "python-dotenv>=1.0.1",

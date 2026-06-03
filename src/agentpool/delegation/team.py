@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from time import perf_counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from anyenv.async_run import as_generated
@@ -15,10 +14,9 @@ from agentpool.agents.events import SpawnSessionStart, SubAgentEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.delegation.base_team import BaseTeam
 from agentpool.log import get_logger
-from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
+from agentpool.messaging import ChatMessage, TeamResponse
 from agentpool.messaging.messagenode import get_source_type
 from agentpool.messaging.processing import finalize_message, prepare_prompts
-from agentpool.utils.time_utils import get_now
 
 
 logger = get_logger(__name__)
@@ -37,17 +35,14 @@ if TYPE_CHECKING:
 class Team[TDeps = None](BaseTeam[TDeps, Any]):
     """Group of agents that can execute together."""
 
+    _error_mode: Literal["fail_all", "collect_exceptions"] = "collect_exceptions"
+
     async def execute(self, *prompts: PromptCompatible | None, **kwargs: Any) -> TeamResponse:
-        """Run all agents in parallel with monitoring."""
+        """Run all agents in parallel via pydantic-graph Fork + Join."""
+        from agentpool.delegation.graph_team import _TeamGraphState, run_team_graph
         from agentpool.talk.talk import Talk
 
         self._team_talk.clear()
-        start_time = get_now()
-        responses: list[AgentResponse[Any]] = []
-        errors: dict[str, Exception] = {}
-        final_prompt = list(prompts)
-        if self.shared_prompt:
-            final_prompt.insert(0, self.shared_prompt)
         all_nodes = list(self.nodes)
         # Create Talk connections for monitoring this execution
         execution_talks: list[Talk[Any]] = []
@@ -57,22 +52,15 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             execution_talks.append(talk)
             self._team_talk.append(talk)  # Add to base class's TeamTalk
 
-        async def _run(node: MessageNode[TDeps, Any]) -> None:
-            try:
-                start = perf_counter()
-                message = await node.run(*final_prompt, **kwargs)
-                timing = perf_counter() - start
-                r = AgentResponse(agent_name=node.name, message=message, timing=timing)
-                responses.append(r)
-                # Update talk stats for this agent
-                talk = next(t for t in execution_talks if t.source == node)
-                talk._stats.messages.append(message)
-            except Exception as e:  # noqa: BLE001
-                errors[node.name] = e
+        state = _TeamGraphState(
+            prompts=prompts,
+            kwargs=kwargs,
+            shared_prompt=self.shared_prompt,
+            execution_talks=execution_talks,
+            error_mode=self._error_mode,
+        )
 
-        # Run all agents in parallel
-        await asyncio.gather(*[_run(node) for node in all_nodes])
-        return TeamResponse(responses=responses, start_time=start_time, errors=errors)
+        return await run_team_graph(all_nodes, state)
 
     def __prompt__(self) -> str:
         """Format team info for prompts."""
