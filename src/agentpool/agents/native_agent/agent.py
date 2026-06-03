@@ -719,10 +719,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         run_ctx: AgentRunContext | None = None,
     ) -> PydanticAgent[AgentContext[TDeps], AgentOutputType]:
         """Create pydantic-ai agent from current state."""
-        from agentpool.agents.native_agent.tool_wrapping import wrap_tool
         from agentpool.utils.context_wrapping import wrap_instruction
 
-        tools = await self.tools.get_tools(state="enabled")
         final_type = to_type(output_type) if output_type not in [None, str] else self._output_type
         actual_model = model or self._model
         if isinstance(actual_model, str):
@@ -733,15 +731,30 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Resolve history processors with caching
         history_processors = self._resolve_history_processors()
 
-        # CRITICAL: Pass run_ctx for event queue isolation (RFC-0021)
-        context_for_tools = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
+        # Yield to ensure interrupt() can run before iteration_task is created.
+        # Without this, get_agentlet() may complete synchronously, causing
+        # iteration_task to be created and cancelled before it starts — which
+        # skips its finally block and leaves the event queue stalled.
+        await asyncio.sleep(0)
 
-        # Collect pydantic_ai.tools.Tool instances using Tool.to_pydantic_ai()
-        pydantic_ai_tools = []
-        for tool in tools:
-            wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
-            pydantic_ai_tool = tool.to_pydantic_ai(function_override=wrapped)
-            pydantic_ai_tools.append(pydantic_ai_tool)
+        # Collect capabilities from all sources
+        tool_capabilities: list[Any] = []
+        # 1. Tool providers
+        for provider in self.tools.providers:
+            cap = provider.as_capability()
+            if cap is not None:
+                tool_capabilities.append(cap)
+        # 2. Hooks
+        hooks_capability = self._hook_manager.as_capability()
+        if run_ctx is not None and run_ctx.event_bus is not None:
+            from agentpool.agents.native_agent.eventbus_hooks_adapter import EventBusHooksAdapter
+            hooks_capability = EventBusHooksAdapter(
+                hooks_capability, run_ctx.event_bus
+            ).as_capability()
+        tool_capabilities.append(hooks_capability)
+        # 3. MCP servers
+        mcp_capabilities = self.mcp.as_capability()
+        tool_capabilities.extend(mcp_capabilities)
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
@@ -776,15 +789,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 )
                 continue
 
-        # Resolve history processors with caching
-        history_processors = self._resolve_history_processors()
-
-        # Build capabilities list from history processors and builtin tools
-        capabilities: list[Any] = []
+        # 4. History processors
         if history_processors:
-            capabilities.extend(ProcessHistory(p) for p in history_processors)
+            tool_capabilities.extend(ProcessHistory(p) for p in history_processors)
+        # 5. Builtin tools
         if self._builtin_tools:
-            capabilities.extend(NativeTool(t) for t in self._builtin_tools)
+            tool_capabilities.extend(NativeTool(t) for t in self._builtin_tools)
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries
         if AgentRetries is not None and self._output_retries is not None:
@@ -804,8 +814,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             "end_strategy": self._end_strategy,
             "deps_type": AgentContext[TDeps],
             "output_type": cast(Any, final_type),
-            "tools": pydantic_ai_tools,
-            "capabilities": capabilities if capabilities else None,
+            "capabilities": tool_capabilities if tool_capabilities else None,
         }
         if AgentRetries is None and self._output_retries is not None:
             agent_kwargs["output_retries"] = self._output_retries

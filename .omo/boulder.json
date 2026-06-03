@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-02T14:42:24.329Z",
+  "updated_at": "2026-06-03T02:51:06.249Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -90,6 +90,32 @@
       "status": "completed",
       "ended_at": "2026-06-02T14:42:24.329Z",
       "elapsed_ms": 459284
+    },
+    "todo:22": {
+      "task_key": "todo:22",
+      "task_label": "22",
+      "task_title": "**Audit current `get_agentlet()` vs capability-based construction**",
+      "session_id": "opencode:ses_17735a7baffezMDU89i9IDjiqh",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-02T14:45:57.907Z",
+      "started_at": "2026-06-02T14:45:43.062Z",
+      "status": "completed",
+      "ended_at": "2026-06-02T14:45:57.907Z",
+      "elapsed_ms": 14845
+    },
+    "todo:23": {
+      "task_key": "todo:23",
+      "task_label": "23",
+      "task_title": "**Refactor `get_agentlet()` to collect capabilities**",
+      "session_id": "opencode:ses_174ece1b8fferclDyW6lcVwQiE",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "started_at": "2026-06-03T01:10:06.006Z",
+      "status": "completed",
+      "updated_at": "2026-06-03T02:51:06.249Z",
+      "ended_at": "2026-06-03T02:51:06.248Z",
+      "elapsed_ms": 6060242
     }
   },
   "works": {
@@ -236,7 +262,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-02T14:42:24.329Z",
+      "updated_at": "2026-06-03T02:51:06.249Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -322,6 +348,32 @@
           "status": "completed",
           "ended_at": "2026-06-02T14:42:24.329Z",
           "elapsed_ms": 459284
+        },
+        "todo:22": {
+          "task_key": "todo:22",
+          "task_label": "22",
+          "task_title": "**Audit current `get_agentlet()` vs capability-based construction**",
+          "session_id": "opencode:ses_17735a7baffezMDU89i9IDjiqh",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-02T14:45:57.907Z",
+          "started_at": "2026-06-02T14:45:43.062Z",
+          "status": "completed",
+          "ended_at": "2026-06-02T14:45:57.907Z",
+          "elapsed_ms": 14845
+        },
+        "todo:23": {
+          "task_key": "todo:23",
+          "task_label": "23",
+          "task_title": "**Refactor `get_agentlet()` to collect capabilities**",
+          "session_id": "opencode:ses_174ece1b8fferclDyW6lcVwQiE",
+          "agent": "Sisyphus-Junior",
+          "category": "deep",
+          "started_at": "2026-06-03T01:10:06.006Z",
+          "status": "completed",
+          "updated_at": "2026-06-03T02:51:06.249Z",
+          "ended_at": "2026-06-03T02:51:06.248Z",
+          "elapsed_ms": 6060242
         }
       }
     }
