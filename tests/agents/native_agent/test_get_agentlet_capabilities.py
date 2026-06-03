@@ -511,3 +511,105 @@ async def test_get_agentlet_resolves_string_model(
 
             call_kwargs = mock_pydantic_agent.call_args.kwargs
             assert call_kwargs.get("model") is mock_model
+
+
+# ---------------------------------------------------------------------------
+# Test: Python API capability passthrough
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_python_api_capability_passthrough(mock_agent: Agent[Any]) -> None:
+    """Pre-instantiated AbstractCapability from config is passed to PydanticAgent."""
+    from pydantic_ai.capabilities import Instrumentation
+
+    cap = Instrumentation()
+    mock_agent.config = MagicMock()
+    mock_agent.config.capabilities = [cap]
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
+
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
+        assert cap in capabilities
+
+
+# ---------------------------------------------------------------------------
+# Test: YAML config capability passthrough
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_yaml_config_capability_passthrough(mock_agent: Agent[Any]) -> None:
+    """YAML-loaded CapabilityConfig is built and included in capabilities."""
+    from agentpool_config.capabilities import CapabilityConfig
+    from pydantic_ai.capabilities import Instrumentation
+
+    cap_config = CapabilityConfig(
+        type="pydantic_ai.capabilities.Instrumentation",
+        args={},
+    )
+    mock_agent.config = MagicMock()
+    mock_agent.config.capabilities = [cap_config]
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
+
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
+        capability_types = [type(c).__name__ for c in capabilities]
+        assert "Instrumentation" in capability_types
+
+
+# ---------------------------------------------------------------------------
+# Test: User capability takes precedence (appended last)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_user_capability_takes_precedence(mock_agent: Agent[Any]) -> None:
+    """User-provided capabilities are appended last (highest priority)."""
+    from pydantic_ai.capabilities import Instrumentation
+
+    user_cap = Instrumentation()
+    mock_agent.config = MagicMock()
+    mock_agent.config.capabilities = [user_cap]
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await mock_agent.get_agentlet(None, None, None)
+
+        call_kwargs = mock_pydantic_agent.call_args.kwargs
+        capabilities = call_kwargs.get("capabilities", []) or []
+        assert capabilities[-1] is user_cap
+
+
+# ---------------------------------------------------------------------------
+# Test: CapabilityConfig.build() is called during get_agentlet()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_capability_config_build_called(mock_agent: Agent[Any]) -> None:
+    """CapabilityConfig.build() is called during get_agentlet()."""
+    from agentpool_config.capabilities import CapabilityConfig
+
+    cap_config = CapabilityConfig(
+        type="pydantic_ai.capabilities.Instrumentation",
+        args={},
+    )
+    mock_agent.config = MagicMock()
+    mock_agent.config.capabilities = [cap_config]
+
+    with patch.object(CapabilityConfig, "build") as mock_build:
+        mock_build.return_value = MagicMock()
+        with patch(
+            "agentpool.agents.native_agent.agent.PydanticAgent"
+        ) as mock_pydantic_agent:
+            mock_pydantic_agent.return_value = MagicMock()
+            await mock_agent.get_agentlet(None, None, None)
+
+        mock_build.assert_called_once()
