@@ -1,14 +1,14 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-03T03:51:20.212Z",
+  "updated_at": "2026-06-03T04:32:29.074Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
   "session_ids": [
     "opencode:ses_1776ac40affejH6cwX46KnopyE"
   ],
-  "status": "active",
+  "status": "completed",
   "session_origins": {
     "opencode:ses_1776ac40affejH6cwX46KnopyE": "direct"
   },
@@ -220,6 +220,123 @@
       "status": "completed",
       "ended_at": "2026-06-03T03:51:20.212Z",
       "elapsed_ms": 20372
+    },
+    "todo:53": {
+      "task_key": "todo:53",
+      "task_label": "53",
+      "task_title": "**Migrate `tests/tools/test_manager.py`**",
+      "session_id": "opencode:ses_1745dddf4ffeT3fZ1UDsZR9hxZ",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-03T04:01:02.277Z",
+      "started_at": "2026-06-03T04:00:04.950Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:01:02.277Z",
+      "elapsed_ms": 57327
+    },
+    "todo:62": {
+      "task_key": "todo:62",
+      "task_label": "62",
+      "task_title": "**Benchmark capability overhead**",
+      "session_id": "opencode:ses_174590558ffeHDN11Ncy6uFTHU",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T04:06:49.485Z",
+      "started_at": "2026-06-03T04:06:13.890Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:06:49.485Z",
+      "elapsed_ms": 35595
+    },
+    "todo:63": {
+      "task_key": "todo:63",
+      "task_label": "63",
+      "task_title": "**Verify EventBus adapter handles all lifecycle events**",
+      "session_id": "opencode:ses_174561836ffeWdMuP3019m9XHo",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T04:14:02.782Z",
+      "started_at": "2026-06-03T04:13:44.626Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:14:02.782Z",
+      "elapsed_ms": 18156
+    },
+    "todo:64": {
+      "task_key": "todo:64",
+      "task_label": "64",
+      "task_title": "**Pin pydantic-ai version**",
+      "session_id": "opencode:ses_1744f9e2effeE0OetJ5n0TfooF",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-03T04:16:06.246Z",
+      "started_at": "2026-06-03T04:15:53.908Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:16:06.246Z",
+      "elapsed_ms": 12338
+    },
+    "todo:65": {
+      "task_key": "todo:65",
+      "task_label": "65",
+      "task_title": "**Add CI job for pydantic-ai main branch**",
+      "session_id": "opencode:ses_1744dcde5ffemaKnPxj7XU09z1",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-03T04:17:12.506Z",
+      "started_at": "2026-06-03T04:16:56.439Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:17:12.506Z",
+      "elapsed_ms": 16067
+    },
+    "final-wave:f1": {
+      "task_key": "final-wave:f1",
+      "task_label": "F1",
+      "task_title": "**Plan Compliance Audit** — `oracle`",
+      "session_id": "opencode:ses_1744cb39cffeqnPtH6r42GklKc",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T04:21:30.963Z",
+      "started_at": "2026-06-03T04:20:43.197Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:21:30.963Z",
+      "elapsed_ms": 47766
+    },
+    "final-wave:f2": {
+      "task_key": "final-wave:f2",
+      "task_label": "F2",
+      "task_title": "**Code Quality Review** — `unspecified-high`",
+      "session_id": "opencode:ses_17448d9c6ffeL3NSsGW3TA9Dfq",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T04:25:32.117Z",
+      "started_at": "2026-06-03T04:24:54.695Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:25:32.117Z",
+      "elapsed_ms": 37422
+    },
+    "final-wave:f3": {
+      "task_key": "final-wave:f3",
+      "task_label": "F3",
+      "task_title": "**Real Manual QA** — `unspecified-high`",
+      "session_id": "opencode:ses_17445215affeVxs94lCPyTPBjA",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T04:28:43.178Z",
+      "started_at": "2026-06-03T04:28:23.417Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:28:43.178Z",
+      "elapsed_ms": 19761
+    },
+    "final-wave:f4": {
+      "task_key": "final-wave:f4",
+      "task_label": "F4",
+      "task_title": "**Scope Fidelity Check** — `deep`",
+      "session_id": "opencode:ses_174423fc2ffe1ES343VbOWHFyy",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-06-03T04:31:47.673Z",
+      "started_at": "2026-06-03T04:31:23.092Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T04:31:47.673Z",
+      "elapsed_ms": 24581
     }
   },
   "works": {
@@ -364,9 +481,9 @@
       "work_id": "thin-pydantic-ai-wrappers-7c434f04",
       "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
       "plan_name": "thin-pydantic-ai-wrappers",
-      "status": "active",
+      "status": "completed",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-03T03:51:20.212Z",
+      "updated_at": "2026-06-03T04:32:29.074Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -582,9 +699,130 @@
           "status": "completed",
           "ended_at": "2026-06-03T03:51:20.212Z",
           "elapsed_ms": 20372
+        },
+        "todo:53": {
+          "task_key": "todo:53",
+          "task_label": "53",
+          "task_title": "**Migrate `tests/tools/test_manager.py`**",
+          "session_id": "opencode:ses_1745dddf4ffeT3fZ1UDsZR9hxZ",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-03T04:01:02.277Z",
+          "started_at": "2026-06-03T04:00:04.950Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:01:02.277Z",
+          "elapsed_ms": 57327
+        },
+        "todo:62": {
+          "task_key": "todo:62",
+          "task_label": "62",
+          "task_title": "**Benchmark capability overhead**",
+          "session_id": "opencode:ses_174590558ffeHDN11Ncy6uFTHU",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T04:06:49.485Z",
+          "started_at": "2026-06-03T04:06:13.890Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:06:49.485Z",
+          "elapsed_ms": 35595
+        },
+        "todo:63": {
+          "task_key": "todo:63",
+          "task_label": "63",
+          "task_title": "**Verify EventBus adapter handles all lifecycle events**",
+          "session_id": "opencode:ses_174561836ffeWdMuP3019m9XHo",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T04:14:02.782Z",
+          "started_at": "2026-06-03T04:13:44.626Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:14:02.782Z",
+          "elapsed_ms": 18156
+        },
+        "todo:64": {
+          "task_key": "todo:64",
+          "task_label": "64",
+          "task_title": "**Pin pydantic-ai version**",
+          "session_id": "opencode:ses_1744f9e2effeE0OetJ5n0TfooF",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-03T04:16:06.246Z",
+          "started_at": "2026-06-03T04:15:53.908Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:16:06.246Z",
+          "elapsed_ms": 12338
+        },
+        "todo:65": {
+          "task_key": "todo:65",
+          "task_label": "65",
+          "task_title": "**Add CI job for pydantic-ai main branch**",
+          "session_id": "opencode:ses_1744dcde5ffemaKnPxj7XU09z1",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-03T04:17:12.506Z",
+          "started_at": "2026-06-03T04:16:56.439Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:17:12.506Z",
+          "elapsed_ms": 16067
+        },
+        "final-wave:f1": {
+          "task_key": "final-wave:f1",
+          "task_label": "F1",
+          "task_title": "**Plan Compliance Audit** — `oracle`",
+          "session_id": "opencode:ses_1744cb39cffeqnPtH6r42GklKc",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T04:21:30.963Z",
+          "started_at": "2026-06-03T04:20:43.197Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:21:30.963Z",
+          "elapsed_ms": 47766
+        },
+        "final-wave:f2": {
+          "task_key": "final-wave:f2",
+          "task_label": "F2",
+          "task_title": "**Code Quality Review** — `unspecified-high`",
+          "session_id": "opencode:ses_17448d9c6ffeL3NSsGW3TA9Dfq",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T04:25:32.117Z",
+          "started_at": "2026-06-03T04:24:54.695Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:25:32.117Z",
+          "elapsed_ms": 37422
+        },
+        "final-wave:f3": {
+          "task_key": "final-wave:f3",
+          "task_label": "F3",
+          "task_title": "**Real Manual QA** — `unspecified-high`",
+          "session_id": "opencode:ses_17445215affeVxs94lCPyTPBjA",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T04:28:43.178Z",
+          "started_at": "2026-06-03T04:28:23.417Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:28:43.178Z",
+          "elapsed_ms": 19761
+        },
+        "final-wave:f4": {
+          "task_key": "final-wave:f4",
+          "task_label": "F4",
+          "task_title": "**Scope Fidelity Check** — `deep`",
+          "session_id": "opencode:ses_174423fc2ffe1ES343VbOWHFyy",
+          "agent": "Sisyphus-Junior",
+          "category": "deep",
+          "updated_at": "2026-06-03T04:31:47.673Z",
+          "started_at": "2026-06-03T04:31:23.092Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T04:31:47.673Z",
+          "elapsed_ms": 24581
         }
-      }
+      },
+      "ended_at": "2026-06-03T04:32:29.074Z",
+      "elapsed_ms": 53206911
     }
   },
-  "active_work_id": "thin-pydantic-ai-wrappers-7c434f04"
+  "active_work_id": "thin-pydantic-ai-wrappers-7c434f04",
+  "ended_at": "2026-06-03T04:32:29.074Z",
+  "elapsed_ms": 53206911
 }

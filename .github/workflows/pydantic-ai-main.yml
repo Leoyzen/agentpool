@@ -1,0 +1,45 @@
+name: Test pydantic-ai main
+
+# This workflow is for early warning only. It tests against pydantic-ai's
+# main branch to detect breaking changes before they are released.
+# Failures here do not block PRs or releases.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: 1
+  COLUMNS: 120
+
+jobs:
+  test:
+    name: Test against pydantic-ai main
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+
+      - name: Override pydantic-ai with main branch
+        run: uv pip install git+https://github.com/pydantic/pydantic-ai.git@main
+
+      - name: Run unit tests
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run --no-group docs pytest -m unit --no-cov
