@@ -16,9 +16,7 @@ import warnings
 import logfire
 from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
-from pydantic_graph import End, GraphBuilder, Step, StepContext
-from pydantic_graph.graph_builder import EndMarker, ErrorMarker
-from pydantic_graph.id_types import NodeID
+from pydantic_graph import End
 
 
 try:
@@ -26,7 +24,7 @@ try:
     from pydantic_ai.capabilities import NativeTool, ProcessHistory
 except ImportError:
     AgentRetries = None  # type: ignore[misc,assignment]
-    from pydantic_ai.capabilities import (
+    from pydantic_ai.capabilities import (  # type: ignore[no-redef]
         BuiltinTool as NativeTool,
         HistoryProcessor as ProcessHistory,
     )
@@ -34,8 +32,6 @@ except ImportError:
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import (
-    PartStartEvent,
-    RunErrorEvent,
     RunStartedEvent,
     StreamCompleteEvent,
 )
@@ -43,7 +39,6 @@ from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.messaging.graph_adapter import AgentPoolState
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
@@ -232,6 +227,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         self.model_settings = model_settings
         self.config = agent_config
+        self._direct_history_processors = None
         # Handle deprecated history_processors parameter
         if history_processors is not None:
             # Convert to session configuration
@@ -1074,6 +1070,27 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
+        """Stream agent events in real-time using direct iteration.
+
+        This is the **standalone agent streaming path**. It spawns a background
+        task that calls `_run_agentlet_core()` directly, pushing events into an
+        async queue as they are produced. The consumer drains the queue and
+        yields events immediately, preserving real-time streaming behavior.
+
+        !!! note "Dual-path architecture"
+            There are two execution paths for native agents:
+
+            | Path | Entry Point | Mechanism | Streaming Granularity |
+            |---|---|---|---|
+            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` | Fine-grained (real-time) |
+            | **Graph** | `MessageNode.run()` / `run_stream()` | `MessageNodeStep._execute()` → `_execute_node()` | Coarse-grained (per-step) |
+
+            Both paths share `_run_agentlet_core()` as the streaming core.
+            The graph path wraps agent execution inside a pydantic-graph Step,
+            where Step-internal events are invisible until the Step boundary
+            is crossed. This method bypasses graph wrapping entirely to avoid
+            that buffering.
+        """
         message_id = message_id or str(uuid4())
         run_id = str(uuid4())
         start_time = time.perf_counter()
@@ -1086,110 +1103,36 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             parent_session_id=parent_session_id,
         )
 
-        # Standalone: wrap the agent in a single-node pydantic-graph so that
-        # Graph.iter() drives execution.  The custom step calls
-        # _run_agentlet_core() which pushes events to state.event_queue.
-        async def _agent_step(ctx: StepContext[AgentPoolState, Any, Any]) -> ChatMessage[Any]:
-            state = ctx.state
-            kw = state.kwargs
-            return await self._run_agentlet_core(
-                prompts=list(state.prompts),
-                run_ctx=kw["run_ctx"],
-                user_msg=kw["user_msg"],
-                message_history=kw["message_history"],
-                message_id=kw["message_id"],
-                session_id=kw["session_id"],
-                parent_id=kw.get("parent_id"),
-                input_provider=kw.get("input_provider"),
-                deps=kw.get("deps"),
-                event_queue=state.event_queue,
-                start_time=kw["start_time"],
-            )
-
-        builder = GraphBuilder(state_type=AgentPoolState, output_type=Any)
-        agent_step = Step(
-            id=NodeID(self.name),
-            call=_agent_step,
-            label=self.description or self.name,
-        )
-        builder.add_edge(builder.start_node, agent_step)
-        builder.add_edge(agent_step, builder.end_node)
-        graph = builder.build()
-
-        state = AgentPoolState(
-            node=self,
-            prompts=tuple(prompts),
-            kwargs={
-                "run_ctx": run_ctx,
-                "user_msg": user_msg,
-                "message_history": message_history,
-                "message_id": message_id,
-                "session_id": session_id,
-                "parent_id": parent_id,
-                "input_provider": input_provider,
-                "deps": deps,
-                "start_time": start_time,
-            },
-        )
-
         response_msg: ChatMessage[Any] | None = None
-        graph_event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
+        event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
         iteration_done = asyncio.Event()
         iteration_error: BaseException | None = None
 
-        async def graph_iteration_task() -> None:
-            """Background task that runs graph.iter() and feeds events to queue."""
+        async def agent_iteration_task() -> None:
+            """Background task that runs agent iteration and feeds events to queue."""
             nonlocal iteration_error, response_msg
             try:
-                async with graph.iter(
-                    state=state, deps=self._get_deps(), inputs=None
-                ) as graph_run:
-                    async for yield_item in graph_run:
-                        # Drain step-internal events from state.event_queue
-                        while not state.event_queue.empty():
-                            try:
-                                event = state.event_queue.get_nowait()
-                                await graph_event_queue.put(event)
-                            except asyncio.QueueEmpty:
-                                break
-
-                        # Map pydantic-graph yields to AgentPool events
-                        match yield_item:
-                            case Sequence() as tasks:
-                                for i, task in enumerate(tasks):
-                                    await graph_event_queue.put(
-                                        PartStartEvent.text(
-                                            index=i,
-                                            content=f"Starting step {task.node_id}",
-                                        )
-                                    )
-                            case EndMarker() as end_marker:
-                                response_msg = end_marker.value
-                                break
-                            case ErrorMarker() as error_marker:
-                                await graph_event_queue.put(
-                                    RunErrorEvent(
-                                        message=str(error_marker.error),
-                                        agent_name=self.name,
-                                        run_id=run_id,
-                                    )
-                                )
-                                raise error_marker.error
+                response_msg = await self._run_agentlet_core(
+                    prompts=list(prompts),
+                    run_ctx=run_ctx,
+                    user_msg=user_msg,
+                    message_history=message_history,
+                    message_id=message_id,
+                    session_id=session_id,
+                    parent_id=parent_id,
+                    input_provider=input_provider,
+                    deps=deps,
+                    event_queue=event_queue,
+                    start_time=start_time,
+                )
             except asyncio.CancelledError:
-                self.log.info("Graph iteration task cancelled")
+                self.log.info("Agent iteration task cancelled")
             except BaseException as e:
                 iteration_error = e
             finally:
-                # Drain any remaining step events
-                while not state.event_queue.empty():
-                    try:
-                        event = state.event_queue.get_nowait()
-                        await graph_event_queue.put(event)
-                    except asyncio.QueueEmpty:
-                        break
-                await graph_event_queue.put(None)
+                await event_queue.put(None)
 
-        iteration_task = asyncio.create_task(graph_iteration_task())
+        iteration_task = asyncio.create_task(agent_iteration_task())
         if self._iteration_task is not None and not self._iteration_task.done():
             self.log.warning(
                 "Starting new stream while iteration_task is still active — "
@@ -1200,7 +1143,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(graph_event_queue.get(), timeout=0.1)
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
                     if event is None:
                         break
                     yield event
