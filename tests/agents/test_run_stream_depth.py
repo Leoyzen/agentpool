@@ -30,6 +30,20 @@ def test_agent_run_context_depth_zero_explicit() -> None:
     assert ctx.depth == 0
 
 
+def test_agent_run_context_terminal_tool_state_default() -> None:
+    """AgentRunContext should default terminal-tool state to empty."""
+    ctx = AgentRunContext()
+    assert ctx.terminal_tool_name is None
+    assert ctx.terminal_tool_result is None
+
+
+def test_attempt_completion_is_terminal_tool() -> None:
+    """Native agents should stop after `attempt_completion` completes."""
+    from agentpool.agents.native_agent.helpers import TERMINAL_TOOL_NAMES
+
+    assert "attempt_completion" in TERMINAL_TOOL_NAMES
+
+
 def test_run_stream_accepts_depth_param() -> None:
     """BaseAgent.run_stream() should accept depth parameter without TypeError.
 

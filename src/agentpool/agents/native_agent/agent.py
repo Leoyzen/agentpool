@@ -936,7 +936,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         Returns:
             The final response ChatMessage.
         """
-        from agentpool.agents.native_agent.helpers import extract_text_from_messages
+        from agentpool.agents.native_agent.helpers import (
+            TERMINAL_TOOL_NAMES,
+            extract_text_from_messages,
+        )
 
         history_list = message_history.get_history()
         if history_list and history_list[-1] is user_msg:
@@ -962,6 +965,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 async for node in agent_run:
                     if run_ctx.cancelled:
                         self.log.info("Stream cancelled by user")
+                        break
+                    if run_ctx.terminal_tool_name is not None:
+                        self.log.info(
+                            "Stream completed by terminal tool",
+                            tool_name=run_ctx.terminal_tool_name,
+                        )
                         break
                     if isinstance(node, End):
                         break
@@ -1016,6 +1025,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                         run_ctx,
                                     ):
                                         await event_queue.put(combined)
+                                        if combined.tool_name in TERMINAL_TOOL_NAMES:
+                                            run_ctx.terminal_tool_name = combined.tool_name
+                                            run_ctx.terminal_tool_result = combined.tool_result
+                                            break
+                                if run_ctx.terminal_tool_name is not None:
+                                    break
                             else:
                                 async with merge_queue_into_iterator(
                                     stream, run_ctx.event_queue
@@ -1032,6 +1047,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                             run_ctx,
                                         ):
                                             await event_queue.put(combined)
+                                            if combined.tool_name in TERMINAL_TOOL_NAMES:
+                                                run_ctx.terminal_tool_name = combined.tool_name
+                                                run_ctx.terminal_tool_result = combined.tool_result
+                                                break
+                                if run_ctx.terminal_tool_name is not None:
+                                    break
 
             response_time = time.perf_counter() - start_time
             if run_ctx.cancelled:
@@ -1049,6 +1070,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     finish_reason="stop",
                 )
                 await event_queue.put(StreamCompleteEvent(message=response_msg))
+            elif run_ctx.terminal_tool_name is not None:
+                response_msg = ChatMessage(
+                    content=str(run_ctx.terminal_tool_result or ""),
+                    role="assistant",
+                    name=self.name,
+                    message_id=message_id,
+                    session_id=session_id,
+                    parent_id=user_msg.message_id,
+                    response_time=response_time,
+                    finish_reason="stop",
+                )
             elif agent_run.result:
                 response_msg = await ChatMessage.from_run_result(
                     agent_run.result,

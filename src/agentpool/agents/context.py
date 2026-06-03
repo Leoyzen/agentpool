@@ -81,6 +81,12 @@ class AgentRunContext:
     completed: bool = False
     """Whether the run has completed (stream finished)."""
 
+    terminal_tool_result: Any = None
+    """Result returned by a terminal tool such as `attempt_completion`."""
+
+    terminal_tool_name: str | None = None
+    """Name of the terminal tool that completed the run."""
+
 
 @dataclass(kw_only=True)
 class AgentContext[TDeps = Any](NodeContext[TDeps]):

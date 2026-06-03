@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from agentpool_config.nodes import ToolConfirmationMode
 
 
+TERMINAL_TOOL_NAMES = frozenset({"attempt_completion"})
+
+
 async def process_tool_event(
     agent_name: str,
     event: RichAgentStreamEvent[Any],
