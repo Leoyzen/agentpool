@@ -271,6 +271,7 @@ class HooksConfig(Schema):
             post_run=[cfg.get_hook("post_run") for cfg in self.post_run],
             pre_tool_use=[cfg.get_hook("pre_tool_use") for cfg in self.pre_tool_use],
             post_tool_use=[cfg.get_hook("post_tool_use") for cfg in self.post_tool_use],
+            _warn=False,
         )
 
 

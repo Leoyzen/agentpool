@@ -182,7 +182,7 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
         self._client: httpx.AsyncClient | None = None
         self._sdk_session_id: str | None = None
         # Override tools with provided tools
-        self.tools = ToolManager(tools)
+        self.tools = ToolManager(tools, _warn=False)
 
     @classmethod
     def from_config(

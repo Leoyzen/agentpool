@@ -218,7 +218,7 @@ class SystemPrompts:
 
         # Wrap callable prompts for pydantic-ai compatibility
         for prompt in callable_prompts:
-            wrapped = wrap_instruction(prompt, fallback="")  # type: ignore[arg-type]
+            wrapped = wrap_instruction(prompt, fallback="", _warn=False)  # type: ignore[arg-type]
             instructions.append(wrapped)
 
         return instructions

@@ -9,6 +9,7 @@ from datetime import timedelta
 import inspect
 from pathlib import Path
 import time
+import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
 from uuid import uuid4
 
@@ -288,7 +289,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # Store builtin tools for pydantic-ai
         self._builtin_tools = list(builtin_tools) if builtin_tools else []
         # Override tools with Agent-specific ToolManager (with tools and tool_mode)
-        self.tools = ToolManager(tools, tool_mode=tool_mode)
+        self.tools = ToolManager(tools, tool_mode=tool_mode, _warn=False)
         for toolset_provider in toolsets or []:
             self.tools.add_provider(toolset_provider)
         aggregating_provider = self.mcp.get_aggregating_provider()
@@ -367,12 +368,21 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
                 raise ValueError(msg)
 
-    def _resolve_history_processors(self) -> list[Callable[..., Any]]:
+    def _resolve_history_processors(
+        self, *, _warn: bool = True
+    ) -> list[Callable[..., Any]]:
         """Resolve history processors from config with caching.
 
         Returns:
             List of resolved processor callables
         """
+        if _warn:
+            warnings.warn(
+                "_resolve_history_processors() is deprecated and will be removed in v0.5.0. "
+                "Use ProcessHistoryAdapter instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         # Return cached result if available
         if self._resolved_history_processors is not None:
             return self._resolved_history_processors
@@ -730,7 +740,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             model_ = actual_model
 
         # Resolve history processors with caching
-        history_processors = self._resolve_history_processors()
+        history_processors = self._resolve_history_processors(_warn=False)
 
         # Yield to ensure interrupt() can run before iteration_task is created.
         # Without this, get_agentlet() may complete synchronously, causing
@@ -777,7 +787,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 # Wrap each instruction for pydantic-ai compatibility
                 for instruction_fn in provider_instructions:
                     try:
-                        wrapped_instruction = wrap_instruction(instruction_fn, fallback="")
+                        wrapped_instruction = wrap_instruction(instruction_fn, fallback="", _warn=False)
                         all_instructions.append(wrapped_instruction)
                     except Exception:
                         # Wrap failure - log and skip this instruction

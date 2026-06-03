@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -39,7 +40,16 @@ class MCPManager:
         sampling_model: str = "openai:gpt-5-nano",
         servers: Sequence[MCPServerConfig | str] | None = None,
         accessible_roots: list[str] | None = None,
+        *,
+        _warn: bool = True,
     ) -> None:
+        if _warn:
+            warnings.warn(
+                "MCPManager is deprecated and will be removed in v0.5.0. "
+                "Use as_capability() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.name = name
         self.owner = owner
         self.servers: list[MCPServerConfig] = []
@@ -56,6 +66,12 @@ class MCPManager:
 
     def add_server_config(self, cfg: MCPServerConfig | str) -> None:
         """Add a new MCP server to the manager."""
+        warnings.warn(
+            "MCPManager.add_server_config() is deprecated and will be removed in v0.5.0. "
+            "Use as_capability() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         resolved = BaseMCPServerConfig.from_string(cfg) if isinstance(cfg, str) else cfg
         self.servers.append(resolved)
 
@@ -155,6 +171,12 @@ class MCPManager:
 
     def get_mcp_providers(self) -> list[MCPResourceProvider]:
         """Get all MCP resource providers managed by this manager."""
+        warnings.warn(
+            "MCPManager.get_mcp_providers() is deprecated and will be removed in v0.5.0. "
+            "Use as_capability() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return list(self.providers)
 
     def remove_provider(self, client_id: str) -> bool:
@@ -166,6 +188,12 @@ class MCPManager:
         Returns:
             True if a provider was removed, False otherwise
         """
+        warnings.warn(
+            "MCPManager.remove_provider() is deprecated and will be removed in v0.5.0. "
+            "Use as_capability() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         for i, provider in enumerate(self.providers):
             if provider.server.client_id == client_id:
                 # Note: We don't remove from exit_stack here because

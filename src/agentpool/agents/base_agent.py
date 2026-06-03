@@ -266,7 +266,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 assert_never(unreachable)
         self._input_provider = input_provider
         self._output_type: type[TResult] = output_type
-        self.tools = ToolManager()
+        self.tools = ToolManager(_warn=False)
         handlers = resolve_event_handlers(event_handlers)
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks

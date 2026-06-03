@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-03T03:10:07.554Z",
+  "updated_at": "2026-06-03T03:47:04.752Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -16,15 +16,15 @@
     "todo:1": {
       "task_key": "todo:1",
       "task_label": "1",
-      "task_title": "**Remove `self.session_id` from `BaseAgent.__init__`**",
-      "session_id": "opencode:ses_1776a1751ffeSyETtBw1NKZHws",
+      "task_title": "`test_python_api_capability_passthrough` — passing pre-instantiated capability to NativeAgentConfig",
+      "session_id": "opencode:ses_174889877ffeNYeGefcOY36KzR",
       "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-06-02T13:58:15.872Z",
+      "category": "quick",
       "started_at": "2026-06-02T13:56:48.084Z",
+      "ended_at": "2026-06-03T03:16:01.373Z",
+      "elapsed_ms": 47953289,
       "status": "completed",
-      "ended_at": "2026-06-02T13:58:15.872Z",
-      "elapsed_ms": 87788
+      "updated_at": "2026-06-03T03:16:01.373Z"
     },
     "todo:5": {
       "task_key": "todo:5",
@@ -150,8 +150,60 @@
       "session_id": "opencode:ses_1748c277cffe73W56vMv7y0Sbo",
       "agent": "Sisyphus-Junior",
       "category": "unspecified-high",
-      "updated_at": "2026-06-03T03:10:07.554Z",
+      "updated_at": "2026-06-03T03:11:28.201Z",
       "started_at": "2026-06-03T03:10:07.554Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:11:28.201Z",
+      "elapsed_ms": 80647
+    },
+    "todo:38": {
+      "task_key": "todo:38",
+      "task_label": "38",
+      "task_title": "**Run full test suite for passthrough**",
+      "session_id": "opencode:ses_1748430fcffeUTbgBJrLMj37xS",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-03T03:18:31.821Z",
+      "started_at": "2026-06-03T03:18:16.265Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:18:31.821Z",
+      "elapsed_ms": 15556
+    },
+    "todo:39": {
+      "task_key": "todo:39",
+      "task_label": "39",
+      "task_title": "**Map `Tool.requires_confirmation` to `ApprovalRequiredToolset`**",
+      "session_id": "opencode:ses_174823f27ffeT8dUiqoJf480JU",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T03:36:31.365Z",
+      "started_at": "2026-06-03T03:32:03.913Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:36:31.365Z",
+      "elapsed_ms": 267452
+    },
+    "todo:42": {
+      "task_key": "todo:42",
+      "task_label": "42",
+      "task_title": "**Write tests for tool confirmation with capability-based toolsets**",
+      "session_id": "opencode:ses_17471bb36ffeMWtZ24z6Y4wbzP",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-03T03:42:19.024Z",
+      "started_at": "2026-06-03T03:41:55.284Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:42:19.024Z",
+      "elapsed_ms": 23740
+    },
+    "todo:44": {
+      "task_key": "todo:44",
+      "task_label": "44",
+      "task_title": "**Implement `ToolManager` shim**",
+      "session_id": "opencode:ses_1746bccd1ffenvRYz2QGIQrI8E",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T03:47:04.752Z",
+      "started_at": "2026-06-03T03:47:04.752Z",
       "status": "running"
     }
   },
@@ -299,7 +351,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-03T03:10:07.554Z",
+      "updated_at": "2026-06-03T03:47:04.752Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -311,15 +363,15 @@
         "todo:1": {
           "task_key": "todo:1",
           "task_label": "1",
-          "task_title": "**Remove `self.session_id` from `BaseAgent.__init__`**",
-          "session_id": "opencode:ses_1776a1751ffeSyETtBw1NKZHws",
+          "task_title": "`test_python_api_capability_passthrough` — passing pre-instantiated capability to NativeAgentConfig",
+          "session_id": "opencode:ses_174889877ffeNYeGefcOY36KzR",
           "agent": "Sisyphus-Junior",
-          "category": "deep",
-          "updated_at": "2026-06-02T13:58:15.872Z",
+          "category": "quick",
           "started_at": "2026-06-02T13:56:48.084Z",
+          "ended_at": "2026-06-03T03:16:01.373Z",
+          "elapsed_ms": 47953289,
           "status": "completed",
-          "ended_at": "2026-06-02T13:58:15.872Z",
-          "elapsed_ms": 87788
+          "updated_at": "2026-06-03T03:16:01.373Z"
         },
         "todo:5": {
           "task_key": "todo:5",
@@ -445,8 +497,60 @@
           "session_id": "opencode:ses_1748c277cffe73W56vMv7y0Sbo",
           "agent": "Sisyphus-Junior",
           "category": "unspecified-high",
-          "updated_at": "2026-06-03T03:10:07.554Z",
+          "updated_at": "2026-06-03T03:11:28.201Z",
           "started_at": "2026-06-03T03:10:07.554Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:11:28.201Z",
+          "elapsed_ms": 80647
+        },
+        "todo:38": {
+          "task_key": "todo:38",
+          "task_label": "38",
+          "task_title": "**Run full test suite for passthrough**",
+          "session_id": "opencode:ses_1748430fcffeUTbgBJrLMj37xS",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-03T03:18:31.821Z",
+          "started_at": "2026-06-03T03:18:16.265Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:18:31.821Z",
+          "elapsed_ms": 15556
+        },
+        "todo:39": {
+          "task_key": "todo:39",
+          "task_label": "39",
+          "task_title": "**Map `Tool.requires_confirmation` to `ApprovalRequiredToolset`**",
+          "session_id": "opencode:ses_174823f27ffeT8dUiqoJf480JU",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T03:36:31.365Z",
+          "started_at": "2026-06-03T03:32:03.913Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:36:31.365Z",
+          "elapsed_ms": 267452
+        },
+        "todo:42": {
+          "task_key": "todo:42",
+          "task_label": "42",
+          "task_title": "**Write tests for tool confirmation with capability-based toolsets**",
+          "session_id": "opencode:ses_17471bb36ffeMWtZ24z6Y4wbzP",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-03T03:42:19.024Z",
+          "started_at": "2026-06-03T03:41:55.284Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:42:19.024Z",
+          "elapsed_ms": 23740
+        },
+        "todo:44": {
+          "task_key": "todo:44",
+          "task_label": "44",
+          "task_title": "**Implement `ToolManager` shim**",
+          "session_id": "opencode:ses_1746bccd1ffenvRYz2QGIQrI8E",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T03:47:04.752Z",
+          "started_at": "2026-06-03T03:47:04.752Z",
           "status": "running"
         }
       }

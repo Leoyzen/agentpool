@@ -170,7 +170,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             self.event_handlers = event_handlers or []
             self.connection_registry = ConnectionRegistry()
             servers = self.manifest.get_mcp_servers()
-            self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool")
+            self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool", _warn=False)
             self.skills = SkillsManager(
                 name="pool_skills",
                 owner="pool",

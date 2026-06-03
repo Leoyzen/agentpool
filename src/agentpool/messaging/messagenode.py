@@ -123,7 +123,7 @@ class MessageNode[TDeps, TResult](ABC):
             source_name=self._name,
         )
         name_ = f"node_{self._name}"
-        self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name)
+        self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name, _warn=False)
         self.enable_db_logging = enable_logging
 
     async def log_session(

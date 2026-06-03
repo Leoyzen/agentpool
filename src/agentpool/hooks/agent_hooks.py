@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +46,16 @@ class AgentHooks:
     post_run: Sequence[Hook] = field(default_factory=list)
     pre_tool_use: Sequence[Hook] = field(default_factory=list)
     post_tool_use: Sequence[Hook] = field(default_factory=list)
+    _warn: bool = field(default=True, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._warn:
+            warnings.warn(
+                "AgentHooks is deprecated and will be removed in v0.5.0. "
+                "Use as_capability() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     def has_hooks(self) -> bool:
         """Check if any hooks are configured."""

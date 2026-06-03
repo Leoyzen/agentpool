@@ -6,6 +6,7 @@ context injection for pydantic-ai compatibility.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
@@ -33,6 +34,7 @@ def wrap_instruction(
     fn: InstructionFunc,
     *,
     fallback: str = "",
+    _warn: bool = True,
 ) -> Callable[[RunContext[Any]], Awaitable[str]]:
     """Wrap an instruction function for pydantic-ai compatibility.
 
@@ -81,6 +83,13 @@ def wrap_instruction(
 
             wrapped = wrap_instruction(from_run_context)
     """
+    if _warn:
+        warnings.warn(
+            "wrap_instruction() is deprecated and will be removed in v0.5.0. "
+            "Use PydanticAIInstruction protocol instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     from pydantic_ai import RunContext
 
     from agentpool.agents.context import AgentContext
