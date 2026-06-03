@@ -14,7 +14,7 @@ the consumer is cancelled, the background task gets a shielded cleanup window.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import contextlib
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -23,7 +23,6 @@ from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.messages import BaseToolCallPart, ToolCallPart
 from pydantic_graph import End
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     RichAgentStreamEvent,
     RunStartedEvent,
@@ -40,6 +39,9 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.native_agent.agent import Agent
 
 
@@ -60,7 +62,7 @@ class RunExecutor:
         self._agent = agent
         self._iteration_task: asyncio.Task[Any] | None = None
 
-    async def execute(
+    async def execute(  # noqa: PLR0915
         self,
         *,
         prompts: list[Any],
@@ -233,7 +235,8 @@ class RunExecutor:
                         metadata=None,
                     )
                 else:
-                    raise RuntimeError("Stream completed without producing a result")
+                    msg = "Stream completed without producing a result"
+                    raise RuntimeError(msg)  # noqa: TRY301
 
             except asyncio.CancelledError:
                 logger.debug("Agent iteration task cancelled")
@@ -263,7 +266,7 @@ class RunExecutor:
                 except TimeoutError:
                     current = asyncio.current_task()
                     if current is not None and current.cancelling() > 0:
-                        raise asyncio.CancelledError() from None
+                        raise asyncio.CancelledError from None
                     if run_ctx.cancelled:
                         break
                     continue
@@ -275,13 +278,11 @@ class RunExecutor:
         finally:
             if self._iteration_task is not None and not self._iteration_task.done():
                 self._iteration_task.cancel()
-                try:
+                with contextlib.suppress(TimeoutError, asyncio.CancelledError):
                     await asyncio.wait_for(
                         asyncio.shield(self._iteration_task),
                         timeout=2.0,
                     )
-                except (TimeoutError, asyncio.CancelledError):
-                    pass
             self._iteration_task = None
 
         if iteration_error is not None:

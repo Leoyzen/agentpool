@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.context import AgentRunContext
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class RunStatus(Enum):
@@ -80,7 +83,7 @@ class RunHandle:
         if event_bus is not None:
             from agentpool.agents.events import RunFailedEvent
 
-            _ = asyncio.create_task(
+            self._event_task = asyncio.create_task(
                 event_bus.publish(
                     self.session_id,
                     RunFailedEvent(

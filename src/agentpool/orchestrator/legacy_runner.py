@@ -7,13 +7,11 @@ non-native agents (ACP, ClaudeCode, AGUI).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 import contextlib
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import uuid
 
-from agentpool.agents.context import AgentRunContext
 from agentpool.log import get_logger
 from agentpool.orchestrator.core import (
     DEFAULT_MAX_AUTO_RESUME,
@@ -22,6 +20,10 @@ from agentpool.orchestrator.core import (
     SessionState,
 )
 from agentpool.orchestrator.run import RunHandle, RunStatus
+
+
+if TYPE_CHECKING:
+    from agentpool.agents.context import AgentRunContext
 
 
 logger = get_logger(__name__)
@@ -84,7 +86,7 @@ class LegacyTurnRunner:
                 self._injection_locks[session_id] = lock
             return lock
 
-    async def _run_turn_unlocked(
+    async def _run_turn_unlocked(  # noqa: PLR0915
         self,
         session_id: str,
         *prompts: Any,
