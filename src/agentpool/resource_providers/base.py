@@ -123,12 +123,20 @@ class ResourceProvider(ABC):
         Tool.to_pydantic_ai() and wraps them in a FunctionToolset, exposed
         through a Toolset capability for lazy evaluation.
 
+        Tools with ``requires_confirmation=True`` are wrapped in an
+        ``ApprovalRequiredToolset`` so pydantic-ai defers their execution
+        until explicit approval is granted.
+
         Returns:
             A pydantic-ai AbstractCapability (Toolset) that contributes this
             provider's tools when the agent runs.
         """
         from pydantic_ai.capabilities import Toolset
-        from pydantic_ai.toolsets import FunctionToolset
+        from pydantic_ai.toolsets import (
+            ApprovalRequiredToolset,
+            CombinedToolset,
+            FunctionToolset,
+        )
 
         from agentpool.agents.context import AgentContext
 
@@ -205,8 +213,27 @@ class ResourceProvider(ABC):
             tools = await self.get_tools()
             if not tools:
                 return None
-            pa_tools = [_wrap_for_pydantic_ai(tool) for tool in tools]
-            return FunctionToolset(pa_tools, id=self.name)
+
+            normal_tools = [t for t in tools if not t.requires_confirmation]
+            confirm_tools = [t for t in tools if t.requires_confirmation]
+
+            toolsets: list[Any] = []
+            if normal_tools:
+                pa_tools = [_wrap_for_pydantic_ai(tool) for tool in normal_tools]
+                toolsets.append(FunctionToolset(pa_tools, id=self.name))
+            if confirm_tools:
+                pa_tools = [_wrap_for_pydantic_ai(tool) for tool in confirm_tools]
+                toolsets.append(
+                    ApprovalRequiredToolset(
+                        FunctionToolset(pa_tools, id=self.name)
+                    )
+                )
+
+            if not toolsets:
+                return None
+            if len(toolsets) == 1:
+                return toolsets[0]
+            return CombinedToolset(toolsets)
 
         return Toolset(_build_toolset)
 

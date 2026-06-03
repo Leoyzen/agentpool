@@ -753,7 +753,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 hooks_capability, run_ctx.event_bus
             ).as_capability()
         tool_capabilities.append(hooks_capability)
-        # 3. MCP servers
+        # 3. Approval bridge: routes pydantic-ai deferred approvals to InputProvider
+        from agentpool.agents.native_agent.approval_bridge import (
+            create_approval_bridge_capability,
+        )
+
+        tool_capabilities.append(create_approval_bridge_capability(self))
+        # 4. MCP servers
         mcp_capabilities = self.mcp.as_capability()
         tool_capabilities.extend(mcp_capabilities)
 
