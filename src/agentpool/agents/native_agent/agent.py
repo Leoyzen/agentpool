@@ -945,17 +945,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                         if run_ctx.cancelled or iteration_done.is_set():
                                             break
                                         await event_queue.put(event)
-                                        if combined := await process_tool_event(
+                                        await process_tool_event(
                                             self.name,
                                             event,  # type: ignore[arg-type]
                                             pending_tcs,
                                             message_id,
                                             run_ctx,
-                                        ):
-                                            await run_ctx.event_bus.publish(
-                                                session_id,  # type: ignore[arg-type]
-                                                combined,
-                                            )
+                                        )
                                 else:
                                     # Standalone mode: merge run_ctx.event_queue
                                     # for backward compatibility.

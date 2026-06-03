@@ -368,7 +368,7 @@ class SubagentTools(StaticResourceProvider):
             if session_pool is not None:
                 # Subscribe to EventBus for child session events
                 event_queue = await session_pool.event_bus.subscribe(
-                    child_session_id, scope="self"
+                    child_session_id, scope="session"
                 )
 
                 async def _run_via_session_pool() -> None:

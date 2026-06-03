@@ -518,7 +518,13 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             run_ctx.cancelled = True
         finally:
             if event_bus is not None and bus_queue is not None:
-                await event_bus.unsubscribe(session_id, bus_queue)
+                try:
+                    await event_bus.unsubscribe(session_id, bus_queue)
+                except Exception:
+                    self.log.exception(
+                        "Failed to unsubscribe from event bus during cleanup",
+                        session_id=session_id,
+                    )
 
         if run_ctx.cancelled:
             message = ChatMessage[str](
