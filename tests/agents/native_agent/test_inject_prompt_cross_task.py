@@ -114,6 +114,7 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     session_pool = MagicMock()
     session_pool.sessions = session_controller
     session_pool.get_run.return_value = run_handle
+    session_pool.receive_request = AsyncMock()
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent_pool.storage = MagicMock()

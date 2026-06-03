@@ -656,6 +656,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         processed in a continuation loop without exiting the stream. This
         allows tools or external code to schedule follow-up work.
 
+        For native agents when pooled, delegates to SessionPool.receive_request()
+        with priority="when_idle". The active-run path still queues directly into
+        the injection_manager to avoid race conditions with tool augmentation.
+
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
             session_id: Optional session ID for SessionPool fallback lookup.
@@ -667,6 +671,37 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return "Initial work done"
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
+
+        # Native agents when pooled: route through SessionPool.receive_request.
+        # For active runs, also queue directly for synchronous tool augmentation.
+        if self.AGENT_TYPE == "native":
+            if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+                effective_session_id = session_id or (
+                    run_ctx.session_id if run_ctx else self._events.session_id
+                )
+                if effective_session_id is not None:
+                    session_pool = self.agent_pool.session_pool
+                    if run_ctx is not None and not run_ctx.completed:
+                        # Active run: queue directly for immediate availability
+                        if run_ctx.injection_manager is not None:
+                            run_ctx.injection_manager.queue(*prompts)
+                        # Also schedule through SessionPool for consistency
+                        self.task_manager.fire_and_forget(
+                            session_pool.receive_request(
+                                effective_session_id, prompts, priority="when_idle"
+                            )
+                        )
+                        return
+                    # No active run: delegate to SessionPool for auto-resume
+                    self.task_manager.fire_and_forget(
+                        session_pool.receive_request(
+                            effective_session_id, prompts, priority="when_idle"
+                        )
+                    )
+                    return
+            # Standalone native agents: fall through to legacy path
+
+        # Legacy path for non-native agents and standalone native agents
         if run_ctx is not None and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.queue(*prompts)
 
@@ -678,8 +713,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         iteration completes, the message is automatically queued for the
         next iteration.
 
+        For native agents when pooled, delegates to SessionPool.receive_request()
+        with priority="asap". The active-run path still injects directly into
+        the injection_manager to avoid race conditions with tool augmentation
+        (after_tool_execute -> consume()).
+
         If no active run context exists (e.g., after end_turn), delegates to
-        SessionPool.inject_prompt() to trigger auto-resume.
+        SessionPool.receive_request() to trigger auto-resume.
 
         Args:
             message: Message to inject
@@ -693,6 +733,38 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return "Changes made"
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
+
+        # Native agents when pooled: route through SessionPool.receive_request.
+        # For active runs, also inject directly for synchronous tool augmentation.
+        if self.AGENT_TYPE == "native":
+            if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+                effective_session_id = session_id or (
+                    run_ctx.session_id if run_ctx else self._events.session_id
+                )
+                if effective_session_id is not None:
+                    session_pool = self.agent_pool.session_pool
+                    if run_ctx is not None and not run_ctx.completed:
+                        # Active run: inject directly for immediate availability
+                        # (tool augmentation needs synchronous access)
+                        if run_ctx.injection_manager is not None:
+                            run_ctx.injection_manager.inject(message)
+                        # Also schedule through SessionPool for consistency
+                        self.task_manager.fire_and_forget(
+                            session_pool.receive_request(
+                                effective_session_id, message, priority="asap"
+                            )
+                        )
+                        return
+                    # No active run: delegate to SessionPool for auto-resume
+                    self.task_manager.fire_and_forget(
+                        session_pool.receive_request(
+                            effective_session_id, message, priority="asap"
+                        )
+                    )
+                    return
+            # Standalone native agents: fall through to legacy path
+
+        # Legacy path for non-native agents and standalone native agents
         # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
         # has already finished (e.g., after end_turn).  If the turn is complete,
         # the message would be stuck in injection_manager.pending forever because
@@ -844,27 +916,20 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
         self._active_run_ctx = run_ctx
-        # Queue the initial prompts (skip if no injection_manager)
-        if run_ctx.injection_manager is not None:
-            run_ctx.injection_manager.insert_queued(prompts)
 
         # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
         # token is initialized so finally always has a bound name; reset only if set() succeeded.
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
-            # Process queued prompts until queue is empty
-            while (
-                run_ctx.injection_manager is not None
-                and run_ctx.injection_manager.has_queued()
-                and not run_ctx.cancelled
-            ):
-                current_prompts = run_ctx.injection_manager.pop_queued()
-                if current_prompts is None:
-                    break
+            # Native agents use PydanticAI's PendingMessageDrainCapability for
+            # enqueue/asap/when_idle handling.  Non-native agents still need
+            # the manual follow-up loop.
+            if self.AGENT_TYPE == "native":
+                # Process initial prompts directly, skip manual follow-up loop
                 async for event in self._run_stream_once(
                     run_ctx,
-                    *current_prompts,
+                    *prompts,
                     store_history=store_history,
                     message_id=message_id,
                     session_id=effective_session_id,
@@ -877,10 +942,38 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     event_handlers=event_handlers,
                 ):
                     yield event
-
-                # After each iteration, flush unconsumed injections to queue
+            else:
+                # Queue the initial prompts (skip if no injection_manager)
                 if run_ctx.injection_manager is not None:
-                    run_ctx.injection_manager.flush_pending_to_queue()
+                    run_ctx.injection_manager.insert_queued(prompts)
+                # Process queued prompts until queue is empty
+                while (
+                    run_ctx.injection_manager is not None
+                    and run_ctx.injection_manager.has_queued()
+                    and not run_ctx.cancelled
+                ):
+                    current_prompts = run_ctx.injection_manager.pop_queued()
+                    if current_prompts is None:
+                        break
+                    async for event in self._run_stream_once(
+                        run_ctx,
+                        *current_prompts,
+                        store_history=store_history,
+                        message_id=message_id,
+                        session_id=effective_session_id,
+                        parent_session_id=parent_session_id,
+                        parent_id=parent_id,
+                        message_history=message_history,
+                        input_provider=input_provider,
+                        wait_for_connections=wait_for_connections,
+                        deps=deps,
+                        event_handlers=event_handlers,
+                    ):
+                        yield event
+
+                    # After each iteration, flush unconsumed injections to queue
+                    if run_ctx.injection_manager is not None:
+                        run_ctx.injection_manager.flush_pending_to_queue()
         finally:
             if token is not None:
                 # Suppress ValueError when token was created in a different async
@@ -1265,9 +1358,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Sets the cancelled flag, calls subclass-specific _interrupt(),
         and emits the interrupted signal.
 
-        When run_ctx is not provided (e.g., from OpenCode abort_session),
-        tries _current_run_ctx_var (ContextVar) first, then falls back to
-        SessionPool's session.current_run_id + get_run() for cross-task access.
+        When pooled, delegates to SessionPool to cancel the active run via
+        RunHandle.  When run_ctx is not provided (e.g., from OpenCode
+        abort_session), tries _current_run_ctx_var (ContextVar) first, then
+        falls back to SessionPool's session.current_run_id + get_run() for
+        cross-task access.
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
@@ -1285,6 +1380,16 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             effective_run_ctx.cancelled = True
         if self._background_run_ctx:
             self._background_run_ctx.cancelled = True
+
+        # When pooled, delegate to SessionPool for proper run cancellation.
+        if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+            effective_session_id = session_id or (
+                effective_run_ctx.session_id if effective_run_ctx else self._events.session_id
+            )
+            if effective_session_id is not None:
+                session_pool = self.agent_pool.session_pool
+                session_pool.sessions.cancel_run_for_session(effective_session_id)
+
         await self._interrupt(effective_run_ctx)
         await self.interrupted.emit(self.InterruptEvent(agent_name=self.name))
         logger.info("Agent interrupted", agent=self.name)

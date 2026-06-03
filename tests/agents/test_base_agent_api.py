@@ -23,6 +23,8 @@ from agentpool.orchestrator.core import SessionState
 class _TestAgent(BaseAgent):
     """Minimal concrete agent for testing BaseAgent APIs."""
 
+    AGENT_TYPE = "native"
+
     @property
     def model_name(self) -> str | None:
         return "test-model"
