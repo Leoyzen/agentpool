@@ -96,10 +96,11 @@ class NativeAgentHookManager:
             args: ValidatedToolArgs,
             result: Any,
         ) -> Any:
-            # Run original hook first
-            result = await original_after_tool(
-                ctx, call=call, tool_def=tool_def, args=args, result=result
-            )
+            # Run original hook first if it exists
+            if original_after_tool is not None:
+                result = await original_after_tool(
+                    ctx, call=call, tool_def=tool_def, args=args, result=result
+                )
 
             # Consume pending injection from run context
             run_ctx = self._agent.get_active_run_context()

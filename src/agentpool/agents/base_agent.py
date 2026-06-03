@@ -10,6 +10,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 import inspect
 import os
+import sys
 from pathlib import Path
 import re
 import warnings
@@ -122,27 +123,31 @@ def _should_bypass_session_pool() -> bool:
        within a TurnRunner turn (e.g., via message forwarding), delegating
        back to SessionPool would cause a deadlock on the per-session turn_lock.
 
-    Uses inspect.stack() to walk the call stack and identify these frames.
+    Uses sys._getframe() to walk the call stack efficiently and identify
+    these frames. This avoids the overhead of inspect.stack() which
+    constructs full FrameInfo objects for every frame.
 
     Returns:
         True if SessionPool delegation should be bypassed, False otherwise.
     """
-    for frame_info in inspect.stack():
-        module = inspect.getmodule(frame_info.frame)
+    frame = sys._getframe(1)
+    while frame:
+        module = inspect.getmodule(frame)
         if module is not None:
             module_name = module.__name__
             # AG-UI adapter bypass
             if "agui" in module_name:
                 return True
             # SessionPool internal turn bypass (prevents turn_lock deadlock)
-            if "orchestrator" in module_name and frame_info.function in (
+            if "orchestrator" in module_name and frame.f_code.co_name in (
                 "_run_turn_unlocked",
                 "run_loop",
                 "run_turn",
             ):
                 return True
-        if "agui_server" in frame_info.filename:
+        if "agui_server" in frame.f_code.co_filename:
             return True
+        frame = frame.f_back
     return False
 
 
@@ -697,10 +702,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         if self.agent_pool is not None and effective_session_id is not None:
             session_pool = self.agent_pool.session_pool
             assert session_pool is not None
-            # Fire-and-forget: create task to inject via SessionPool
-            import asyncio
-
-            asyncio.create_task(session_pool.inject_prompt(effective_session_id, message))
+            # Fire-and-forget: delegate to SessionPool for auto-resume.
+            # Use task_manager to prevent GC of the task mid-execution.
+            self.task_manager.fire_and_forget(
+                session_pool.inject_prompt(effective_session_id, message)
+            )
             return
 
         # No pool or session_id available — log warning

@@ -742,6 +742,7 @@ class TurnRunner:
         self._max_auto_resume = max_auto_resume
         self._turn_timings: list[tuple[float, float]] = []
         self._max_turn_timing_history: int = 100
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     async def _get_injection_lock(self, session_id: str) -> asyncio.Lock:
         """Get or create per-session injection lock.
@@ -966,9 +967,9 @@ class TurnRunner:
             self._post_turn_injections.setdefault(session_id, []).append(message)
 
         logger.debug("Queued injection for next turn, triggering auto-resume")
-        _ = asyncio.create_task(  # noqa: RUF006
-            self._trigger_auto_resume(session_id)
-        )
+        task = asyncio.create_task(self._trigger_auto_resume(session_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
         return False
 
     async def queue_prompt(self, session_id: str, *prompts: Any) -> bool:
@@ -1005,9 +1006,9 @@ class TurnRunner:
                 return False
             self._post_turn_prompts.setdefault(session_id, []).append(prompts)
 
-        _ = asyncio.create_task(  # noqa: RUF006
-            self._trigger_auto_resume(session_id)
-        )
+        task = asyncio.create_task(self._trigger_auto_resume(session_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
         return False
 
     async def _process_queued_work(
