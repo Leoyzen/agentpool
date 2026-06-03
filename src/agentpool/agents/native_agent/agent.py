@@ -759,14 +759,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             cap = provider.as_capability()
             if cap is not None:
                 tool_capabilities.append(cap)
-        # 2. Hooks
-        hooks_capability = self._hook_manager.as_capability()
-        if run_ctx is not None and run_ctx.event_bus is not None:
-            from agentpool.agents.native_agent.eventbus_hooks_adapter import EventBusHooksAdapter
-            hooks_capability = EventBusHooksAdapter(
-                hooks_capability, run_ctx.event_bus
-            ).as_capability()
-        tool_capabilities.append(hooks_capability)
+        # 2. Hooks — skip adding as capability when old mechanism is active
+        #    to avoid double-firing. Old base_agent.py hook mechanism handles
+        #    pre_run/post_run/pre_tool_use/post_tool_use directly.
+        if not self.hooks:
+            hooks_capability = self._hook_manager.as_capability()
+            if run_ctx is not None and run_ctx.event_bus is not None:
+                from agentpool.agents.native_agent.eventbus_hooks_adapter import EventBusHooksAdapter
+                hooks_capability = EventBusHooksAdapter(
+                    hooks_capability, run_ctx.event_bus
+                ).as_capability()
+            tool_capabilities.append(hooks_capability)
         # 3. Approval bridge: routes pydantic-ai deferred approvals to InputProvider
         from agentpool.agents.native_agent.approval_bridge import (
             create_approval_bridge_capability,

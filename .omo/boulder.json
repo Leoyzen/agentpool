@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-03T03:50:59.840Z",
+  "updated_at": "2026-06-03T03:51:20.212Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -215,9 +215,11 @@
       "session_id": "opencode:ses_174672256ffemQRFF22Kja0Ayd",
       "agent": "Sisyphus-Junior",
       "category": "quick",
-      "updated_at": "2026-06-03T03:50:59.840Z",
+      "updated_at": "2026-06-03T03:51:20.212Z",
       "started_at": "2026-06-03T03:50:59.840Z",
-      "status": "running"
+      "status": "completed",
+      "ended_at": "2026-06-03T03:51:20.212Z",
+      "elapsed_ms": 20372
     }
   },
   "works": {
@@ -364,7 +366,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-03T03:50:59.840Z",
+      "updated_at": "2026-06-03T03:51:20.212Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -575,9 +577,11 @@
           "session_id": "opencode:ses_174672256ffemQRFF22Kja0Ayd",
           "agent": "Sisyphus-Junior",
           "category": "quick",
-          "updated_at": "2026-06-03T03:50:59.840Z",
+          "updated_at": "2026-06-03T03:51:20.212Z",
           "started_at": "2026-06-03T03:50:59.840Z",
-          "status": "running"
+          "status": "completed",
+          "ended_at": "2026-06-03T03:51:20.212Z",
+          "elapsed_ms": 20372
         }
       }
     }
