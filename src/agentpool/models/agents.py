@@ -21,6 +21,7 @@ from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool_config import BaseToolConfig, NativeAgentToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
+from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
 from agentpool_config.session import MemoryConfig, SessionQuery
@@ -202,6 +203,13 @@ class NativeAgentConfig(BaseAgentConfig):
     """Tool execution mode:
     - None: Default mode - tools are called directly
     - "codemode": Tools are wrapped in a Python execution environment
+    """
+
+    capabilities: list[Any] = Field(default_factory=list)
+    """Additional pydantic-ai capabilities to attach to the agent.
+
+    Can contain either CapabilityConfig objects (for YAML-loaded capabilities)
+    or pre-instantiated AbstractCapability objects (for Python API usage).
     """
 
     @model_validator(mode="before")

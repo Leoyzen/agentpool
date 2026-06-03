@@ -10,6 +10,7 @@ from agentpool_config.tools import ImportToolConfig, BaseToolConfig
 from agentpool_config.agentpool_tools import AgentpoolToolConfig
 from agentpool_config.builtin_tools import BuiltinToolConfig
 
+from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.forward_targets import ForwardingTarget
 from agentpool_config.session import SessionQuery
 from agentpool_config.session_pool import ACPConfig, OpenCodeConfig, SessionPoolConfig
@@ -76,6 +77,7 @@ __all__ = [
     "BaseToolConfig",
     "CallableHookConfig",
     "CallbackEventHandlerConfig",
+    "CapabilityConfig",
     "CommandHookConfig",
     "ConfigLayer",
     "ConfigSource",

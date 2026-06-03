@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-03T02:51:06.249Z",
+  "updated_at": "2026-06-03T03:06:02.647Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -116,6 +116,30 @@
       "updated_at": "2026-06-03T02:51:06.249Z",
       "ended_at": "2026-06-03T02:51:06.248Z",
       "elapsed_ms": 6060242
+    },
+    "todo:29": {
+      "task_key": "todo:29",
+      "task_label": "29",
+      "task_title": "**Write tests for `get_agentlet()` with capabilities**",
+      "session_id": "opencode:ses_1749b3e76ffeokN51dK6J103zV",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T03:01:03.489Z",
+      "started_at": "2026-06-03T02:58:27.996Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:01:03.489Z",
+      "elapsed_ms": 155493
+    },
+    "todo:31": {
+      "task_key": "todo:31",
+      "task_label": "31",
+      "task_title": "**Add `capabilities` field to `NativeAgentConfig`**",
+      "session_id": "opencode:ses_174904b07ffegmtecNz18CvAXl",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T03:06:02.647Z",
+      "started_at": "2026-06-03T03:06:02.647Z",
+      "status": "running"
     }
   },
   "works": {
@@ -262,7 +286,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-03T02:51:06.249Z",
+      "updated_at": "2026-06-03T03:06:02.647Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -374,6 +398,30 @@
           "updated_at": "2026-06-03T02:51:06.249Z",
           "ended_at": "2026-06-03T02:51:06.248Z",
           "elapsed_ms": 6060242
+        },
+        "todo:29": {
+          "task_key": "todo:29",
+          "task_label": "29",
+          "task_title": "**Write tests for `get_agentlet()` with capabilities**",
+          "session_id": "opencode:ses_1749b3e76ffeokN51dK6J103zV",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T03:01:03.489Z",
+          "started_at": "2026-06-03T02:58:27.996Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:01:03.489Z",
+          "elapsed_ms": 155493
+        },
+        "todo:31": {
+          "task_key": "todo:31",
+          "task_label": "31",
+          "task_title": "**Add `capabilities` field to `NativeAgentConfig`**",
+          "session_id": "opencode:ses_174904b07ffegmtecNz18CvAXl",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T03:06:02.647Z",
+          "started_at": "2026-06-03T03:06:02.647Z",
+          "status": "running"
         }
       }
     }
