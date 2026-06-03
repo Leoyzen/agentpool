@@ -31,7 +31,12 @@ logger = get_logger(__name__)
 
 
 class MCPManager:
-    """Manages MCP server connections and distributes resource providers."""
+    """Manages MCP server connections and distributes resource providers.
+
+    .. deprecated::
+        This class is deprecated and will be removed in v0.5.0.
+        Use :meth:`as_capability()` instead.
+    """
 
     def __init__(
         self,

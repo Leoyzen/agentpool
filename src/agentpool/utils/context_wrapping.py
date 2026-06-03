@@ -38,6 +38,10 @@ def wrap_instruction(
 ) -> Callable[[RunContext[Any]], Awaitable[str]]:
     """Wrap an instruction function for pydantic-ai compatibility.
 
+    .. deprecated::
+        This function is deprecated and will be removed in v0.5.0.
+        Use the ``PydanticAIInstruction`` protocol instead.
+
     This utility adapts instruction functions to pydantic-ai's expected
     signature: (RunContext) -> str. It automatically detects and injects
     appropriate context(s) based on function signature.

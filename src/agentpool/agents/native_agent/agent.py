@@ -373,6 +373,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     ) -> list[Callable[..., Any]]:
         """Resolve history processors from config with caching.
 
+        .. deprecated::
+            This method is deprecated and will be removed in v0.5.0.
+            Use ``ProcessHistoryAdapter`` instead.
+
         Returns:
             List of resolved processor callables
         """

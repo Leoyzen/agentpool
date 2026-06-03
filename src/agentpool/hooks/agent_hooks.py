@@ -35,6 +35,10 @@ class AgentHooks:
     Holds instantiated hooks organized by event type and provides
     methods to execute them with proper input/output handling.
 
+    .. deprecated::
+        This class is deprecated and will be removed in v0.5.0.
+        Use :meth:`as_capability()` instead.
+
     Attributes:
         pre_run: Hooks executed before agent.run() processes a prompt.
         post_run: Hooks executed after agent.run() completes.

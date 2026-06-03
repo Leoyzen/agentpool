@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-03T03:47:04.752Z",
+  "updated_at": "2026-06-03T03:50:59.840Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -202,8 +202,21 @@
       "session_id": "opencode:ses_1746bccd1ffenvRYz2QGIQrI8E",
       "agent": "Sisyphus-Junior",
       "category": "unspecified-high",
-      "updated_at": "2026-06-03T03:47:04.752Z",
+      "updated_at": "2026-06-03T03:47:46.537Z",
       "started_at": "2026-06-03T03:47:04.752Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:47:46.537Z",
+      "elapsed_ms": 41785
+    },
+    "todo:49": {
+      "task_key": "todo:49",
+      "task_label": "49",
+      "task_title": "**Add `DeprecationWarning` to all shim methods**",
+      "session_id": "opencode:ses_174672256ffemQRFF22Kja0Ayd",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-06-03T03:50:59.840Z",
+      "started_at": "2026-06-03T03:50:59.840Z",
       "status": "running"
     }
   },
@@ -351,7 +364,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-03T03:47:04.752Z",
+      "updated_at": "2026-06-03T03:50:59.840Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -549,8 +562,21 @@
           "session_id": "opencode:ses_1746bccd1ffenvRYz2QGIQrI8E",
           "agent": "Sisyphus-Junior",
           "category": "unspecified-high",
-          "updated_at": "2026-06-03T03:47:04.752Z",
+          "updated_at": "2026-06-03T03:47:46.537Z",
           "started_at": "2026-06-03T03:47:04.752Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:47:46.537Z",
+          "elapsed_ms": 41785
+        },
+        "todo:49": {
+          "task_key": "todo:49",
+          "task_label": "49",
+          "task_title": "**Add `DeprecationWarning` to all shim methods**",
+          "session_id": "opencode:ses_174672256ffemQRFF22Kja0Ayd",
+          "agent": "Sisyphus-Junior",
+          "category": "quick",
+          "updated_at": "2026-06-03T03:50:59.840Z",
+          "started_at": "2026-06-03T03:50:59.840Z",
           "status": "running"
         }
       }

@@ -38,7 +38,12 @@ class ToolError(AgentPoolError):
 
 
 class ToolManager:
-    """Manages tool registration, enabling/disabling and access."""
+    """Manages tool registration, enabling/disabling and access.
+
+    .. deprecated::
+        This class is deprecated and will be removed in v0.5.0.
+        Use :meth:`ResourceProvider.as_capability()` instead.
+    """
 
     def __init__(
         self,
