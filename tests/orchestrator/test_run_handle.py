@@ -1,0 +1,201 @@
+"""Unit tests for RunHandle (Wave 1 foundation).
+
+Tests lifecycle management: creation, start, complete, fail, cancel.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+import pytest
+
+from agentpool.orchestrator.run import RunHandle, RunStatus
+
+
+pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+
+# ---------------------------------------------------------------------------
+# Creation
+# ---------------------------------------------------------------------------
+
+
+def test_run_handle_defaults() -> None:
+    """RunHandle starts in pending state with fresh context."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    assert handle.run_id == "r1"
+    assert handle.session_id == "s1"
+    assert handle.agent_type == "native"
+    assert handle.status == RunStatus.pending
+    assert handle.run_ctx.current_task is None
+    assert not handle.complete_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# start()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_start_transitions_to_running() -> None:
+    """start() transitions status to running and stores the task."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    task: asyncio.Task[Any] = asyncio.create_task(asyncio.sleep(0))
+    handle.start(task)
+    assert handle.status == RunStatus.running
+    assert handle.run_ctx.current_task is task
+    await task
+
+
+def test_start_without_task() -> None:
+    """start() works when no task is provided."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    handle.start()
+    assert handle.status == RunStatus.running
+    assert handle.run_ctx.current_task is None
+
+
+# ---------------------------------------------------------------------------
+# complete()
+# ---------------------------------------------------------------------------
+
+
+def test_complete_transitions_and_sets_event() -> None:
+    """complete() transitions to completed and sets complete_event."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    handle.complete()
+    assert handle.status == RunStatus.completed
+    assert handle.complete_event.is_set()
+
+
+def test_complete_invokes_cleanup_callback() -> None:
+    """complete() calls _cleanup_callback before setting complete_event."""
+    cleanup_calls: list[str] = []
+
+    def cleanup(run_id: str) -> None:
+        cleanup_calls.append(run_id)
+        # Event should NOT be set yet during callback
+        assert not handle.complete_event.is_set()
+
+    handle = RunHandle(
+        run_id="r1",
+        session_id="s1",
+        agent_type="native",
+        _cleanup_callback=cleanup,
+    )
+    handle.complete()
+    assert cleanup_calls == ["r1"]
+    assert handle.complete_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# fail()
+# ---------------------------------------------------------------------------
+
+
+def test_fail_transitions_and_sets_event() -> None:
+    """fail() transitions to failed and sets complete_event."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    handle.fail()
+    assert handle.status == RunStatus.failed
+    assert handle.complete_event.is_set()
+
+
+def test_fail_with_exception_sets_cancelled() -> None:
+    """fail(exception) sets the cancelled flag on run_ctx."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    exc = RuntimeError("boom")
+    handle.fail(exc)
+    assert handle.status == RunStatus.failed
+    assert handle.run_ctx.cancelled is True
+
+
+def test_fail_invokes_cleanup_callback() -> None:
+    """fail() calls _cleanup_callback before setting complete_event."""
+    cleanup_calls: list[str] = []
+
+    def cleanup(run_id: str) -> None:
+        cleanup_calls.append(run_id)
+        assert not handle.complete_event.is_set()
+
+    handle = RunHandle(
+        run_id="r1",
+        session_id="s1",
+        agent_type="native",
+        _cleanup_callback=cleanup,
+    )
+    handle.fail(ValueError("oops"))
+    assert cleanup_calls == ["r1"]
+    assert handle.complete_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# cancel()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_cancel_sets_cancelled_flag() -> None:
+    """cancel() sets run_ctx.cancelled without calling cleanup."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    task = asyncio.create_task(asyncio.sleep(10))
+    handle.start(task)
+
+    handle.cancel()
+    assert handle.run_ctx.cancelled is True
+    # Status should remain running; cleanup is deferred
+    assert handle.status == RunStatus.running
+    assert not handle.complete_event.is_set()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.anyio
+async def test_cancel_does_not_call_cleanup_callback() -> None:
+    """cancel() must NOT invoke _cleanup_callback synchronously."""
+    cleanup_calls: list[str] = []
+
+    def cleanup(run_id: str) -> None:
+        cleanup_calls.append(run_id)
+
+    handle = RunHandle(
+        run_id="r1",
+        session_id="s1",
+        agent_type="native",
+        _cleanup_callback=cleanup,
+    )
+    task = asyncio.create_task(asyncio.sleep(10))
+    handle.start(task)
+
+    handle.cancel()
+    assert cleanup_calls == []
+    assert not handle.complete_event.is_set()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.anyio
+async def test_cancel_no_task_is_safe() -> None:
+    """cancel() is safe when no task is stored."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    handle.cancel()
+    assert handle.run_ctx.cancelled is True
+    assert not handle.complete_event.is_set()
+
+
+@pytest.mark.anyio
+async def test_cancel_done_task_is_safe() -> None:
+    """cancel() is safe when the task is already done."""
+    handle = RunHandle(run_id="r1", session_id="s1", agent_type="native")
+    task = asyncio.create_task(asyncio.sleep(0))
+    await task
+    handle.start(task)
+
+    handle.cancel()
+    assert handle.run_ctx.cancelled is True
+    assert not handle.complete_event.is_set()

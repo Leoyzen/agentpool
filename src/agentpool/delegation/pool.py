@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from agentpool.messaging.compaction import CompactionPipeline
     from agentpool.models.manifest import AgentsManifest
     from agentpool.orchestrator import SessionPool
+    from agentpool.orchestrator.run import RunHandle
     from agentpool.resource_providers.base import ResourceProvider
     from agentpool.ui.base import InputProvider
     from agentpool_config.session_pool import SessionPoolConfig
@@ -407,6 +408,43 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         assert self._session_pool is not None
         return await self._session_pool.create_session(session_id, agent_name, **metadata)
+
+    def list_active_runs(self) -> list[RunHandle]:
+        """List all currently active runs.
+
+        Returns:
+            List of active run handles, or empty list if no session pool.
+        """
+        if self._session_pool is None:
+            return []
+        return self._session_pool.active_runs
+
+    def cancel_run(self, run_id: str) -> None:
+        """Cancel an active run by its ID.
+
+        Args:
+            run_id: The run identifier to cancel.
+
+        Raises:
+            RuntimeError: If no session pool is available.
+            ValueError: If no active run with the given ID exists.
+        """
+        if self._session_pool is None:
+            raise RuntimeError("No session pool available")
+        self._session_pool.cancel_run(run_id)
+
+    def get_run(self, run_id: str) -> RunHandle | None:
+        """Get a handle for an active run by its ID.
+
+        Args:
+            run_id: The run identifier to look up.
+
+        Returns:
+            The run handle if found and still active, otherwise None.
+        """
+        if self._session_pool is None:
+            return None
+        return self._session_pool.get_run(run_id)
 
     @property
     def skill_commands(self) -> SkillCommandRegistry | None:

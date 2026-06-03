@@ -51,6 +51,9 @@ class AgentRunContext:
     cancelled: bool = False
     """Whether the run has been cancelled."""
 
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    """Unique identifier for this run."""
+
     current_task: asyncio.Task[Any] | None = None
     """The asyncio.Task for the current run, if any."""
 

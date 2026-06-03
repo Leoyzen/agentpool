@@ -92,12 +92,17 @@ def agent() -> _TestAgent:
 
 def _mock_session_pool(agent: _TestAgent, run_ctx: AgentRunContext) -> None:
     """Mock agent_pool.session_pool so _get_session_run_ctx() returns run_ctx."""
+    from agentpool.orchestrator.run import RunHandle
+
     session_state = SessionState(session_id="test-session", agent_name="test")
-    session_state.active_run_ctx = run_ctx
+    session_state.current_run_id = run_ctx.run_id
     session_controller = MagicMock()
     session_controller.get_session.return_value = session_state
+    run_handle = MagicMock(spec=RunHandle)
+    run_handle.run_ctx = run_ctx
     session_pool = MagicMock()
     session_pool.sessions = session_controller
+    session_pool.get_run.return_value = run_handle
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent.agent_pool = agent_pool
@@ -119,7 +124,7 @@ def test_get_active_run_context_returns_none_when_idle(agent: _TestAgent) -> Non
 
 
 def test_get_active_run_context_returns_session_run_ctx(agent: _TestAgent) -> None:
-    """When session.active_run_ctx is set, it is returned."""
+    """When session.current_run_id is set, the run context is returned."""
     ctx = AgentRunContext()
     _mock_session_pool(agent, ctx)
 
@@ -216,7 +221,7 @@ def test_is_turn_active_false_when_idle(agent: _TestAgent) -> None:
 
 
 def test_is_turn_active_true_with_session_run_ctx(agent: _TestAgent) -> None:
-    """is_turn_active() returns True when session.active_run_ctx is set."""
+    """is_turn_active() returns True when session.current_run_id is set."""
     _mock_session_pool(agent, AgentRunContext())
     assert agent.is_turn_active() is False  # is_turn_active doesn't pass session_id
     assert agent.get_active_run_context(session_id="test-session") is not None
@@ -245,20 +250,27 @@ async def test_is_turn_active_true_with_current_run_ctx(agent: _TestAgent) -> No
 
 
 def test_is_turn_active_false_after_clearing_session_run_ctx(agent: _TestAgent) -> None:
-    """After clearing session.active_run_ctx, is_turn_active() returns False."""
+    """After clearing session.current_run_id, is_turn_active() returns False."""
+    from agentpool.orchestrator.run import RunHandle
+
+    run_ctx = AgentRunContext()
     session_state = SessionState(session_id="test-session", agent_name="test")
-    session_state.active_run_ctx = AgentRunContext()
+    session_state.current_run_id = run_ctx.run_id
     session_controller = MagicMock()
     session_controller.get_session.return_value = session_state
+    run_handle = MagicMock(spec=RunHandle)
+    run_handle.run_ctx = run_ctx
     session_pool = MagicMock()
     session_pool.sessions = session_controller
+    session_pool.get_run.return_value = run_handle
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent.agent_pool = agent_pool
 
     assert agent.get_active_run_context(session_id="test-session") is not None
 
-    session_state.active_run_ctx = None
+    session_state.current_run_id = None
+    session_pool.get_run.return_value = None
     assert agent.get_active_run_context(session_id="test-session") is None
 
 

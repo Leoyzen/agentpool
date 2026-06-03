@@ -37,7 +37,7 @@ class ACPProtocolHandler:
 
     Manages per-session event consumers that subscribe to the SessionPool's
     EventBus and forward converted events to the ACP client. Prompt handling
-    is delegated to ``SessionPool.process_prompt()``.
+    is delegated to ``SessionPool.receive_request()``.
 
     Args:
         agent_pool: The agent pool containing the SessionPool.
@@ -181,7 +181,7 @@ class ACPProtocolHandler:
 
         Ensures the session exists (via ``SessionPool.create_session``) and
         that an event consumer is running before delegating the prompt to
-        ``SessionPool.process_prompt()``.
+        ``SessionPool.receive_request()``.
 
         When the per-agent canary flag is disabled, returns ``None`` so the
         caller can fall back to the legacy session path.
@@ -228,7 +228,7 @@ class ACPProtocolHandler:
 
         stop_reason: StopReason = "end_turn"
         try:
-            await session_pool.process_prompt(
+            await session_pool.receive_request(
                 session_id, *contents, input_provider=input_provider
             )
         except asyncio.CancelledError:

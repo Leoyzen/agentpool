@@ -261,7 +261,7 @@ class OpenCodeProtocolHandler:
 
         await self._ensure_event_consumer(session_id, agent_name)
         await session_pool.create_session(session_id)
-        await session_pool.process_prompt(session_id, message)
+        await session_pool.receive_request(session_id, message)
 
     async def close_session(self, session_id: str) -> None:
         """Close a session and clean up its EventBus subscription.

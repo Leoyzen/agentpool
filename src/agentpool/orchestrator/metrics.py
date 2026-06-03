@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentpool.log import get_logger
@@ -36,6 +36,7 @@ class SessionPoolMetrics:
     session_lifetime_seconds: float
     turn_latency_ms: float
     turn_latency_p99: float = 0.0
+    active_runs_by_agent_type: dict[str, int] = field(default_factory=dict)
 
     def to_prometheus(self) -> str:
         """Return metrics in Prometheus exposition format.
@@ -70,6 +71,13 @@ class SessionPoolMetrics:
 
         lines.append("# TYPE agentpool_turn_latency_ms summary")
         lines.append(f'agentpool_turn_latency_ms{{quantile="0.99"}} {self.turn_latency_p99:.3f}')
+
+        lines.append("# TYPE agentpool_active_runs_by_agent_type gauge")
+        for agent_type, count in self.active_runs_by_agent_type.items():
+            at = agent_type.replace('"', '\\"')
+            lines.append(
+                f'agentpool_active_runs_by_agent_type{{agent_type="{at}"}} {count}'
+            )
 
         return "\n".join(lines)
 
@@ -128,12 +136,22 @@ class MetricsCollector:
             p99_turn_latency_ms = 0.0
 
         subscriber_counts = await self.session_pool.event_bus.get_subscriber_counts()
+
+        active_runs = self.session_pool.active_runs
+        active_turns = len(active_runs)
+        active_runs_by_agent_type: dict[str, int] = {}
+        for run in active_runs:
+            active_runs_by_agent_type[run.agent_type] = (
+                active_runs_by_agent_type.get(run.agent_type, 0) + 1
+            )
+
         return SessionPoolMetrics(
             active_sessions=len(sessions),
-            active_turns=sum(1 for s in sessions.values() if s.turn_lock.locked()),
+            active_turns=active_turns,
             auto_resume_count=self._auto_resume_counter,
             event_bus_queue_depth=subscriber_counts,
             session_lifetime_seconds=avg_session_lifetime,
             turn_latency_ms=avg_turn_latency_ms,
             turn_latency_p99=p99_turn_latency_ms,
+            active_runs_by_agent_type=active_runs_by_agent_type,
         )

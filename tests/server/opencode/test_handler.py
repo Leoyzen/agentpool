@@ -68,7 +68,7 @@ def mock_session_pool() -> MagicMock:
     pool.event_bus.unsubscribe = AsyncMock()
     pool.event_bus.close_session = AsyncMock()
     pool.create_session = AsyncMock()
-    pool.process_prompt = AsyncMock()
+    pool.receive_request = AsyncMock()
     pool.close_session = AsyncMock()
     return pool
 
@@ -201,7 +201,7 @@ class TestHandleMessage:
         handler._agent_pool.session_pool = mock_session_pool
         await handler.handle_message("sess-1", "hello")
         mock_session_pool.create_session.assert_awaited_once_with("sess-1")
-        mock_session_pool.process_prompt.assert_awaited_once_with("sess-1", "hello")
+        mock_session_pool.receive_request.assert_awaited_once_with("sess-1", "hello")
 
     @pytest.mark.anyio
     async def test_raises_when_session_pool_none(

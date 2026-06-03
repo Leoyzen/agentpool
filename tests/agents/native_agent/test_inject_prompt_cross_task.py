@@ -103,13 +103,17 @@ def fast_agent() -> Agent[None]:
 def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     """Mock agent_pool.session_pool so get_active_run_context() returns run_ctx."""
     from unittest.mock import AsyncMock
+    from agentpool.orchestrator.run import RunHandle
 
     session_state = SessionState(session_id="test-session", agent_name="test")
-    session_state.active_run_ctx = run_ctx
+    session_state.current_run_id = run_ctx.run_id
     session_controller = MagicMock()
     session_controller.get_session.return_value = session_state
+    run_handle = MagicMock(spec=RunHandle)
+    run_handle.run_ctx = run_ctx
     session_pool = MagicMock()
     session_pool.sessions = session_controller
+    session_pool.get_run.return_value = run_handle
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent_pool.storage = MagicMock()

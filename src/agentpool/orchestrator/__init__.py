@@ -13,6 +13,7 @@ from agentpool.orchestrator.core import (
     TurnRunner,
 )
 from agentpool.orchestrator.metrics import MetricsCollector, SessionPoolMetrics
+from agentpool.orchestrator.run import RunHandle, RunStatus
 
 __all__ = [
     "DEFAULT_MAX_AUTO_RESUME",
@@ -20,6 +21,8 @@ __all__ = [
     "DEFAULT_SESSION_TTL_SECONDS",
     "EventBus",
     "MetricsCollector",
+    "RunHandle",
+    "RunStatus",
     "SessionController",
     "SessionPool",
     "SessionPoolMetrics",

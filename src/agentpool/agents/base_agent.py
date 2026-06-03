@@ -276,6 +276,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
         self._cancelled = False
+        self._active_run_ctx: AgentRunContext | None = None
+        """Foreground run context for cross-task access (legacy path without SessionPool)."""
         self._background_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
@@ -601,10 +603,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             session_pool = self.agent_pool.session_pool
             assert session_pool is not None
             session = session_pool.sessions.get_session(session_id)
-            if session is not None:
-                run_ctx = session.active_run_ctx
-                if run_ctx is not None and not run_ctx.completed:
-                    return run_ctx
+            if session is not None and session.current_run_id is not None:
+                run_handle = session_pool.get_run(session.current_run_id)
+                if run_handle is not None and not run_handle.run_ctx.completed:
+                    return run_handle.run_ctx
         return None
 
     def get_active_run_context(self, session_id: str | None = None) -> AgentRunContext | None:
@@ -615,7 +617,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         private attributes.
 
         Tries _current_run_ctx_var (ContextVar) first, then falls back to
-        SessionPool's session.active_run_ctx for cross-task access, then
+        SessionPool's session.current_run_id + get_run() for cross-task access, then
         _background_run_ctx.
 
         Args:
@@ -629,6 +631,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx = _current_run_ctx_var.get()
         if run_ctx is not None and not run_ctx.completed:
             return run_ctx
+        # Instance-level fallback for cross-task access (legacy path without SessionPool)
+        if self._active_run_ctx is not None and not self._active_run_ctx.completed:
+            return self._active_run_ctx
         run_ctx = self._get_session_run_ctx(session_id=session_id)
         if run_ctx is not None:
             return run_ctx
@@ -662,7 +667,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return "Initial work done"
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None:
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.queue(*prompts)
 
     def inject_prompt(self, message: str, session_id: str | None = None) -> None:
@@ -693,7 +698,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # the message would be stuck in injection_manager.pending forever because
         # flush_pending_to_queue() has already been called and won't be called
         # again.  In that case, delegate to SessionPool for auto-resume.
-        if run_ctx is not None and not run_ctx.completed:
+        if run_ctx is not None and not run_ctx.completed and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.inject(message)
             return
 
@@ -722,7 +727,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             session_id: Optional session ID for SessionPool fallback lookup.
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None:
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             return run_ctx.injection_manager.has_queued()
         return False
 
@@ -733,7 +738,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             session_id: Optional session ID for SessionPool fallback lookup.
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None:
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             return run_ctx.injection_manager.has_pending()
         return False
 
@@ -744,7 +749,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             session_id: Optional session ID for SessionPool fallback lookup.
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
-        if run_ctx is not None:
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.clear()
 
     @method_spawner
@@ -838,8 +843,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
-        # Queue the initial prompts
-        run_ctx.injection_manager.insert_queued(prompts)
+        self._active_run_ctx = run_ctx
+        # Queue the initial prompts (skip if no injection_manager)
+        if run_ctx.injection_manager is not None:
+            run_ctx.injection_manager.insert_queued(prompts)
 
         # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
         # token is initialized so finally always has a bound name; reset only if set() succeeded.
@@ -847,7 +854,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         try:
             token = _current_run_ctx_var.set(run_ctx)
             # Process queued prompts until queue is empty
-            while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
+            while (
+                run_ctx.injection_manager is not None
+                and run_ctx.injection_manager.has_queued()
+                and not run_ctx.cancelled
+            ):
                 current_prompts = run_ctx.injection_manager.pop_queued()
                 if current_prompts is None:
                     break
@@ -868,7 +879,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     yield event
 
                 # After each iteration, flush unconsumed injections to queue
-                run_ctx.injection_manager.flush_pending_to_queue()
+                if run_ctx.injection_manager is not None:
+                    run_ctx.injection_manager.flush_pending_to_queue()
         finally:
             if token is not None:
                 # Suppress ValueError when token was created in a different async
@@ -877,7 +889,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # context when the task exits, so ignoring the reset is safe.
                 with suppress(ValueError):
                     _current_run_ctx_var.reset(token)
-            run_ctx.injection_manager.clear()
+            if run_ctx.injection_manager is not None:
+                run_ctx.injection_manager.clear()
+            self._active_run_ctx = None
 
     async def _run_stream_once(
         self,
@@ -1253,7 +1267,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         When run_ctx is not provided (e.g., from OpenCode abort_session),
         tries _current_run_ctx_var (ContextVar) first, then falls back to
-        SessionPool's session.active_run_ctx for cross-task access.
+        SessionPool's session.current_run_id + get_run() for cross-task access.
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt

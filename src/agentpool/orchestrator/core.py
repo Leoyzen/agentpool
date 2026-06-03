@@ -14,9 +14,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
+import uuid
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.log import get_logger
+from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.sessions.models import SessionData
 
 
@@ -77,8 +79,17 @@ class SessionState:
     is_closing: bool = False
     parent_session_id: str | None = None
     lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
-    active_run_ctx: AgentRunContext | None = None
-    """Active run context for cross-task access (replaces agent._active_run_ctx)."""
+    current_run_id: str | None = None
+    _request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    @property
+    def closing(self) -> bool:
+        """Alias for is_closing."""
+        return self.is_closing
+
+    @closing.setter
+    def closing(self, value: bool) -> None:
+        self.is_closing = value
 
 
 class EventBus:
@@ -292,6 +303,7 @@ class SessionController:
         pool: AgentPool[Any],
         store: SessionStore | None = None,
         cleanup_callback: Callable[[str], Awaitable[None]] | None = None,
+        max_concurrent_runs: int | None = None,
     ) -> None:
         """Initialize the session controller.
 
@@ -299,6 +311,7 @@ class SessionController:
             pool: The agent pool to resolve agents from.
             store: Optional session store for persistence.
             cleanup_callback: Optional callback invoked when a session is cleaned up.
+            max_concurrent_runs: Maximum number of concurrent runs across all sessions.
         """
         self.pool = pool
         self.store = store
@@ -311,6 +324,11 @@ class SessionController:
         self._cleanup_task: asyncio.Task[Any] | None = None
         self._mcp_max_processes: int = 100
         self._mcp_process_count: int = 0
+        self._runs: dict[str, RunHandle] = {}
+        self._runs_lock: asyncio.Lock = asyncio.Lock()
+        self._max_concurrent_runs: int | None = max_concurrent_runs
+        self._turn_runner: TurnRunner | None = None
+        self._pending_run_ids: dict[str, str] = {}
 
     async def get_or_create_session(
         self,
@@ -628,6 +646,109 @@ class SessionController:
             return None
         return self._sessions.get(session.parent_session_id)
 
+    async def receive_request(
+        self,
+        session_id: str,
+        content: Any,
+        priority: str = "when_idle",
+    ) -> None:
+        """Receive an incoming request for a session.
+
+        If the session is idle, creates a RunHandle and starts execution.
+        If the session has an active run, delegates to inject_prompt or queue_prompt.
+
+        Args:
+            session_id: Target session.
+            content: Message / prompt content.
+            priority: "when_idle" to queue, "asap" to inject into active turn.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return
+
+        async with session._request_lock:
+            if session.closing or session.is_closing:
+                return
+
+            if self._max_concurrent_runs is not None:
+                async with self._runs_lock:
+                    if len(self._runs) >= self._max_concurrent_runs:
+                        return
+
+            if session.current_run_id is None:
+                run_handle = self._create_run(session_id, content)
+                self._runs[run_handle.run_id] = run_handle
+                session.current_run_id = run_handle.run_id
+                if self._turn_runner is not None:
+                    self._pending_run_ids[session_id] = run_handle.run_id
+                    task = asyncio.create_task(
+                        self._turn_runner.run_loop(session_id, content),
+                    )
+                    run_handle.start(task)
+                    task.add_done_callback(
+                        lambda _t, rid=run_handle.run_id: self._cleanup_run(rid),
+                    )
+                return
+
+        # Session has an active run - delegate after releasing the request lock
+        if self._turn_runner is not None:
+            if priority == "asap":
+                await self._turn_runner.inject_prompt(session_id, content)
+            else:
+                await self._turn_runner.queue_prompt(session_id, content)
+
+    def cancel_run_for_session(self, session_id: str) -> None:
+        """Cancel the active run for a session.
+
+        Args:
+            session_id: The session whose run should be cancelled.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return
+        run_id = session.current_run_id
+        if run_id is None:
+            return
+        run_handle = self._runs.get(run_id)
+        if run_handle is None:
+            return
+        run_handle.cancel()
+
+    def _create_run(self, session_id: str, initial_prompt: Any) -> RunHandle:
+        """Create a new RunHandle for a session.
+
+        Args:
+            session_id: The session to create the run for.
+            initial_prompt: The initial prompt content.
+
+        Returns:
+            A new RunHandle.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            raise ValueError("Session not found")
+        agent_type = session.metadata.get("agent_type", "unknown")
+        return RunHandle(
+            run_id=uuid.uuid4().hex,
+            session_id=session_id,
+            agent_type=agent_type,
+        )
+
+    def _cleanup_run(self, run_id: str) -> None:
+        """Clean up a run after it completes.
+
+        Removes the handle from _runs and signals completion.
+
+        Args:
+            run_id: The run ID to clean up.
+        """
+        run_handle = self._runs.pop(run_id, None)
+        if run_handle is not None:
+            run_handle.complete_event.set()
+
     def _count_mcp_processes(self) -> int:
         """Count active MCP processes across all per-session agents.
 
@@ -743,6 +864,7 @@ class TurnRunner:
         self._turn_timings: list[tuple[float, float]] = []
         self._max_turn_timing_history: int = 100
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._runs: dict[str, AgentRunContext] = {}
 
     async def _get_injection_lock(self, session_id: str) -> asyncio.Lock:
         """Get or create per-session injection lock.
@@ -789,8 +911,10 @@ class TurnRunner:
         from agentpool.agents.base_agent import _current_run_ctx_var
         from agentpool.agents.context import AgentRunContext
 
+        run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
         run_ctx = AgentRunContext(
             deps=kwargs.get("deps"),
+            run_id=run_id_override or uuid.uuid4().hex,
         )
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()
@@ -798,8 +922,9 @@ class TurnRunner:
         run_ctx.session_id = session_id
         _current_run_ctx_var.set(run_ctx)
 
-        if _session is not None:
-            _session.active_run_ctx = run_ctx
+        if _session is not None and _session.current_run_id is None:
+            _session.current_run_id = run_ctx.run_id
+        self._runs[run_ctx.run_id] = run_ctx
 
         # Consume events from run_ctx.event_queue and publish to EventBus.
         # This is needed because StreamEventEmitter no longer has a global
@@ -822,25 +947,32 @@ class TurnRunner:
 
         turn_start = time.monotonic()
         try:
-            # Process prompts and handle injections/queued prompts
-            # like BaseAgent.run_stream() does.
-            async for event in agent._run_stream_once(
-                run_ctx, *prompts, session_id=session_id, **kwargs
-            ):
-                await self.event_bus.publish(session_id, event)
-
-            # After _run_stream_once completes, flush unconsumed injections
-            # to queued prompts and continue processing if any remain.
-            run_ctx.injection_manager.flush_pending_to_queue()
-            while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
-                current_prompts = run_ctx.injection_manager.pop_queued()
-                if current_prompts is None:
-                    break
+            try:
+                # Process prompts and handle injections/queued prompts
+                # like BaseAgent.run_stream() does.
                 async for event in agent._run_stream_once(
-                    run_ctx, *current_prompts, session_id=session_id, **kwargs
+                    run_ctx, *prompts, session_id=session_id, **kwargs
                 ):
                     await self.event_bus.publish(session_id, event)
+
+                # After _run_stream_once completes, flush unconsumed injections
+                # to queued prompts and continue processing if any remain.
                 run_ctx.injection_manager.flush_pending_to_queue()
+                while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
+                    current_prompts = run_ctx.injection_manager.pop_queued()
+                    if current_prompts is None:
+                        break
+                    async for event in agent._run_stream_once(
+                        run_ctx, *current_prompts, session_id=session_id, **kwargs
+                    ):
+                        await self.event_bus.publish(session_id, event)
+                    run_ctx.injection_manager.flush_pending_to_queue()
+            except Exception as exc:
+                if _session is not None and _session.current_run_id is not None:
+                    run_handle = self.sessions._runs.get(_session.current_run_id)
+                    if run_handle is not None:
+                        run_handle.fail(exception=exc, event_bus=self.event_bus)
+                raise
         finally:
             # CRITICAL: Mark run as completed BEFORE any await so that
             # inject_prompt() sees completed=True and falls back to
@@ -848,12 +980,13 @@ class TurnRunner:
             # and dropping the message in a dead pending queue.
             run_ctx.completed = True
 
-            # CRITICAL: Clear session.active_run_ctx BEFORE any await to prevent
+            # CRITICAL: Clear session.current_run_id BEFORE any await to prevent
             # race condition where inject_prompt returns True but message
             # gets stuck in pending (flush_pending_to_queue() already passed).
             if _session is not None:
-                _session.active_run_ctx = None
+                _session.current_run_id = None
 
+            self._runs.pop(run_ctx.run_id, None)
             _current_run_ctx_var.set(None)
 
             # Cancel the event consumer task
@@ -1167,6 +1300,7 @@ class SessionPool:
         enable_auto_resume: bool = True,
         enable_event_bus: bool = True,
         max_auto_resume: int = DEFAULT_MAX_AUTO_RESUME,
+        max_concurrent_runs: int | None = None,
     ) -> None:
         """Initialize the session pool.
 
@@ -1176,16 +1310,24 @@ class SessionPool:
             enable_auto_resume: Whether to enable auto-resume loop.
             enable_event_bus: Whether to enable cross-turn event routing.
             max_auto_resume: Maximum auto-resume iterations.
+            max_concurrent_runs: Maximum number of concurrent runs across all sessions.
         """
         self.pool = pool
-        self.sessions = SessionController(pool, store=store, cleanup_callback=self.close_session)
+        self.sessions = SessionController(
+            pool,
+            store=store,
+            cleanup_callback=self.close_session,
+            max_concurrent_runs=max_concurrent_runs,
+        )
         self.turns = TurnRunner(
             self.sessions,
             enable_auto_resume=enable_auto_resume,
             max_auto_resume=max_auto_resume,
         )
+        self.sessions._turn_runner = self.turns
         self._enable_auto_resume = enable_auto_resume
         self._enable_event_bus = enable_event_bus
+        self._runs_lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self) -> None:
         """Start the session pool and background tasks."""
@@ -1244,12 +1386,28 @@ class SessionPool:
     async def close_session(self, session_id: str) -> None:
         """Close a session.
 
-        Order: session first (agent may emit final events), then event bus,
-        then turn state.
+        Waits for any active run to complete before proceeding.
+        Order: wait for run, session cleanup, event bus, then turn state.
 
         Args:
             session_id: The session to close.
         """
+        session = self.sessions.get_session(session_id)
+        run_handle: RunHandle | None = None
+        if session is not None:
+            async with session._request_lock:
+                session.closing = True
+                run_id = session.current_run_id
+                if run_id is not None:
+                    run_handle = self.sessions._runs.get(run_id)
+
+            if run_handle is not None:
+                try:
+                    await asyncio.wait_for(run_handle.complete_event.wait(), timeout=30.0)
+                except TimeoutError:
+                    self.cancel_run(run_handle.run_id)
+                    await asyncio.sleep(0.1)
+
         await self.sessions.close_session(session_id)
         await self.event_bus.close_session(session_id)
         has_turn_state = (
@@ -1280,10 +1438,61 @@ class SessionPool:
             *prompts: Prompts to process.
             **kwargs: Additional arguments passed to the agent.
         """
+        # Keep blocking behavior for backward compatibility during migration.
+        # Protocol handlers that need fire-and-forget should use receive_request().
         if self._enable_auto_resume:
             await self.turns.run_loop(session_id, *prompts, **kwargs)
         else:
             await self.turns.run_turn(session_id, *prompts, **kwargs)
+
+    async def receive_request(
+        self,
+        session_id: str,
+        content: Any,
+        priority: str = "when_idle",
+    ) -> None:
+        """Route an incoming request for a session (fire-and-forget).
+
+        Creates a background task that processes the prompt through
+        the turn runner. Protocol handlers should subscribe to the
+        EventBus *before* calling this method so no events are dropped.
+
+        Args:
+            session_id: Target session.
+            content: Message / prompt content.
+            priority: "when_idle" to queue, "asap" to inject into active turn.
+        """
+        await self.sessions.receive_request(session_id, content, priority=priority)
+
+    @property
+    def active_runs(self) -> list[RunHandle]:
+        """Get all currently active (running) RunHandles."""
+        return [rh for rh in self.sessions._runs.values() if rh.status == RunStatus.running]
+
+    def get_run(self, run_id: str) -> RunHandle | None:
+        """Get a RunHandle by ID.
+
+        Args:
+            run_id: The run ID to look up.
+
+        Returns:
+            The RunHandle, or None if not found.
+        """
+        return self.sessions._runs.get(run_id)
+
+    def cancel_run(self, run_id: str) -> None:
+        """Cancel a run by ID.
+
+        Args:
+            run_id: The run ID to cancel.
+
+        Raises:
+            ValueError: If no active run with the given ID exists.
+        """
+        run_handle = self.sessions._runs.get(run_id)
+        if run_handle is None:
+            raise ValueError("No active run found with ID: " + run_id)
+        run_handle.cancel()
 
     async def run_stream(self, session_id: str, *prompts: str) -> AsyncIterator[Any]:
         """Process prompts and yield events from the EventBus.

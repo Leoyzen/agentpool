@@ -374,7 +374,7 @@ class SubagentTools(StaticResourceProvider):
                 async def _run_via_session_pool() -> None:
                     """Run task through SessionPool and collect final result."""
                     try:
-                        await session_pool.process_prompt(
+                        await session_pool.receive_request(
                             child_session_id, prompt
                         )
                     finally:

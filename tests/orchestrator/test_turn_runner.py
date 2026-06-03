@@ -98,6 +98,7 @@ async def _setup_session(
     session_id: str,
     agent: MagicMock,
     mock_pool: MagicMock,
+    turn_runner: TurnRunner | None = None,
 ) -> SessionState:
     """Create a session and attach the mock agent directly."""
     state = await controller.get_or_create_session(session_id)
@@ -106,7 +107,7 @@ async def _setup_session(
     mock_pool.get_agent.return_value = agent
 
     # Configure mock to support new get_active_run_context behavior
-    # (ContextVar for same-task, session.active_run_ctx for cross-task)
+    # (ContextVar for same-task, session.current_run_id + TurnRunner._runs for cross-task)
     from agentpool.agents.base_agent import _current_run_ctx_var
 
     def _mock_get_active_run_context() -> AgentRunContext | None:
@@ -114,8 +115,8 @@ async def _setup_session(
         if run_ctx is not None and not run_ctx.completed:
             return run_ctx
         session = controller.get_session(session_id)
-        if session is not None:
-            run_ctx = session.active_run_ctx
+        if session is not None and session.current_run_id is not None and turn_runner is not None:
+            run_ctx = turn_runner._runs.get(session.current_run_id)
             if run_ctx is not None and not run_ctx.completed:
                 return run_ctx
         if agent._background_run_ctx is not None and not agent._background_run_ctx.completed:
@@ -605,7 +606,7 @@ async def test_inject_prompt_into_active_turn(
     mock_pool: MagicMock,
 ) -> None:
     """inject_prompt returns True and injects immediately when a turn is active."""
-    await _setup_session(controller, "sess-1", mock_agent_with_delay, mock_pool)
+    await _setup_session(controller, "sess-1", mock_agent_with_delay, mock_pool, turn_runner)
 
     injected = False
 
@@ -671,7 +672,7 @@ async def test_queue_prompt_into_active_turn(
     mock_pool: MagicMock,
 ) -> None:
     """queue_prompt returns True and queues into active run context."""
-    await _setup_session(controller, "sess-1", mock_agent_with_delay, mock_pool)
+    await _setup_session(controller, "sess-1", mock_agent_with_delay, mock_pool, turn_runner)
 
     queued = False
 

@@ -29,7 +29,7 @@ def mock_pool() -> MagicMock:
 
     session_pool = MagicMock()
     session_pool.create_session = AsyncMock()
-    session_pool.process_prompt = AsyncMock()
+    session_pool.receive_request = AsyncMock()
     session_pool.event_bus = MagicMock()
 
     # Event consumer loop should exit immediately in tests
@@ -94,7 +94,7 @@ def handler_with_elicitation(
 
 
 class TestHandlePromptInputProvider:
-    """RED FLAG: input_provider must be passed to SessionPool.process_prompt."""
+    """RED FLAG: input_provider must be passed to SessionPool.receive_request."""
 
     @pytest.mark.anyio
     async def test_handle_prompt_passes_acp_input_provider(
@@ -103,15 +103,15 @@ class TestHandlePromptInputProvider:
         mock_pool: MagicMock,
     ) -> None:
         """When handle_prompt() is called, an ACPInputProvider is created
-        and passed to SessionPool.process_prompt() so elicitation goes
+        and passed to SessionPool.receive_request() so elicitation goes
         through the ACP protocol."""
         prompt = [TextContentBlock(text="hello")]
 
         await handler.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        assert session_pool.process_prompt.called
-        call_kwargs = session_pool.process_prompt.call_args.kwargs
+        assert session_pool.receive_request.called
+        call_kwargs = session_pool.receive_request.call_args.kwargs
         assert "input_provider" in call_kwargs
         assert isinstance(call_kwargs["input_provider"], ACPInputProvider)
 
@@ -128,7 +128,7 @@ class TestHandlePromptInputProvider:
         await handler.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        call_kwargs = session_pool.process_prompt.call_args.kwargs
+        call_kwargs = session_pool.receive_request.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         assert input_provider.session.requests is not None
 
@@ -146,7 +146,7 @@ class TestHandlePromptInputProvider:
         await handler.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        call_kwargs = session_pool.process_prompt.call_args.kwargs
+        call_kwargs = session_pool.receive_request.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         assert input_provider.session.client_capabilities is not None
         assert input_provider.session.client_capabilities.elicitation is None
@@ -165,7 +165,7 @@ class TestHandlePromptInputProvider:
         await handler_with_elicitation.handle_prompt("sess-1", prompt)
 
         session_pool = mock_pool.session_pool
-        call_kwargs = session_pool.process_prompt.call_args.kwargs
+        call_kwargs = session_pool.receive_request.call_args.kwargs
         input_provider = call_kwargs["input_provider"]
         caps = input_provider.session.client_capabilities
         assert caps.elicitation is not None
@@ -192,7 +192,7 @@ class TestHandlePromptInputProvider:
         result = await handler.handle_prompt("sess-1", prompt)
 
         assert result is None
-        assert not mock_pool.session_pool.process_prompt.called
+        assert not mock_pool.session_pool.receive_request.called
 
     @pytest.mark.anyio
     async def test_handle_prompt_skips_when_session_pool_missing(
