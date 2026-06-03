@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "agent": "atlas",
-  "updated_at": "2026-06-03T03:06:02.647Z",
+  "updated_at": "2026-06-03T03:10:07.554Z",
   "active_plan": "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool-session-pool/.omo/plans/thin-pydantic-ai-wrappers.md",
   "plan_name": "thin-pydantic-ai-wrappers",
   "started_at": "2026-06-02T13:45:42.163Z",
@@ -137,8 +137,21 @@
       "session_id": "opencode:ses_174904b07ffegmtecNz18CvAXl",
       "agent": "Sisyphus-Junior",
       "category": "unspecified-high",
-      "updated_at": "2026-06-03T03:06:02.647Z",
+      "updated_at": "2026-06-03T03:07:31.833Z",
       "started_at": "2026-06-03T03:06:02.647Z",
+      "status": "completed",
+      "ended_at": "2026-06-03T03:07:31.833Z",
+      "elapsed_ms": 89186
+    },
+    "todo:33": {
+      "task_key": "todo:33",
+      "task_label": "33",
+      "task_title": "**Merge user-provided capabilities in `get_agentlet()`**",
+      "session_id": "opencode:ses_1748c277cffe73W56vMv7y0Sbo",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-06-03T03:10:07.554Z",
+      "started_at": "2026-06-03T03:10:07.554Z",
       "status": "running"
     }
   },
@@ -286,7 +299,7 @@
       "plan_name": "thin-pydantic-ai-wrappers",
       "status": "active",
       "started_at": "2026-06-02T13:45:42.163Z",
-      "updated_at": "2026-06-03T03:06:02.647Z",
+      "updated_at": "2026-06-03T03:10:07.554Z",
       "session_ids": [
         "opencode:ses_1776ac40affejH6cwX46KnopyE"
       ],
@@ -419,8 +432,21 @@
           "session_id": "opencode:ses_174904b07ffegmtecNz18CvAXl",
           "agent": "Sisyphus-Junior",
           "category": "unspecified-high",
-          "updated_at": "2026-06-03T03:06:02.647Z",
+          "updated_at": "2026-06-03T03:07:31.833Z",
           "started_at": "2026-06-03T03:06:02.647Z",
+          "status": "completed",
+          "ended_at": "2026-06-03T03:07:31.833Z",
+          "elapsed_ms": 89186
+        },
+        "todo:33": {
+          "task_key": "todo:33",
+          "task_label": "33",
+          "task_title": "**Merge user-provided capabilities in `get_agentlet()`**",
+          "session_id": "opencode:ses_1748c277cffe73W56vMv7y0Sbo",
+          "agent": "Sisyphus-Junior",
+          "category": "unspecified-high",
+          "updated_at": "2026-06-03T03:10:07.554Z",
+          "started_at": "2026-06-03T03:10:07.554Z",
           "status": "running"
         }
       }

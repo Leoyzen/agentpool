@@ -217,6 +217,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         from agentpool_config.session import MemoryConfig
 
         self.model_settings = model_settings
+        self.config = agent_config
         # Handle deprecated history_processors parameter
         if history_processors is not None:
             # Convert to session configuration
@@ -795,6 +796,19 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # 5. Builtin tools
         if self._builtin_tools:
             tool_capabilities.extend(NativeTool(t) for t in self._builtin_tools)
+
+        # Merge user-provided capabilities from config
+        if self.config and self.config.capabilities:
+            from agentpool_config.capabilities import CapabilityConfig
+
+            for cap in self.config.capabilities:
+                if cap is None:
+                    continue
+                if isinstance(cap, CapabilityConfig):
+                    tool_capabilities.append(cap.build())
+                else:
+                    # Pre-instantiated AbstractCapability
+                    tool_capabilities.append(cap)
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries
         if AgentRetries is not None and self._output_retries is not None:

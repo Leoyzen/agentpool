@@ -248,6 +248,20 @@ class NativeAgentConfig(BaseAgentConfig):
 
     @model_validator(mode="before")
     @classmethod
+    def handle_capabilities(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Convert capability dicts to CapabilityConfig objects."""
+        if capabilities := data.get("capabilities"):
+            resolved: list[Any] = []
+            for cap in capabilities:
+                if isinstance(cap, dict):
+                    resolved.append(CapabilityConfig(**cap))
+                else:
+                    resolved.append(cap)
+            data["capabilities"] = resolved
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
     def handle_workers_shorthand(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Convert worker string shorthand to AgentWorkerConfig objects.
 
