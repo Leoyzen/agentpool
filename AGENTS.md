@@ -475,6 +475,95 @@ graph:
 
 Old configs with `teams:` or `connections:` are automatically translated to `GraphConfig` at load time. You can mix `graph:` with legacy sections, or migrate incrementally.
 
+### Session Orchestration
+
+AgentPool sessions are managed by `SessionPool` and `SessionController`. `SessionPool` holds all active sessions. `SessionController` routes incoming requests and tracks active runs.
+
+#### Unified Request Entry Point
+
+`SessionController.receive_request()` is the single entry point for all incoming prompts:
+
+```python
+async def receive_request(session_id, content, priority="when_idle")
+```
+
+- If the session is idle, it creates a `RunHandle` and starts execution.
+- If the session has an active run, it routes based on priority.
+- `"asap"` injects into the active turn immediately.
+- `"when_idle"` queues the message for the next turn.
+
+Protocol handlers should subscribe to the `EventBus` before calling `receive_request()`, since the method is fire-and-forget. All events stream through the bus.
+
+#### Dual Queue Architecture
+
+AgentPool maintains two queue systems because native and non-native agents use different run loops.
+
+**Native agents** rely on PydanticAI's `PendingMessageDrainCapability`. PydanticAI auto-injects this capability outermost. It handles message queuing at two hook points:
+
+- `before_model_request` drains `"asap"` messages immediately before the model call.
+- `after_node_run` drains `"when_idle"` messages after the current node finishes.
+
+Native agents drive execution through `RunExecutor`, which calls `agent_run.next(node)` in a loop. The bare `async for node in agent_run:` pattern does not fire `after_node_run` hooks, so `"when_idle"` messages would never drain. `RunExecutor` avoids this by using explicit `next()` calls.
+
+**Non-native agents** (ACP, ClaudeCode, AGUI) do not use PydanticAI's agent loop. They communicate through subprocess JSON-RPC, Claude SDK, or HTTP/SSE. These agents continue using `LegacyTurnRunner`, which preserves the manual queue system:
+
+- `_post_turn_injections` for immediate injections.
+- `_post_turn_prompts` for follow-up prompts.
+- `_process_queued_work()` and `_trigger_auto_resume()` for the auto-resume loop.
+- `SessionState.turn_lock` for turn serialization.
+
+`LegacyTurnRunner` creates `RunHandle` instances and registers them in `SessionController._runs` just like native runs. This gives the pool a unified view of all active execution.
+
+#### RunHandle Lifecycle
+
+`RunHandle` tracks the state of a single run from start to finish:
+
+```python
+@dataclass
+class RunHandle:
+    run_id: str
+    session_id: str
+    agent_type: str
+    status: RunStatus  # pending | running | completed | failed
+    complete_event: asyncio.Event
+```
+
+The lifecycle flows through these states:
+
+1. **pending** - Created when `receive_request()` sees an idle session.
+2. **running** - `start()` is called after the asyncio task begins.
+3. **completed** - `complete()` is called when the run finishes normally.
+4. **failed** - `fail()` is called when an exception escapes the run loop. It publishes `RunFailedEvent` to the EventBus.
+
+`complete_event` is set only after all cleanup finishes. `close_session()` awaits this event with a timeout to allow graceful shutdown. If the timeout expires, it falls back to `cancel_run()`.
+
+#### Event Mapping (Native Agents)
+
+`RunExecutor` maps PydanticAI node-level events to AgentPool EventBus events:
+
+| PydanticAI Node Event | AgentPool EventBus Event |
+|---|---|
+| `AgentRun` created | `RunStartedEvent` |
+| `ModelRequestNode` start | `PartStartEvent` |
+| `ModelRequestNode` text chunks | `PartDeltaEvent` |
+| `ModelRequestNode` end | `PartEndEvent` |
+| `FunctionToolCallEvent` | `ToolCallStartEvent` |
+| `FunctionToolResultEvent` | `ToolCallCompleteEvent` |
+| `EndNode` | `StreamCompleteEvent` |
+| Run cancelled | `StreamCompleteEvent(cancelled=True)` |
+
+The `RunExecutor` runs PydanticAI iteration in a background task and pushes events into an async queue. The consumer drains this queue and yields `RichAgentStreamEvent` tokens. This preserves CancelScope safety: cancelling the consumer does not immediately tear down the PydanticAI run.
+
+#### PromptInjectionManager
+
+`PromptInjectionManager` serves two purposes depending on the agent type.
+
+**For all agents**, `inject()` and `consume()` handle tool result augmentation. When a tool finishes, `after_tool_execute` hooks call `consume()` to inject additional context into the conversation. If no tool runs, `flush_pending_to_queue()` moves unconsumed injections into the queued prompts.
+
+**For non-native agents**, `queue()` and `pop_queued()` also handle follow-up prompts after a turn ends. `LegacyTurnRunner` drains these queues through `_process_queued_work()`.
+
+**For native agents**, the follow-up prompt queue (`queue()` / `pop_queued()`) is replaced by PydanticAI's `PendingMessageDrainCapability`. `inject()` / `consume()` remain in use for tool augmentation.
+
 ### Agent Types
 
 **Native Agents** (`type: native`)
