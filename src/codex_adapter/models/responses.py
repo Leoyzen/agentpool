@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from codex_adapter.models.base import CodexBaseModel
 from codex_adapter.models.codex_types import (  # noqa: TC001
     AskForApproval,
@@ -71,6 +73,11 @@ class ThreadResponse(CodexBaseModel):
     approval_policy: AskForApproval
     sandbox: SandboxPolicy
     reasoning_effort: ReasoningEffort | None = None
+    service_tier: str | None = None
+    runtime_workspace_roots: list[str] = Field(default_factory=list)
+    instruction_sources: list[str] = Field(default_factory=list)
+    approvals_reviewer: str | None = None
+    active_permission_profile: str | None = None
 
 
 class TurnStartResponse(CodexBaseModel):

@@ -181,6 +181,10 @@ class Turn(CodexBaseModel):
     items: list[ThreadItem] = Field(default_factory=list)
     status: TurnStatusValue = "inProgress"
     error: TurnError | None = None
+    items_view: str | None = None
+    started_at: int | None = None
+    completed_at: int | None = None
+    duration_ms: int | None = None
 
 
 class Thread(CodexBaseModel):
@@ -202,6 +206,9 @@ class Thread(CodexBaseModel):
     git_info: GitInfo | None = None
     name: str | None = None
     turns: list[Turn] = Field(default_factory=list)
+    session_id: str | None = None
+    forked_from_id: str | None = None
+    thread_source: str | None = None
 
 
 class ThreadData(CodexBaseModel):
@@ -223,6 +230,9 @@ class ThreadData(CodexBaseModel):
     git_info: GitInfo | None = None
     name: str | None = None
     turns: list[Turn] = Field(default_factory=list)
+    session_id: str | None = None
+    forked_from_id: str | None = None
+    thread_source: str | None = None
 
 
 class TurnData(CodexBaseModel):
@@ -233,6 +243,10 @@ class TurnData(CodexBaseModel):
     thread_id: str | None = None
     items: list[ThreadItem] = Field(default_factory=list)
     error: str | None = None
+    items_view: str | None = None
+    started_at: int | None = None
+    completed_at: int | None = None
+    duration_ms: int | None = None
 
 
 class SkillInterface(CodexBaseModel):
