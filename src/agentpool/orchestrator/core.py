@@ -12,6 +12,7 @@ import contextlib
 import copy
 from dataclasses import dataclass, field
 from datetime import datetime
+import inspect
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
@@ -651,6 +652,7 @@ class SessionController:
         session_id: str,
         content: Any,
         priority: str = "when_idle",
+        **kwargs: Any,
     ) -> None:
         """Receive an incoming request for a session.
 
@@ -661,6 +663,7 @@ class SessionController:
             session_id: Target session.
             content: Message / prompt content.
             priority: "when_idle" to queue, "asap" to inject into active turn.
+            **kwargs: Additional arguments passed to the turn runner (e.g. input_provider).
         """
         session = self.get_session(session_id)
         if session is None:
@@ -682,7 +685,7 @@ class SessionController:
                 if self._turn_runner is not None:
                     self._pending_run_ids[session_id] = run_handle.run_id
                     task = asyncio.create_task(
-                        self._turn_runner.run_loop(session_id, content),
+                        self._turn_runner.run_loop(session_id, content, **kwargs),
                     )
                     run_handle.start(task)
                     task.add_done_callback(
@@ -905,7 +908,11 @@ class TurnRunner:
             *prompts: Prompts to pass to the agent.
             **kwargs: Additional arguments passed to the agent.
         """
-        agent = await self.sessions.get_or_create_session_agent(session_id)
+        # Extract input_provider for agent creation, pass remaining kwargs to _run_stream_once
+        input_provider = kwargs.pop("input_provider", None)
+        agent = await self.sessions.get_or_create_session_agent(
+            session_id, input_provider=input_provider
+        )
         _session = self.sessions.get_session(session_id)
 
         from agentpool.agents.base_agent import _current_run_ctx_var
@@ -946,12 +953,24 @@ class TurnRunner:
         )
 
         turn_start = time.monotonic()
+        # Filter kwargs to only include parameters _run_stream_once accepts.
+        # If the function has **kwargs, allow all kwargs through.
+        sig = inspect.signature(agent._run_stream_once)
+        stream_params = set(sig.parameters)
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        # input_provider was popped for get_or_create_session_agent;
+        # include it back if _run_stream_once also accepts it.
+        stream_kwargs = dict(kwargs)
+        if input_provider is not None and (has_var_keyword or "input_provider" in stream_params):
+            stream_kwargs["input_provider"] = input_provider
         try:
             try:
                 # Process prompts and handle injections/queued prompts
                 # like BaseAgent.run_stream() does.
                 async for event in agent._run_stream_once(
-                    run_ctx, *prompts, session_id=session_id, **kwargs
+                    run_ctx, *prompts, session_id=session_id, **stream_kwargs
                 ):
                     await self.event_bus.publish(session_id, event)
 
@@ -963,7 +982,7 @@ class TurnRunner:
                     if current_prompts is None:
                         break
                     async for event in agent._run_stream_once(
-                        run_ctx, *current_prompts, session_id=session_id, **kwargs
+                        run_ctx, *current_prompts, session_id=session_id, **stream_kwargs
                     ):
                         await self.event_bus.publish(session_id, event)
                     run_ctx.injection_manager.flush_pending_to_queue()
@@ -1450,6 +1469,7 @@ class SessionPool:
         session_id: str,
         content: Any,
         priority: str = "when_idle",
+        **kwargs: Any,
     ) -> None:
         """Route an incoming request for a session (fire-and-forget).
 
@@ -1461,8 +1481,9 @@ class SessionPool:
             session_id: Target session.
             content: Message / prompt content.
             priority: "when_idle" to queue, "asap" to inject into active turn.
+            **kwargs: Additional arguments passed to the turn runner.
         """
-        await self.sessions.receive_request(session_id, content, priority=priority)
+        await self.sessions.receive_request(session_id, content, priority=priority, **kwargs)
 
     @property
     def active_runs(self) -> list[RunHandle]:

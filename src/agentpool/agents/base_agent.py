@@ -881,17 +881,31 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             effective_session_id = session_id or generate_session_id()
             session_pool = self.agent_pool.session_pool
 
-            # Ensure session exists in SessionPool
-            if session_pool.sessions.get_session(effective_session_id) is None:
-                await session_pool.create_session(
-                    effective_session_id,
-                    agent_name=self.name,
-                    parent_session_id=parent_session_id,
-                )
+            # If the session already exists but belongs to a different agent,
+            # fall through to the legacy path so THIS agent runs.
+            existing_session = session_pool.sessions.get_session(effective_session_id)
+            if existing_session is None or existing_session.agent_name == self.name:
+                # Ensure session exists in SessionPool
+                if existing_session is None:
+                    await session_pool.create_session(
+                        effective_session_id,
+                        agent_name=self.name,
+                        parent_session_id=parent_session_id,
+                    )
 
-            async for event in session_pool.run_stream(effective_session_id, *prompts):  # type: ignore[arg-type]
-                yield event
-            return
+                final_message: ChatMessage[TResult] | None = None
+                async for event in session_pool.run_stream(effective_session_id, *prompts):  # type: ignore[arg-type]
+                    yield event
+                    if isinstance(event, StreamCompleteEvent):
+                        final_message = event.message
+                if final_message is not None:
+                    await self.message_sent.emit(final_message)
+                    session = session_pool.sessions.get_session(effective_session_id)
+                    if session is not None and getattr(session, "is_per_session_agent", False):
+                        await self.connections.route_message(
+                            final_message, wait=wait_for_connections
+                        )
+                return
 
         # Legacy path (standalone mode or AG-UI bypass)
         from agentpool.utils.identifiers import generate_session_id
@@ -1376,6 +1390,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             effective_run_ctx = _current_run_ctx_var.get()
         if effective_run_ctx is None:
             effective_run_ctx = self._get_session_run_ctx(session_id=session_id)
+        # Fallback to instance-level active run context for cross-task access
+        # when SessionPool is not available (e.g. standalone agent usage).
+        if effective_run_ctx is None:
+            effective_run_ctx = self._active_run_ctx
         if effective_run_ctx:
             effective_run_ctx.cancelled = True
         if self._background_run_ctx:
@@ -1486,55 +1504,67 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             effective_session_id = session_id or generate_session_id()
             session_pool = self.agent_pool.session_pool
 
-            # Ensure session exists in SessionPool
-            if session_pool.sessions.get_session(effective_session_id) is None:
-                await session_pool.create_session(
-                    effective_session_id,
-                    agent_name=self.name,
-                    parent_session_id=parent_session_id,
-                )
+            # If the session already exists but belongs to a different agent,
+            # fall through to the legacy path so THIS agent runs.
+            existing_session = session_pool.sessions.get_session(effective_session_id)
+            if existing_session is None or existing_session.agent_name == self.name:
+                # Ensure session exists in SessionPool
+                if existing_session is None:
+                    await session_pool.create_session(
+                        effective_session_id,
+                        agent_name=self.name,
+                        parent_session_id=parent_session_id,
+                    )
 
-            # Subscribe to EventBus and process prompt
-            queue = await session_pool.event_bus.subscribe(effective_session_id)
-            process_kwargs = {
-                "store_history": store_history,
-                "message_id": message_id,
-                "parent_id": parent_id,
-                "message_history": message_history,
-                "input_provider": input_provider,
-                "wait_for_connections": wait_for_connections,
-                "deps": deps,
-                "event_handlers": event_handlers,
-            }
-            process_task = asyncio.create_task(
-                session_pool.process_prompt(
-                    effective_session_id, *prompts, **process_kwargs
+                # Subscribe to EventBus and process prompt
+                queue = await session_pool.event_bus.subscribe(effective_session_id)
+                process_kwargs = {
+                    "store_history": store_history,
+                    "message_id": message_id,
+                    "parent_id": parent_id,
+                    "message_history": message_history,
+                    "input_provider": input_provider,
+                    "wait_for_connections": wait_for_connections,
+                    "deps": deps,
+                    "event_handlers": event_handlers,
+                }
+                process_task = asyncio.create_task(
+                    session_pool.process_prompt(
+                        effective_session_id, *prompts, **process_kwargs
+                    )
                 )
-            )
-            final_message: ChatMessage[TResult] | None = None
-            try:
-                while not process_task.done():
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                final_message: ChatMessage[TResult] | None = None
+                try:
+                    while not process_task.done():
+                        try:
+                            event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                            if isinstance(event, StreamCompleteEvent):
+                                final_message = event.message
+                        except TimeoutError:
+                            continue
+
+                    # Drain remaining events
+                    while not queue.empty():
+                        event = queue.get_nowait()
                         if isinstance(event, StreamCompleteEvent):
                             final_message = event.message
-                    except TimeoutError:
-                        continue
 
-                # Drain remaining events
-                while not queue.empty():
-                    event = queue.get_nowait()
-                    if isinstance(event, StreamCompleteEvent):
-                        final_message = event.message
+                    if (exc := process_task.exception()) is not None:
+                        raise exc
+                finally:
+                    await session_pool.event_bus.unsubscribe(effective_session_id, queue)
 
-                if (exc := process_task.exception()) is not None:
-                    raise exc
-            finally:
-                await session_pool.event_bus.unsubscribe(effective_session_id, queue)
-
-            if final_message is None:
-                raise RuntimeError("No final message received from stream")
-            return final_message
+                if final_message is None:
+                    raise RuntimeError("No final message received from stream")
+                await self.message_sent.emit(final_message)
+                # Per-session agents don't inherit connections from the base agent.
+                # Route from the base agent so Talk targets still receive the message.
+                session = session_pool.sessions.get_session(effective_session_id)
+                if session is not None and getattr(session, "is_per_session_agent", False):
+                    await self.connections.route_message(
+                        final_message, wait=wait_for_connections
+                    )
+                return final_message
 
         # Legacy path (standalone mode or AG-UI bypass)
         final_message = None

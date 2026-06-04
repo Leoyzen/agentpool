@@ -1155,9 +1155,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         break
                     continue
 
-            if iteration_error is not None:
-                raise iteration_error
-
         finally:
             iteration_done.set()
             if iteration_task.cancelled():
@@ -1173,7 +1170,24 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     pass
             self._iteration_task = None
 
-        assert response_msg is not None
+        if iteration_error is not None:
+            raise iteration_error
+
+        # If the stream was cancelled before producing a response, create a
+        # minimal empty message so the caller always receives StreamCompleteEvent.
+        if response_msg is None:
+            response_time = time.perf_counter() - start_time
+            response_msg = ChatMessage(
+                content="",
+                role="assistant",
+                name=self.name,
+                message_id=message_id,
+                session_id=session_id,
+                parent_id=user_msg.message_id,
+                response_time=response_time,
+                finish_reason="stop",
+            )
+
         yield StreamCompleteEvent(message=response_msg)
 
     def register_worker(
