@@ -103,7 +103,8 @@ class EventBusHooksAdapter:
                         agent_name=ctx.deps.node_name if ctx.deps else None,
                     ),
                 )
-            await original(ctx)
+            if original is not None:
+                await original(ctx)
 
         return wrapped
 
@@ -118,7 +119,9 @@ class EventBusHooksAdapter:
         async def wrapped(
             ctx: RunContext[AgentContext[Any]], *, result: AgentRunResult[Any]
         ) -> AgentRunResult[Any]:
-            return await original(ctx, result=result)
+            if original is not None:
+                return await original(ctx, result=result)
+            return result
 
         return wrapped
 
@@ -144,7 +147,9 @@ class EventBusHooksAdapter:
                         raw_input=dict(args),
                     ),
                 )
-            return await original(ctx, call=call, tool_def=tool_def, args=args)
+            if original is not None:
+                return await original(ctx, call=call, tool_def=tool_def, args=args)
+            return args
 
         return wrapped
 
@@ -173,6 +178,8 @@ class EventBusHooksAdapter:
                         message_id=str(uuid.uuid4()),
                     ),
                 )
-            return await original(ctx, call=call, tool_def=tool_def, args=args, result=result)
+            if original is not None:
+                return await original(ctx, call=call, tool_def=tool_def, args=args, result=result)
+            return result
 
         return wrapped

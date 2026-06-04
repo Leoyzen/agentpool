@@ -206,24 +206,19 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             The child session ID string.
         """
         pool = self.node.agent_pool
-        if pool is not None:
+        if pool is not None and pool.session_pool is not None:
             effective_parent = parent_session_id or getattr(self.node, "session_id", None)
-            if effective_parent is None:
+            if effective_parent is not None:
                 from agentpool.utils.identifiers import generate_session_id
 
-                return generate_session_id()
-
-            from agentpool.utils.identifiers import generate_session_id
-
-            child_session = await pool.session_pool.create_session(
-                session_id=generate_session_id(),
-                agent_name=agent_name,
-                parent_session_id=effective_parent,
-                agent_type=agent_type,
-            )
-            return child_session.session_id
-
-        # No pool available — generate an ephemeral ID without persistence.
+                child_session = await pool.session_pool.create_session(
+                    session_id=generate_session_id(),
+                    agent_name=agent_name,
+                    parent_session_id=effective_parent,
+                    agent_type=agent_type,
+                )
+                return child_session.session_id
+        # Fallback: no pool, no session_pool, or no parent — generate ephemeral ID.
         from agentpool.utils.identifiers import generate_session_id
 
         return generate_session_id()

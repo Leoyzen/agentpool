@@ -1278,8 +1278,13 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             self._callback_run_ctx = None
             # Unsubscribe from event_bus if we subscribed
             if event_bus_queue is not None and run_ctx.event_bus is not None:
-                with contextlib.suppress(Exception):
+                try:
                     await run_ctx.event_bus.unsubscribe(run_ctx.session_id, event_bus_queue)
+                except Exception:
+                    self.log.warning(
+                        "Failed to unsubscribe from event bus during cleanup",
+                        session_id=run_ctx.session_id,
+                    )
             # Disconnect fork client if we created one
             if fork_client:
                 try:

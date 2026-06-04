@@ -132,19 +132,19 @@ def _should_bypass_session_pool() -> bool:
     """
     frame = sys._getframe(1)
     while frame:
-        module = inspect.getmodule(frame)
-        if module is not None:
-            module_name = module.__name__
-            # AG-UI adapter bypass
-            if "agui" in module_name:
-                return True
-            # SessionPool internal turn bypass (prevents turn_lock deadlock)
-            if "orchestrator" in module_name and frame.f_code.co_name in (
-                "_run_turn_unlocked",
-                "run_loop",
-                "run_turn",
-            ):
-                return True
+        # Avoid inspect.getmodule() which performs expensive sys.modules lookups.
+        # frame.f_globals.get("__name__") is O(1) and sufficient for module detection.
+        module_name = frame.f_globals.get("__name__", "")
+        # AG-UI adapter bypass
+        if "agui" in module_name:
+            return True
+        # SessionPool internal turn bypass (prevents turn_lock deadlock)
+        if "orchestrator" in module_name and frame.f_code.co_name in (
+            "_run_turn_unlocked",
+            "run_loop",
+            "run_turn",
+        ):
+            return True
         if "agui_server" in frame.f_code.co_filename:
             return True
         frame = frame.f_back
@@ -601,7 +601,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         if self.agent_pool is not None and session_id is not None:
             session_pool = self.agent_pool.session_pool
-            assert session_pool is not None
+            if session_pool is None:
+                return None
             session = session_pool.sessions.get_session(session_id)
             if session is not None and session.current_run_id is not None:
                 run_handle = session_pool.get_run(session.current_run_id)
