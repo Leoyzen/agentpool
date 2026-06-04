@@ -355,22 +355,20 @@ class StreamEventEmitter:
         """Internal method to emit events to EventBus or agent's queue."""
         if self._event_bus is not None:
             session_id = getattr(self._context.agent, "session_id", None)
+            if not session_id and self._context.run_ctx is not None:
+                session_id = self._context.run_ctx.session_id
             if session_id:
                 try:
                     await self._event_bus.publish(session_id, event)
+                    return
                 except Exception:
                     logger.debug(
                         "EventBus publish failed",
                         session_id=session_id,
                         event_type=type(event).__name__,
                     )
-            else:
-                logger.error(
-                    "DEBUG_EMIT: EventBus publish skipped: agent has no session_id",
-                    agent_name=self._context.agent.name,
-                    event_type=type(event).__name__,
-                )
-        elif self._context.run_ctx is not None:
+
+        if self._context.run_ctx is not None:
             await self._context.run_ctx.event_queue.put(event)
         else:
             logger.debug(

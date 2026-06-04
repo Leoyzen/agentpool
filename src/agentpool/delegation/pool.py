@@ -181,7 +181,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             servers = self.manifest.get_mcp_servers()
             self.mcp = MCPManager(name="pool_mcp", servers=servers, owner="pool", _warn=False)
             self.skills = SkillsManager(
-                name="pool_skills",
+                name="local",
                 owner="pool",
                 config=self.manifest.skills,
                 config_file_path=self._config_file_path,

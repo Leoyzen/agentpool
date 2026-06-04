@@ -111,7 +111,9 @@ class WorkersTools(ResourceProvider):
             # Create child session via AgentContext (RFC-0028)
             from agentpool.utils.identifiers import generate_session_id
 
-            parent_session_id = getattr(ctx.node, "session_id", None) or generate_session_id()
+            parent_session_id = getattr(ctx.node, "session_id", None) or (
+                ctx.run_ctx.session_id if ctx.run_ctx else generate_session_id()
+            )
             child_session_id = await ctx.create_child_session(
                 agent_name=agent_name,
                 agent_type=worker.agent_type,
