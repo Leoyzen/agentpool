@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from acp.schema.capabilities import AgentCapabilities, McpCapabilities
+from acp.schema.capabilities import AgentCapabilities, ClientCapabilities, McpCapabilities
 
 
 class TestAgentCapabilities:
@@ -196,3 +196,59 @@ def test_agent_capabilities_create_with_all_mcp_server_types() -> None:
     assert caps.mcp_capabilities.http is True
     assert caps.mcp_capabilities.sse is True
     assert caps.mcp_capabilities.acp is True
+
+
+# =============================================================================
+# ClientCapabilities.turn_complete tests
+# =============================================================================
+
+
+@pytest.mark.unit
+def test_client_capabilities_turn_complete_true() -> None:
+    """Direct construction with turn_complete=True should set field correctly."""
+    caps = ClientCapabilities(turn_complete=True)
+    assert caps.turn_complete is True
+
+
+@pytest.mark.unit
+def test_client_capabilities_turn_complete_false() -> None:
+    """Direct construction with turn_complete=False should set field correctly."""
+    caps = ClientCapabilities(turn_complete=False)
+    assert caps.turn_complete is False
+
+
+@pytest.mark.unit
+def test_client_capabilities_turn_complete_defaults_to_false() -> None:
+    """Omitted turn_complete field should default to False."""
+    caps = ClientCapabilities()
+    assert caps.turn_complete is False
+
+
+@pytest.mark.unit
+def test_client_capabilities_turn_complete_coerce_empty_dict() -> None:
+    """{} should coerce to True via field_validator."""
+    caps = ClientCapabilities.model_validate({"turn_complete": {}})
+    assert caps.turn_complete is True
+
+
+@pytest.mark.unit
+def test_client_capabilities_create_with_turn_complete_true() -> None:
+    """create(turn_complete=True) should set field correctly."""
+    caps = ClientCapabilities.create(turn_complete=True)
+    assert caps.turn_complete is True
+
+
+@pytest.mark.unit
+def test_client_capabilities_create_without_turn_complete_defaults_false() -> None:
+    """create() without parameter should default turn_complete to False."""
+    caps = ClientCapabilities.create()
+    assert caps.turn_complete is False
+
+
+@pytest.mark.unit
+def test_client_capabilities_turn_complete_round_trip() -> None:
+    """Serialization round-trip should preserve turn_complete value."""
+    original = ClientCapabilities(turn_complete=True)
+    dumped = original.model_dump()
+    restored = ClientCapabilities.model_validate(dumped)
+    assert restored.turn_complete is True

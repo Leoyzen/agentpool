@@ -382,6 +382,9 @@ class AgentPoolACPAgent(ACPAgent):
         pool = self.agent_pool
         manifest = pool.manifest if pool else None
         self.provider_router = ProviderRouter(manifest)
+        # Gate turn_complete advertisement on client's declared support
+        client_caps = params.client_capabilities
+        turn_complete = bool(client_caps.turn_complete) if client_caps is not None else False
         return InitializeResponse.create(
             protocol_version=version,
             name="agentpool",
@@ -399,7 +402,7 @@ class AgentPoolACPAgent(ACPAgent):
             embedded_context_prompts=True,
             image_prompts=True,
             providers=True,
-            turn_complete=True,
+            turn_complete=turn_complete,
         )
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:

@@ -653,7 +653,7 @@ class SessionController:
         content: Any,
         priority: str = "when_idle",
         **kwargs: Any,
-    ) -> None:
+    ) -> RunHandle | None:
         """Receive an incoming request for a session.
 
         If the session is idle, creates a RunHandle and starts execution.
@@ -664,19 +664,22 @@ class SessionController:
             content: Message / prompt content.
             priority: "when_idle" to queue, "asap" to inject into active turn.
             **kwargs: Additional arguments passed to the turn runner (e.g. input_provider).
+
+        Returns:
+            The RunHandle if a new run was started, otherwise None.
         """
         session = self.get_session(session_id)
         if session is None:
-            return
+            return None
 
         async with session._request_lock:
             if session.closing or session.is_closing:
-                return
+                return None
 
             if self._max_concurrent_runs is not None:
                 async with self._runs_lock:
                     if len(self._runs) >= self._max_concurrent_runs:
-                        return
+                        return None
 
             if session.current_run_id is None:
                 run_handle = self._create_run(session_id, content)
@@ -691,7 +694,7 @@ class SessionController:
                     task.add_done_callback(
                         lambda _t, rid=run_handle.run_id: self._cleanup_run(rid),
                     )
-                return
+                return run_handle
 
         # Session has an active run - delegate after releasing the request lock
         if self._turn_runner is not None:
@@ -699,6 +702,7 @@ class SessionController:
                 await self._turn_runner.inject_prompt(session_id, content)
             else:
                 await self._turn_runner.queue_prompt(session_id, content)
+        return None
 
     def cancel_run_for_session(self, session_id: str) -> None:
         """Cancel the active run for a session.
@@ -1470,7 +1474,7 @@ class SessionPool:
         content: Any,
         priority: str = "when_idle",
         **kwargs: Any,
-    ) -> None:
+    ) -> RunHandle | None:
         """Route an incoming request for a session (fire-and-forget).
 
         Creates a background task that processes the prompt through
@@ -1482,8 +1486,11 @@ class SessionPool:
             content: Message / prompt content.
             priority: "when_idle" to queue, "asap" to inject into active turn.
             **kwargs: Additional arguments passed to the turn runner.
+
+        Returns:
+            The RunHandle if a new run was started, otherwise None.
         """
-        await self.sessions.receive_request(session_id, content, priority=priority, **kwargs)
+        return await self.sessions.receive_request(session_id, content, priority=priority, **kwargs)
 
     @property
     def active_runs(self) -> list[RunHandle]:

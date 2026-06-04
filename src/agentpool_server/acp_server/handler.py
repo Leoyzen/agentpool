@@ -15,7 +15,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from acp.agent.acp_requests import ACPRequests
-from acp.schema.capabilities import ClientCapabilities, ElicitationCapabilities
+from acp.schema.capabilities import ClientCapabilities
 from agentpool.log import get_logger
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
@@ -123,9 +123,16 @@ class ACPProtocolHandler:
         queue = await session_pool.event_bus.subscribe(session_id, scope="descendants")
         self._consumer_queues[session_id] = queue
 
+        # Derive turn_complete support from stored client capabilities
+        client_supports_turn_complete = (
+            self.client_capabilities is not None
+            and self.client_capabilities.turn_complete is True
+        )
+
         # Create a per-session converter so tool-call state is isolated
         converter = ACPEventConverter(
             subagent_display_mode=self._event_converter_template.subagent_display_mode,
+            client_supports_turn_complete=client_supports_turn_complete,
         )
 
         try:
@@ -228,9 +235,16 @@ class ACPProtocolHandler:
 
         stop_reason: StopReason = "end_turn"
         try:
-            await session_pool.receive_request(
+            run_handle = await session_pool.receive_request(
                 session_id, *contents, input_provider=input_provider
             )
+            # Legacy clients (no turn_complete support) block until the run finishes
+            # so they don't need session/update turn_complete notifications.
+            if run_handle is not None and not (
+                self.client_capabilities is not None
+                and self.client_capabilities.turn_complete
+            ):
+                await run_handle.complete_event.wait()
         except asyncio.CancelledError:
             logger.info("Prompt processing cancelled", session_id=session_id)
             stop_reason = "cancelled"

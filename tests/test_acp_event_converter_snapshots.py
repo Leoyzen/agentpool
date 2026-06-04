@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from tests.fixtures.subagent_events import TEST_EVENT_SEQUENCES
 
+from agentpool.agents.events import StreamCompleteEvent
+from agentpool.messaging.messages import ChatMessage
+from pydantic_ai.usage import RequestUsage
+
 
 async def collect_updates(converter: ACPEventConverter, event) -> list[dict[str, object]]:
     """Helper to collect all updates from an event and convert to dict for snapshots.
@@ -346,3 +350,64 @@ class TestLegacyModeSnapshots:
             all_updates.extend(await collect_updates(legacy_converter, event))
 
         assert all_updates == snapshot
+
+
+class TestTurnCompleteConditional:
+    """Tests for conditional TurnCompleteUpdate emission."""
+
+    @staticmethod
+    def _make_stream_complete_event() -> StreamCompleteEvent[str]:
+        """Create a minimal StreamCompleteEvent for testing."""
+        message = ChatMessage(
+            content="Hello",
+            role="assistant",  # type: ignore[arg-type]
+            usage=RequestUsage(),
+        )
+        return StreamCompleteEvent(message=message)
+
+    @staticmethod
+    async def _collect_updates_raw(converter, event) -> list[object]:
+        """Helper to collect all update objects without dict conversion."""
+        return [u async for u in converter.convert(event)]
+
+    @pytest.mark.anyio
+    async def test_turn_complete_yielded_when_flag_true(self):
+        """When client_supports_turn_complete=True, TurnCompleteUpdate is yielded."""
+        converter = ACPEventConverter(client_supports_turn_complete=True)
+        event = self._make_stream_complete_event()
+
+        updates = await self._collect_updates_raw(converter, event)
+        types = [type(u).__name__ for u in updates]
+
+        assert "TurnCompleteUpdate" in types
+
+    @pytest.mark.anyio
+    async def test_turn_complete_not_yielded_when_flag_false(self):
+        """When client_supports_turn_complete=False, TurnCompleteUpdate is NOT yielded."""
+        converter = ACPEventConverter(client_supports_turn_complete=False)
+        event = self._make_stream_complete_event()
+
+        updates = await self._collect_updates_raw(converter, event)
+        types = [type(u).__name__ for u in updates]
+
+        assert "TurnCompleteUpdate" not in types
+
+    @pytest.mark.anyio
+    async def test_turn_complete_not_yielded_by_default(self):
+        """By default (no flag), TurnCompleteUpdate is NOT yielded."""
+        converter = ACPEventConverter()
+        event = self._make_stream_complete_event()
+
+        updates = await self._collect_updates_raw(converter, event)
+        types = [type(u).__name__ for u in updates]
+
+        assert "TurnCompleteUpdate" not in types
+
+    def test_reset_preserves_client_supports_turn_complete(self):
+        """reset() must NOT clear the client_supports_turn_complete flag."""
+        converter = ACPEventConverter(client_supports_turn_complete=True)
+        assert converter.client_supports_turn_complete is True
+
+        converter.reset()
+
+        assert converter.client_supports_turn_complete is True

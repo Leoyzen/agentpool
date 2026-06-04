@@ -7,12 +7,14 @@ SessionPool path.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from acp.schema import TextContentBlock
+from agentpool.orchestrator.run import RunHandle
 from agentpool_server.acp_server.handler import ACPProtocolHandler, _ACPSessionProxy
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 
@@ -40,6 +42,7 @@ def mock_pool() -> MagicMock:
     mock_queue.get = _mock_queue_get
     session_pool.event_bus.subscribe = AsyncMock(return_value=mock_queue)
     session_pool.event_bus.close_session = AsyncMock()
+    session_pool.event_bus.unsubscribe = AsyncMock()
 
     pool.session_pool = session_pool
     return pool
@@ -241,3 +244,198 @@ class TestACPSessionProxy:
         caps = ClientCapabilities(fs=None, terminal=True)
         proxy = _ACPSessionProxy(requests=MagicMock(), client_capabilities=caps)
         assert proxy.client_capabilities is caps
+
+
+class TestEventConsumerConverterFlag:
+    """Tests that _event_consumer_loop passes client_supports_turn_complete to ACPEventConverter."""
+
+    @pytest.mark.anyio
+    async def test_event_consumer_passes_turn_complete_true(
+        self,
+        mock_pool: MagicMock,
+        mock_event_converter: MagicMock,
+        mock_client: MagicMock,
+    ) -> None:
+        """When client supports turn_complete, converter is created with flag=True."""
+        from acp.schema.capabilities import ClientCapabilities
+        from agentpool_server.acp_server.handler import ACPEventConverter
+
+        handler = ACPProtocolHandler(
+            agent_pool=mock_pool,
+            event_converter=mock_event_converter,
+            client=mock_client,
+            client_capabilities=ClientCapabilities(turn_complete=True),
+        )
+
+        with patch.object(
+            ACPEventConverter, "__init__", return_value=None
+        ) as mock_init:
+            await handler._event_consumer_loop("sess-1")
+
+        mock_init.assert_called_once()
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs.get("client_supports_turn_complete") is True
+
+
+class TestHandlePromptBlockingBehavior:
+    """Tests for ACPProtocolHandler.handle_prompt() blocking on RunHandle.complete_event."""
+
+    @pytest.mark.anyio
+    async def test_legacy_client_blocks_until_run_completes(
+        self,
+        handler: ACPProtocolHandler,
+        mock_pool: MagicMock,
+    ) -> None:
+        """Legacy clients block until the run's complete_event is set."""
+        event = asyncio.Event()
+        run_handle = RunHandle(
+            run_id="run-1",
+            session_id="sess-1",
+            agent_type="native",
+            complete_event=event,
+        )
+        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+
+        prompt = [TextContentBlock(text="hello")]
+        task = asyncio.create_task(handler.handle_prompt("sess-1", prompt))
+
+        # Yield so the task reaches the wait()
+        await asyncio.sleep(0)
+        assert not task.done(), "Should block until complete_event is set"
+
+        event.set()
+        result = await task
+        assert result is not None
+        assert result.stop_reason == "end_turn"
+
+    @pytest.mark.anyio
+    async def test_modern_client_returns_immediately(
+        self,
+        mock_pool: MagicMock,
+        mock_event_converter: MagicMock,
+        mock_client: MagicMock,
+    ) -> None:
+        """Modern clients with turn_complete=True return without waiting."""
+        from acp.schema.capabilities import ClientCapabilities
+
+        handler = ACPProtocolHandler(
+            agent_pool=mock_pool,
+            event_converter=mock_event_converter,
+            client=mock_client,
+            client_capabilities=ClientCapabilities(turn_complete=True),
+        )
+
+        event = asyncio.Event()
+        run_handle = RunHandle(
+            run_id="run-1",
+            session_id="sess-1",
+            agent_type="native",
+            complete_event=event,
+        )
+        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+
+        prompt = [TextContentBlock(text="hello")]
+        with patch.object(event, "wait", new_callable=AsyncMock) as mock_wait:
+            result = await handler.handle_prompt("sess-1", prompt)
+
+        assert result is not None
+        assert result.stop_reason == "end_turn"
+        mock_wait.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_legacy_client_cancelled_during_wait(
+        self,
+        handler: ACPProtocolHandler,
+        mock_pool: MagicMock,
+    ) -> None:
+        """If the wait is cancelled, handler returns stop_reason='cancelled'."""
+        event = asyncio.Event()
+        run_handle = RunHandle(
+            run_id="run-1",
+            session_id="sess-1",
+            agent_type="native",
+            complete_event=event,
+        )
+        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+
+        prompt = [TextContentBlock(text="hello")]
+        with patch.object(event, "wait", side_effect=asyncio.CancelledError):
+            result = await handler.handle_prompt("sess-1", prompt)
+
+        assert result is not None
+        assert result.stop_reason == "cancelled"
+
+    @pytest.mark.anyio
+    async def test_legacy_client_missing_capabilities_defaults_to_blocking(
+        self,
+        handler: ACPProtocolHandler,
+        mock_pool: MagicMock,
+    ) -> None:
+        """When client_capabilities is None, handler defaults to blocking."""
+        event = asyncio.Event()
+        run_handle = RunHandle(
+            run_id="run-1",
+            session_id="sess-1",
+            agent_type="native",
+            complete_event=event,
+        )
+        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+
+        prompt = [TextContentBlock(text="hello")]
+        task = asyncio.create_task(handler.handle_prompt("sess-1", prompt))
+
+        await asyncio.sleep(0)
+        assert not task.done(), "Should block when client_capabilities is None"
+
+        event.set()
+        result = await task
+        assert result is not None
+        assert result.stop_reason == "end_turn"
+
+    @pytest.mark.anyio
+    async def test_legacy_client_run_completes_quickly(
+        self,
+        handler: ACPProtocolHandler,
+        mock_pool: MagicMock,
+    ) -> None:
+        """If the run is already complete, legacy client returns promptly."""
+        event = asyncio.Event()
+        event.set()
+        run_handle = RunHandle(
+            run_id="run-1",
+            session_id="sess-1",
+            agent_type="native",
+            complete_event=event,
+        )
+        mock_pool.session_pool.receive_request = AsyncMock(return_value=run_handle)
+
+        prompt = [TextContentBlock(text="hello")]
+        result = await handler.handle_prompt("sess-1", prompt)
+        assert result is not None
+        assert result.stop_reason == "end_turn"
+
+    @pytest.mark.anyio
+    async def test_event_consumer_defaults_turn_complete_when_no_capabilities(
+        self,
+        mock_pool: MagicMock,
+        mock_event_converter: MagicMock,
+        mock_client: MagicMock,
+    ) -> None:
+        """When client_capabilities is None, converter defaults to flag=False."""
+        from agentpool_server.acp_server.handler import ACPEventConverter
+
+        handler = ACPProtocolHandler(
+            agent_pool=mock_pool,
+            event_converter=mock_event_converter,
+            client=mock_client,
+            client_capabilities=None,
+        )
+
+        with patch.object(
+            ACPEventConverter, "__init__", return_value=None
+        ) as mock_init:
+            await handler._event_consumer_loop("sess-1")
+
+        mock_init.assert_called_once()
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs.get("client_supports_turn_complete") is False

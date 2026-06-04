@@ -95,6 +95,26 @@ class ClientCapabilities(AnnotatedObject):
     structured user input, or must fall back to `request_permission`.
     """
 
+    turn_complete: bool | None = False
+    """Whether the client supports `turn_complete` session updates.
+
+    When enabled, the agent emits `turn_complete` updates at the end
+    of each prompt turn. See draft RFD PR #644.
+    """
+
+    @field_validator("turn_complete", mode="before")
+    def _coerce_turn_complete_to_bool(cls, v: Any) -> bool | None:  # noqa: N805
+        """Coerce ACP spec's {} or true to bool.
+
+        The ACP spec represents capability presence as either an empty
+        object ``{}`` or ``true``.  Both indicate the mode is supported.
+        """
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return True
+        return bool(v)
+
     @classmethod
     def create(
         cls,
@@ -103,6 +123,7 @@ class ClientCapabilities(AnnotatedObject):
         terminal: bool | None = False,
         auth: AuthCapabilities | None = None,
         elicitation: ElicitationCapabilities | None = None,
+        turn_complete: bool | None = False,
     ) -> Self:
         """Create a new instance of ClientCapabilities.
 
@@ -112,12 +133,21 @@ class ClientCapabilities(AnnotatedObject):
             terminal: Whether the Client supports all `terminal/*` methods.
             auth: Authentication capabilities supported by the client.
             elicitation: Elicitation capabilities supported by the client.
+            turn_complete: Whether the client supports `turn_complete` session updates.
 
         Returns:
             A new instance of ClientCapabilities.
         """
-        fs = FileSystemCapability(read_text_file=read_text_file, write_text_file=write_text_file)
-        return cls(fs=fs, terminal=terminal, auth=auth, elicitation=elicitation)
+        fs = FileSystemCapability(
+            read_text_file=read_text_file, write_text_file=write_text_file
+        )
+        return cls(
+            fs=fs,
+            terminal=terminal,
+            auth=auth,
+            elicitation=elicitation,
+            turn_complete=turn_complete,
+        )
 
 
 class PromptCapabilities(AnnotatedObject):

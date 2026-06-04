@@ -605,8 +605,17 @@ class ACPSession:
 
             self.log.debug("Processing prompt", content_items=len(non_command_content))
             event_count = 0
+            # Derive turn-complete support from client capabilities
+            client_supports_turn_complete = (
+                bool(self.client_capabilities.turn_complete)
+                if self.client_capabilities is not None
+                else False
+            )
             # Create a new event converter for this prompt
-            converter = ACPEventConverter(subagent_display_mode=self.subagent_display_mode)
+            converter = ACPEventConverter(
+                subagent_display_mode=self.subagent_display_mode,
+                client_supports_turn_complete=client_supports_turn_complete,
+            )
             self._current_converter = converter  # Track for cancellation
 
             try:  # Use the session's persistent input provider

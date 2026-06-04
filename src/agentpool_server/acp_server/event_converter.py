@@ -198,6 +198,15 @@ class ACPEventConverter:
     subagent_display_mode: Literal["legacy", "inline", "tool_box"] = "legacy"
     """How to display subagent output. Deprecated: Use ACP_SUBAGENT_DISPLAY_MODE env var instead."""
 
+    # Feature flag for TurnCompleteUpdate emission
+    client_supports_turn_complete: bool = False
+    """Whether the connected ACP client supports TurnCompleteUpdate.
+
+    When True, the converter yields TurnCompleteUpdate on StreamCompleteEvent.
+    When False (default), no TurnCompleteUpdate is emitted for backward
+    compatibility with clients that do not handle the update type.
+    """
+
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
     """Active tool call states."""
@@ -733,7 +742,8 @@ class ACPEventConverter:
                 # Turn-complete signal: explicit end-of-turn barrier for clients.
                 # Based on draft RFD PR #644 (not yet merged into ACP spec).
                 # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
-                yield TurnCompleteUpdate(stop_reason="end_turn")
+                if self.client_supports_turn_complete:
+                    yield TurnCompleteUpdate(stop_reason="end_turn")
                 self.reset()
                 # Clean up all subagent states when stream completes
                 # Prevents memory leaks by removing accumulated state
