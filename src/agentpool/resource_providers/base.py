@@ -183,7 +183,14 @@ class ResourceProvider(ABC):
                 other_params.append(p)
 
             async def wrapper(ctx: RunContext[AgentContext], *args: Any, **kwargs: Any) -> Any:
-                agent_ctx = ctx.deps
+                from dataclasses import replace
+
+                agent_ctx = replace(
+                    ctx.deps,
+                    tool_name=ctx.tool_name,
+                    tool_call_id=ctx.tool_call_id,
+                    tool_input=kwargs.copy(),
+                )
                 sig_bound = sig.bind_partial(*args, **kwargs)
                 sig_bound.arguments[agent_ctx_param] = agent_ctx
                 if run_ctx_param is not None:
