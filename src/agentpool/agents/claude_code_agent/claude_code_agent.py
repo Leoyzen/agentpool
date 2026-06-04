@@ -64,7 +64,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 import uuid
 
 import anyio
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 from pydantic_ai import (
     FunctionToolResultEvent,
     ModelRequest,
@@ -134,7 +134,7 @@ if TYPE_CHECKING:
         ToolUseBlock,
         UserMessage,
     )
-    from clawd_code_sdk.types import ReasoningEffort
+    from clawd_code_sdk.models import ReasoningEffort
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
@@ -143,7 +143,7 @@ if TYPE_CHECKING:
     from tokonomics.model_names import AnthropicMaxModelName
     from toprompt import AnyPromptType
 
-    from agentpool.agents.claude_code_agent.models import (
+    from clawd_code_sdk.models.server_info import (
         ClaudeCodeCommandInfo,
         ClaudeCodeServerInfo,
     )
@@ -428,7 +428,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         and starts an MCP bridge to expose them to Claude Code via the SDK's
         native MCP support. Also converts external MCP servers to SDK format.
         """
-        from clawd_code_sdk.types import McpHttpServerConfig
+        from clawd_code_sdk.models import McpHttpServerConfig
 
         # Convert external MCP servers to SDK format first
         if self._external_mcp_servers:
@@ -513,7 +513,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             system_prompt: Pre-formatted system prompt from SystemPrompts manager
             fork_session: Whether to fork the session
         """
-        from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient
+        from clawd_code_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResumeSession
 
         sys_prompt = to_claude_system_prompt(system_prompt) if system_prompt else None
         # Determine effective permission mode
@@ -560,15 +560,14 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             add_dirs=self._add_dir or [],  # type: ignore[arg-type]
             tools=self._builtin_tools,
             fallback_model=self._fallback_model,
-            can_use_tool=can_use_tool,
+            on_permission=can_use_tool,
             max_buffer_size=10 * 1024 * 1024,
-            output_format=to_output_format(self._output_type),
+            output_schema=to_output_format(self._output_type),
             mcp_servers=self._mcp_servers or {},
             hooks=self._hook_manager.build_hooks(),  # type: ignore[arg-type]
             setting_sources=self._setting_sources,
             extra_args=extra_args,
-            resume=self._sdk_session_id,
-            fork_session=fork_session,
+            session=ResumeSession(session_id=self._sdk_session_id, fork=fork_session) if self._sdk_session_id else None,
         )
         return ClaudeSDKClient(opts)
 
@@ -666,6 +665,53 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             raise AgentNotInitializedError
 
         try:
+            # SDK 1.1.6's ClaudeCodeCommandInfo rejects the `aliases` field
+            # returned by newer Claude CLI versions. Strip it before validation.
+            from clawd_code_sdk.models.server_info import ClaudeCodeServerInfo
+
+            if not getattr(ClaudeCodeServerInfo, "_aliases_patched", False):
+                _original_validate = ClaudeCodeServerInfo.model_validate.__func__
+
+                def _patched_validate(cls, obj, *args, **kwargs):
+                    if isinstance(obj, dict) and "commands" in obj:
+                        for cmd in obj["commands"]:
+                            cmd.pop("aliases", None)
+                    return _original_validate(cls, obj, *args, **kwargs)
+
+                ClaudeCodeServerInfo.model_validate = classmethod(_patched_validate)
+                ClaudeCodeServerInfo._aliases_patched = True
+
+            # SDK 1.1.6's AssistantMessage.error is a Literal that does not
+            # include error values returned by newer Claude CLI (e.g.
+            # 'model_not_found'). Map unknown error values to 'unknown' so
+            # parsing does not crash.
+            import clawd_code_sdk.client as _cc_client
+
+            if not getattr(_cc_client, "_error_patched", False):
+                _original_parse = _cc_client.parse_message
+
+                def _patched_parse(data):
+                    if (
+                        isinstance(data, dict)
+                        and data.get("type") == "assistant"
+                        and data.get("error") is not None
+                        and data.get("error")
+                        not in {
+                            "authentication_failed",
+                            "billing_error",
+                            "rate_limit",
+                            "invalid_request",
+                            "server_error",
+                            "unknown",
+                        }
+                    ):
+                        data = dict(data)
+                        data["error"] = "unknown"
+                    return _original_parse(data)
+
+                _cc_client.parse_message = _patched_parse
+                _cc_client._error_patched = True
+
             await self._client.connect()
             await self.populate_commands()
             self.log.info("Claude Code client connected")
@@ -786,7 +832,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
         Returns:
             A slashed Command that executes via Claude Code
         """
-        from clawd_code_sdk.types import AssistantMessage, ResultMessage, TextBlock, UserMessage
+        from clawd_code_sdk.models import AssistantMessage, ResultMessage, TextBlock, UserMessage
         from slashed import Command
 
         name = cmd_info.name
@@ -855,14 +901,14 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             AssistantMessage,
             Message,
             ResultMessage,
-            SystemMessage,
+            InitSystemMessage,
             TextBlock,
             ThinkingBlock,
             ToolResultBlock,
             ToolUseBlock,
             UserMessage,
         )
-        from clawd_code_sdk.types import StreamEvent
+        from clawd_code_sdk.models import StreamEvent
 
         await self.ensure_initialized()
         # Initialize session_id on first run and log to storage
@@ -937,18 +983,22 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
             # Capture SDK session ID from init message
             stream = client.receive_response()
             first_msg = await anext(stream)
-            assert isinstance(first_msg, SystemMessage)
-            assert first_msg.subtype == "init"
-            self._sdk_session_id = first_msg.data["session_id"]
+            # Newer SDKs may emit other system messages (e.g., session_state_changed)
+            # before the init message. Skip them.
+            while not (
+                isinstance(first_msg, InitSystemMessage) and first_msg.subtype == "init"
+            ):
+                first_msg = await anext(stream)
+            self._sdk_session_id = first_msg.session_id
             # Merge SDK messages with event queue for real-time tool event streaming
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
-                self._tool_bridge.set_run_context(agent_ctx, input_provider, prompt=prompts),
+                self._tool_bridge.set_run_context(agent_ctx, prompt=prompts),
                 merge_queue_into_iterator(stream, event_source) as events,
             ):
                 async for event_or_message in events:
                     # Check if it's a queued event (from tools via EventEmitter)
-                    if not isinstance(event_or_message, Message):
+                    if not isinstance(event_or_message, BaseModel):
                         # Capture metadata events for correlation with tool results
                         if isinstance(event_or_message, ToolResultMetadataEvent):
                             tool_metadata[event_or_message.tool_call_id] = event_or_message.metadata
@@ -1219,7 +1269,9 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
         except Exception as e:
             yield RunErrorEvent(message=str(e), run_id=run_id, agent_name=self.name)
-            raise
+            # Append error text so the final StreamCompleteEvent has content
+            # and base_agent.run() returns a message instead of raising
+            current_response_parts.append(TextPart(content=str(e)))
 
         finally:
             # Clear callback run context to prevent leaks
@@ -1332,7 +1384,7 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
 
     async def get_server_info(self) -> ClaudeCodeServerInfo:
         """Get server initialization info (models, commands, account info, ...) from Claude Code."""
-        from agentpool.agents.claude_code_agent.models import ClaudeCodeServerInfo
+        from clawd_code_sdk.models.server_info import ClaudeCodeServerInfo
 
         await self.ensure_initialized()
         assert self._client, "Client not connected after ensure_initialized"
