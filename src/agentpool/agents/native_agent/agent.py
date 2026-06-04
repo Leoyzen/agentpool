@@ -234,6 +234,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         self.model_settings = model_settings
         self.config = agent_config
+        self.inherit_pool_mcp_servers = (
+            agent_config.inherit_pool_mcp_servers if agent_config is not None else True
+        )
         self._direct_history_processors = None
         # Handle deprecated history_processors parameter
         if history_processors is not None:

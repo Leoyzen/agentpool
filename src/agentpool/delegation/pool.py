@@ -281,7 +281,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 if self.skills_instruction_provider:
                     await self.exit_stack.enter_async_context(self.skills_instruction_provider)
                 for agent in agents:
-                    agent.tools.add_provider(aggregating_provider)
+                    if getattr(agent, "inherit_pool_mcp_servers", True):
+                        agent.tools.add_provider(aggregating_provider)
                     if self.skills_instruction_provider:
                         agent.tools.add_provider(self.skills_instruction_provider)
                     agent.tools.add_provider(self.skills_tools_provider)
@@ -355,7 +356,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 # Remove MCP aggregating provider from all agents
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 for agent in self.get_agents().values():
-                    agent.tools.remove_provider(aggregating_provider.name)
+                    if getattr(agent, "inherit_pool_mcp_servers", True):
+                        agent.tools.remove_provider(aggregating_provider.name)
                     if self.skills_instruction_provider:
                         agent.tools.remove_provider(self.skills_instruction_provider.name)
                     agent.tools.remove_provider(self.skills_tools_provider.name)
