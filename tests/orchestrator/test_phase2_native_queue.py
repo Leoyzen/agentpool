@@ -848,3 +848,93 @@ async def test_run_handle_lifecycle_created_completed_cancelled(
 
     # Verify we got a complete stream
     assert any(isinstance(e, StreamCompleteEvent) for e in events)
+
+
+# ---------------------------------------------------------------------------
+# 14. receive_request passes input_provider to get_or_create_session_agent
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_receive_request_passes_input_provider_to_session_agent(
+    session_pool: SessionPool,
+    native_agent: Agent[None],
+    mock_pool: MagicMock,
+) -> None:
+    """receive_request() forwards input_provider kwarg to get_or_create_session_agent."""
+    session_id = "input-provider-sess"
+    await session_pool.create_session(session_id, agent_name=native_agent.name)
+
+    state = session_pool.sessions.get_session(session_id)
+    assert state is not None
+    state.agent = native_agent
+    session_pool.sessions._session_agents[session_id] = native_agent
+    mock_pool.get_agent.return_value = native_agent
+    state.metadata["agent_type"] = "native"
+
+    # Spy on get_or_create_session_agent to capture input_provider
+    original_get_agent = session_pool.sessions.get_or_create_session_agent
+    captured_input_provider: Any = None
+
+    async def spy_get_agent(
+        session_id: str, input_provider: Any = None
+    ) -> Agent[None]:
+        nonlocal captured_input_provider
+        captured_input_provider = input_provider
+        return await original_get_agent(session_id, input_provider=input_provider)
+
+    session_pool.sessions.get_or_create_session_agent = spy_get_agent
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    fake_input_provider = MagicMock()
+    await session_pool.receive_request(
+        session_id, "hello", priority="when_idle", input_provider=fake_input_provider
+    )
+
+    # Wait for execution
+    try:
+        while True:
+            event = await asyncio.wait_for(queue.get(), timeout=2.0)
+            if event is None:
+                break
+    except TimeoutError:
+        pass
+
+    assert captured_input_provider is fake_input_provider, (
+        f"input_provider not forwarded: got {captured_input_provider!r}"
+    )
+
+
+@pytest.mark.anyio
+async def test_receive_request_ignores_unknown_kwargs_gracefully(
+    session_pool: SessionPool,
+    native_agent: Agent[None],
+    mock_pool: MagicMock,
+) -> None:
+    """receive_request() silently drops kwargs that get_or_create_session_agent does not accept."""
+    session_id = "unknown-kwarg-sess"
+    await session_pool.create_session(session_id, agent_name=native_agent.name)
+
+    state = session_pool.sessions.get_session(session_id)
+    assert state is not None
+    state.agent = native_agent
+    session_pool.sessions._session_agents[session_id] = native_agent
+    mock_pool.get_agent.return_value = native_agent
+    state.metadata["agent_type"] = "native"
+
+    queue = await session_pool.event_bus.subscribe(session_id)
+
+    # Should not raise even though "unknown_param" is not consumed anywhere
+    await session_pool.receive_request(
+        session_id, "hello", priority="when_idle", unknown_param="whatever"
+    )
+
+    # Wait for execution
+    try:
+        while True:
+            event = await asyncio.wait_for(queue.get(), timeout=2.0)
+            if event is None:
+                break
+    except TimeoutError:
+        pass

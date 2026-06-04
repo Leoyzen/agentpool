@@ -581,6 +581,7 @@ async def test_run_loop_drains_on_exception(
 
     async def broken_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         raise RuntimeError("boom")
+        yield  # make it an async generator
 
     agent._run_stream_once = broken_stream
     await _setup_session(controller, "sess-1", agent, mock_pool)
