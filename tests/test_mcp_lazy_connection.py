@@ -86,6 +86,7 @@ def lazy_sse_config():
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_lazy_config_parsing_from_yaml():
     """Test that `lazy: true` is correctly parsed from YAML config."""
     yaml_text = """
@@ -112,6 +113,7 @@ mcp_servers:
     assert eager_parsed.lazy is False
 
 
+@pytest.mark.unit
 def test_lazy_default_is_false():
     """Test that lazy defaults to False when not specified."""
     config = StdioMCPServerConfig(
@@ -122,6 +124,7 @@ def test_lazy_default_is_false():
     assert config.lazy is False
 
 
+@pytest.mark.unit
 def test_lazy_field_on_base_config():
     """Test that lazy field exists on BaseMCPServerConfig."""
     config = StdioMCPServerConfig(
@@ -140,6 +143,7 @@ def test_lazy_field_on_base_config():
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_server_skipped_during_manager_enter(
     mock_mcp_client, lazy_stdio_config
 ):
@@ -162,6 +166,7 @@ async def test_lazy_server_skipped_during_manager_enter(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_eager_server_connects_during_manager_enter(
     mock_mcp_client, eager_stdio_config
 ):
@@ -184,6 +189,7 @@ async def test_eager_server_connects_during_manager_enter(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_server_connects_on_first_get_tools(
     mock_mcp_client, lazy_stdio_config
 ):
@@ -210,6 +216,7 @@ async def test_lazy_server_connects_on_first_get_tools(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_server_connects_on_first_get_prompts(
     mock_mcp_client, lazy_stdio_config
 ):
@@ -236,6 +243,7 @@ async def test_lazy_server_connects_on_first_get_prompts(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_server_cleanup_when_never_accessed(
     mock_mcp_client, lazy_stdio_config
 ):
@@ -255,6 +263,7 @@ async def test_lazy_server_cleanup_when_never_accessed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_server_cleanup_after_access(mock_mcp_client, lazy_stdio_config):
     """Test that lazy server cleanup works after being accessed."""
     with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
@@ -274,6 +283,7 @@ async def test_lazy_server_cleanup_after_access(mock_mcp_client, lazy_stdio_conf
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mixed_lazy_and_eager_servers(
     mock_mcp_client, eager_stdio_config, lazy_stdio_config
 ):
@@ -297,6 +307,7 @@ async def test_mixed_lazy_and_eager_servers(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mixed_servers_provider_level(
     mock_mcp_client, eager_stdio_config, lazy_stdio_config
 ):
@@ -327,6 +338,7 @@ async def test_mixed_servers_provider_level(
 # =============================================================================
 
 
+@pytest.mark.unit
 def test_as_capability_returns_capabilities_for_lazy_servers(
     lazy_stdio_config, lazy_sse_config
 ):
@@ -342,6 +354,7 @@ def test_as_capability_returns_capabilities_for_lazy_servers(
     assert "lazy_sse_server" in cap_ids
 
 
+@pytest.mark.unit
 def test_as_capability_skips_disabled_and_acp(mock_mcp_client):
     """Test that as_capability() still skips disabled servers and ACP transport."""
     disabled_config = StdioMCPServerConfig(
@@ -374,6 +387,7 @@ def test_as_capability_skips_disabled_and_acp(mock_mcp_client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_provider_get_resources_triggers_connection(
     mock_mcp_client, lazy_stdio_config
 ):
@@ -390,6 +404,7 @@ async def test_lazy_provider_get_resources_triggers_connection(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_ensure_client_connected_is_idempotent(mock_mcp_client, lazy_stdio_config):
     """Test that _ensure_client_connected() is safe to call multiple times."""
     with patch("agentpool.mcp_server.MCPClient") as mock_client_class:
@@ -406,6 +421,7 @@ async def test_ensure_client_connected_is_idempotent(mock_mcp_client, lazy_stdio
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_lazy_provider_with_string_shorthand(mock_mcp_client):
     """Test lazy config from string shorthand works correctly."""
     # String shorthand creates StdioMCPServerConfig which defaults lazy=False
