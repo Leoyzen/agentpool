@@ -1,24 +1,36 @@
-"""Unit tests for RunHandle (Wave 1 foundation).
+"""Tests for RunHandle lifecycle, metrics collection, and ContextVar streaming.
 
-Tests lifecycle management: creation, start, complete, fail, cancel.
+Consolidated from:
+- test_run_handle.py (RunHandle lifecycle: creation, start, complete, fail, cancel)
+- test_metrics.py (MetricsCollector active runs and agent type breakdown)
+- test_contextvar_stream.py (ContextVar compliance during stream execution)
 """
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from pydantic_ai.models.test import TestModel
 
+from agentpool import Agent
+from agentpool.agents.base_agent import _current_run_ctx_var
+from agentpool.agents.context import AgentRunContext
+from agentpool.agents.events import StreamCompleteEvent
+from agentpool.messaging import ChatMessage
+from agentpool.orchestrator.core import EventBus, SessionPool
+from agentpool.orchestrator.metrics import MetricsCollector, SessionPoolMetrics
 from agentpool.orchestrator.run import RunHandle, RunStatus
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 
-# ---------------------------------------------------------------------------
-# Creation
-# ---------------------------------------------------------------------------
+# ============================================================================
+# RunHandle Lifecycle
+# ============================================================================
 
 
 def test_run_handle_defaults() -> None:
@@ -30,11 +42,6 @@ def test_run_handle_defaults() -> None:
     assert handle.status == RunStatus.pending
     assert handle.run_ctx.current_task is None
     assert not handle.complete_event.is_set()
-
-
-# ---------------------------------------------------------------------------
-# start()
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -54,11 +61,6 @@ def test_start_without_task() -> None:
     handle.start()
     assert handle.status == RunStatus.running
     assert handle.run_ctx.current_task is None
-
-
-# ---------------------------------------------------------------------------
-# complete()
-# ---------------------------------------------------------------------------
 
 
 def test_complete_transitions_and_sets_event() -> None:
@@ -87,11 +89,6 @@ def test_complete_invokes_cleanup_callback() -> None:
     handle.complete()
     assert cleanup_calls == ["r1"]
     assert handle.complete_event.is_set()
-
-
-# ---------------------------------------------------------------------------
-# fail()
-# ---------------------------------------------------------------------------
 
 
 def test_fail_transitions_and_sets_event() -> None:
@@ -128,11 +125,6 @@ def test_fail_invokes_cleanup_callback() -> None:
     handle.fail(ValueError("oops"))
     assert cleanup_calls == ["r1"]
     assert handle.complete_event.is_set()
-
-
-# ---------------------------------------------------------------------------
-# cancel()
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
@@ -199,3 +191,108 @@ async def test_cancel_done_task_is_safe() -> None:
     handle.cancel()
     assert handle.run_ctx.cancelled is True
     assert not handle.complete_event.is_set()
+
+
+# ============================================================================
+# Metrics Collection
+# ============================================================================
+
+
+@pytest.fixture
+def mock_pool_for_metrics() -> MagicMock:
+    """Return a mocked AgentPool with a main_agent."""
+    pool = MagicMock()
+    pool.main_agent = MagicMock()
+    pool.main_agent.name = "main-agent"
+    pool.manifest = MagicMock()
+    pool.manifest.agents = {}
+    return pool
+
+
+class TestMetricsCollectorActiveRuns:
+    """Tests for MetricsCollector.active_turns and active_runs_by_agent_type."""
+
+    @pytest.mark.anyio
+    async def test_get_metrics_returns_zero_initially(self, mock_pool_for_metrics: MagicMock) -> None:
+        """MetricsCollector should use SessionPool.active_runs for active_turns."""
+        session_pool = SessionPool(mock_pool_for_metrics)
+        collector = MetricsCollector(session_pool)
+
+        # No active runs initially
+        metrics = await collector.get_metrics()
+        assert metrics.active_turns == 0
+        assert metrics.active_runs_by_agent_type == {}
+
+    @pytest.mark.anyio
+    async def test_get_metrics_counts_native_vs_non_native(self, mock_pool_for_metrics: MagicMock) -> None:
+        """active_runs_by_agent_type should count native and non-native runs."""
+        session_pool = SessionPool(mock_pool_for_metrics)
+        collector = MetricsCollector(session_pool)
+
+        # Create two sessions: one native (per-session), one non-native
+        state_native = await session_pool.sessions.get_or_create_session("sess-native")
+        state_native.metadata["agent_type"] = "native"
+        handle_native = RunHandle(
+            run_id="run-1",
+            session_id="sess-native",
+            agent_type="native",
+            status=RunStatus.running,
+        )
+        session_pool.sessions._runs["run-1"] = handle_native
+
+        state_non_native = await session_pool.sessions.get_or_create_session("sess-non-native")
+        state_non_native.metadata["agent_type"] = "non-native"
+        handle_non_native = RunHandle(
+            run_id="run-2",
+            session_id="sess-non-native",
+            agent_type="non-native",
+            status=RunStatus.running,
+        )
+        session_pool.sessions._runs["run-2"] = handle_non_native
+
+        metrics = await collector.get_metrics()
+        assert metrics.active_turns == 2
+        assert metrics.active_runs_by_agent_type.get("native") == 1
+        assert metrics.active_runs_by_agent_type.get("non-native") == 1
+
+        # Cleanup
+        session_pool.sessions._runs.clear()
+        await session_pool.close_session("sess-native")
+        await session_pool.close_session("sess-non-native")
+
+
+# ============================================================================
+# ContextVar Streaming
+# ============================================================================
+
+
+@pytest.fixture
+def ctxvar_agent() -> Agent[None]:
+    """Agent with instant TestModel for ContextVar testing."""
+    model = TestModel(custom_output_text="Hello")
+    return Agent(name="ctxvar-test-agent", model=model)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_contextvar_set_during_run_stream_once(ctxvar_agent: Agent[None]) -> None:
+    """_current_run_ctx_var must be non-None during _run_stream_once and None after."""
+    # Before stream starts
+    assert _current_run_ctx_var.get() is None
+
+    captured_ctx: AgentRunContext | None = None
+
+    # Fully consume the stream so the generator's finally block runs naturally
+    async for _event in ctxvar_agent.run_stream("Test prompt"):
+        # During the stream _run_stream_once is active
+        if captured_ctx is None:
+            captured_ctx = _current_run_ctx_var.get()
+            assert captured_ctx is not None, (
+                "_current_run_ctx_var must be set during _run_stream_once"
+            )
+            assert isinstance(captured_ctx, AgentRunContext)
+
+    # After stream completes the finally block in run_stream should have reset it
+    assert _current_run_ctx_var.get() is None, (
+        "_current_run_ctx_var must be reset to None after run_stream completes"
+    )

@@ -1,9 +1,8 @@
-"""Integration tests for tool confirmation with capability-based toolsets.
+"""Tests for tool confirmation with capability-based toolsets.
 
-These tests verify the full agent run flow when multiple tools require
-confirmation. They mock pydantic-ai internals (not real models) to test
-that Agent.run() correctly routes deferred approval requests through the
-InputProvider and handles mixed approval/denial scenarios.
+Consolidated from:
+- test_confirmation_integration.py (full agent run flow with multiple confirmations)
+- test_confirmation_ui.py (AgentContext.handle_confirmation bridging)
 """
 
 from __future__ import annotations
@@ -28,12 +27,47 @@ from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.tools.base import Tool
 
 
+# ============================================================================
+# Fixtures
+# ============================================================================
+
+
 @pytest.fixture
 def mock_agent() -> Agent[Any]:
-    """Create an agent with mocked internals for integration testing."""
+    """Create an agent with mocked internals for confirmation testing."""
     model = TestModel(custom_output_text="test")
-    agent = Agent(name="integration-test-agent", model=model)
+    agent = Agent(name="confirmation-test-agent", model=model)
     return agent
+
+
+@pytest.fixture
+def mock_input_provider() -> MagicMock:
+    """Create a mock InputProvider that returns 'allow' by default."""
+    provider = MagicMock()
+    provider.get_tool_confirmation = AsyncMock(return_value="allow")
+    return provider
+
+
+@pytest.fixture
+def confirmation_tool() -> Tool[Any]:
+    """Create a tool that requires confirmation."""
+
+    def tool_with_confirm(text: str) -> str:
+        """Tool requiring confirmation."""
+        return f"Confirmed tool got: {text}"
+
+    return Tool.from_callable(tool_with_confirm, requires_confirmation=True)
+
+
+@pytest.fixture
+def no_confirmation_tool() -> Tool[Any]:
+    """Create a tool that does not require confirmation."""
+
+    def tool_without_confirm(text: str) -> str:
+        """Tool not requiring confirmation."""
+        return f"Regular tool got: {text}"
+
+    return Tool.from_callable(tool_without_confirm, requires_confirmation=False)
 
 
 @pytest.fixture
@@ -77,28 +111,180 @@ def sample_deferred_requests() -> DeferredToolRequests:
     )
 
 
+# ============================================================================
+# UI-level confirmation tests
+# ============================================================================
+
+
+@pytest.mark.unit
+async def test_confirmation_ui_approval(
+    mock_agent: Agent[Any],
+    mock_input_provider: MagicMock,
+    confirmation_tool: Tool[Any],
+) -> None:
+    """Test approval flow through InputProvider with capability-based tools."""
+    mock_agent._input_provider = mock_input_provider
+    ctx = mock_agent.get_context(input_provider=mock_input_provider)
+    result = await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+
+    mock_input_provider.get_tool_confirmation.assert_called_once()
+    call_args = mock_input_provider.get_tool_confirmation.call_args
+    assert call_args[0][0] is ctx
+    assert call_args[0][1] == confirmation_tool.description
+    assert result == "allow"
+
+
+@pytest.mark.unit
+async def test_confirmation_ui_denial(
+    mock_agent: Agent[Any],
+    confirmation_tool: Tool[Any],
+) -> None:
+    """Test denial flow through InputProvider."""
+    mock_provider = MagicMock()
+    mock_provider.get_tool_confirmation = AsyncMock(return_value="skip")
+    mock_agent._input_provider = mock_provider
+    ctx = mock_agent.get_context(input_provider=mock_provider)
+    result = await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+
+    mock_provider.get_tool_confirmation.assert_called_once()
+    assert result == "skip"
+
+
+@pytest.mark.unit
+async def test_confirmation_ui_timeout(
+    mock_agent: Agent[Any],
+    confirmation_tool: Tool[Any],
+) -> None:
+    """Test timeout during confirmation."""
+    mock_provider = MagicMock()
+    mock_provider.get_tool_confirmation = AsyncMock(
+        side_effect=TimeoutError("Confirmation timed out")
+    )
+    mock_agent._input_provider = mock_provider
+    ctx = mock_agent.get_context(input_provider=mock_provider)
+
+    with pytest.raises(TimeoutError, match="Confirmation timed out"):
+        await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+
+    mock_provider.get_tool_confirmation.assert_called_once()
+
+
+@pytest.mark.unit
+async def test_confirmation_ui_abort_run(
+    mock_agent: Agent[Any],
+    confirmation_tool: Tool[Any],
+) -> None:
+    """Test abort_run confirmation result from InputProvider."""
+    mock_provider = MagicMock()
+    mock_provider.get_tool_confirmation = AsyncMock(return_value="abort_run")
+    mock_agent._input_provider = mock_provider
+    ctx = mock_agent.get_context(input_provider=mock_provider)
+    result = await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+    assert result == "abort_run"
+
+
+@pytest.mark.unit
+async def test_confirmation_ui_abort_chain(
+    mock_agent: Agent[Any],
+    confirmation_tool: Tool[Any],
+) -> None:
+    """Test abort_chain confirmation result from InputProvider."""
+    mock_provider = MagicMock()
+    mock_provider.get_tool_confirmation = AsyncMock(return_value="abort_chain")
+    mock_agent._input_provider = mock_provider
+    ctx = mock_agent.get_context(input_provider=mock_provider)
+    result = await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+    assert result == "abort_chain"
+
+
+@pytest.mark.unit
+async def test_confirmation_context_populated(
+    mock_agent: Agent[Any],
+    mock_input_provider: MagicMock,
+    confirmation_tool: Tool[Any],
+) -> None:
+    """AgentContext passed to InputProvider has tool execution fields set."""
+    mock_agent._input_provider = mock_input_provider
+    ctx = mock_agent.get_context(
+        input_provider=mock_input_provider,
+        tool_name=confirmation_tool.name,
+        tool_input={"text": "hello"},
+        tool_call_id="call-123",
+    )
+    await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+
+    passed_ctx = mock_input_provider.get_tool_confirmation.call_args[0][0]
+    assert isinstance(passed_ctx, AgentContext)
+    assert passed_ctx.tool_name == confirmation_tool.name
+    assert passed_ctx.tool_input == {"text": "hello"}
+    assert passed_ctx.tool_call_id == "call-123"
+
+
+@pytest.mark.unit
+def test_requires_confirmation_propagated_to_pydantic_ai(
+    confirmation_tool: Tool[Any],
+) -> None:
+    """Tool.requires_confirmation is propagated to pydantic-ai Tool.requires_approval."""
+    pa_tool = confirmation_tool.to_pydantic_ai()
+    assert pa_tool.requires_approval is True
+
+
+@pytest.mark.unit
+def test_no_confirmation_not_propagated_to_pydantic_ai(
+    no_confirmation_tool: Tool[Any],
+) -> None:
+    """Tool without requires_confirmation does not set requires_approval."""
+    pa_tool = no_confirmation_tool.to_pydantic_ai()
+    assert pa_tool.requires_approval is False
+
+
+@pytest.mark.unit
+async def test_confirmation_never_mode_bypasses_provider(
+    mock_agent: Agent[Any],
+    mock_input_provider: MagicMock,
+    confirmation_tool: Tool[Any],
+) -> None:
+    """tool_confirmation_mode='never' bypasses InputProvider entirely."""
+    mock_agent.tool_confirmation_mode = "never"
+    ctx = mock_agent.get_context(input_provider=mock_input_provider)
+    result = await ctx.handle_confirmation(confirmation_tool, {"text": "hello"})
+    mock_input_provider.get_tool_confirmation.assert_not_called()
+    assert result == "allow"
+
+
+@pytest.mark.unit
+async def test_confirmation_per_tool_mode_no_confirmation_bypasses(
+    mock_agent: Agent[Any],
+    mock_input_provider: MagicMock,
+    no_confirmation_tool: Tool[Any],
+) -> None:
+    """per_tool mode with non-confirmation tool bypasses InputProvider."""
+    mock_agent.tool_confirmation_mode = "per_tool"
+    ctx = mock_agent.get_context(input_provider=mock_input_provider)
+    result = await ctx.handle_confirmation(no_confirmation_tool, {"text": "hello"})
+    mock_input_provider.get_tool_confirmation.assert_not_called()
+    assert result == "allow"
+
+
+# ============================================================================
+# Integration tests: multiple tools in same run
+# ============================================================================
+
+
 def _create_mock_agentlet_from_caps(
     capabilities: list[Any],
     deferred_requests: DeferredToolRequests,
     final_text: str = "Done",
 ) -> MagicMock:
-    """Create a mock pydantic-ai agentlet that simulates deferred approval flow.
-
-    The mock agentlet will:
-    1. Find the HandleDeferredToolCalls capability
-    2. Call it with the deferred requests
-    3. Yield an End node with a mock result
-    """
+    """Create a mock pydantic-ai agentlet that simulates deferred approval flow."""
     from pydantic_ai.capabilities import HandleDeferredToolCalls
 
-    # Find HandleDeferredToolCalls capability
     deferred_cap = None
     for cap in capabilities:
         if isinstance(cap, HandleDeferredToolCalls):
             deferred_cap = cap
             break
 
-    # Create mock result with proper usage info
     mock_result = MagicMock()
     mock_result.data = final_text
     mock_result.all_messages.return_value = []
@@ -118,8 +304,6 @@ def _create_mock_agentlet_from_caps(
         message_history: list[Any] | None = None,
         usage_limits: Any = None,
     ) -> Any:
-        """Mock iter that invokes deferred tool handler and yields End."""
-
         class MockAgentRun:
             def __init__(self) -> None:
                 self.result = mock_result
@@ -133,7 +317,6 @@ def _create_mock_agentlet_from_caps(
                 return self
 
             async def __anext__(self) -> Any:
-                # Invoke the deferred tool capability
                 if cap_instance is not None:
                     run_ctx = RunContext(
                         deps=deps,
@@ -143,7 +326,6 @@ def _create_mock_agentlet_from_caps(
                     await cap_instance.handle_deferred_tool_calls(
                         run_ctx, requests=deferred_requests
                     )
-                # End iteration
                 raise StopAsyncIteration
 
             async def __aenter__(self) -> Any:
@@ -162,11 +344,6 @@ def _create_mock_agentlet_from_caps(
     return mock_agentlet
 
 
-# ---------------------------------------------------------------------------
-# Test: Multiple confirmation-required tools in same run
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.unit
 async def test_multiple_confirmation_tools_same_run(
     mock_agent: Agent[Any],
@@ -175,12 +352,9 @@ async def test_multiple_confirmation_tools_same_run(
     sample_deferred_requests: DeferredToolRequests,
 ) -> None:
     """Test multiple confirmation-required tools all get approval prompts."""
-    # Setup mock InputProvider that approves all
     mock_provider = MagicMock()
     mock_provider.get_tool_confirmation = AsyncMock(return_value="allow")
     mock_agent._input_provider = mock_provider
-
-    # Add confirmation tools to agent
     mock_agent.tools.register_tool(confirmation_tool_1)
     mock_agent.tools.register_tool(confirmation_tool_2)
 
@@ -192,32 +366,12 @@ async def test_multiple_confirmation_tools_same_run(
             )
 
         mock_pydantic_agent.side_effect = side_effect
-
-        # Run the agent
         result = await mock_agent.run("Test prompt")
 
-    # Verify InputProvider.get_tool_confirmation was called twice (once per tool)
     assert mock_provider.get_tool_confirmation.call_count == 2
-
-    # Verify both tools got approval prompts with correct details
     call_args_list = mock_provider.get_tool_confirmation.call_args_list
-
-    # First call should be for dangerous_read
-    first_ctx = call_args_list[0][0][0]
-    assert isinstance(first_ctx, AgentContext)
-    assert first_ctx.tool_name == "dangerous_read"
-    assert first_ctx.tool_input == {"path": "/etc/passwd"}
-
-    # Second call should be for dangerous_write
-    second_ctx = call_args_list[1][0][0]
-    assert isinstance(second_ctx, AgentContext)
-    assert second_ctx.tool_name == "dangerous_write"
-    assert second_ctx.tool_input == {"path": "/etc/hosts", "content": "test"}
-
-
-# ---------------------------------------------------------------------------
-# Test: Mixed approval/denial in same run
-# ---------------------------------------------------------------------------
+    assert call_args_list[0][0][0].tool_name == "dangerous_read"
+    assert call_args_list[1][0][0].tool_name == "dangerous_write"
 
 
 @pytest.mark.unit
@@ -228,14 +382,9 @@ async def test_mixed_approval_denial_same_run(
     sample_deferred_requests: DeferredToolRequests,
 ) -> None:
     """Test approving some tools and denying others in same run."""
-    # Setup mock InputProvider: approve first, deny second
     mock_provider = MagicMock()
-    mock_provider.get_tool_confirmation = AsyncMock(
-        side_effect=["allow", "skip"]
-    )
+    mock_provider.get_tool_confirmation = AsyncMock(side_effect=["allow", "skip"])
     mock_agent._input_provider = mock_provider
-
-    # Add confirmation tools to agent
     mock_agent.tools.register_tool(confirmation_tool_1)
     mock_agent.tools.register_tool(confirmation_tool_2)
 
@@ -247,25 +396,11 @@ async def test_mixed_approval_denial_same_run(
             )
 
         mock_pydantic_agent.side_effect = side_effect
-
-        # Run the agent
         result = await mock_agent.run("Test prompt")
 
-    # Verify InputProvider.get_tool_confirmation was called twice
     assert mock_provider.get_tool_confirmation.call_count == 2
-
-    # Verify first tool was approved
-    first_ctx = mock_provider.get_tool_confirmation.call_args_list[0][0][0]
-    assert first_ctx.tool_name == "dangerous_read"
-
-    # Verify second tool was also presented for confirmation (even though denied)
-    second_ctx = mock_provider.get_tool_confirmation.call_args_list[1][0][0]
-    assert second_ctx.tool_name == "dangerous_write"
-
-
-# ---------------------------------------------------------------------------
-# Test: Never mode auto-approves all tools without InputProvider
-# ---------------------------------------------------------------------------
+    assert mock_provider.get_tool_confirmation.call_args_list[0][0][0].tool_name == "dangerous_read"
+    assert mock_provider.get_tool_confirmation.call_args_list[1][0][0].tool_name == "dangerous_write"
 
 
 @pytest.mark.unit
@@ -280,7 +415,6 @@ async def test_never_mode_auto_approves_all_tools(
     mock_provider.get_tool_confirmation = AsyncMock(return_value="allow")
     mock_agent._input_provider = mock_provider
     mock_agent.tool_confirmation_mode = "never"
-
     mock_agent.tools.register_tool(confirmation_tool_1)
     mock_agent.tools.register_tool(confirmation_tool_2)
 
@@ -292,16 +426,9 @@ async def test_never_mode_auto_approves_all_tools(
             )
 
         mock_pydantic_agent.side_effect = side_effect
-
         result = await mock_agent.run("Test prompt")
 
-    # InputProvider should NOT be called in never mode
     mock_provider.get_tool_confirmation.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Test: abort_run stops all subsequent confirmations
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -315,7 +442,6 @@ async def test_abort_run_stops_subsequent_confirmations(
     mock_provider = MagicMock()
     mock_provider.get_tool_confirmation = AsyncMock(side_effect=["abort_run"])
     mock_agent._input_provider = mock_provider
-
     mock_agent.tools.register_tool(confirmation_tool_1)
     mock_agent.tools.register_tool(confirmation_tool_2)
 
@@ -327,12 +453,7 @@ async def test_abort_run_stops_subsequent_confirmations(
             )
 
         mock_pydantic_agent.side_effect = side_effect
-
         result = await mock_agent.run("Test prompt")
 
-    # InputProvider should be called at least once (for first tool)
     assert mock_provider.get_tool_confirmation.call_count >= 1
-
-    # First call should be for dangerous_read
-    first_ctx = mock_provider.get_tool_confirmation.call_args_list[0][0][0]
-    assert first_ctx.tool_name == "dangerous_read"
+    assert mock_provider.get_tool_confirmation.call_args_list[0][0][0].tool_name == "dangerous_read"
