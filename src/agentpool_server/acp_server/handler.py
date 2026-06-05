@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
 
@@ -51,12 +52,14 @@ class ACPProtocolHandler:
     def __init__(
         self,
         agent_pool: AgentPool[Any],
+        session_manager: ACPSessionManager,
         event_converter: ACPEventConverter,
         client: Client,
         client_capabilities: ClientCapabilities | None = None,
     ) -> None:
         """Initialize the protocol handler."""
         self.agent_pool = agent_pool
+        self.session_manager = session_manager
         self._event_converter_template = event_converter
         self.client = client
         self.client_capabilities = client_capabilities
@@ -217,6 +220,26 @@ class ACPProtocolHandler:
 
         # Ensure the session exists in the SessionPool
         await session_pool.create_session(session_id)
+
+        # Add session MCP providers to SessionPool's per-session agent
+        acp_session = self.session_manager.get_session(session_id)
+        if acp_session is not None and acp_session.session_mcp_providers:
+            try:
+                session_agent = await session_pool.sessions.get_or_create_session_agent(
+                    session_id
+                )
+                for provider in acp_session.session_mcp_providers:
+                    session_agent.tools.add_provider(provider)
+                logger.info(
+                    "Added session MCP providers to SessionPool agent",
+                    session_id=session_id,
+                    num_providers=len(acp_session.session_mcp_providers),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to add session MCP providers to SessionPool agent",
+                    session_id=session_id,
+                )
 
         # Start event consumer before processing so no events are dropped
         self._ensure_event_consumer(session_id)

@@ -283,6 +283,7 @@ class AgentPoolACPAgent(ACPAgent):
 
             self._protocol_handler = ACPProtocolHandler(
                 agent_pool=self.agent_pool,
+                session_manager=self.session_manager,
                 event_converter=ACPEventConverter(
                     subagent_display_mode=self.subagent_display_mode,
                 ),

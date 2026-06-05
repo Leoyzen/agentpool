@@ -17,13 +17,13 @@ from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from types import TracebackType
     from typing import Literal
 
     from fastmcp.client.sampling import SamplingHandler
     from mcp.types import ResourceTemplate
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.prompts.prompts import MCPClientPrompt
     from agentpool.tools.base import FunctionTool, Tool
@@ -77,9 +77,14 @@ class MCPResourceProvider(ResourceProvider):
     def as_capability(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
 
-        Returns:
-            A pydantic-ai AbstractCapability instance, or None.
+        For ACP-transport MCP servers, falls back to the base class which
+        wraps get_tools() -> FunctionTool -> pydantic-ai Tool via Toolset
+        capability. Non-ACP transports rely on MCPManager.as_capability().
         """
+        from agentpool_config.mcp_server import AcpMCPServerConfig
+
+        if isinstance(self.client.config, AcpMCPServerConfig):
+            return super().as_capability()  # type: ignore[no-any-return]
         return None
 
     def __repr__(self) -> str:
