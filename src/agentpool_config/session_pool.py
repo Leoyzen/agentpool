@@ -39,8 +39,12 @@ class SessionPoolConfig(Schema):
 class ACPConfig(Schema):
     """ACP protocol-specific configuration."""
 
-    use_session_pool: bool = Field(default=False, title="Use session pool")
-    """Whether to use the SessionPool for ACP protocol session management."""
+    use_session_pool: bool = Field(default=True, title="Use session pool")
+    """Whether to use the SessionPool for ACP protocol session management.
+
+    Defaults to True as SessionPool is the mandatory execution entry point
+    per the sessionpool-only-execution spec. Setting to False is deprecated.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -48,7 +52,11 @@ class ACPConfig(Schema):
 class OpenCodeConfig(Schema):
     """OpenCode protocol-specific configuration."""
 
-    use_session_pool: bool = Field(default=False, title="Use session pool")
-    """Whether to use the SessionPool for OpenCode protocol session management."""
+    use_session_pool: bool = Field(default=True, title="Use session pool")
+    """Whether to use the SessionPool for OpenCode protocol session management.
+
+    Defaults to True as SessionPool is the mandatory execution entry point
+    per the sessionpool-only-execution spec. Setting to False is deprecated.
+    """
 
     model_config = ConfigDict(frozen=True)
