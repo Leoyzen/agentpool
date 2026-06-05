@@ -73,6 +73,7 @@ class MCPResourceProvider(ResourceProvider):
             resource_change_callback=self._on_resources_changed,
             transport=transport,
         )
+        self._client_connected = False
 
     def as_capability(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
@@ -113,14 +114,23 @@ class MCPResourceProvider(ResourceProvider):
                 assert_never(unreachable)  # ty: ignore[type-assertion-failure]
 
     async def __aenter__(self) -> Self:
+        if self.server.lazy:
+            return self
         try:
             await self.exit_stack.enter_async_context(self.client)
+            self._client_connected = True
         except Exception as e:
             # Clean up in case of error
             await self.__aexit__(type(e), e, e.__traceback__)
             raise RuntimeError("Failed to initialize MCP manager") from e
 
         return self
+
+    async def _ensure_client_connected(self) -> None:
+        """Ensure the MCP client is connected, entering it lazily if needed."""
+        if self.server.lazy and not self._client_connected:
+            await self.exit_stack.enter_async_context(self.client)
+            self._client_connected = True
 
     async def __aexit__(
         self,
@@ -193,6 +203,7 @@ class MCPResourceProvider(ResourceProvider):
 
     async def get_tools(self) -> Sequence[Tool]:
         """Get cached tools with server name prefix, refreshing if necessary."""
+        await self._ensure_client_connected()
         if self._tools_cache is None:
             await self.refresh_tools_cache()
 
@@ -226,6 +237,7 @@ class MCPResourceProvider(ResourceProvider):
 
     async def get_prompts(self) -> list[MCPClientPrompt]:  # type: ignore
         """Get cached prompts, refreshing if necessary."""
+        await self._ensure_client_connected()
         if self._prompts_cache is None:
             await self.refresh_prompts_cache()
 
@@ -255,6 +267,7 @@ class MCPResourceProvider(ResourceProvider):
 
     async def get_resources(self) -> list[ResourceInfo]:
         """Get cached resources, refreshing if necessary."""
+        await self._ensure_client_connected()
         if self._resources_cache is None:
             await self.refresh_resources_cache()
 
