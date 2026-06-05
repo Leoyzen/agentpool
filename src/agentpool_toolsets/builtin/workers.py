@@ -148,12 +148,14 @@ class WorkersTools(ResourceProvider):
             await ctx.events.emit_event(spawn_event)
 
             try:
+                input_provider = ctx.get_input_provider() if ctx.input_provider else None
                 # Use run_stream instead of run for consistent event handling
                 stream = worker.run_stream(
                     prompt,
                     session_id=child_session_id,
                     parent_session_id=parent_session_id,
                     depth=child_depth,
+                    input_provider=input_provider,
                 )
 
                 final_content = ""
@@ -252,11 +254,13 @@ class WorkersTools(ResourceProvider):
             await ctx.events.emit_event(spawn_event)
 
             # Use run_stream for consistent event handling
+            input_provider = ctx.get_input_provider() if ctx.input_provider else None
             stream = worker.run_stream(
                 prompt,
                 session_id=child_session_id,
                 parent_session_id=parent_session_id,
                 depth=child_depth,
+                input_provider=input_provider,
             )
 
             final_content = ""

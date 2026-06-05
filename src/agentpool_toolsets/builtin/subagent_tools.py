@@ -367,6 +367,7 @@ class SubagentTools(StaticResourceProvider):
 
             # Use SessionPool if available for proper event routing
             session_pool = ctx.pool.session_pool if ctx.pool else None
+            input_provider = ctx.get_input_provider() if ctx.input_provider else None
             if session_pool is not None:
                 # Subscribe to EventBus for child session events
                 event_queue = await session_pool.event_bus.subscribe(
@@ -377,7 +378,7 @@ class SubagentTools(StaticResourceProvider):
                     """Run task through SessionPool and collect final result."""
                     try:
                         await session_pool.receive_request(
-                            child_session_id, prompt
+                            child_session_id, prompt, input_provider=input_provider
                         )
                     finally:
                         # Signal event consumer to stop
@@ -452,6 +453,7 @@ class SubagentTools(StaticResourceProvider):
                             session_id=child_session_id,
                             parent_session_id=parent_session_id,
                             depth=child_depth,
+                            input_provider=input_provider,
                         ),
                     ),
                     name=f"async_task_{task_id}",
@@ -474,6 +476,7 @@ class SubagentTools(StaticResourceProvider):
             }
 
         # Synchronous mode - stream with SubAgentEvent wrapping
+        input_provider = ctx.get_input_provider() if ctx.input_provider else None
         return await _stream_task(
             ctx,
             source_name=agent_or_team,
@@ -483,6 +486,7 @@ class SubagentTools(StaticResourceProvider):
                 session_id=child_session_id,
                 parent_session_id=parent_session_id,
                 depth=child_depth,
+                input_provider=input_provider,
             ),
             batch_deltas=self._batch_stream_deltas,
             child_session_id=child_session_id,
