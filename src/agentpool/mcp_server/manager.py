@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, Self, cast
+import warnings
 
 import anyio
 
@@ -85,7 +85,7 @@ class MCPManager:
 
     async def __aenter__(self) -> Self:
         try:
-            if tasks := [self.setup_server(server) for server in self.servers]:
+            if tasks := [self.setup_server(server) for server in self.servers if not server.lazy]:
                 await asyncio.gather(*tasks)
         except Exception as e:
             await self.__aexit__(type(e), e, e.__traceback__)
@@ -235,6 +235,7 @@ class MCPManager:
             configured and enabled server with a supported transport.
         """
         from pydantic_ai.capabilities import MCP
+
         from agentpool_config.mcp_server import (
             AcpMCPServerConfig,
             SSEMCPServerConfig,
