@@ -82,6 +82,7 @@ class SessionState:
     lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
     current_run_id: str | None = None
     _request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    input_provider: Any | None = None
 
     @property
     def closing(self) -> bool:
@@ -685,6 +686,10 @@ class SessionController:
                     if len(self._runs) >= self._max_concurrent_runs:
                         return None
 
+            # Store input_provider on session for auto-resume
+            if "input_provider" in kwargs:
+                session.input_provider = kwargs["input_provider"]
+
             if session.current_run_id is None:
                 run_handle = self._create_run(session_id, content)
                 self._runs[run_handle.run_id] = run_handle
@@ -1222,6 +1227,10 @@ class TurnRunner:
             logger.debug("Session is closing, skipping queued work")
             return
 
+        # Use session-stored input_provider if not provided in kwargs
+        if "input_provider" not in kwargs and session.input_provider is not None:
+            kwargs["input_provider"] = session.input_provider
+
         injections = await self._drain_post_turn_injections(session_id)
         prompts = await self._drain_post_turn_prompts(session_id)
 
@@ -1296,6 +1305,10 @@ class TurnRunner:
                 if current_session is not session:
                     logger.debug("Session changed")
                     return
+
+                # Use session-stored input_provider if not provided in kwargs
+                if "input_provider" not in kwargs and session.input_provider is not None:
+                    kwargs["input_provider"] = session.input_provider
 
                 if self._enable_auto_resume:
                     logger.debug("Processing queued work")
