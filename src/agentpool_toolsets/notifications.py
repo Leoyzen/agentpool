@@ -11,6 +11,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Mapping, Sequence
 
     from agentpool.tools.base import Tool
@@ -143,3 +144,11 @@ class NotificationsTools(ResourceProvider):
             "target": target_desc,
             "message": "Notification delivery may have failed for some channels",
         }
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

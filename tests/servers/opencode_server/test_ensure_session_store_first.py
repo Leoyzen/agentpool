@@ -34,7 +34,9 @@ def create_mock_agent() -> MagicMock:
     agent.agent_pool.manifest.config_file_path = "test_config.yml"
     agent.agent_pool.storage.save_session = AsyncMock()
     agent.agent_pool.storage.load_session = AsyncMock(return_value=None)
-    agent.agent_pool.sessions.store = None
+    agent.agent_pool.session_pool = MagicMock()
+    agent.agent_pool.session_pool.sessions = MagicMock()
+    agent.agent_pool.session_pool.sessions.store = None
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"
     return agent
@@ -97,7 +99,7 @@ async def test_store_first_preserves_agent_type_and_pool_id(
     # Wire store.load to return the persisted data
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     # Also mock save so we can verify it's NOT called
     mock_store.save = AsyncMock()
@@ -146,7 +148,7 @@ async def test_store_first_child_not_overwritten(mock_state: ServerState) -> Non
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
     mock_store.save = AsyncMock()
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
         session = await mock_state.ensure_session(child_id, parent_id=parent_id)
@@ -184,7 +186,7 @@ async def test_concurrent_calls_produce_one_session(
     # wired to storage_manager via the mock_pool fixture in conftest.py,
     # but mock_state uses a simpler mock).  Set store to None so the
     # store-first path yields None and falls through to creation.
-    mock_state.pool.sessions.store = None
+    mock_state.pool.session_pool.sessions.store = None
     mock_state.pool.storage.load_session = AsyncMock(return_value=None)
 
     with (
@@ -222,7 +224,7 @@ async def test_concurrent_store_first_produces_one_session(
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
     mock_store.save = AsyncMock()
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
         results = await asyncio.gather(
@@ -267,7 +269,7 @@ async def test_in_memory_session_not_overwritten_by_store(
     sd = _make_session_data(session_id, cwd="/store/dir", project_id="store-project")
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
         result = await mock_state.ensure_session(session_id)
@@ -308,7 +310,7 @@ async def test_store_first_child_skips_agent_binding(
 
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     original_session_id = mock_state.agent.session_id
 
@@ -343,7 +345,7 @@ async def test_store_miss_fallback_creates_and_persists(
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=None)
     mock_store.save = AsyncMock()
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with (
         patch("agentpool_server.opencode_server.converters.opencode_to_session_data") as mock_conv,
@@ -382,7 +384,7 @@ async def test_store_first_broadcasts_created_and_updated(
 
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
         session = await mock_state.ensure_session(session_id)
@@ -412,7 +414,7 @@ async def test_store_first_marks_session_idle(mock_state: ServerState) -> None:
 
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
         await mock_state.ensure_session(session_id)
@@ -475,7 +477,7 @@ async def test_store_first_creates_runtime_state_and_input_provider(
 
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
         await mock_state.ensure_session(session_id)
@@ -503,7 +505,7 @@ async def test_store_first_top_level_session_binds_agent(
 
     mock_store = MagicMock()
     mock_store.load = AsyncMock(return_value=sd)
-    mock_state.pool.sessions.store = mock_store
+    mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
         await mock_state.ensure_session(session_id)

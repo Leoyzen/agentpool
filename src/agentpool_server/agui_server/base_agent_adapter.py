@@ -111,6 +111,10 @@ class BaseAgentAGUIAdapter:
 
         try:
             # Get user prompt and run agent
+            # NOTE: AG-UI uses direct agent.run_stream() to preserve its
+            # specialized event-handling path. BaseAgent._should_bypass_session_pool()
+            # detects AG-UI callers via stack inspection and bypasses SessionPool
+            # delegation, ensuring AG-UI events flow directly without interception.
             # TODO: Properly handle agent statefulness with AG-UI protocol.
             # AG-UI is stateless - client sends full history with each request.
             # For now, we use store_history=False to avoid accumulating duplicate

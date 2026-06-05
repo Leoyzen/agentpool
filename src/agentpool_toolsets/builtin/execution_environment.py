@@ -10,15 +10,15 @@ from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.resource_providers import ResourceProvider
 
 
-logger = log.get_logger(__name__)
-
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from exxec import ExecutionEnvironment
 
     from agentpool.tools.base import Tool
+
+
+logger = log.get_logger(__name__)
 
 
 def filter_lines_regex(pattern_str: str, text: str) -> str:
@@ -236,7 +236,7 @@ class ProcessManagementTools(ResourceProvider):
             if not process_ids:
                 return "No active background processes"
 
-            lines = [f"Active processes ({len(process_ids)}):"]
+            lines = [f"Active processes ({len(process_ids)})"]
             for process_id in process_ids:
                 try:
                     info = await env.process_manager.get_process_info(process_id)

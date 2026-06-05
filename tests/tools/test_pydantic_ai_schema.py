@@ -2,6 +2,7 @@ import pytest
 from schemez import OpenAIFunctionDefinition
 
 from agentpool.resource_providers import ResourceProvider
+from pydantic_ai.capabilities import AbstractCapability
 
 
 class MockProvider(ResourceProvider):
@@ -42,3 +43,11 @@ async def test_to_pydantic_ai_includes_parameter_descriptions_from_override():
     assert params["y"]["description"] == "Custom Y description"
     assert pydantic_tool.name == "my_tool"
     assert pydantic_tool.description == "Original description."
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

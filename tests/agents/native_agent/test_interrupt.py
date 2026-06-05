@@ -9,7 +9,8 @@ agent task is never cancelled because:
 2. iteration_task (LLM API call) is a local variable and never directly cancelled
 
 Fix approach:
-- Layer 1: interrupt() falls back to _active_run_ctx stored by run_stream()
+- Layer 1: interrupt() falls back to _current_run_ctx_var (ContextVar) first,
+  then SessionPool's session.active_run_ctx for cross-task access.
 - Layer 2: iteration_task is stored as instance var so _interrupt() can cancel it
 """
 
@@ -18,12 +19,14 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic_ai.models.test import TestModel, TestStreamedResponse
 
 from agentpool import Agent
 from agentpool.agents.events import StreamCompleteEvent
+from agentpool.orchestrator.core import SessionState
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +102,24 @@ async def fast_agent() -> Agent[None]:
     yield agent
 
 
+def _mock_session_pool(agent: Agent, run_ctx: Any) -> None:
+    """Mock agent_pool.session_pool so _get_session_run_ctx() returns run_ctx."""
+    from agentpool.orchestrator.run import RunHandle
+
+    session_state = SessionState(session_id="test-session", agent_name="test")
+    session_state.current_run_id = run_ctx.run_id
+    session_controller = MagicMock()
+    session_controller.get_session.return_value = session_state
+    run_handle = MagicMock(spec=RunHandle)
+    run_handle.run_ctx = run_ctx
+    session_pool = MagicMock()
+    session_pool.sessions = session_controller
+    session_pool.get_run.return_value = run_handle
+    agent_pool = MagicMock()
+    agent_pool.session_pool = session_pool
+    agent.agent_pool = agent_pool
+
+
 # ---------------------------------------------------------------------------
 # Layer 1 Tests: interrupt() without run_ctx must still cancel the stream
 # ---------------------------------------------------------------------------
@@ -112,15 +133,20 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
     This is the core bug: abort_session() calls interrupt() with no run_ctx,
     so the per-run run_ctx.cancelled flag is never set, and the streaming
     loop (which checks run_ctx.cancelled) never exits.
+
+    After removing _active_run_ctx, cross-task access requires SessionPool fallback.
     """
+    from agentpool.agents.base_agent import _current_run_ctx_var
+
     stream_started = asyncio.Event()
     captured_run_ctx: list[Any] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
-            # Capture the run_ctx while stream is active
-            if slow_agent._current_run_ctx is not None and not captured_run_ctx:
-                captured_run_ctx.append(slow_agent._current_run_ctx)
+            # Capture the run_ctx while stream is active (same task)
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -135,12 +161,13 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
     run_ctx = captured_run_ctx[0]
     assert run_ctx.cancelled is False, "run_ctx should not be cancelled before interrupt"
 
-    # Call interrupt with NO run_ctx (simulates OpenCode abort_session)
-    await slow_agent.interrupt()
+    # Set up SessionPool fallback for cross-task access
+    _mock_session_pool(slow_agent, run_ctx)
 
-    # THE BUG: run_ctx.cancelled should be True after interrupt()
-    # Before fix: interrupt(run_ctx=None) only sets self._cancelled but NOT run_ctx.cancelled
-    # After fix: interrupt() finds the per-run run_ctx via _current_run_ctx and sets cancelled
+    # Call interrupt with NO run_ctx (simulates OpenCode abort_session)
+    await slow_agent.interrupt(session_id="test-session")
+
+    # run_ctx.cancelled should be True after interrupt() via SessionPool fallback
     assert run_ctx.cancelled is True, (
         "run_ctx.cancelled must be True after interrupt() — "
         "the streaming loop checks this flag to exit"
@@ -162,7 +189,8 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
 
     Before the fix: interrupt() passes run_ctx=None to _interrupt(),
     which checks `run_ctx.current_task if run_ctx else None` → None → no task cancelled.
-    After the fix: _interrupt() falls back to _active_run_ctx.current_task.
+    After the fix: _interrupt() finds run_ctx via ContextVar (same task) or
+    SessionPool fallback (cross-task) and cancels current_task.
     """
     stream_started = asyncio.Event()
 
@@ -175,22 +203,6 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
 
     # Wait for stream to start
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
-
-    # The agent should track its current stream task via _active_run_ctx and _current_stream_task
-    # Before fix: _active_run_ctx was not stored and _current_stream_task was always None,
-    # so interrupt() couldn't find the task to cancel
-    # After fix: run_stream() sets both self._active_run_ctx and self._current_stream_task
-    assert slow_agent._active_run_ctx is not None, (
-        "_active_run_ctx should be set during run_stream — "
-        "this is how interrupt() finds the task to cancel"
-    )
-    assert slow_agent._active_run_ctx.current_task is not None, (
-        "_active_run_ctx.current_task should be set during run_stream"
-    )
-    assert slow_agent._current_stream_task is not None, (
-        "_current_stream_task should be set during run_stream — "
-        "this is how _interrupt() finds the task to cancel"
-    )
 
     # Call interrupt with NO run_ctx
     await slow_agent.interrupt()
@@ -217,6 +229,8 @@ async def test_interrupt_with_run_ctx_still_works(fast_agent: Agent[None]) -> No
 
     The fix must not break the existing code path where run_ctx is provided.
     """
+    from agentpool.agents.base_agent import _current_run_ctx_var
+
     stream_started = asyncio.Event()
     captured_run_ctx = None
 
@@ -224,9 +238,9 @@ async def test_interrupt_with_run_ctx_still_works(fast_agent: Agent[None]) -> No
         nonlocal captured_run_ctx
         async for event in fast_agent.run_stream("Test prompt"):
             stream_started.set()
-            # Capture the run_ctx from the agent
-            if fast_agent._current_run_ctx is not None:
-                captured_run_ctx = fast_agent._current_run_ctx
+            # Capture the run_ctx from the ContextVar
+            if captured_run_ctx is None:
+                captured_run_ctx = _current_run_ctx_var.get()
 
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)

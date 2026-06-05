@@ -327,7 +327,9 @@ class SubagentTools(StaticResourceProvider):
 
         # Create and persist child session via SessionManager (or generate
         # ephemeral ID when no pool / sessions are available).
-        parent_session_id = ctx.node.session_id or ""
+        parent_session_id = getattr(ctx.node, "session_id", None) or (
+            ctx.run_ctx.session_id if ctx.run_ctx else ""
+        )
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
             agent_type=node.agent_type,
@@ -363,25 +365,99 @@ class SubagentTools(StaticResourceProvider):
             fs = ctx.internal_fs
             fs.mkdirs(f"/tasks/{task_id}", exist_ok=True)
 
-            # Start streaming to filesystem in background
-            # Store task reference to prevent garbage collection
-            task = asyncio.create_task(
-                _stream_task_to_fs(
-                    fs=fs,
-                    task_id=task_id,
-                    source_name=agent_or_team,
-                    stream=node.run_stream(
-                        prompt,
-                        session_id=child_session_id,
-                        parent_session_id=parent_session_id,
-                        depth=child_depth,
+            # Use SessionPool if available for proper event routing
+            session_pool = ctx.pool.session_pool if ctx.pool else None
+            if session_pool is not None:
+                # Subscribe to EventBus for child session events
+                event_queue = await session_pool.event_bus.subscribe(
+                    child_session_id, scope="session"
+                )
+
+                async def _run_via_session_pool() -> None:
+                    """Run task through SessionPool and collect final result."""
+                    try:
+                        await session_pool.receive_request(
+                            child_session_id, prompt
+                        )
+                    finally:
+                        # Signal event consumer to stop
+                        await event_queue.put(None)
+
+                async def _consume_events_to_fs() -> None:
+                    """Consume events from EventBus and write to filesystem."""
+                    content_parts: list[str] = []
+                    try:
+                        while True:
+                            event = await event_queue.get()
+                            if event is None:
+                                break
+
+                            # Handle nested SubAgentEvents - unwrap inner event
+                            inner_event = (
+                                event.event if isinstance(event, SubAgentEvent) else event
+                            )
+
+                            # Collect text deltas
+                            if (
+                                isinstance(inner_event, PartDeltaEvent)
+                                and inner_event.delta
+                            ):
+                                delta = inner_event.delta
+                                if (
+                                    isinstance(delta, (TextPartDelta, ThinkingPartDelta))
+                                    and delta.content_delta
+                                ):
+                                    content_parts.append(delta.content_delta)
+                                fs.pipe(
+                                    output_path, "".join(content_parts).encode("utf-8")
+                                )
+
+                            # Final content from StreamCompleteEvent
+                            elif isinstance(inner_event, StreamCompleteEvent):
+                                content = inner_event.message.content
+                                if content:
+                                    final_content = str(content)
+                                    fs.pipe(
+                                        output_path, final_content.encode("utf-8")
+                                    )
+                    finally:
+                        await session_pool.event_bus.unsubscribe(
+                            child_session_id, event_queue
+                        )
+
+                # Start both tasks
+                run_task = asyncio.create_task(
+                    _run_via_session_pool(),
+                    name=f"async_task_{task_id}",
+                )
+                consume_task = asyncio.create_task(
+                    _consume_events_to_fs(),
+                    name=f"async_consume_{task_id}",
+                )
+
+                # Add to background tasks set to prevent GC
+                _background_tasks.add(run_task)
+                run_task.add_done_callback(_background_tasks.discard)
+                _background_tasks.add(consume_task)
+                consume_task.add_done_callback(_background_tasks.discard)
+            else:
+                # Fallback: use direct run_stream when SessionPool unavailable
+                task = asyncio.create_task(
+                    _stream_task_to_fs(
+                        fs=fs,
+                        task_id=task_id,
+                        source_name=agent_or_team,
+                        stream=node.run_stream(
+                            prompt,
+                            session_id=child_session_id,
+                            parent_session_id=parent_session_id,
+                            depth=child_depth,
+                        ),
                     ),
-                ),
-                name=f"async_task_{task_id}",
-            )
-            # Add task to a set to prevent GC while running
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+                    name=f"async_task_{task_id}",
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
 
             return {
                 "output": (

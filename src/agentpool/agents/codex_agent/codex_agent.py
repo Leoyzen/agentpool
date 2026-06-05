@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
 
-    from codex_adapter.codex_types import McpServerConfig
-    from codex_adapter.events import CodexEvent
+    from codex_adapter.models.mcp_server import McpServerConfig
+    from codex_adapter.models.events import CodexEvent
     from exxec import ExecutionEnvironment
     from pydantic_ai import UserContent
     from tokonomics.model_discovery.model_info import ModelInfo
@@ -226,7 +226,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _setup_toolsets(self) -> None:
         """Setup toolsets and start the tool bridge."""
-        from codex_adapter.codex_types import HttpMcpServer as CodexHttpMcpServer
+        from codex_adapter.models.mcp_server import HttpMcpServer as CodexHttpMcpServer
 
         if not self._toolsets:
             return
@@ -325,10 +325,8 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
 
     async def _cleanup(self) -> None:
         """Clean up resources."""
-        # Stop tool bridge if it was started
-        if self._tool_bridge._mcp is not None:
-            await self._tool_bridge.stop()
-        self._extra_mcp_servers.clear()
+        # Stop the Codex client first so it doesn't make requests to the bridge
+        # while the bridge is shutting down (avoids FastMCP lifespan race)
         if self._client:
             try:
                 await self._client.__aexit__(None, None, None)
@@ -336,6 +334,10 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
                 self.log.exception("Error closing Codex client")
             self._client = None
         self._sdk_session_id = None
+        # Stop tool bridge after the client is fully closed
+        if self._tool_bridge._mcp is not None:
+            await self._tool_bridge.stop()
+        self._extra_mcp_servers.clear()
 
     async def _stream_events(  # noqa: PLR0915
         self,
@@ -355,7 +357,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         store_history: bool = True,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
         """Stream events from Codex turn execution."""
-        from codex_adapter.events import (
+        from codex_adapter.models.events import (
             ThreadTokenUsageUpdatedEvent,
             TurnStartedEvent,
         )
@@ -370,12 +372,11 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
         # Generate IDs if not provided
         run_id = str(uuid4())
         final_message_id = message_id or str(uuid4())
-        final_session_id = session_id or self.session_id
         # Ensure session_id is set (should always be from base class)
-        if final_session_id is None:
+        if session_id is None:
             raise ValueError("session_id must be set")
         yield RunStartedEvent(
-            session_id=final_session_id, run_id=run_id, parent_session_id=parent_session_id
+            session_id=session_id, run_id=run_id, parent_session_id=parent_session_id
         )
         # Stream turn events with bridge context set
         accumulated_text: list[str] = []
@@ -479,7 +480,7 @@ class CodexAgent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT])
             content=final_content,
             role="assistant",
             message_id=final_message_id,
-            session_id=final_session_id,
+            session_id=session_id,
             parent_id=parent_id,
             cost_info=cost_info,
             usage=request_usage,

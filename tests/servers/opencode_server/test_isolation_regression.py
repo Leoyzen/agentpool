@@ -75,6 +75,9 @@ def mock_pool() -> Mock:
     pool.skill_commands = None
     pool.sessions = Mock()
     pool.sessions.store = None
+    pool.session_pool = Mock()
+    pool.session_pool.sessions = Mock()
+    pool.session_pool.sessions.store = None
     pool.file_ops = Mock()
     pool.file_ops.changes = []
     pool.todos = Mock()

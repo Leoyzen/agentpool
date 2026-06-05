@@ -30,6 +30,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from fastmcp.client.sampling import SamplingHandler
@@ -89,6 +90,14 @@ class MCPDiscoveryToolset(ResourceProvider):
         self._table: Any = None
         self._embed_model: Any = None
         self._tmpdir: str | None = None
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def _get_registry(self) -> MCPRegistryClient:
         """Get or create the registry client."""

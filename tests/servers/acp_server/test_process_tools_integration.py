@@ -11,6 +11,7 @@ from exxec.models import ExecutionResult
 import pytest
 
 from agentpool import Agent, AgentContext
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import ToolCallProgressEvent
 from agentpool_toolsets.builtin.execution_environment import ProcessManagementTools
 
@@ -19,20 +20,22 @@ if TYPE_CHECKING:
     from agentpool.agents.events import RichAgentStreamEvent
 
 
-def drain_event_queue(agent: Agent) -> list[RichAgentStreamEvent]:
-    """Drain all events from the agent's event queue."""
+def drain_event_queue(agent_ctx: AgentContext) -> list[RichAgentStreamEvent]:
+    """Drain all events from the agent context's event queue."""
     events: list[RichAgentStreamEvent] = []
-    while not agent._event_queue.empty():
+    if agent_ctx.run_ctx is None:
+        return events
+    while not agent_ctx.run_ctx.event_queue.empty():
         try:
-            events.append(agent._event_queue.get_nowait())
+            events.append(agent_ctx.run_ctx.event_queue.get_nowait())
         except asyncio.QueueEmpty:
             break
     return events
 
 
-def get_progress_events(agent: Agent) -> list[ToolCallProgressEvent]:
-    """Get all ToolCallProgressEvent from the agent's queue."""
-    events = drain_event_queue(agent)
+def get_progress_events(agent_ctx: AgentContext) -> list[ToolCallProgressEvent]:
+    """Get all ToolCallProgressEvent from the agent context's queue."""
+    events = drain_event_queue(agent_ctx)
     return [e for e in events if isinstance(e, ToolCallProgressEvent)]
 
 
@@ -50,6 +53,7 @@ def agent_ctx(test_agent: Agent[None]) -> AgentContext:
         tool_call_id="test_call_123",
         tool_name="test_tool",
         tool_input={"command": "echo", "args": ["hello"]},
+        run_ctx=AgentRunContext(),
     )
 
 
@@ -112,7 +116,7 @@ async def test_start_process(
     assert "echo" in result
 
     # Check event was emitted to the queue
-    events = get_progress_events(test_agent)
+    events = get_progress_events(agent_ctx)
     assert len(events) == 1
     assert events[0].title is not None
     assert "Running: echo" in events[0].title
@@ -141,7 +145,7 @@ async def test_get_process_output(
     assert "hello world" in result
 
     # Check event was emitted (title contains output)
-    events = get_progress_events(test_agent)
+    events = get_progress_events(agent_ctx)
     assert len(events) == 1
     assert events[0].title is not None
     assert "hello world" in events[0].title
@@ -171,7 +175,7 @@ async def test_kill_process(
     assert "terminated" in result.lower()
 
     # Check event was emitted
-    events = get_progress_events(test_agent)
+    events = get_progress_events(agent_ctx)
     assert len(events) == 1
     assert events[0].title is not None
     assert "Killed process" in events[0].title
@@ -201,7 +205,7 @@ async def test_wait_for_process(
     assert "hello world" in result  # The mock returns "hello world\n"
 
     # Check event was emitted
-    events = get_progress_events(test_agent)
+    events = get_progress_events(agent_ctx)
     assert len(events) == 1
     assert events[0].title is not None
     assert "Process exited" in events[0].title
@@ -236,7 +240,7 @@ async def test_release_process(
     assert process_id not in processes
 
     # Check event was emitted
-    events = get_progress_events(test_agent)
+    events = get_progress_events(agent_ctx)
     assert len(events) == 1
     assert events[0].title is not None
     assert "Released process" in events[0].title
@@ -285,7 +289,7 @@ async def test_execute_command(
     assert "hello world" in result
 
     # Check events were emitted (start + output + exit)
-    events = get_progress_events(test_agent)
+    events = get_progress_events(agent_ctx)
     assert len(events) >= 1  # At least process start event
 
 

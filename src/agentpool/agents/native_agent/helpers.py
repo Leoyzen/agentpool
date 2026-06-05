@@ -22,26 +22,35 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 if TYPE_CHECKING:
     from tokonomics.model_discovery import ModelInfo
 
+    from agentpool.agents.context import AgentRunContext
     from agentpool.agents.events import RichAgentStreamEvent
     from agentpool_config.nodes import ToolConfirmationMode
 
 
-def process_tool_event(
+async def process_tool_event(
     agent_name: str,
     event: RichAgentStreamEvent[Any],
     pending_tool_calls: dict[str, BaseToolCallPart],
     message_id: str,
+    run_ctx: AgentRunContext | None = None,
 ) -> ToolCallCompleteEvent | None:
     """Process tool-related events and return combined event when complete.
+
+    When *run_ctx.event_bus* is available, the combined event is published
+    directly to the EventBus and ``None`` is returned so the caller does not
+    also enqueue it locally.
 
     Args:
         agent_name: Name of the agent
         event: The streaming event to process
         pending_tool_calls: Dict tracking in-progress tool calls by ID
         message_id: Message ID for the combined event
+        run_ctx: Optional per-run context. When provided and *event_bus* is set,
+            combined events are published to the bus instead of being returned.
 
     Returns:
-        ToolCallCompleteEvent if a tool call completed, None otherwise
+        ToolCallCompleteEvent if a tool call completed and no EventBus is
+        available, None otherwise.
     """
     # Note: BuiltinToolCallEvent/BuiltinToolResultEvent are deprecated.
     # Both function and builtin tools use PartStartEvent with BaseToolCallPart/BaseToolReturnPart.
@@ -58,7 +67,7 @@ def process_tool_event(
             )
         ):
             if call_info := pending_tool_calls.pop(call_id, None):
-                return ToolCallCompleteEvent(
+                combined = ToolCallCompleteEvent(
                     tool_name=call_info.tool_name,
                     tool_call_id=call_id,
                     tool_input=safe_args_as_dict(call_info),
@@ -66,6 +75,10 @@ def process_tool_event(
                     agent_name=agent_name,
                     message_id=message_id,
                 )
+                if run_ctx is not None and run_ctx.event_bus is not None:
+                    await run_ctx.event_bus.publish(run_ctx.session_id, combined)
+                    return None
+                return combined
     return None
 
 

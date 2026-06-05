@@ -18,6 +18,9 @@ from agentpool.messaging.processing import finalize_message, prepare_prompts
 from agentpool.talk.talk import Talk, TeamTalk
 from agentpool.utils.time_utils import get_now
 
+from pydantic_graph import GraphBuilder, Step, StepContext
+from pydantic_graph.id_types import NodeID
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
@@ -33,6 +36,60 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 ResultMode = Literal["last", "concat"]
+
+
+@dataclass
+class _TeamRunGraphState:
+    """Shared state for TeamRun graph execution."""
+
+    prompts: tuple[Any, ...] = field(default_factory=tuple)
+    """Input prompts for this execution."""
+
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    """Additional keyword arguments passed to member ``run()``."""
+
+    connections: list[Talk[Any]] = field(default_factory=list)
+    """Talk connections for tracking execution stats."""
+
+    responses: list[AgentResponse[Any]] = field(default_factory=list)
+    """Collected responses from completed steps."""
+
+
+def _make_sequential_step(
+    node: MessageNode[Any, Any],
+    node_index: int,
+) -> Any:
+    """Create a pydantic-graph step for a sequential team member.
+
+    Args:
+        node: The team member node to wrap.
+        node_index: Index of the node in the pipeline (0 = first).
+
+    Returns:
+        An async callable compatible with :meth:`GraphBuilder.step`.
+    """
+
+    async def _step(
+        ctx: StepContext[_TeamRunGraphState, Any, Any],
+    ) -> ChatMessage[Any]:
+        start = perf_counter()
+        if node_index == 0:
+            result = await node.run(*ctx.state.prompts, **ctx.state.kwargs)
+        else:
+            result = await node.run_message(ctx.inputs)
+        timing = perf_counter() - start
+        response = AgentResponse(agent_name=node.name, message=result, timing=timing)
+        ctx.state.responses.append(response)
+
+        # Update talk stats for the edge leaving this node (if any)
+        if node_index < len(ctx.state.connections):
+            talk = ctx.state.connections[node_index]
+            if result:
+                talk._stats.messages.append(result)
+
+        return result
+
+    return _step
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -146,8 +203,8 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         match self.result_mode:
             case "last":
                 content = all_messages[-1].content
-            # case "concat":
-            #     content = "\n".join(msg.format() for msg in all_messages)
+            case "concat":
+                content = "\n".join(str(msg.content) for msg in all_messages)
             case _:
                 raise ValueError(f"Invalid result mode: {self.result_mode}")
 
@@ -209,47 +266,77 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
         *prompt: PromptCompatible,
         **kwargs: Any,
     ) -> AsyncIterator[Talk[Any] | AgentResponse[Any]]:
+        all_nodes = list(self.nodes)
+        if self.validator:
+            all_nodes.append(self.validator)
+
+        # Create Talk objects for edges (not registered with ConnectionManager)
         connections: list[Talk[Any]] = []
+        for source, target in pairwise(all_nodes):
+            talk = Talk[Any](
+                source=source,
+                targets=[target],
+                connection_type="run",
+                queued=True,
+            )
+            connections.append(talk)
+            self._team_talk.append(talk)
+
+        # Build graph state
+        state = _TeamRunGraphState(
+            prompts=prompt,
+            kwargs=kwargs,
+            connections=connections,
+        )
+
+        # Build steps
+        steps: list[Any] = []
+        for i, node in enumerate(all_nodes):
+            step_fn = _make_sequential_step(node, i)
+            step = Step(
+                id=NodeID(node.name),
+                call=step_fn,
+                label=node.description or node.name,
+            )
+            steps.append(step)
+
+        # Build graph: start -> step1 -> step2 -> ... -> end
+        builder = GraphBuilder(
+            state_type=_TeamRunGraphState,
+            input_type=Any,
+            output_type=ChatMessage[Any],
+        )
+        builder.add_edge(builder.start_node, steps[0])
+        for s, t in pairwise(steps):
+            builder.add_edge(s, t)
+        builder.add_edge(steps[-1], builder.end_node)
+
+        graph = builder.build()
+
         try:
-            all_nodes = list(self.nodes)
-            if self.validator:
-                all_nodes.append(self.validator)
-            first = all_nodes[0]
-            connections = [s.connect_to(t, queued=True) for s, t in pairwise(all_nodes)]
-            for conn in connections:
-                self._team_talk.append(conn)
-
-            # First agent
-            start = perf_counter()
-            message = await first.run(*prompt, **kwargs)
-            timing = perf_counter() - start
-            response = AgentResponse[Any](first.name, message=message, timing=timing)
-            yield response
-
-            # Process through chain
-            for connection in connections:
-                target = connection.targets[0]
-                target_name = target.name
-                yield connection
-
-                # Let errors propagate - they break the chain
-                start = perf_counter()
-                messages = await connection.trigger()
-
-                if target == all_nodes[-1]:
-                    last_talk = Talk[Any](target, [], connection_type="run")
-                    if response.message:
-                        last_talk.stats.messages.append(response.message)
-                    self._team_talk.append(last_talk)
-
-                timing = perf_counter() - start
-                msg = messages[0]
-                response = AgentResponse[Any](target_name, message=msg, timing=timing)
+            await graph.run(state=state, deps=self._get_deps(), inputs=None)
+        except Exception:
+            # Yield responses collected so far, then re-raise
+            for i, response in enumerate(state.responses):
                 yield response
+                if i < len(connections):
+                    yield connections[i]
+            raise
 
-        finally:  # Always clean up connections
-            for connection in connections:
-                connection.disconnect()
+        # Add last_talk for the final node if all steps completed and pipeline
+        # has more than one node (preserves legacy behaviour)
+        if len(state.responses) == len(all_nodes) and len(all_nodes) > 1:
+            last_response = state.responses[-1]
+            last_talk = Talk[Any](all_nodes[-1], [], connection_type="run")
+            if last_response.message:
+                last_talk._stats.messages.append(last_response.message)
+            self._team_talk.append(last_talk)
+
+        # Yield results in order: AgentResponse, Talk, AgentResponse, Talk, ...
+        for i, response in enumerate(state.responses):
+            yield response
+            if i < len(connections):
+                yield connections[i]
 
     async def run_stream(
         self,
@@ -287,9 +374,9 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
         # Resolve the parent session id for this team execution.
         # The caller's parent_session_id takes priority, then session_id (for
-        # backward compat), then the team's own session.
+        # backward compat).
         parent_session_id: str | None = (
-            parent_session_id_kwarg or session_id_kwarg or self.session_id
+            parent_session_id_kwarg or session_id_kwarg
         )
 
         child_depth = depth + 1
@@ -306,12 +393,14 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
 
                 # Create child session for this member
                 pool = self.agent_pool
-                if pool is not None and pool.sessions is not None and parent_session_id is not None:
-                    child_sid = await pool.sessions.create_child_session(
+                if pool is not None and pool.session_pool is not None and parent_session_id is not None:
+                    child_state = await pool.session_pool.create_session(
+                        session_id=generate_session_id(),
                         parent_session_id=parent_session_id,
                         agent_name=node.name,
                         agent_type=node.agent_type,
                     )
+                    child_sid = child_state.session_id
                 else:
                     child_sid = generate_session_id()
 

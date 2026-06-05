@@ -298,6 +298,14 @@ class ClaudeCodeAgentConfig(BaseAgentConfig):
     Note: Requires an active Claude subscription and logged-in session.
     """
 
+    dangerously_skip_permissions: bool = Field(default=False, title="Dangerously Skip Permissions")
+    """Skip all permission checks without prompting.
+
+    When True, bypasses all tool use confirmation dialogs. Use with caution
+    as this allows the agent to execute arbitrary code and make changes
+    without user approval.
+    """
+
     tools: list[AnyToolConfig | str] = Field(
         default_factory=list,
         title="Tools",

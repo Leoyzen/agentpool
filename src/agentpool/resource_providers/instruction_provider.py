@@ -12,6 +12,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from agentpool.prompts.instructions import InstructionFunc
     from agentpool_config.instructions import ProviderInstructionConfig
 
@@ -101,3 +102,11 @@ class InstructionProvider(ResourceProvider):
                 return []
 
         return []
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

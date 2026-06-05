@@ -38,8 +38,10 @@ async def test_team_shared_prompt():
         def echo(prompt: str) -> str:
             return prompt
 
-        a1 = pool.get_agent(Agent.from_callback(echo, name="a1"))
-        a2 = pool.get_agent(Agent.from_callback(echo, name="a2"))
+        a1 = Agent.from_callback(echo, name="a1")
+        await pool.add_agent(a1)
+        a2 = Agent.from_callback(echo, name="a2")
+        await pool.add_agent(a2)
 
         # Create team with shared prompt
         team = pool.create_team([a1, a2], shared_prompt="Common instruction: ")

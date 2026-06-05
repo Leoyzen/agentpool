@@ -44,6 +44,7 @@ from acp.schema import (
     ToolCallLocation,
     ToolCallProgress,
     ToolCallStart,
+    TurnCompleteUpdate,
     Usage,
     UsageUpdate,
 )
@@ -89,6 +90,7 @@ ACPSessionUpdate = (
     | ToolCallProgress
     | AgentPlanUpdate
     | UsageUpdate
+    | TurnCompleteUpdate
 )
 ACPSessionUpdate = (
     AgentMessageChunk | AgentThoughtChunk | ToolCallStart | ToolCallProgress | AgentPlanUpdate
@@ -195,6 +197,15 @@ class ACPEventConverter:
     # Legacy mode fields (deprecated)
     subagent_display_mode: Literal["legacy", "inline", "tool_box"] = "legacy"
     """How to display subagent output. Deprecated: Use ACP_SUBAGENT_DISPLAY_MODE env var instead."""
+
+    # Feature flag for TurnCompleteUpdate emission
+    client_supports_turn_complete: bool = False
+    """Whether the connected ACP client supports TurnCompleteUpdate.
+
+    When True, the converter yields TurnCompleteUpdate on StreamCompleteEvent.
+    When False (default), no TurnCompleteUpdate is emitted for backward
+    compatibility with clients that do not handle the update type.
+    """
 
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
@@ -705,27 +716,34 @@ class ACPEventConverter:
 
             case StreamCompleteEvent(message=message):
                 request_usage = message.usage
-                if request_usage.total_tokens > 0:
-                    thought = request_usage.details.get("reasoning_tokens") or None
-                    self.last_usage = Usage(
-                        total_tokens=request_usage.total_tokens,
-                        input_tokens=request_usage.input_tokens,
-                        output_tokens=request_usage.output_tokens,
-                        thought_tokens=thought,
-                        cached_read_tokens=request_usage.cache_read_tokens or None,
-                        cached_write_tokens=request_usage.cache_write_tokens or None,
+                thought = request_usage.details.get("reasoning_tokens") or None
+                self.last_usage = Usage(
+                    total_tokens=request_usage.total_tokens,
+                    input_tokens=request_usage.input_tokens,
+                    output_tokens=request_usage.output_tokens,
+                    thought_tokens=thought,
+                    cached_read_tokens=request_usage.cache_read_tokens or None,
+                    cached_write_tokens=request_usage.cache_write_tokens or None,
+                )
+                cost_obj: Cost | None = None
+                if message.cost_info and message.cost_info.total_cost:
+                    cost_obj = Cost(
+                        amount=float(message.cost_info.total_cost),
+                        currency="USD",
                     )
-                    cost_obj: Cost | None = None
-                    if message.cost_info and message.cost_info.total_cost:
-                        cost_obj = Cost(
-                            amount=float(message.cost_info.total_cost),
-                            currency="USD",
-                        )
-                    yield UsageUpdate(
-                        used=request_usage.total_tokens,
-                        size=request_usage.total_tokens,  # best approximation
-                        cost=cost_obj,
-                    )
+                # Always yield UsageUpdate on stream completion so clients
+                # know the turn has ended — especially critical for inject-
+                # triggered turns where no PromptResponse(stop_reason) is sent.
+                yield UsageUpdate(
+                    used=request_usage.total_tokens,
+                    size=request_usage.total_tokens,  # best approximation
+                    cost=cost_obj,
+                )
+                # Turn-complete signal: explicit end-of-turn barrier for clients.
+                # Based on draft RFD PR #644 (not yet merged into ACP spec).
+                # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
+                if self.client_supports_turn_complete:
+                    yield TurnCompleteUpdate(stop_reason="end_turn")
                 self.reset()
                 # Clean up all subagent states when stream completes
                 # Prevents memory leaks by removing accumulated state
@@ -743,13 +761,14 @@ class ACPEventConverter:
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case SpawnSessionStart(
-                source_name=source_name,
-                description=description,
-                spawn_mechanism=spawn_mechanism,
+                # source_name=source_name,
+                # description=description,
+                # spawn_mechanism=spawn_mechanism,
             ):
-                icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
-                text = f"\n{icon} **`{source_name}`**: {description}\n"
-                yield AgentMessageChunk.text(text)
+                # icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
+                # text = f"\n{icon} **`{source_name}`**: {description}\n"
+                # yield AgentMessageChunk.text(text)
+                ...
 
             case SubAgentEvent(
                 source_name=source_name,

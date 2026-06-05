@@ -77,6 +77,17 @@ class NodeConfig(Schema):
     )
     """Optional description of the agent / team."""
 
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        examples=[{"use_session_pool": True}],
+        title="Node metadata",
+    )
+    """Arbitrary metadata for the node.
+
+    Can be used for feature flags, annotations, or other protocol-specific
+    configuration that does not fit into structured fields.
+    """
+
     triggers: list[EventConfig] = Field(
         default_factory=list,
         examples=[
@@ -202,6 +213,19 @@ class BaseAgentConfig(NodeConfig):
 
     Allows adding context, blocking operations, modifying inputs, or triggering
     side effects during run execution and tool usage.
+    """
+
+    metadata: dict[str, Any] = Field(default_factory=dict, title="Agent metadata")
+    """Arbitrary metadata for the agent.
+
+    Can be used for feature flags, annotations, and other per-agent
+    configuration that doesn't fit into standard fields.
+
+    Example:
+        ```yaml
+        metadata:
+          use_session_pool: true
+        ```
     """
 
     environment: Annotated[

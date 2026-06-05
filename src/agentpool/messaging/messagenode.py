@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
 
 from anyenv.signals import Signal
@@ -115,27 +117,24 @@ class MessageNode[TDeps, TResult](ABC):
         self.log = logger.bind(agent_name=self._name)
         self.agent_pool = agent_pool
         self.description = description
-        self.session_id: str | None = None
-        self.parent_session_id: str | None = None
-        self.session_title: str | None = None
         self.connections = ConnectionManager(self)
         cfgs = list(event_configs) if event_configs else None
         self._events = EventManager(
             configs=cfgs,
             event_callbacks=[_event_handler],
-            session_id=self.session_id,
-            parent_session_id=self.parent_session_id,
             source_name=self._name,
         )
         name_ = f"node_{self._name}"
-        self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name)
+        self.mcp = MCPManager(name_, servers=mcp_servers, owner=self.name, _warn=False)
         self.enable_db_logging = enable_logging
 
     async def log_session(
         self,
+        session_id: str | None = None,
         initial_prompt: str | None = None,
         model: str | None = None,
         parent_session_id: str | None = None,
+        session_title_setter: Callable[[str], None] | None = None,
     ) -> None:
         """Log conversation to storage if enabled.
 
@@ -144,44 +143,32 @@ class MessageNode[TDeps, TResult](ABC):
         For wrapped agents (Claude Code), set session_id from SDK session first.
 
         Args:
+            session_id: Optional session ID for the conversation.
             initial_prompt: Optional initial prompt to trigger title generation.
             model: Requested model identifier for this session.
             parent_session_id: Optional parent session ID.
+            session_title_setter: Optional callback for setting conversation title.
         """
-
-        def _set_session_title(title: str) -> None:
-            """Callback for setting conversation title (called by storage manager)."""
-            self.session_title = title
-
-        if self.enable_db_logging and self.storage and self.session_id:
+        if self.enable_db_logging and self.storage and session_id:
             await self.storage.log_session(
-                session_id=self.session_id,
+                session_id=session_id,
                 node_name=self.name,
                 model=model,
                 initial_prompt=initial_prompt,
                 parent_session_id=parent_session_id,
-                on_title_generated=_set_session_title,
+                on_title_generated=session_title_setter,
             )
 
-    async def emit_agent_event(self, event: RichAgentStreamEvent[Any]) -> None:
+    async def emit_agent_event(
+        self, event: RichAgentStreamEvent[Any], source_session_id: str | None = None
+    ) -> None:
         """Emit an agent stream event via the event manager.
 
         Args:
             event: The agent stream event to emit
+            source_session_id: Optional ID of the session that produced the event
         """
-        await self._events.emit_agent_event(event, source_session_id=self.session_id)
-
-    def set_session_context(self, session_id: str, parent_session_id: str | None = None) -> None:
-        """Set session context for the node and its event manager.
-
-        Args:
-            session_id: The session ID to set
-            parent_session_id: Optional parent session ID
-        """
-        self.session_id = session_id
-        self.parent_session_id = parent_session_id
-        self._events.session_id = session_id
-        self._events.parent_session_id = parent_session_id
+        await self._events.emit_agent_event(event, source_session_id=source_session_id)
 
     async def __aenter__(self) -> Self:
         """Initialize base message node."""
@@ -398,6 +385,11 @@ class MessageNode[TDeps, TResult](ABC):
         exit_condition: AsyncFilterFn | None = None,
     ) -> Talk[Any] | TeamTalk:
         """Create connection(s) to target(s)."""
+        warnings.warn(
+            "connect_to() is deprecated. Use YAML config or GraphBuilder instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # Handle callable case
         from agentpool.agents import Agent
         from agentpool.delegation.base_team import BaseTeam
@@ -449,9 +441,117 @@ class MessageNode[TDeps, TResult](ABC):
         """Stop forwarding results to another node."""
         self.connections.disconnect(other)
 
-    @abstractmethod
+    def _get_deps(self) -> TDeps | None:
+        """Return dependencies for graph execution.
+
+        Returns:
+            The node's dependencies, or None if not configured.
+        """
+        return None
+
+    def _build_single_node_graph(
+        self,
+    ) -> Any:
+        """Build a single-node pydantic-graph wrapping this node.
+
+        Returns:
+            An immutable Graph ready for execution.
+        """
+        from agentpool.messaging.graph_adapter import MessageNodeStep
+
+        return MessageNodeStep(self).build_single_node_graph()
+
+    async def _execute_node(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
+        """Core execution logic without graph wrapping.
+
+        Subclasses that do not override :meth:`run` must implement this
+        method. Subclasses that override :meth:`run` (the default for
+        all existing agent types) do not need to implement this method.
+
+        Args:
+            *prompts: Input prompts.
+            **kwargs: Additional execution arguments.
+
+        Returns:
+            The resulting ChatMessage.
+
+        Raises:
+            NotImplementedError: If neither ``run()`` nor ``_execute_node()``
+                is overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _execute_node() "
+            f"or override run() directly."
+        )
+
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[TResult]:
-        """Execute node with prompts. Implementation-specific run logic."""
+        """Execute node with prompts via pydantic-graph single-node graph.
+
+        Builds a single-node graph and runs it to completion. Subclasses
+        may override this method to provide custom execution logic; in
+        that case the graph-based path is bypassed.
+
+        Args:
+            *prompts: Input prompts.
+            **kwargs: Additional execution arguments.
+
+        Returns:
+            The resulting ChatMessage.
+        """
+        from agentpool.messaging.graph_adapter import AgentPoolState
+
+        graph = self._build_single_node_graph()
+        state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
+        return await graph.run(state=state, deps=self._get_deps(), inputs=None)
+
+    async def run_stream(
+        self,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
+        """Run with streaming output via pydantic-graph Graph.iter().
+
+        Uses :meth:`Graph.iter` to drive execution step-by-step.
+        For nodes that do not override :meth:`run_stream` (e.g. most
+        agent subclasses), this yields the final result wrapped in a
+        :class:`StreamCompleteEvent`. Agent subclasses typically override
+        this with rich event streaming.
+
+        Args:
+            *prompts: Input prompts.
+            **kwargs: Additional execution arguments.
+
+        Yields:
+            RichAgentStreamEvent tokens during execution.
+        """
+        from agentpool.agents.events import StreamCompleteEvent
+        from agentpool.messaging.graph_adapter import AgentPoolState
+
+        graph = self._build_single_node_graph()
+        state = AgentPoolState(node=self, prompts=prompts, kwargs=kwargs)
+
+        async with graph.iter(state=state, deps=self._get_deps(), inputs=None) as graph_run:
+            async for _ in graph_run:
+                # Generic nodes do not produce intermediate stream events;
+                # drain the event queue in case a subclass pushed events.
+                while not state.event_queue.empty():
+                    try:
+                        event = state.event_queue.get_nowait()
+                        yield event  # type: ignore[misc]
+                    except asyncio.QueueEmpty:
+                        break
+
+        # Yield any remaining events after graph completion
+        while not state.event_queue.empty():
+            try:
+                event = state.event_queue.get_nowait()
+                yield event  # type: ignore[misc]
+            except asyncio.QueueEmpty:
+                break
+
+        # Yield the final result wrapped in StreamCompleteEvent
+        if state.result is not None:
+            yield StreamCompleteEvent(message=state.result)  # type: ignore[misc]
 
     async def run_message(
         self,
@@ -477,13 +577,23 @@ class MessageNode[TDeps, TResult](ABC):
             **kwargs,
         )
 
-    async def get_message_history(self, limit: int | None = None) -> list[ChatMessage[Any]]:
-        """Get message history from storage."""
+    async def get_message_history(
+        self, session_id: str | None = None, limit: int | None = None
+    ) -> list[ChatMessage[Any]]:
+        """Get message history from storage.
+
+        Args:
+            session_id: Optional session ID to query history for.
+            limit: Maximum number of messages to return.
+
+        Returns:
+            List of chat messages from the session.
+        """
         from agentpool_config.session import SessionQuery
 
-        if not self.enable_db_logging or not self.storage:
+        if not self.enable_db_logging or not self.storage or not session_id:
             return []
-        query = SessionQuery(name=self.session_id, limit=limit)
+        query = SessionQuery(name=session_id, limit=limit)
         return await self.storage.filter_messages(query)
 
     async def log_message(self, message: ChatMessage[Any]) -> None:

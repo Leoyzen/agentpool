@@ -5,7 +5,7 @@ name = "agentpool"
 version = "2.9.5"
 description = "Pydantic-AI based Multi-Agent Framework with YAML-based Agents, Teams, Workflows & Extended ACP / AGUI integration"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -57,7 +57,8 @@ dependencies = [
   "psygnal>=0.11.1",
   "py-key-value-aio[disk]",
   "pydantic>=2.10.0",
-  "pydantic-ai-slim[openai,google,anthropic,mistral,retries]>=1.0.0",
+  "pydantic-ai-slim[openai,google,anthropic,mistral,retries]==1.102.0",
+  "pydantic-graph",
   # Only add below (Copier)
   "pydocket>=0.16.1",
   "python-dotenv>=1.0.1",

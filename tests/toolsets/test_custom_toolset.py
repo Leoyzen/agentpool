@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agentpool.resource_providers import ResourceProvider
 from agentpool_config.toolsets import CustomToolsetConfig
+from pydantic_ai.capabilities import AbstractCapability
 
 
 class MockProvider(ResourceProvider):
@@ -13,6 +14,14 @@ class MockProvider(ResourceProvider):
         """Initialize mock provider with arbitrary parameters."""
         super().__init__(name=name, owner=owner)
         self.custom_params = kwargs
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
 
 class StrictProvider(ResourceProvider):
@@ -67,3 +76,11 @@ async def test_custom_toolset_invalid_parameters():
     assert "unknown_param" in error_msg
     assert "value" in error_msg
     assert "Original error:" in error_msg
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

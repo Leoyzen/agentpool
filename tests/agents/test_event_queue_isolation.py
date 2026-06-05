@@ -6,6 +6,7 @@ Tests that run_ctx.event_queue is used instead of self._event_queue.
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -123,27 +124,51 @@ async def test_concurrent_runs_dont_pollute_queues():
     print("✓ Concurrent runs don't pollute each other's event queues")
 
 
-def test_agent_has_instance_event_queue():
-    """Test that Agent still has instance-level _event_queue for non-run contexts."""
+def test_agent_has_no_instance_event_queue():
+    """Test that Agent no longer has instance-level _event_queue (RFC-0021)."""
 
     from agentpool.agents.base_agent import BaseAgent
 
     # Create minimal agent
     class TestAgent(BaseAgent):
-        async def _run_stream_once(self, run_ctx, *prompts, **kwargs):
-            async for _ in []:
+        @property
+        def model_name(self) -> str | None:
+            return "test-model"
+
+        async def set_model(self, model: str) -> None:
+            pass
+
+        async def _stream_events(self, run_ctx, *args, **kwargs):
+            if False:
                 yield
 
-    try:
-        agent = TestAgent(name="test", model="test-model")
+        async def _interrupt(self, run_ctx=None) -> None:
+            pass
 
-        # Instance-level queue should still exist for non-run contexts
-        assert hasattr(agent, "_event_queue")
-        assert isinstance(agent._event_queue, asyncio.Queue)
+        async def get_available_models(self):
+            return None
 
-        print("✓ Agent has instance-level _event_queue for non-run contexts")
-    except Exception as e:
-        print(f"⚠️  Could not fully test instance event queue: {e}")
+        async def get_modes(self):
+            return []
+
+        async def _set_mode(self, mode_id: str, category_id: str) -> None:
+            pass
+
+        async def list_sessions(self, *, cwd=None, limit=None):
+            return []
+
+        async def load_session(self, session_id: str):
+            return None
+
+    agent = TestAgent(name="test")
+
+    # Instance-level queue should NOT exist — per-run isolation via AgentRunContext
+    assert not hasattr(agent, "_event_queue"), (
+        "Agent should not have instance-level _event_queue — "
+        "use run_ctx.event_queue for per-run isolation"
+    )
+
+    print("✓ Agent has no instance-level _event_queue (per-run isolation only)")
 
 
 def test_hook_manager_no_event_queue_param():

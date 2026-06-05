@@ -1,21 +1,11 @@
-"""TDD tests for inject_prompt/queue_prompt cross-task bug fix.
+"""TDD tests for inject_prompt/queue_prompt cross-task behavior.
 
-These tests validate that inject_prompt() and queue_prompt() work when called
-from a different async task than the agent's run_stream() task.
+These tests validate that inject_prompt() and queue_prompt() work via:
+1. ContextVar (_current_run_ctx_var) when called from the same task as run_stream()
+2. SessionPool fallback (session.active_run_ctx) when called from a different task
 
-Bug: When a background task completes and calls inject_prompt() from its own
-asyncio.Task, the injection is silently dropped because inject_prompt() only
-checks _current_run_ctx (ContextVar, task-scoped) and _background_run_ctx
-(continuous mode only), but NOT _active_run_ctx (instance var, cross-task
-accessible).
-
-The same bug affects: queue_prompt(), has_queued_prompts(),
-has_pending_injections(), clear_queued_prompts().
-
-Fix approach:
-    Add _active_run_ctx as fallback in all 5 methods, matching the pattern
-    already used by interrupt() (base_agent.py L1101-1104):
-        effective_run_ctx = run_ctx or self._active_run_ctx
+After removing _active_run_ctx from BaseAgent, cross-task access requires
+a SessionPool with session.active_run_ctx set.
 """
 
 from __future__ import annotations
@@ -23,12 +13,16 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from typing import Any
+from unittest.mock import MagicMock
 
 from pydantic_ai.models.test import TestModel, TestStreamedResponse
 import pytest
 
 from agentpool import Agent
+from agentpool.agents.base_agent import _current_run_ctx_var
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
+from agentpool.orchestrator.core import SessionState
 
 
 # ---------------------------------------------------------------------------
@@ -102,61 +96,77 @@ def fast_agent() -> Agent[None]:
 
 
 # ---------------------------------------------------------------------------
-# Core Test: inject_prompt from a different async task
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
+    """Mock agent_pool.session_pool so get_active_run_context() returns run_ctx."""
+    from unittest.mock import AsyncMock
+    from agentpool.orchestrator.run import RunHandle
+
+    session_state = SessionState(session_id="test-session", agent_name="test")
+    session_state.current_run_id = run_ctx.run_id
+    session_controller = MagicMock()
+    session_controller.get_session.return_value = session_state
+    run_handle = MagicMock(spec=RunHandle)
+    run_handle.run_ctx = run_ctx
+    session_pool = MagicMock()
+    session_pool.sessions = session_controller
+    session_pool.get_run.return_value = run_handle
+    session_pool.receive_request = AsyncMock()
+    agent_pool = MagicMock()
+    agent_pool.session_pool = session_pool
+    agent_pool.storage = MagicMock()
+    agent_pool.storage.log_message = AsyncMock()
+    agent_pool.storage.log_session = AsyncMock()
+    agent.agent_pool = agent_pool
+
+
+# ---------------------------------------------------------------------------
+# Core Test: inject_prompt from a different async task (via SessionPool)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_inject_prompt_from_different_task(slow_agent: Agent[None]) -> None:
-    """inject_prompt() called from a different task MUST reach the injection manager.
-
-    This is the core bug: BackgroundTaskProvider._on_task_completed() calls
-    ctx.agent.inject_prompt(notice) from inside its own asyncio.Task, which
-    is different from the lead agent's run_stream() task.
-
-    _current_run_ctx is a ContextVar → returns None in the other task.
-    Without _active_run_ctx fallback, the injection is silently dropped.
-
-    EXPECTED: inject_prompt() uses _active_run_ctx as fallback (like interrupt()
-    already does at base_agent.py L1101-1104).
+async def test_inject_prompt_from_different_task_with_session_pool(
+    slow_agent: Agent[None],
+) -> None:
+    """inject_prompt() called from a different task MUST reach the injection manager
+    when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
-    injection_done = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
 
     task = asyncio.create_task(run_stream())
 
-    # Wait for run_stream to start and set _active_run_ctx
+    # Wait for run_stream to start and capture run_ctx
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    # Verify the agent has an active run context
-    assert slow_agent._active_run_ctx is not None, (
-        "_active_run_ctx must be set during run_stream — "
-        "this is how cross-task methods find the run context"
-    )
+    assert len(captured_run_ctx) == 1, "Should have captured run_ctx"
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback so cross-task access works
+    _mock_session_pool(slow_agent, run_ctx)
 
     # Call inject_prompt from THIS task (different from run_stream's task)
-    # This simulates BackgroundTaskProvider._on_task_completed()
-    slow_agent.inject_prompt("Background task completed")
+    slow_agent.inject_prompt("Background task completed", session_id="test-session")
 
-    # Verify the injection reached the injection manager
-    # BEFORE FIX: _current_run_ctx is None in this task, _background_run_ctx is None,
-    # so inject_prompt silently drops the message.
-    # AFTER FIX: inject_prompt falls back to _active_run_ctx and inject succeeds.
-    assert slow_agent._active_run_ctx.injection_manager.has_pending(), (
+    # Verify the injection reached the injection manager via SessionPool fallback
+    assert run_ctx.injection_manager.has_pending(), (
         "inject_prompt() from a different task MUST deliver the message to "
-        "the active run's injection_manager via _active_run_ctx fallback. "
-        "Without this, background task completion notices are silently dropped "
-        "and the lead agent never resumes."
+        "the active run's injection_manager via SessionPool fallback."
     )
-
-    injection_done.set()
 
     # Clean up
     await slow_agent.interrupt()
@@ -165,21 +175,26 @@ async def test_inject_prompt_from_different_task(slow_agent: Agent[None]) -> Non
 
 
 # ---------------------------------------------------------------------------
-# queue_prompt from a different async task
+# queue_prompt from a different async task (via SessionPool)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_queue_prompt_from_different_task(slow_agent: Agent[None]) -> None:
-    """queue_prompt() called from a different task MUST reach the injection manager.
-
-    Same bug as inject_prompt: _current_run_ctx is None in the caller's task.
+async def test_queue_prompt_from_different_task_with_session_pool(
+    slow_agent: Agent[None],
+) -> None:
+    """queue_prompt() called from a different task MUST reach the injection manager
+    when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -187,14 +202,18 @@ async def test_queue_prompt_from_different_task(slow_agent: Agent[None]) -> None
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    assert slow_agent._active_run_ctx is not None
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback
+    _mock_session_pool(slow_agent, run_ctx)
 
     # Queue a prompt from a different task
-    slow_agent.queue_prompt("Follow-up prompt")
+    slow_agent.queue_prompt("Follow-up prompt", session_id="test-session")
 
-    assert slow_agent._active_run_ctx.injection_manager.has_queued(), (
+    assert run_ctx.injection_manager.has_queued(), (
         "queue_prompt() from a different task MUST deliver the prompt to "
-        "the active run's injection_manager via _active_run_ctx fallback."
+        "the active run's injection_manager via SessionPool fallback."
     )
 
     await slow_agent.interrupt()
@@ -203,22 +222,26 @@ async def test_queue_prompt_from_different_task(slow_agent: Agent[None]) -> None
 
 
 # ---------------------------------------------------------------------------
-# has_queued_prompts from a different async task
+# has_queued_prompts from a different async task (via SessionPool)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_has_queued_prompts_from_different_task(slow_agent: Agent[None]) -> None:
-    """has_queued_prompts() called from a different task MUST reflect actual state.
-
-    Without _active_run_ctx fallback, has_queued_prompts() always returns False
-    when called from a different task, even if there ARE queued prompts.
+async def test_has_queued_prompts_from_different_task_with_session_pool(
+    slow_agent: Agent[None],
+) -> None:
+    """has_queued_prompts() called from a different task MUST reflect actual state
+    when SessionPool fallback is available.
     """
     stream_started = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -226,17 +249,18 @@ async def test_has_queued_prompts_from_different_task(slow_agent: Agent[None]) -
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    assert slow_agent._active_run_ctx is not None
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
 
-    # First, queue a prompt directly into the injection manager from within
-    # the run_stream task's context (via _active_run_ctx)
-    slow_agent._active_run_ctx.injection_manager.queue("Test prompt")
+    # Set up SessionPool fallback
+    _mock_session_pool(slow_agent, run_ctx)
+
+    # Queue a prompt directly into the injection manager
+    run_ctx.injection_manager.queue("Test prompt")
 
     # Now check has_queued_prompts from a different task
-    # BEFORE FIX: returns False (because _current_run_ctx is None)
-    # AFTER FIX: returns True (because _active_run_ctx has queued prompts)
-    assert slow_agent.has_queued_prompts(), (
-        "has_queued_prompts() from a different task MUST check _active_run_ctx "
+    assert slow_agent.has_queued_prompts(session_id="test-session"), (
+        "has_queued_prompts() from a different task MUST check SessionPool fallback "
         "and return True when prompts are queued."
     )
 
@@ -246,18 +270,26 @@ async def test_has_queued_prompts_from_different_task(slow_agent: Agent[None]) -
 
 
 # ---------------------------------------------------------------------------
-# has_pending_injections from a different async task
+# has_pending_injections from a different async task (via SessionPool)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_has_pending_injections_from_different_task(slow_agent: Agent[None]) -> None:
-    """has_pending_injections() called from a different task MUST reflect actual state."""
+async def test_has_pending_injections_from_different_task_with_session_pool(
+    slow_agent: Agent[None],
+) -> None:
+    """has_pending_injections() called from a different task MUST reflect actual state
+    when SessionPool fallback is available.
+    """
     stream_started = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -265,16 +297,18 @@ async def test_has_pending_injections_from_different_task(slow_agent: Agent[None
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    assert slow_agent._active_run_ctx is not None
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
 
-    # Inject directly into the injection manager via _active_run_ctx
-    slow_agent._active_run_ctx.injection_manager.inject("Test injection")
+    # Set up SessionPool fallback
+    _mock_session_pool(slow_agent, run_ctx)
+
+    # Inject directly into the injection manager
+    run_ctx.injection_manager.inject("Test injection")
 
     # Check has_pending_injections from a different task
-    # BEFORE FIX: returns False
-    # AFTER FIX: returns True
-    assert slow_agent.has_pending_injections(), (
-        "has_pending_injections() from a different task MUST check _active_run_ctx "
+    assert slow_agent.has_pending_injections(session_id="test-session"), (
+        "has_pending_injections() from a different task MUST check SessionPool fallback "
         "and return True when injections are pending."
     )
 
@@ -284,18 +318,26 @@ async def test_has_pending_injections_from_different_task(slow_agent: Agent[None
 
 
 # ---------------------------------------------------------------------------
-# clear_queued_prompts from a different async task
+# clear_queued_prompts from a different async task (via SessionPool)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_clear_queued_prompts_from_different_task(slow_agent: Agent[None]) -> None:
-    """clear_queued_prompts() called from a different task MUST actually clear."""
+async def test_clear_queued_prompts_from_different_task_with_session_pool(
+    slow_agent: Agent[None],
+) -> None:
+    """clear_queued_prompts() called from a different task MUST actually clear
+    when SessionPool fallback is available.
+    """
     stream_started = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -303,20 +345,22 @@ async def test_clear_queued_prompts_from_different_task(slow_agent: Agent[None])
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    assert slow_agent._active_run_ctx is not None
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
 
-    # Queue something directly via _active_run_ctx
-    slow_agent._active_run_ctx.injection_manager.queue("Test prompt")
-    assert slow_agent._active_run_ctx.injection_manager.has_queued()
+    # Set up SessionPool fallback
+    _mock_session_pool(slow_agent, run_ctx)
+
+    # Queue something directly
+    run_ctx.injection_manager.queue("Test prompt")
+    assert run_ctx.injection_manager.has_queued()
 
     # Clear from a different task
-    # BEFORE FIX: no-op (because _current_run_ctx is None)
-    # AFTER FIX: clears the injection manager
-    slow_agent.clear_queued_prompts()
+    slow_agent.clear_queued_prompts(session_id="test-session")
 
-    assert not slow_agent._active_run_ctx.injection_manager.has_queued(), (
+    assert not run_ctx.injection_manager.has_queued(), (
         "clear_queued_prompts() from a different task MUST clear the active "
-        "run's injection_manager via _active_run_ctx fallback."
+        "run's injection_manager via SessionPool fallback."
     )
 
     await slow_agent.interrupt()
@@ -334,18 +378,22 @@ async def test_clear_queued_prompts_from_different_task(slow_agent: Agent[None])
 async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> None:
     """inject_prompt from a different task should cause run_stream to continue.
 
-    The run_stream() loop (base_agent.py L686) checks injection_manager.has_queued()
+    The run_stream() loop checks injection_manager.has_queued()
     after each _run_stream_once iteration. If inject_prompt() successfully
-    delivers to _active_run_ctx.injection_manager, and the injection gets
-    flushed to the queue, the loop should run another iteration.
+    delivers to the injection manager (via SessionPool fallback), and the
+    injection gets flushed to the queue, the loop should run another iteration.
     """
     iteration_count = 0
     stream_started = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         nonlocal iteration_count
         async for event in slow_agent.run_stream("First prompt"):
             iteration_count += 1
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent) and iteration_count == 1:
                 # Placeholder — real inject test happens from outside this task
@@ -354,14 +402,18 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback
+    _mock_session_pool(slow_agent, run_ctx)
+
     # Inject from a different task
-    slow_agent.inject_prompt("Follow-up from different task")
+    slow_agent.inject_prompt("Follow-up from different task", session_id="test-session")
 
     # The injection should be in the pending list
-    active_ctx = slow_agent._active_run_ctx
-    assert active_ctx is not None, "_active_run_ctx should be set during run_stream"
-    assert active_ctx.injection_manager.has_pending(), (
-        "Injection from different task must reach injection_manager"
+    assert run_ctx.injection_manager.has_pending(), (
+        "Injection from different task must reach injection_manager via SessionPool fallback"
     )
 
     await slow_agent.interrupt()
@@ -387,10 +439,11 @@ async def test_inject_prompt_same_task_still_works(fast_agent: Agent[None]) -> N
     async def run_stream() -> None:
         nonlocal injected
         async for event in fast_agent.run_stream("Test prompt"):
-            # From within the same task, inject_prompt should work
-            if fast_agent._current_run_ctx is not None:
+            # From within the same task, inject_prompt should work via ContextVar
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None:
                 fast_agent.inject_prompt("Same-task injection")
-                if fast_agent._current_run_ctx.injection_manager.has_pending():
+                if run_ctx.injection_manager.has_pending():
                     injected = True
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -413,9 +466,10 @@ async def test_queue_prompt_same_task_still_works(fast_agent: Agent[None]) -> No
     async def run_stream() -> None:
         nonlocal queued
         async for event in fast_agent.run_stream("Test prompt"):
-            if fast_agent._current_run_ctx is not None:
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None:
                 fast_agent.queue_prompt("Same-task queue")
-                if fast_agent._current_run_ctx.injection_manager.has_queued():
+                if run_ctx.injection_manager.has_queued():
                     queued = True
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -425,29 +479,28 @@ async def test_queue_prompt_same_task_still_works(fast_agent: Agent[None]) -> No
 
 
 # ---------------------------------------------------------------------------
-# Hook consumer: NativeAgentHookManager reads injection via _active_run_ctx
+# Hook consumer: NativeAgentHookManager reads injection via SessionPool fallback
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_hook_manager_consumes_cross_task_injection(slow_agent: Agent[None]) -> None:
-    """NativeAgentHookManager must consume injections queued from a different task.
-
-    The hook manager's run_post_tool_hooks() reads injection_manager via
-    _current_run_ctx. After our fix, it also falls back to _active_run_ctx.
-
-    This test verifies the full producer → consumer chain:
-    1. Background task calls inject_prompt() from different task (producer)
-    2. inject_prompt() delivers to _active_run_ctx.injection_manager (fixed)
-    3. Hook manager consumes from _active_run_ctx.injection_manager (fixed)
+async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
+    slow_agent: Agent[None],
+) -> None:
+    """NativeAgentHookManager must consume injections queued from a different task
+    when SessionPool fallback is available.
     """
     from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
 
     stream_started = asyncio.Event()
+    captured_run_ctx: list[AgentRunContext] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -455,21 +508,27 @@ async def test_hook_manager_consumes_cross_task_injection(slow_agent: Agent[None
     task = asyncio.create_task(run_stream())
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    assert slow_agent._active_run_ctx is not None
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback
+    _mock_session_pool(slow_agent, run_ctx)
 
     # Inject from a different task (simulates BackgroundTaskProvider._on_task_completed)
-    slow_agent.inject_prompt("Background task result notice")
+    slow_agent.inject_prompt("Background task result notice", session_id="test-session")
 
-    # Verify the hook manager can find the injection via _active_run_ctx fallback
+    # Verify the hook manager can find the injection via SessionPool fallback
     hook_mgr = slow_agent._hook_manager
     assert isinstance(hook_mgr, NativeAgentHookManager)
 
     # The hook manager should be able to access the injection_manager
-    # via the _active_run_ctx fallback we added
-    run_ctx = slow_agent._current_run_ctx or slow_agent._active_run_ctx
-    assert run_ctx is not None, "Hook manager must find run_ctx via _active_run_ctx fallback"
-    assert run_ctx.injection_manager.has_pending(), (
-        "Injection from different task must be visible via _active_run_ctx "
+    # via the SessionPool fallback
+    active_run_ctx = slow_agent.get_active_run_context(session_id="test-session")
+    assert active_run_ctx is not None, (
+        "Hook manager must find run_ctx via SessionPool fallback"
+    )
+    assert active_run_ctx.injection_manager.has_pending(), (
+        "Injection from different task must be visible via SessionPool fallback "
         "so the hook manager can consume it"
     )
 

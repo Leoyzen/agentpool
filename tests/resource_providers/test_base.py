@@ -1,6 +1,7 @@
 """Test ResourceProvider base class."""
 
 from __future__ import annotations
+from pydantic_ai.capabilities import AbstractCapability
 
 
 class TestResourceProviderGetInstructions:
@@ -47,3 +48,11 @@ class TestResourceProviderGetInstructions:
         # Type checking may show this differently, but runtime check should work
         # For now, just verify it has a return annotation
         assert sig.return_annotation is not inspect.Signature.empty
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

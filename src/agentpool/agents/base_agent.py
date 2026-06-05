@@ -8,9 +8,12 @@ from collections.abc import Callable
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+import inspect
 import os
+import sys
 from pathlib import Path
 import re
+import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, overload
 
 from anyenv import MultiEventHandler, method_spawner
@@ -108,6 +111,44 @@ def _parse_slash_command(command_text: str) -> tuple[str, str] | None:
 def _is_slash_command(text: str) -> bool:
     """Check if text starts with a slash command."""
     return bool(_SLASH_PATTERN.match(text.strip()))
+
+
+def _should_bypass_session_pool() -> bool:
+    """Detect if the caller should bypass SessionPool delegation.
+
+    Two cases require bypass:
+    1. AG-UI adapter code: AG-UI uses direct streaming and must not go
+       through SessionPool to preserve its event handling.
+    2. SessionPool internal turns: When run()/run_stream() is called from
+       within a TurnRunner turn (e.g., via message forwarding), delegating
+       back to SessionPool would cause a deadlock on the per-session turn_lock.
+
+    Uses sys._getframe() to walk the call stack efficiently and identify
+    these frames. This avoids the overhead of inspect.stack() which
+    constructs full FrameInfo objects for every frame.
+
+    Returns:
+        True if SessionPool delegation should be bypassed, False otherwise.
+    """
+    frame = sys._getframe(1)
+    while frame:
+        # Avoid inspect.getmodule() which performs expensive sys.modules lookups.
+        # frame.f_globals.get("__name__") is O(1) and sufficient for module detection.
+        module_name = frame.f_globals.get("__name__", "")
+        # AG-UI adapter bypass
+        if "agui" in module_name:
+            return True
+        # SessionPool internal turn bypass (prevents turn_lock deadlock)
+        if "orchestrator" in module_name and frame.f_code.co_name in (
+            "_run_turn_unlocked",
+            "run_loop",
+            "run_turn",
+        ):
+            return True
+        if "agui_server" in frame.f_code.co_filename:
+            return True
+        frame = frame.f_back
+    return False
 
 
 class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
@@ -219,7 +260,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._infinite = False
         self.deps_type = deps_type  # or type(None)
         self._background_task: asyncio.Task[ChatMessage[Any]] | None = None
-        self._event_queue: asyncio.Queue[RichAgentStreamEvent[Any]] = asyncio.Queue()
         storage = agent_pool.storage if agent_pool else None
         self.conversation = MessageHistory(storage=storage)
         match env:
@@ -231,13 +271,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 assert_never(unreachable)
         self._input_provider = input_provider
         self._output_type: type[TResult] = output_type
-        self.tools = ToolManager()
+        self.tools = ToolManager(_warn=False)
         handlers = resolve_event_handlers(event_handlers)
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
         self._cancelled = False
-        self._current_stream_task: asyncio.Task[Any] | None = None
         self._active_run_ctx: AgentRunContext | None = None
+        """Foreground run context for cross-task access (legacy path without SessionPool)."""
         self._background_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
@@ -248,6 +288,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Internal filesystem for tool/session state (can get written to via AgentContext)
         self._internal_fs = IsolatedMemoryFileSystem()
         self.staged_content = StagedContent()
+        self.metadata: dict[str, Any] = {}
 
     @property
     def _current_run_ctx(self) -> AgentRunContext | None:
@@ -258,6 +299,16 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         typ = self.__class__.__name__
         desc = f", {self.description!r}" if self.description else ""
         return f"{typ}({self.name!r}, model={self.model_name!r}{desc})"
+
+    def set_session_context(self, session_id: str, parent_session_id: str | None = None) -> None:
+        """Set session context for the agent and its event manager.
+
+        Args:
+            session_id: The session ID to set
+            parent_session_id: Optional parent session ID
+        """
+        self._events.session_id = session_id
+        self._events.parent_session_id = parent_session_id
 
     async def __prompt__(self) -> str:
         typ = self.__class__.__name__
@@ -538,15 +589,81 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         finally:
             self._background_task = None
 
-    def queue_prompt(self, *prompts: PromptCompatible) -> None:
+    def _get_session_run_ctx(self, session_id: str | None = None) -> AgentRunContext | None:
+        """Get active run context from SessionPool for cross-task access.
+
+        Args:
+            session_id: Optional session ID to look up. Uses the provided
+                value directly instead of instance state.
+
+        Returns:
+            The session's active run context, or None if not found.
+        """
+        if self.agent_pool is not None and session_id is not None:
+            session_pool = self.agent_pool.session_pool
+            if session_pool is None:
+                return None
+            session = session_pool.sessions.get_session(session_id)
+            if session is not None and session.current_run_id is not None:
+                run_handle = session_pool.get_run(session.current_run_id)
+                if run_handle is not None and not run_handle.run_ctx.completed:
+                    return run_handle.run_ctx
+        return None
+
+    def get_active_run_context(self, session_id: str | None = None) -> AgentRunContext | None:
+        """Get the currently active run context.
+
+        Public API for external callers (e.g., SessionPool) to check if a
+        turn is active and access the run context without relying on
+        private attributes.
+
+        Tries _current_run_ctx_var (ContextVar) first, then falls back to
+        SessionPool's session.current_run_id + get_run() for cross-task access, then
+        _background_run_ctx.
+
+        Args:
+            session_id: Optional session ID for SessionPool lookup.
+                When provided, used for the SessionPool fallback instead of
+                instance state.
+
+        Returns:
+            The active run context, or None if no turn is running.
+        """
+        run_ctx = _current_run_ctx_var.get()
+        if run_ctx is not None and not run_ctx.completed:
+            return run_ctx
+        # Instance-level fallback for cross-task access (legacy path without SessionPool)
+        if self._active_run_ctx is not None and not self._active_run_ctx.completed:
+            return self._active_run_ctx
+        run_ctx = self._get_session_run_ctx(session_id=session_id)
+        if run_ctx is not None:
+            return run_ctx
+        if self._background_run_ctx is not None and not self._background_run_ctx.completed:
+            return self._background_run_ctx
+        return None
+
+    def is_turn_active(self) -> bool:
+        """Check if a turn is currently running.
+
+        Returns:
+            True if there is an active run context, False otherwise.
+        """
+        return self.get_active_run_context() is not None
+
+    def queue_prompt(self, *prompts: PromptCompatible, session_id: str | None = None) -> None:
         """Queue a prompt to be processed after the current run completes.
 
         When called during an active run_stream, the queued prompt will be
         processed in a continuation loop without exiting the stream. This
         allows tools or external code to schedule follow-up work.
 
+        For native agents when pooled, delegates to SessionPool.receive_request()
+        with priority="when_idle". The active-run path still queues directly into
+        the injection_manager to avoid race conditions with tool augmentation.
+
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
+            session_id: Optional session ID for SessionPool fallback lookup.
 
         Example:
             # In a tool implementation:
@@ -554,17 +671,42 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.queue_prompt("Now analyze the results")
                 return "Initial work done"
         """
-        # Use current run context if available, otherwise fall back to
-        # _active_run_ctx (cross-task accessible) or _background_run_ctx.
-        # We need _active_run_ctx because these methods may be called from
-        # a different async task than run_stream() (e.g. background task
-        # completion callbacks), and _current_run_ctx is a ContextVar that
-        # is only visible within the run_stream task.
-        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
-        if run_ctx is not None:
+        run_ctx = self.get_active_run_context(session_id=session_id)
+
+        # Native agents when pooled: route through SessionPool.receive_request.
+        # For active runs, also queue directly for synchronous tool augmentation.
+        if self.AGENT_TYPE == "native":
+            if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+                effective_session_id = session_id or (
+                    run_ctx.session_id if run_ctx else self._events.session_id
+                )
+                if effective_session_id is not None:
+                    session_pool = self.agent_pool.session_pool
+                    if run_ctx is not None and not run_ctx.completed:
+                        # Active run: queue directly for immediate availability
+                        if run_ctx.injection_manager is not None:
+                            run_ctx.injection_manager.queue(*prompts)
+                        # Also schedule through SessionPool for consistency
+                        self.task_manager.fire_and_forget(
+                            session_pool.receive_request(
+                                effective_session_id, prompts, priority="when_idle"
+                            )
+                        )
+                        return
+                    # No active run: delegate to SessionPool for auto-resume
+                    self.task_manager.fire_and_forget(
+                        session_pool.receive_request(
+                            effective_session_id, prompts, priority="when_idle"
+                        )
+                    )
+                    return
+            # Standalone native agents: fall through to legacy path
+
+        # Legacy path for non-native agents and standalone native agents
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.queue(*prompts)
 
-    def inject_prompt(self, message: str) -> None:
+    def inject_prompt(self, message: str, session_id: str | None = None) -> None:
         """Inject a message into the conversation mid-run.
 
         The message will be injected after the next tool completes (if the
@@ -572,8 +714,18 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         iteration completes, the message is automatically queued for the
         next iteration.
 
+        For native agents when pooled, delegates to SessionPool.receive_request()
+        with priority="asap". The active-run path still injects directly into
+        the injection_manager to avoid race conditions with tool augmentation
+        (after_tool_execute -> consume()).
+
+        If no active run context exists (e.g., after end_turn), delegates to
+        SessionPool.receive_request() to trigger auto-resume.
+
         Args:
             message: Message to inject
+            session_id: Optional session ID. Falls back to the active run
+                context's session_id if available.
 
         Example:
             # In a tool implementation:
@@ -581,31 +733,96 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 ctx.agent.inject_prompt("Also check the test coverage")
                 return "Changes made"
         """
-        # Use current run context if available, otherwise fall back to
-        # _active_run_ctx (cross-task accessible) or _background_run_ctx.
-        # Same rationale as queue_prompt — see interrupt() for the same pattern.
-        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
-        if run_ctx is not None:
-            run_ctx.injection_manager.inject(message)
+        run_ctx = self.get_active_run_context(session_id=session_id)
 
-    def has_queued_prompts(self) -> bool:
-        """Check if there are queued prompts waiting to be processed."""
-        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
-        if run_ctx is not None:
+        # Native agents when pooled: route through SessionPool.receive_request.
+        # For active runs, also inject directly for synchronous tool augmentation.
+        if self.AGENT_TYPE == "native":
+            if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+                effective_session_id = session_id or (
+                    run_ctx.session_id if run_ctx else self._events.session_id
+                )
+                if effective_session_id is not None:
+                    session_pool = self.agent_pool.session_pool
+                    if run_ctx is not None and not run_ctx.completed:
+                        # Active run: inject directly for immediate availability
+                        # (tool augmentation needs synchronous access)
+                        if run_ctx.injection_manager is not None:
+                            run_ctx.injection_manager.inject(message)
+                        # Also schedule through SessionPool for consistency
+                        self.task_manager.fire_and_forget(
+                            session_pool.receive_request(
+                                effective_session_id, message, priority="asap"
+                            )
+                        )
+                        return
+                    # No active run: delegate to SessionPool for auto-resume
+                    self.task_manager.fire_and_forget(
+                        session_pool.receive_request(
+                            effective_session_id, message, priority="asap"
+                        )
+                    )
+                    return
+            # Standalone native agents: fall through to legacy path
+
+        # Legacy path for non-native agents and standalone native agents
+        # CRITICAL: Check run_ctx.completed to avoid injecting into a turn that
+        # has already finished (e.g., after end_turn).  If the turn is complete,
+        # the message would be stuck in injection_manager.pending forever because
+        # flush_pending_to_queue() has already been called and won't be called
+        # again.  In that case, delegate to SessionPool for auto-resume.
+        if run_ctx is not None and not run_ctx.completed and run_ctx.injection_manager is not None:
+            run_ctx.injection_manager.inject(message)
+            return
+
+        # No active run context — delegate to SessionPool for auto-resume
+        effective_session_id = session_id or (run_ctx.session_id if run_ctx else None)
+        if self.agent_pool is not None and effective_session_id is not None:
+            session_pool = self.agent_pool.session_pool
+            assert session_pool is not None
+            # Fire-and-forget: delegate to SessionPool for auto-resume.
+            # Use task_manager to prevent GC of the task mid-execution.
+            self.task_manager.fire_and_forget(
+                session_pool.inject_prompt(effective_session_id, message)
+            )
+            return
+
+        # No pool or session_id available — log warning
+        self.log.warning(
+            "inject_prompt called but no active run context or session pool available",
+            agent_name=self.name,
+        )
+
+    def has_queued_prompts(self, session_id: str | None = None) -> bool:
+        """Check if there are queued prompts waiting to be processed.
+
+        Args:
+            session_id: Optional session ID for SessionPool fallback lookup.
+        """
+        run_ctx = self.get_active_run_context(session_id=session_id)
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             return run_ctx.injection_manager.has_queued()
         return False
 
-    def has_pending_injections(self) -> bool:
-        """Check if there are pending injections."""
-        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
-        if run_ctx is not None:
+    def has_pending_injections(self, session_id: str | None = None) -> bool:
+        """Check if there are pending injections.
+
+        Args:
+            session_id: Optional session ID for SessionPool fallback lookup.
+        """
+        run_ctx = self.get_active_run_context(session_id=session_id)
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             return run_ctx.injection_manager.has_pending()
         return False
 
-    def clear_queued_prompts(self) -> None:
-        """Clear all queued prompts and pending injections."""
-        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
-        if run_ctx is not None:
+    def clear_queued_prompts(self, session_id: str | None = None) -> None:
+        """Clear all queued prompts and pending injections.
+
+        Args:
+            session_id: Optional session ID for SessionPool fallback lookup.
+        """
+        run_ctx = self.get_active_run_context(session_id=session_id)
+        if run_ctx is not None and run_ctx.injection_manager is not None:
             run_ctx.injection_manager.clear()
 
     @method_spawner
@@ -647,20 +864,65 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Stream events during execution
         """
+        warnings.warn(
+            f"{self.__class__.__name__}.run_stream() is deprecated. "
+            "Use SessionPool.run_stream() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        # SessionPool delegation (bypass for AG-UI which uses direct path)
+        if (
+            not _should_bypass_session_pool()
+            and self.agent_pool is not None
+            and self.agent_pool.session_pool is not None
+        ):
+            from agentpool.utils.identifiers import generate_session_id
+
+            effective_session_id = session_id or generate_session_id()
+            session_pool = self.agent_pool.session_pool
+
+            # If the session already exists but belongs to a different agent,
+            # fall through to the legacy path so THIS agent runs.
+            existing_session = session_pool.sessions.get_session(effective_session_id)
+            if existing_session is None or existing_session.agent_name == self.name:
+                # Ensure session exists in SessionPool
+                if existing_session is None:
+                    await session_pool.create_session(
+                        effective_session_id,
+                        agent_name=self.name,
+                        parent_session_id=parent_session_id,
+                    )
+
+                final_message: ChatMessage[TResult] | None = None
+                async for event in session_pool.run_stream(effective_session_id, *prompts):  # type: ignore[arg-type]
+                    yield event
+                    if isinstance(event, StreamCompleteEvent):
+                        final_message = event.message
+                if final_message is not None:
+                    await self.message_sent.emit(final_message)
+                    session = session_pool.sessions.get_session(effective_session_id)
+                    if session is not None and getattr(session, "is_per_session_agent", False):
+                        await self.connections.route_message(
+                            final_message, wait=wait_for_connections
+                        )
+                return
+
+        # Legacy path (standalone mode or AG-UI bypass)
         from agentpool.utils.identifiers import generate_session_id
 
         # Initialize session_id once for the entire run (including queued prompts)
-        if self.session_id is None:
-            self.session_id = session_id or generate_session_id()
-            self.parent_session_id = parent_session_id
-            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
-            initial_prompt = user_prompts[-1] if user_prompts else None
-            await self.log_session(
-                initial_prompt, model=self.model_name, parent_session_id=self.parent_session_id
-            )
-        elif session_id and self.session_id != session_id:
-            self.session_id = session_id
-            self.parent_session_id = parent_session_id
+        effective_session_id = session_id or generate_session_id()
+
+        user_prompts = [str(p) for p in prompts if isinstance(p, str)]
+        initial_prompt = user_prompts[-1] if user_prompts else None
+
+        await self.log_session(
+            session_id=effective_session_id,
+            initial_prompt=initial_prompt,
+            model=self.model_name,
+            parent_session_id=parent_session_id,
+        )
 
         # Create per-run context for state isolation
         run_ctx = AgentRunContext(deps=deps, depth=depth)
@@ -668,39 +930,24 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
-        # Track the stream task so interrupt() can cancel it even without run_ctx
-        self._current_stream_task = run_ctx.current_task
-        # Store run_ctx as instance variable so interrupt() can find it
-        # from a different task (ContextVar is task-scoped and returns None
-        # when read from outside the run_stream task).
-        # NOTE: This is single-session state — concurrent run_stream calls
-        # on the same agent instance will overwrite each other's context.
-        if self._active_run_ctx is not None:
-            logger.warning(
-                "Starting new run_stream while another is active — "
-                "concurrent runs on a shared agent instance are not safe",
-                agent=self.name,
-            )
         self._active_run_ctx = run_ctx
-        # Queue the initial prompts
-        run_ctx.injection_manager.insert_queued(prompts)
 
         # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
         # token is initialized so finally always has a bound name; reset only if set() succeeded.
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
-            # Process queued prompts until queue is empty
-            while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
-                current_prompts = run_ctx.injection_manager.pop_queued()
-                if current_prompts is None:
-                    break
+            # Native agents use PydanticAI's PendingMessageDrainCapability for
+            # enqueue/asap/when_idle handling.  Non-native agents still need
+            # the manual follow-up loop.
+            if self.AGENT_TYPE == "native":
+                # Process initial prompts directly, skip manual follow-up loop
                 async for event in self._run_stream_once(
                     run_ctx,
-                    *current_prompts,
+                    *prompts,
                     store_history=store_history,
                     message_id=message_id,
-                    session_id=session_id,
+                    session_id=effective_session_id,
                     parent_session_id=parent_session_id,
                     parent_id=parent_id,
                     message_history=message_history,
@@ -710,9 +957,38 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     event_handlers=event_handlers,
                 ):
                     yield event
+            else:
+                # Queue the initial prompts (skip if no injection_manager)
+                if run_ctx.injection_manager is not None:
+                    run_ctx.injection_manager.insert_queued(prompts)
+                # Process queued prompts until queue is empty
+                while (
+                    run_ctx.injection_manager is not None
+                    and run_ctx.injection_manager.has_queued()
+                    and not run_ctx.cancelled
+                ):
+                    current_prompts = run_ctx.injection_manager.pop_queued()
+                    if current_prompts is None:
+                        break
+                    async for event in self._run_stream_once(
+                        run_ctx,
+                        *current_prompts,
+                        store_history=store_history,
+                        message_id=message_id,
+                        session_id=effective_session_id,
+                        parent_session_id=parent_session_id,
+                        parent_id=parent_id,
+                        message_history=message_history,
+                        input_provider=input_provider,
+                        wait_for_connections=wait_for_connections,
+                        deps=deps,
+                        event_handlers=event_handlers,
+                    ):
+                        yield event
 
-                # After each iteration, flush unconsumed injections to queue
-                run_ctx.injection_manager.flush_pending_to_queue()
+                    # After each iteration, flush unconsumed injections to queue
+                    if run_ctx.injection_manager is not None:
+                        run_ctx.injection_manager.flush_pending_to_queue()
         finally:
             if token is not None:
                 # Suppress ValueError when token was created in a different async
@@ -721,8 +997,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # context when the task exits, so ignoring the reset is safe.
                 with suppress(ValueError):
                     _current_run_ctx_var.reset(token)
-            run_ctx.injection_manager.clear()
-            self._current_stream_task = None
+            if run_ctx.injection_manager is not None:
+                run_ctx.injection_manager.clear()
             self._active_run_ctx = None
 
     async def _run_stream_once(
@@ -781,7 +1057,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         user_msg = ChatMessage.user_prompt(
             message=converted_prompts,
             parent_id=effective_parent_id,
-            session_id=self.session_id,
+            session_id=session_id,
         )
 
         # Resolve event handlers
@@ -815,7 +1091,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     prompt=user_msg.content
                     if isinstance(user_msg.content, str)
                     else str(user_msg.content),
-                    session_id=self.session_id,
+                    session_id=session_id,
                 )
                 if pre_run_result.get("decision") == "deny":
                     reason = pre_run_result.get("reason", "Blocked by pre-run hook")
@@ -863,7 +1139,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     agent_name=self.name,
                     prompt=prompt_str,
                     result=final_message.content,
-                    session_id=self.session_id,
+                    session_id=session_id,
                 )
 
             # Emit signal (always - for event handlers)
@@ -913,9 +1189,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # Temporarily set event handler on command store
         old_handler = self._command_store.event_handler
         self._command_store.event_handler = event_queue.put
-        # Use current run_ctx if available, otherwise fall back to _active_run_ctx
-        # or _background_run_ctx (see inject_prompt/queue_prompt for same pattern)
-        run_ctx = self._current_run_ctx or self._active_run_ctx or self._background_run_ctx
+        # Use active run context (ContextVar + SessionPool fallback)
+        run_ctx = self.get_active_run_context()
         cmd_ctx = self._command_store.create_context(data=self.get_context(run_ctx=run_ctx))
         command_str = f"{cmd_name} {args}".strip()
         try:
@@ -1092,29 +1367,48 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         )
         return self._cancelled or background_cancelled
 
-    async def interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
+    async def interrupt(self, run_ctx: AgentRunContext | None = None, session_id: str | None = None) -> None:
         """Interrupt the currently running stream.
 
         Sets the cancelled flag, calls subclass-specific _interrupt(),
         and emits the interrupted signal.
 
-        When run_ctx is not provided (e.g., from OpenCode abort_session),
-        falls back to the active run_ctx stored by run_stream() so that
-        run_ctx.cancelled is set and the streaming loop can exit.
+        When pooled, delegates to SessionPool to cancel the active run via
+        RunHandle.  When run_ctx is not provided (e.g., from OpenCode
+        abort_session), tries _current_run_ctx_var (ContextVar) first, then
+        falls back to SessionPool's session.current_run_id + get_run() for
+        cross-task access.
 
         Args:
             run_ctx: Optional per-run context for the stream to interrupt
+            session_id: Optional session ID for SessionPool fallback lookup.
         """
         self._cancelled = True
-        # When no run_ctx is provided, try the active per-run context
-        # stored by run_stream() as _active_run_ctx. We can't use
-        # _current_run_ctx (ContextVar) because it's task-scoped —
-        # interrupt() is called from a different task than run_stream().
-        effective_run_ctx = run_ctx or self._active_run_ctx
+        # When no run_ctx is provided, try ContextVar first (same task),
+        # then fall back to SessionPool for cross-task access.
+        effective_run_ctx = run_ctx
+        if effective_run_ctx is None:
+            effective_run_ctx = _current_run_ctx_var.get()
+        if effective_run_ctx is None:
+            effective_run_ctx = self._get_session_run_ctx(session_id=session_id)
+        # Fallback to instance-level active run context for cross-task access
+        # when SessionPool is not available (e.g. standalone agent usage).
+        if effective_run_ctx is None:
+            effective_run_ctx = self._active_run_ctx
         if effective_run_ctx:
             effective_run_ctx.cancelled = True
         if self._background_run_ctx:
             self._background_run_ctx.cancelled = True
+
+        # When pooled, delegate to SessionPool for proper run cancellation.
+        if self.agent_pool is not None and self.agent_pool.session_pool is not None:
+            effective_session_id = session_id or (
+                effective_run_ctx.session_id if effective_run_ctx else self._events.session_id
+            )
+            if effective_session_id is not None:
+                session_pool = self.agent_pool.session_pool
+                session_pool.sessions.cancel_run_for_session(effective_session_id)
+
         await self._interrupt(effective_run_ctx)
         await self.interrupted.emit(self.InterruptEvent(agent_name=self.name))
         logger.info("Agent interrupted", agent=self.name)
@@ -1193,8 +1487,88 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             RuntimeError: If no final message received from stream
             UnexpectedModelBehavior: If the model fails or behaves unexpectedly
         """
-        # Collect all events through run_stream
-        final_message: ChatMessage[TResult] | None = None
+        warnings.warn(
+            f"{self.__class__.__name__}.run() is deprecated. "
+            "Use SessionPool.process_prompt() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        # SessionPool delegation (bypass for AG-UI which uses direct path)
+        if (
+            not _should_bypass_session_pool()
+            and self.agent_pool is not None
+            and self.agent_pool.session_pool is not None
+        ):
+            from agentpool.utils.identifiers import generate_session_id
+
+            effective_session_id = session_id or generate_session_id()
+            session_pool = self.agent_pool.session_pool
+
+            # If the session already exists but belongs to a different agent,
+            # fall through to the legacy path so THIS agent runs.
+            existing_session = session_pool.sessions.get_session(effective_session_id)
+            if existing_session is None or existing_session.agent_name == self.name:
+                # Ensure session exists in SessionPool
+                if existing_session is None:
+                    await session_pool.create_session(
+                        effective_session_id,
+                        agent_name=self.name,
+                        parent_session_id=parent_session_id,
+                    )
+
+                # Subscribe to EventBus and process prompt
+                queue = await session_pool.event_bus.subscribe(effective_session_id)
+                process_kwargs = {
+                    "store_history": store_history,
+                    "message_id": message_id,
+                    "parent_id": parent_id,
+                    "message_history": message_history,
+                    "input_provider": input_provider,
+                    "wait_for_connections": wait_for_connections,
+                    "deps": deps,
+                    "event_handlers": event_handlers,
+                }
+                process_task = asyncio.create_task(
+                    session_pool.process_prompt(
+                        effective_session_id, *prompts, **process_kwargs
+                    )
+                )
+                final_message: ChatMessage[TResult] | None = None
+                try:
+                    while not process_task.done():
+                        try:
+                            event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                            if isinstance(event, StreamCompleteEvent):
+                                final_message = event.message
+                        except TimeoutError:
+                            continue
+
+                    # Drain remaining events
+                    while not queue.empty():
+                        event = queue.get_nowait()
+                        if isinstance(event, StreamCompleteEvent):
+                            final_message = event.message
+
+                    if (exc := process_task.exception()) is not None:
+                        raise exc
+                finally:
+                    await session_pool.event_bus.unsubscribe(effective_session_id, queue)
+
+                if final_message is None:
+                    raise RuntimeError("No final message received from stream")
+                await self.message_sent.emit(final_message)
+                # Per-session agents don't inherit connections from the base agent.
+                # Route from the base agent so Talk targets still receive the message.
+                session = session_pool.sessions.get_session(effective_session_id)
+                if session is not None and getattr(session, "is_per_session_agent", False):
+                    await self.connections.route_message(
+                        final_message, wait=wait_for_connections
+                    )
+                return final_message
+
+        # Legacy path (standalone mode or AG-UI bypass)
+        final_message = None
         async for event in self.run_stream(
             *prompts,
             store_history=store_history,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, assert_never
@@ -37,12 +38,19 @@ class ToolError(AgentPoolError):
 
 
 class ToolManager:
-    """Manages tool registration, enabling/disabling and access."""
+    """Manages tool registration, enabling/disabling and access.
+
+    .. deprecated::
+        This class is deprecated and will be removed in v0.5.0.
+        Use :meth:`ResourceProvider.as_capability()` instead.
+    """
 
     def __init__(
         self,
         tools: Sequence[ToolType] | None = None,
         tool_mode: ToolMode | None = None,
+        *,
+        _warn: bool = True,
     ) -> None:
         """Initialize tool manager.
 
@@ -50,6 +58,13 @@ class ToolManager:
             tools: Initial tools to register
             tool_mode: Tool execution mode (None or "codemode")
         """
+        if _warn:
+            warnings.warn(
+                "ToolManager is deprecated and will be removed in v0.5.0. "
+                "Use ResourceProvider.as_capability() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         from agentpool.resource_providers.codemode.provider import CodeModeResourceProvider
 
         super().__init__()
@@ -140,6 +155,12 @@ class ToolManager:
         names: str | list[str] | None = None,
     ) -> list[Tool]:
         """Get tool objects based on filters."""
+        warnings.warn(
+            "ToolManager.get_tools() is deprecated and will be removed in v0.5.0. "
+            "Use ResourceProvider.as_capability() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         tools_map: dict[str, Tool] = {}
         # Get tools from providers concurrently
         provider_coroutines = [provider.get_tools() for provider in self.providers]

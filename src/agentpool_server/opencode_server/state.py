@@ -140,6 +140,11 @@ class ServerState:
     # Per-session locks for agent creation (prevents duplicate creation under
     # concurrent get_or_create_agent calls for the same session_id).
     _session_agent_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    # OpenCode protocol handler for SessionPool integration.
+    # When opencode.use_session_pool=True, this handler routes session events
+    # and message processing through the SessionPool instead of the legacy
+    # ServerState session management code.
+    protocol_handler: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
@@ -270,7 +275,6 @@ class ServerState:
         target_agent = self.agent if agent is None else agent
         input_provider = self.ensure_input_provider(session_id)
         target_agent._input_provider = input_provider
-        target_agent.session_id = session_id
         return target_agent
 
     async def get_or_create_agent(self, session_id: str) -> BaseAgent[Any, Any]:
@@ -346,7 +350,6 @@ class ServerState:
                     input_provider=self.ensure_input_provider(session_id),
                     pool=pool,
                 )
-            agent.session_id = session_id
             return agent
         # Fallback for test environments where no config is available.
         # Bind the shared agent and return it.
@@ -664,8 +667,8 @@ class ServerState:
 
                 # --- Store-first path ------------------------------------------
                 session_data = None
-                if self.pool.sessions is not None and self.pool.sessions.store is not None:
-                    session_data = await self.pool.sessions.store.load(session_id)
+                if self.pool.session_pool is not None and self.pool.session_pool.sessions.store is not None:
+                    session_data = await self.pool.session_pool.sessions.store.load(session_id)
                 if session_data is None:
                     session_data = await self.pool.storage.load_session(session_id)
 
@@ -755,8 +758,8 @@ class ServerState:
         # Persist to storage
         id_ = self.pool.manifest.config_file_path
         session_data = opencode_to_session_data(session, agent_name=self.agent.name, pool_id=id_)
-        if self.pool.sessions.store:
-            await self.pool.sessions.store.save(session_data)
+        if self.pool.session_pool is not None and self.pool.session_pool.sessions.store:
+            await self.pool.session_pool.sessions.store.save(session_data)
         else:
             await self.pool.storage.save_session(session_data)
 

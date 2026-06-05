@@ -608,8 +608,8 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # The session store is used by the opencode server's session management,
     # while agent.load_session() reads from StorageManager (SQL/etc.).
     # If we only save to one, get_or_load_session fails when the other is queried.
-    if state.pool.sessions.store:
-        await state.pool.sessions.store.save(session_data)
+    if state.pool.session_pool and state.pool.session_pool.sessions.store:
+        await state.pool.session_pool.sessions.store.save(session_data)
     try:
         await state.pool.storage.save_session(session_data)
     except Exception:
@@ -726,8 +726,9 @@ async def get_session_children(
 
     # Query database for child sessions not in memory
     try:
-        store = state.pool.sessions.store
-        if hasattr(store, "list_sessions"):
+        session_pool = state.pool.session_pool
+        store = session_pool.sessions.store if session_pool else None
+        if store is not None and hasattr(store, "list_sessions"):
             child_ids = await store.list_sessions(parent_id=session_id)
             for child_id in child_ids:
                 if child_id not in seen_ids:
@@ -765,8 +766,8 @@ async def update_session(
     state.sessions[session_id] = session  # Update cache
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    if state.pool.sessions.store:
-        await state.pool.sessions.store.save(session_data)
+    if state.pool.session_pool and state.pool.session_pool.sessions.store:
+        await state.pool.session_pool.sessions.store.save(session_data)
     await state.broadcast_event(SessionUpdatedEvent.create(session))
     return session
 
@@ -795,8 +796,8 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     state.todos.pop(session_id, None)
     state.reverted_messages.pop(session_id, None)
     # Delete from storage
-    if state.pool.sessions.store:
-        await state.pool.sessions.store.delete(session_id)
+    if state.pool.session_pool and state.pool.session_pool.sessions.store:
+        await state.pool.session_pool.sessions.store.delete(session_id)
     await state.broadcast_event(SessionDeletedEvent.create(session_id))
     return True
 
@@ -908,8 +909,8 @@ async def fork_session(  # noqa: D417
         agent_name=state.agent.name,
         pool_id=state.pool.manifest.config_file_path,
     )
-    if state.pool.sessions.store:
-        await state.pool.sessions.store.save(session_data)
+    if state.pool.session_pool and state.pool.session_pool.sessions.store:
+        await state.pool.session_pool.sessions.store.save(session_data)
     # Cache in memory
     state.sessions[new_session_id] = forked_session
     await state.mark_session_idle(new_session_id)

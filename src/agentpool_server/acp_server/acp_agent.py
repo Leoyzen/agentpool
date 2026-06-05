@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.models.agents import NativeAgentConfig
     from agentpool.storage.manager import SessionMetadataGeneratedEvent
+    from agentpool_server.acp_server.handler import ACPProtocolHandler
     from agentpool_server.acp_server.server import ACPServer
 
 logger = get_logger(__name__)
@@ -234,6 +235,9 @@ class AgentPoolACPAgent(ACPAgent):
     _mcp_manager: AcpMcpConnectionManager = field(init=False)
     """Manager for MCP-over-ACP connection lifecycle."""
 
+    _protocol_handler: ACPProtocolHandler | None = field(init=False, default=None)
+    """SessionPool-backed protocol handler when ``acp.use_session_pool`` is enabled."""
+
     def __post_init__(self) -> None:
         """Initialize derived attributes and setup after field assignment."""
         self.client_capabilities: ClientCapabilities | None = None
@@ -269,10 +273,30 @@ class AgentPoolACPAgent(ACPAgent):
                     cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent.name})
                 self._agent_config = cfg
 
-    # NEW: Per-session agent registry (RFC-0031)
+        # Initialize SessionPool-backed protocol handler if feature flag is enabled
+        if (
+            self.agent_pool
+            and self.agent_pool.manifest.acp.use_session_pool
+        ):
+            from agentpool_server.acp_server.event_converter import ACPEventConverter
+            from agentpool_server.acp_server.handler import ACPProtocolHandler
+
+            self._protocol_handler = ACPProtocolHandler(
+                agent_pool=self.agent_pool,
+                event_converter=ACPEventConverter(
+                    subagent_display_mode=self.subagent_display_mode,
+                ),
+                client=self.client,
+                client_capabilities=self.client_capabilities,
+            )
+            logger.info("ACPProtocolHandler initialized for SessionPool mode")
+
     _agent_config: NativeAgentConfig | None = field(init=False, default=None)
-    _session_agents: dict[str, BaseAgent[Any, Any]] = field(init=False, default_factory=dict)
+    """Cached main-agent config used during pool swaps."""
+
     _session_agent_locks: dict[str, asyncio.Lock] = field(init=False, default_factory=dict)
+    """Locks for serializing agent swaps per session."""
+
     _swap_in_progress: bool = field(init=False, default=False)
     """Flag to prevent concurrent session creation during pool swap."""
 
@@ -314,191 +338,6 @@ class AgentPoolACPAgent(ACPAgent):
             return self._skill_bridge.get_available_commands()
         return None
 
-    async def get_or_create_session_agent(
-        self,
-        session_id: str,
-        input_provider: Any | None = None,
-        agent_name: str | None = None,
-    ) -> BaseAgent[Any, Any]:
-        """Get or create a per-session agent instance.
-
-        Uses double-checked locking for concurrent access.
-        """
-        # Reject session creation during pool swap to prevent stale config usage
-        if self._swap_in_progress:
-            msg = "Pool swap in progress - cannot create new session"
-            raise RuntimeError(msg)
-
-        # Fast path: already registered
-        if session_id in self._session_agents:
-            return self._session_agents[session_id]
-
-        # Ensure a lock exists for this session
-        if session_id not in self._session_agent_locks:
-            self._session_agent_locks[session_id] = asyncio.Lock()
-
-        async with self._session_agent_locks[session_id]:
-            # Re-check after acquiring lock
-            if session_id in self._session_agents:
-                return self._session_agents[session_id]
-
-            # Create agent and set config dir for path resolution
-            # (ConfigContextManager from pool loading has exited,
-            # so _config_dir_global and CONFIG_DIR are None, breaking runtime path resolution)
-            from upathtools import UPath
-
-            import agentpool_config.context as ctx
-
-            config_path = self._resolve_agent_config_path(agent_name)
-            previous_dir = ctx._config_dir_global
-            config_token = None
-            if config_path is not None:
-                ctx._config_dir_global = UPath(config_path)
-                config_token = ctx.CONFIG_DIR.set(UPath(config_path))
-                logger.info(
-                    "get_or_create_session_agent: set _config_dir_global=%s",
-                    ctx._config_dir_global,
-                )
-
-            try:
-                agent = self._create_session_agent(session_id, input_provider, agent_name)
-
-                # Initialize the agent's async context (MCP subprocesses, tool providers, etc.)
-                # Tool providers need _config_dir_global to resolve schema paths
-                entered = False
-                try:
-                    await agent.__aenter__()
-                    entered = True
-                except Exception:
-                    if entered:
-                        with suppress(Exception):
-                            await agent.__aexit__(*sys.exc_info())
-                    raise
-                else:
-                    # Add pool-level MCP tools to the session agent
-                    # Pool-level MCP servers are registered in AgentPool.__aenter__
-                    # but session agents are newly created instances, not the pool's
-                    # original agents, so they need the pool's MCP provider added.
-                    if self.agent_pool is not None and self.agent_pool.mcp is not None:
-                        try:
-                            agent.tools.add_provider(
-                                self.agent_pool.mcp.get_aggregating_provider()
-                            )
-                        except Exception:  # noqa: BLE001
-                            logger.debug(
-                                "Failed to add pool-level MCP provider to session agent",
-                                exc_info=True,
-                            )
-                    self._session_agents[session_id] = agent
-                    return agent
-            finally:
-                ctx._config_dir_global = previous_dir
-                if config_token is not None:
-                    ctx.CONFIG_DIR.reset(config_token)
-                logger.info(
-                    "get_or_create_session_agent: restored _config_dir_global=%s",
-                    ctx._config_dir_global,
-                )
-
-    def _create_session_agent(
-        self,
-        session_id: str,
-        input_provider: Any | None = None,
-        agent_name: str | None = None,
-    ) -> BaseAgent[Any, Any]:
-        """Create a new agent instance for a session.
-
-        NOTE: _config_dir_global must be set by caller (get_or_create_session_agent)
-        before calling this method, and restored after agent.__aenter__().
-        """
-        # Resolve config: use specified agent_name or fallback to main agent
-        agent_config = None
-        if (agent_name is not None and self.agent_pool
-                and agent_name in self.agent_pool.manifest.agents):
-            from agentpool.models.agents import NativeAgentConfig
-            cfg = self.agent_pool.manifest.agents[agent_name]
-            if isinstance(cfg, NativeAgentConfig):
-                agent_config = cfg
-        elif agent_name is None:
-            agent_config = self._agent_config
-
-        if agent_config is not None:
-            agent = agent_config.get_agent(
-                input_provider=input_provider,
-                pool=self.agent_pool,
-            )
-            agent.session_id = session_id
-            return agent
-
-        # Fallback: use pool agent directly if available, otherwise shared default_agent
-        if (agent_name is not None and self.agent_pool
-                and agent_name in self.agent_pool.all_agents):
-            return self.agent_pool.all_agents[agent_name]
-
-        logger.warning(
-            "Non-native agent type - falling back to shared default_agent",
-            agent_type=type(self.default_agent).__name__,
-        )
-        return self.default_agent
-
-    async def remove_session_agent(self, session_id: str) -> None:
-        """Remove and clean up a session's dedicated agent."""
-        if session_id not in self._session_agent_locks:
-            self._session_agent_locks[session_id] = asyncio.Lock()
-        async with self._session_agent_locks[session_id]:
-            agent = self._session_agents.pop(session_id, None)
-            if agent is not None:
-                try:
-                    await agent.__aexit__(None, None, None)
-                except Exception:
-                    logger.exception("Failed to clean up session agent", session_id=session_id)
-        self._session_agent_locks.pop(session_id, None)
-
-    async def cleanup_all_session_agents(self) -> None:
-        """Clean up all per-session agents."""
-        # Iterate over a snapshot to avoid mutation during iteration
-        for session_id, agent in list(self._session_agents.items()):
-            try:
-                await agent.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("Failed to clean up agent", session_id=session_id)
-        self._session_agents.clear()
-        self._session_agent_locks.clear()
-
-    def _resolve_agent_config_path(self, agent_name: str | None = None) -> str | None:
-        """Resolve the config file path for agent creation.
-
-        Used to set _config_dir_global so that tool schemas and other
-        config-relative paths resolve correctly during agent.__aenter__().
-
-        Returns the parent directory of the config file, or None if no
-        config file path can be resolved.
-        """
-        # Resolve config: use specified agent_name or fallback to main agent
-        agent_config = None
-        if (agent_name is not None and self.agent_pool
-                and agent_name in self.agent_pool.manifest.agents):
-            from agentpool.models.agents import NativeAgentConfig
-            cfg = self.agent_pool.manifest.agents[agent_name]
-            if isinstance(cfg, NativeAgentConfig):
-                agent_config = cfg
-        elif agent_name is None:
-            agent_config = self._agent_config
-
-        if agent_config is None:
-            return None
-
-        # Resolve config path: agent-level -> manifest-level -> None
-        config_path = agent_config.config_file_path
-        if config_path is None and self.agent_pool and self.agent_pool.manifest:
-            config_path = self.agent_pool.manifest.config_file_path
-
-        if config_path is not None:
-            from upathtools import UPath
-            return str(UPath(config_path).parent)
-
-        return None
-
     async def _on_metadata_generated(self, event: SessionMetadataGeneratedEvent) -> None:
         """Handle metadata generation - notify active sessions of the update."""
         from acp.schema import SessionInfoUpdate, SessionNotification
@@ -535,10 +374,17 @@ class AgentPoolACPAgent(ACPAgent):
         self.client_info = params.client_info
         logger.info("Client info", request=params.model_dump_json())
         self._initialized = True
+        # Forward client capabilities to the SessionPool protocol handler so
+        # elicitation/create is used when the client supports it.
+        if self._protocol_handler is not None:
+            self._protocol_handler.client_capabilities = self.client_capabilities
         # Initialize provider router from current pool manifest
         pool = self.agent_pool
         manifest = pool.manifest if pool else None
         self.provider_router = ProviderRouter(manifest)
+        # Gate turn_complete advertisement on client's declared support
+        client_caps = params.client_capabilities
+        turn_complete = bool(client_caps.turn_complete) if client_caps is not None else False
         return InitializeResponse.create(
             protocol_version=version,
             name="agentpool",
@@ -556,6 +402,7 @@ class AgentPoolACPAgent(ACPAgent):
             embedded_context_prompts=True,
             image_prompts=True,
             providers=True,
+            turn_complete=turn_complete,
         )
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:
@@ -816,6 +663,16 @@ class AgentPoolACPAgent(ACPAgent):
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
 
+        # Delegate to SessionPool-backed handler when feature flag is enabled
+        if self._protocol_handler is not None:
+            response = await self._protocol_handler.handle_prompt(
+                params.session_id,
+                params.prompt,
+            )
+            if response is not None:
+                return response
+            # Per-agent canary flag is off — fall through to legacy path
+
         logger.info("Processing prompt", session_id=params.session_id)
         session = self.session_manager.get_session(params.session_id)
         # Auto-recreate session if not found (e.g., after pool swap)
@@ -886,6 +743,14 @@ class AgentPoolACPAgent(ACPAgent):
         Cancels any ongoing work (like session/cancel) and then
         closes the session and releases all associated resources.
         """
+        # Delegate to SessionPool-backed handler when feature flag is enabled
+        if self._protocol_handler is not None:
+            await self._protocol_handler.close_session(params.session_id)
+            # Handler returns early when per-agent canary is off;
+            # legacy cleanup below still runs for those agents.
+            if self.default_agent.metadata.get("use_session_pool", False):
+                return CloseSessionResponse()
+
         logger.info("Stopping session", session_id=params.session_id)
         try:
             # Cancel ongoing work first
@@ -1044,7 +909,6 @@ class AgentPoolACPAgent(ACPAgent):
             await self._mcp_manager.close_all()
         except Exception:
             logger.exception("Failed to close MCP connections during agent shutdown")
-        await self.cleanup_all_session_agents()
 
     async def set_session_mode(
         self, params: SetSessionModeRequest
@@ -1167,13 +1031,6 @@ class AgentPoolACPAgent(ACPAgent):
 
         async with self._session_agent_locks[session_id]:
             await session.switch_active_agent(new_agent_name)
-            # Update session agent registry so subsequent get_or_create calls
-            # return the new agent instead of the cached old one.
-            self._session_agents[session_id] = session.agent
-
-        # TODO: Clean up _session_agent_locks when session ends.
-        # Currently no session lifecycle hook exists to safely pop locks.
-        # Memory impact is minimal (one Lock per active session).
 
         return {"success": True}
 
@@ -1287,9 +1144,6 @@ class AgentPoolACPAgent(ACPAgent):
             await self._mcp_manager.close_all()
         except Exception:
             logger.exception("Failed to close MCP connections during pool swap")
-
-        # 5. Clean up all per-session agents
-        await self.cleanup_all_session_agents()
 
         try:
             # 5. Swap pool

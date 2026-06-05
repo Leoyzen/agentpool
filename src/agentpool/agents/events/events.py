@@ -106,6 +106,20 @@ class RunErrorEvent:
 
 
 @dataclass(kw_only=True)
+class RunFailedEvent:
+    """Event indicating a run failed with an error."""
+
+    run_id: str
+    """ID of the agent run that failed."""
+    session_id: str
+    """ID of the session the run belonged to."""
+    exception: BaseException
+    """The exception that caused the failure."""
+    event_kind: Literal["run_failed"] = "run_failed"
+    """Event type identifier."""
+
+
+@dataclass(kw_only=True)
 class ToastInfo:
     """Toast notification from an agent.
 
@@ -210,6 +224,8 @@ class StreamCompleteEvent[TContent]:
 
     message: ChatMessage[TContent]
     """The final chat message with all metadata."""
+    cancelled: bool = False
+    """Whether the run was cancelled before completion."""
     event_kind: Literal["stream_complete"] = "stream_complete"
     """Event type identifier."""
 
@@ -718,6 +734,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | StreamCompleteEvent[OutputDataT]
     | RunStartedEvent
     | RunErrorEvent
+    | RunFailedEvent
     | ToolCallStartEvent
     | ToolCallProgressEvent
     | ToolCallCompleteEvent

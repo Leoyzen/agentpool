@@ -13,6 +13,7 @@ from agentpool.agents.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
+from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
@@ -21,8 +22,11 @@ if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext
     from agentpool.agents.events import RichAgentStreamEvent, ToolCallContentItem
     from agentpool.agents.events.events import ToolCallStatus
+    from agentpool.orchestrator.core import EventBus
     from agentpool.tools.base import ToolKind
     from agentpool.utils.todos import PlanEntry
+
+logger = get_logger(__name__)
 
 
 class StreamEventEmitter:
@@ -36,13 +40,15 @@ class StreamEventEmitter:
     the full pattern (aligned with ACP protocol).
     """
 
-    def __init__(self, context: AgentContext) -> None:
+    def __init__(self, context: AgentContext, event_bus: EventBus | None = None) -> None:
         """Initialize event emitter with agent context.
 
         Args:
             context: Agent context to extract metadata from
+            event_bus: Optional EventBus for forwarding events (set by SessionPool)
         """
         self._context = context
+        self._event_bus = event_bus
 
     # =========================================================================
     # Core methods - the essential API
@@ -346,8 +352,27 @@ class StreamEventEmitter:
     # =========================================================================
 
     async def _emit(self, event: RichAgentStreamEvent[Any]) -> None:
-        """Internal method to emit events to the agent's queue."""
+        """Internal method to emit events to EventBus or agent's queue."""
+        if self._event_bus is not None:
+            session_id = getattr(self._context.agent, "session_id", None)
+            if not session_id and self._context.run_ctx is not None:
+                session_id = self._context.run_ctx.session_id
+            if session_id:
+                try:
+                    await self._event_bus.publish(session_id, event)
+                    return
+                except Exception:
+                    logger.debug(
+                        "EventBus publish failed",
+                        session_id=session_id,
+                        event_type=type(event).__name__,
+                    )
+
         if self._context.run_ctx is not None:
             await self._context.run_ctx.event_queue.put(event)
         else:
-            await self._context.agent._event_queue.put(event)
+            logger.debug(
+                "Event dropped: no run_ctx or event_bus available",
+                agent_name=self._context.agent.name,
+                event_type=type(event).__name__,
+            )

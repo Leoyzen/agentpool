@@ -50,6 +50,7 @@ from codex_adapter.models.event_data import (  # noqa: TC001
     TurnErrorData,
     TurnPlanUpdatedData,
     TurnStartedData,
+    WarningEventData,
     WindowsWorldWritableWarningData,
 )
 
@@ -394,6 +395,13 @@ class ServerRequestResolvedEvent(CodexBaseModel):
     data: ServerRequestResolvedData
 
 
+class WarningEvent(CodexBaseModel):
+    """Warning event from the Codex server."""
+
+    event_type: Literal["warning"] = "warning"
+    data: WarningEventData
+
+
 # ============================================================================
 # Discriminated union of all event types
 # ============================================================================
@@ -452,7 +460,8 @@ CodexEvent = Annotated[
     | ConfigWarningEvent
     | AppListUpdatedEvent
     | ContextCompactedEvent
-    | ServerRequestResolvedEvent,
+    | ServerRequestResolvedEvent
+    | WarningEvent,
     Field(discriminator="event_type"),
 ]
 
@@ -520,6 +529,7 @@ EventType = Literal[
     "app/list/updated",
     "thread/compacted/v2",
     "serverRequest/resolved",
+    "warning",
 ]
 
 

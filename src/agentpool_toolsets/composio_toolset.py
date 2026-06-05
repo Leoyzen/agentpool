@@ -10,6 +10,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Callable, Sequence
 
     from agentpool.tools.base import Tool
@@ -33,6 +34,14 @@ class ComposioTools(ResourceProvider):
             self.composio = Composio()
         self._tools: list[Tool] | None = None
         self._toolkits = toolsets
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def _create_tool_handler(self, tool_slug: str) -> Callable[..., Any]:
         """Create a handler function for a specific tool."""

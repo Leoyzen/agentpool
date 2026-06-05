@@ -127,6 +127,22 @@ def get_argument_key(
 
     # Check each parameter's type annotation
     for key, param_type_ in hints.items():
+        # Handle string annotations (from __future__ import annotations)
+        # when get_type_hints failed and we fell back to inspect.signature.
+        # String annotations like "RunContext[AgentContext[Any]]" need
+        # base-type extraction to match against target_types.
+        if isinstance(param_type_, str):
+            base_type = param_type_.split("[")[0].strip()
+            if base_type in target_types:
+                return key
+            # Also check fallback names for string annotations
+            target_name = _type_to_string(arg_type)
+            if (target_name == "AgentContext" and key in ("ctx", "agent_ctx", "context")) or (
+                target_name == "RunContext" and key in ("run_ctx", "ctx")
+            ):
+                return key
+            continue
+
         # Fallback for common context names if type hint is Any or missing
         type_str = _type_to_string(param_type_)
         if type_str in ("Any", "inspect._empty", "_empty"):
@@ -195,6 +211,11 @@ def _type_to_string(type_hint: Any) -> str:
             args_str = ", ".join(_type_to_string(t) for t in args)
             return f"Union[{args_str}]"
         case _:
+            # For generic types like RunContext[AgentContext[Any]],
+            # try to extract the origin type
+            origin = get_origin(type_hint)
+            if origin is not None:
+                return _type_to_string(origin)
             return str(type_hint)
 
 

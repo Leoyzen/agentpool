@@ -23,7 +23,7 @@ import anyio
 from pydantic_ai import RunContext  # noqa: TC002
 import pytest
 
-from agentpool import Agent
+from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.claude_code_agent import ClaudeCodeAgent
 from agentpool.agents.codex_agent import CodexAgent
 from agentpool.agents.events import StreamCompleteEvent, ToolCallCompleteEvent
@@ -36,21 +36,21 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 # --- Test Tool ---
 
 
+def echo_tool(ctx: RunContext[None], message: str) -> str:
+    """Echo the message back.
+
+    Args:
+        ctx: Run context
+        message: Message to echo
+
+    Returns:
+        The echoed message
+    """
+    return f"Echo: {message}"
+
+
 def create_echo_tool():
     """Create a simple echo tool for testing."""
-
-    def echo_tool(ctx: RunContext[None], message: str) -> str:
-        """Echo the message back.
-
-        Args:
-            ctx: Run context
-            message: Message to echo
-
-        Returns:
-            The echoed message
-        """
-        return f"Echo: {message}"
-
     return echo_tool
 
 
@@ -183,21 +183,35 @@ def external_agent_config(request: pytest.FixtureRequest) -> tuple[type, dict[st
 
 
 async def test_native_agent_event_sequence():
-    """Test native Agent emits events in expected sequence."""
+    """Test native Agent emits events in expected sequence via SessionPool."""
     collector = EventCollector()
 
-    agent = Agent(
-        name="native-test-agent",
-        model="openai:gpt-4o-mini",
-        tools=[create_echo_tool()],
+    manifest = AgentsManifest(
+        agents={
+            "native-test-agent": NativeAgentConfig(
+                name="native-test-agent",
+                model="openai:gpt-4o-mini",
+                tools=["tests.agents.test_external_agent_event_sequence:echo_tool"],
+            )
+        }
     )
 
-    async with agent:
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        session_id = "test-session-native"
+        await session_pool.create_session(session_id, agent_name="native-test-agent")
+
+        handler_queue = await session_pool.event_bus.subscribe(session_id)
+
         with anyio.fail_after(30.0):
-            async for event in agent.run_stream(
-                TOOL_CALL_PROMPT, event_handlers=[collector.handle_event]
-            ):
+            async for event in session_pool.run_stream(session_id, TOOL_CALL_PROMPT):
                 collector.iterated_events.append(event)
+
+        while not handler_queue.empty():
+            event = handler_queue.get_nowait()
+            if event is not None:
+                collector.handler_events.append(event)
 
     # Verify both collection methods got the same events
     iterated_types = collector.get_iterated_types()
@@ -401,20 +415,34 @@ async def test_event_sequence_consistency_across_agents(
 
 
 async def test_handler_receives_all_events():
-    """Verify event handler receives every event that iteration yields."""
+    """Verify EventBus subscriber receives every event that iteration yields."""
     collector = EventCollector()
 
-    agent = Agent(
-        name="native-test-agent",
-        model="openai:gpt-4o-mini",
+    manifest = AgentsManifest(
+        agents={
+            "native-test-agent": NativeAgentConfig(
+                name="native-test-agent",
+                model="openai:gpt-4o-mini",
+            )
+        }
     )
 
-    async with agent:
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        session_id = "test-session-handler"
+        await session_pool.create_session(session_id, agent_name="native-test-agent")
+
+        handler_queue = await session_pool.event_bus.subscribe(session_id)
+
         with anyio.fail_after(30.0):
-            async for event in agent.run_stream(
-                "Just say hello", event_handlers=[collector.handle_event]
-            ):
+            async for event in session_pool.run_stream(session_id, "Just say hello"):
                 collector.iterated_events.append(event)
+
+        while not handler_queue.empty():
+            event = handler_queue.get_nowait()
+            if event is not None:
+                collector.handler_events.append(event)
 
     # Handler should have received exactly the same events
     assert len(collector.handler_events) == len(collector.iterated_events)
@@ -426,19 +454,26 @@ async def test_handler_receives_all_events():
 
 
 async def test_stream_complete_event_structure():
-    """Verify StreamCompleteEvent has required fields across all agents."""
+    """Verify StreamCompleteEvent has required fields via SessionPool."""
     collector = EventCollector()
 
-    agent = Agent(
-        name="native-test-agent",
-        model="openai:gpt-4o-mini",
+    manifest = AgentsManifest(
+        agents={
+            "native-test-agent": NativeAgentConfig(
+                name="native-test-agent",
+                model="openai:gpt-4o-mini",
+            )
+        }
     )
 
-    async with agent:
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        session_id = "test-session-structure"
+        await session_pool.create_session(session_id, agent_name="native-test-agent")
+
         with anyio.fail_after(30.0):
-            async for event in agent.run_stream(
-                "Say hello", event_handlers=[collector.handle_event]
-            ):
+            async for event in session_pool.run_stream(session_id, "Say hello"):
                 collector.iterated_events.append(event)
 
     complete_events = [e for e in collector.iterated_events if isinstance(e, StreamCompleteEvent)]
@@ -456,20 +491,27 @@ async def test_stream_complete_event_structure():
 
 
 async def test_tool_call_complete_event_structure():
-    """Verify ToolCallCompleteEvent has required fields."""
+    """Verify ToolCallCompleteEvent has required fields via SessionPool."""
     collector = EventCollector()
 
-    agent = Agent(
-        name="native-test-agent",
-        model="openai:gpt-4o-mini",
-        tools=[create_echo_tool()],
+    manifest = AgentsManifest(
+        agents={
+            "native-test-agent": NativeAgentConfig(
+                name="native-test-agent",
+                model="openai:gpt-4o-mini",
+                tools=["tests.agents.test_external_agent_event_sequence:echo_tool"],
+            )
+        }
     )
 
-    async with agent:
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        session_id = "test-session-tool"
+        await session_pool.create_session(session_id, agent_name="native-test-agent")
+
         with anyio.fail_after(30.0):
-            async for event in agent.run_stream(
-                TOOL_CALL_PROMPT, event_handlers=[collector.handle_event]
-            ):
+            async for event in session_pool.run_stream(session_id, TOOL_CALL_PROMPT):
                 collector.iterated_events.append(event)
 
     tool_complete_events = [

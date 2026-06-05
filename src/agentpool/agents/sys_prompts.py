@@ -10,7 +10,10 @@ from agentpool.agents.exceptions import PromptResolutionError
 
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from jinjarope import Environment
+    from pydantic_ai import RunContext
     from toprompt import AnyPromptType
 
     from agentpool.agents.base_agent import BaseAgent
@@ -153,3 +156,69 @@ class SystemPrompts:
             tool_usage_style=self.tool_usage_style,
         )
         return result.strip()
+
+    async def to_pydantic_ai_instructions(
+        self,
+        agent: BaseAgent[Any, Any],
+    ) -> list[str | Callable[[RunContext[Any]], Awaitable[str]]]:
+        """Convert system prompts to pydantic-ai compatible instructions.
+
+        Returns a list of instructions where:
+        - Static/template prompts are rendered into a string instruction
+        - Callable prompts are wrapped for pydantic-ai compatibility
+
+        This allows SystemPrompts to produce instructions that can be passed
+        directly to PydanticAgent(instructions=[...]).
+
+        Args:
+            agent: The agent to format prompts for
+
+        Returns:
+            List of pydantic-ai compatible instructions (strings and/or
+            callables accepting RunContext and returning str/Awaitable[str])
+        """
+        import inspect
+
+        from agentpool.utils.context_wrapping import wrap_instruction
+
+        instructions: list[str | Callable[[RunContext[Any]], Awaitable[str]]] = []
+
+        # Separate renderable prompts from callable prompts that need wrapping
+        renderable_prompts: list[Any] = []
+        callable_prompts: list[Any] = []
+
+        for prompt in self.prompts:
+            if callable(prompt):
+                sig = inspect.signature(prompt)
+                param_count = len(
+                    [
+                        p
+                        for p in sig.parameters.values()
+                        if p.default is inspect.Parameter.empty
+                    ]
+                )
+                if param_count == 0:
+                    # No-arg callable can be rendered by to_prompt
+                    renderable_prompts.append(prompt)
+                else:
+                    # Callable with params needs pydantic-ai wrapping
+                    callable_prompts.append(prompt)
+            else:
+                renderable_prompts.append(prompt)
+
+        # Format system prompt with only renderable prompts
+        original_prompts = self.prompts
+        try:
+            self.prompts = renderable_prompts
+            formatted = await self.format_system_prompt(agent)
+            if formatted:
+                instructions.append(formatted)
+        finally:
+            self.prompts = original_prompts
+
+        # Wrap callable prompts for pydantic-ai compatibility
+        for prompt in callable_prompts:
+            wrapped = wrap_instruction(prompt, fallback="", _warn=False)  # type: ignore[arg-type]
+            instructions.append(wrapped)
+
+        return instructions

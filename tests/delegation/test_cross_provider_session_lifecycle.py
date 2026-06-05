@@ -16,6 +16,7 @@ Additional cross-provider invariants:
 from __future__ import annotations
 
 import tempfile
+from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,7 +31,7 @@ from agentpool.agents.events import (
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.delegation.teamrun import TeamRun
-from agentpool.sessions import SessionData, SessionManager
+from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 
 
@@ -96,23 +97,23 @@ agents:
     async with AgentPool(manifest) as pool:
         if pool.sessions is None:
             pytest.skip("Pool has no SessionManager")
-        pool.sessions.store = store  # type: ignore[union-attr]
+        pool.session_pool.sessions.store = store  # type: ignore[union-attr]
 
         orch = pool.get_agent("orchestrator")
         child_session_id_from_spawn: str | None = None
 
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
 
         assert child_session_id_from_spawn is not None
-        parent_session_id = orch.session_id
+        parent_session_id = "ses_test"
         assert parent_session_id is not None
 
-    child_data = await store.load(child_session_id_from_spawn)
-    assert child_data is not None
-    assert child_data.parent_id == parent_session_id
-    assert child_data.agent_name == "worker"
+        child_data = await store.load(child_session_id_from_spawn)
+        assert child_data is not None
+        assert child_data.parent_id == parent_session_id
+        assert child_data.agent_name == "worker"
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +186,7 @@ agents:
 
     async with AgentPool(manifest) as pool:
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_count += 1
 
@@ -258,7 +259,7 @@ agents:
 
     async with AgentPool(manifest) as pool:
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
             elif isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
@@ -304,7 +305,7 @@ agents:
 
     async with AgentPool(manifest) as pool:
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate"):
+        async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_depth_default = event.depth
 
@@ -332,6 +333,7 @@ agents:
 async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     """TG-10: ACP child session created via ACPSessionManager with
     parent_session_id inherits project_id and cwd from parent."""
+    from agentpool.orchestrator.core import SessionPool
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
     pool = AgentPool()
@@ -343,8 +345,8 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     pool.register("acp_agent", agent)
 
     store = MemorySessionStore()
-    sessions = SessionManager(pool=pool, store=store)
-    pool.sessions = sessions
+    session_pool = SessionPool(pool=pool, store=store)
+    pool._session_pool = session_pool
     pool.storage.generate_session_id = MagicMock(return_value="acp_top_001")  # type: ignore[assignment]
 
     # Create parent session with known project_id and cwd
@@ -469,7 +471,7 @@ agents:
     async with AgentPool(manifest) as pool:
         if pool.sessions is None:
             pytest.skip("Pool has no SessionManager")
-        pool.sessions.store = store  # type: ignore[union-attr]
+        pool.session_pool.sessions.store = store  # type: ignore[union-attr]
 
         main_agent = pool.get_agent("main")
         worker = pool.get_agent("worker")
@@ -482,15 +484,15 @@ agents:
         await worker.set_model(TestModel(custom_output_text="Worker result"))
 
         child_session_id: str | None = None
-        async for event in main_agent.run_stream("Run worker"):
+        async for event in main_agent.run_stream("Run worker", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 child_session_id = event.child_session_id
 
         assert child_session_id is not None, "No SpawnSessionStart from worker"
 
-    child_data = await store.load(child_session_id)
-    assert child_data is not None, f"Child session {child_session_id} not persisted"
-    assert child_data.agent_name == "worker"
+        child_data = await store.load(child_session_id)
+        assert child_data is not None, f"Child session {child_session_id} not persisted"
+        assert child_data.agent_name == "worker"
 
 
 # ---------------------------------------------------------------------------
@@ -711,7 +713,7 @@ async def test_spawn_and_subagent_depth_consistency() -> None:
 
 
 async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
-    """Both Team and TeamRun with pool.sessions should call
+    """Both Team and TeamRun with pool.session_pool should call
     create_child_session for each member."""
     agent_a = _make_echo_agent("alpha")
     agent_b = _make_echo_agent("beta")
@@ -720,11 +722,29 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
     teamrun = TeamRun([agent_b], name="sequential_team")
 
     mock_pool = AsyncMock()
-    mock_sessions = AsyncMock()
-    mock_sessions.create_child_session = AsyncMock(
-        side_effect=["ses_child_team", "ses_child_teamrun"]
+    mock_session_pool = AsyncMock()
+
+    def _make_child_state(session_id: str):
+        m = MagicMock()
+        m.session_id = session_id
+        return m
+
+    mock_session_pool.create_session = AsyncMock(
+        side_effect=[
+            _make_child_state("ses_child_team"),
+            _make_child_state("ses_child_team"),
+            _make_child_state("ses_child_teamrun"),
+            _make_child_state("ses_child_teamrun"),
+        ]
     )
-    mock_pool.sessions = mock_sessions
+
+    async def _mock_run_stream(*args: object, **kwargs: object) -> AsyncIterator[Any]:
+        return
+        yield  # Makes this an async generator
+
+    mock_session_pool.run_stream = _mock_run_stream
+    mock_session_pool.sessions.get_session = MagicMock(return_value=None)
+    mock_pool.session_pool = mock_session_pool
 
     team.agent_pool = mock_pool
     agent_a.agent_pool = mock_pool
@@ -743,8 +763,9 @@ async def test_pool_backed_team_and_teamrun_create_child_sessions() -> None:
     assert len(spawn_events) == 1
     assert spawn_events[0].child_session_id == "ses_child_teamrun"
 
-    # Both should have called create_child_session
-    assert mock_sessions.create_child_session.call_count == 2
+    # Both Team and TeamRun should have called create_session for each member.
+    # Agent run_stream also calls create_session to ensure the session exists.
+    assert mock_session_pool.create_session.call_count >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -790,7 +811,7 @@ agents:
         agent_b.agent_pool = pool
 
         orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate to team"):
+        async for event in orch.run_stream("Delegate to team", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 all_child_ids.append(event.child_session_id)
 

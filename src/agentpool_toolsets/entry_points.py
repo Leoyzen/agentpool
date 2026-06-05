@@ -12,6 +12,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from agentpool.tools.base import Tool
@@ -47,3 +48,11 @@ class EntryPointTools(ResourceProvider):
             tool = self.create_tool(item, metadata=meta)
             self._tools.append(tool)
         return self._tools
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

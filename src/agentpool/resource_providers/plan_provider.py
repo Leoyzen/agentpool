@@ -20,6 +20,7 @@ from agentpool.utils.todos import (
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from agentpool.tools.base import Tool
@@ -56,6 +57,14 @@ class PlanProvider(ResourceProvider):
         """
         super().__init__(name="plan")
         self.mode = mode
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None
 
     def _get_tracker(self, agent_ctx: AgentContext) -> TodoTracker | None:
         """Get the TodoTracker from the pool."""

@@ -9,13 +9,14 @@ import pytest
 
 from agentpool import Agent
 from agentpool.delegation import AgentPool
-from agentpool.sessions import SessionData, SessionManager
+from agentpool.orchestrator.core import SessionPool
+from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
-def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionManager, MemorySessionStore]:
-    """Create a pool with a real SessionManager backed by MemorySessionStore."""
+def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionPool, MemorySessionStore]:
+    """Create a pool with a real SessionPool backed by MemorySessionStore."""
     pool = AgentPool()
 
     def simple_callback(message: str) -> str:
@@ -25,13 +26,13 @@ def _make_pool_with_sessions() -> tuple[AgentPool, Agent, SessionManager, Memory
     pool.register("test_agent", agent)
 
     store = MemorySessionStore()
-    sessions = SessionManager(pool=pool, store=store)
-    pool.sessions = sessions
+    session_pool = SessionPool(pool=pool, store=store)
+    pool._session_pool = session_pool
 
     # Also wire up storage.generate_session_id for top-level path
     pool.storage.generate_session_id = MagicMock(return_value="session_top_001")  # type: ignore[assignment]
 
-    return pool, agent, sessions, store
+    return pool, agent, session_pool, store
 
 
 def _make_acp_session_manager(pool: AgentPool) -> ACPSessionManager:
@@ -228,7 +229,7 @@ async def test_child_session_without_pool_sessions_falls_back_to_top_level():
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
     pool.register("test_agent", agent)
-    pool.sessions = None  # type: ignore[assignment]
+    pool._session_pool = None
 
     pool.storage.generate_session_id = MagicMock(return_value="session_fallback_001")  # type: ignore[assignment]
 

@@ -151,7 +151,10 @@ class ACPServer(BaseServer):
             Configured ACP server instance with agent pool
         """
         # AgentPool handles both path and manifest
-        pool = AgentPool(manifest=config, main_agent_name=agent)
+        pool = AgentPool(
+            manifest=config,
+            main_agent_name=agent,
+        )
 
         # Determine config_path for tracking
         config_path = config.config_file_path if isinstance(config, AgentsManifest) else str(config)
@@ -310,7 +313,9 @@ class ACPServer(BaseServer):
         self.log.info("Loading new pool configuration", config_path=config_path)
         with ConfigContextManager(config_path):
             new_manifest = AgentsManifest.from_file(config_path)
-            new_pool = AgentPool(manifest=new_manifest)
+            new_pool = AgentPool(
+                manifest=new_manifest,
+            )
         # 2. Validate agent exists in new pool if specified
         agent_names = list(new_pool.all_agents.keys())
         if not agent_names:

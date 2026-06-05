@@ -11,6 +11,7 @@ from agentpool.utils.time_utils import datetime_to_ms
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from types import TracebackType
 
@@ -158,3 +159,11 @@ class CronTools(ResourceProvider):
         if self.service.remove_job(job_id):
             return f"Removed job {job_id}"
         return f"Job {job_id} not found"
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

@@ -63,6 +63,79 @@ class NativeAgentHookManager:
         """Check if any hooks are configured."""
         return bool(self.agent_hooks and self.agent_hooks.has_hooks())
 
+    def as_capability(self) -> Any:
+        """Return a pydantic-ai Hooks capability with injection consumption.
+
+        Delegates to :meth:`AgentHooks.as_capability` for base hook behaviour
+        and wraps ``after_tool_execute`` to consume pending prompt injections
+        after each tool call.
+
+        Returns:
+            A pydantic-ai :class:`~pydantic_ai.capabilities.Hooks` instance.
+        """
+        from pydantic_ai.capabilities import Hooks
+        from pydantic_ai.messages import ToolCallPart
+        from pydantic_ai.tools import RunContext, ToolDefinition
+
+        if TYPE_CHECKING:
+            from pydantic_ai.capabilities.abstract import ValidatedToolArgs
+
+        # Start with AgentHooks capability if available
+        if self.agent_hooks and self.agent_hooks.has_hooks():
+            base_hooks = self.agent_hooks.as_capability()
+        else:
+            base_hooks = Hooks()
+
+        original_after_tool = base_hooks.after_tool_execute
+
+        async def wrapped_after_tool(
+            ctx: RunContext[Any],
+            *,
+            call: ToolCallPart,
+            tool_def: ToolDefinition,
+            args: ValidatedToolArgs,
+            result: Any,
+        ) -> Any:
+            # Run original hook first if it exists
+            if original_after_tool is not None:
+                result = await original_after_tool(
+                    ctx, call=call, tool_def=tool_def, args=args, result=result
+                )
+
+            # Consume pending injection from run context
+            run_ctx = self._agent.get_active_run_context()
+            injection_manager = run_ctx.injection_manager if run_ctx else None
+            if injection_manager:
+                injection = await injection_manager.consume()
+                if injection:
+                    from agentpool.agents.native_agent.tool_wrapping import (
+                        _inject_additional_context,
+                    )
+
+                    result = _inject_additional_context(result, injection)
+
+            return result
+
+        # Build kwargs for new Hooks, preserving existing callbacks
+        kwargs: dict[str, Any] = {"after_tool_execute": wrapped_after_tool}
+        if self.agent_hooks and self.agent_hooks.has_hooks():
+            if self.agent_hooks.pre_run:
+                kwargs["before_run"] = base_hooks.before_run
+            if self.agent_hooks.post_run:
+                kwargs["after_run"] = base_hooks.after_run
+            if self.agent_hooks.pre_tool_use:
+                kwargs["before_tool_execute"] = base_hooks.before_tool_execute
+            kwargs["ordering"] = base_hooks.get_ordering()
+
+        new_hooks = Hooks(**kwargs)
+
+        # Copy any additional registry entries from base hooks
+        for key, entries in base_hooks._registry.items():
+            if key not in {"before_run", "after_run", "before_tool_execute", "after_tool_execute"}:
+                new_hooks._registry.setdefault(key, []).extend(entries)
+
+        return new_hooks
+
     async def run_pre_run_hooks(
         self,
         *,
@@ -201,8 +274,8 @@ class NativeAgentHookManager:
             result = HookResult(decision="allow")
 
         # Consume pending injection from run context (isolated per-call)
-        # Fall back to _active_run_ctx for cross-task access (see interrupt() pattern)
-        run_ctx = self._agent._current_run_ctx or self._agent._active_run_ctx
+        # Use get_active_run_context() for ContextVar + SessionPool fallback.
+        run_ctx = self._agent.get_active_run_context()
         injection_manager = run_ctx.injection_manager if run_ctx else None
         if injection_manager:
             injection = await injection_manager.consume()

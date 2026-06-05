@@ -147,3 +147,37 @@ async def pool(manifest):
     """Create test pool with agents."""
     async with AgentPool(manifest) as pool:
         yield pool
+
+
+# Model override mapping for custom endpoints without gpt-4o access.
+# Tests that hardcode "openai:gpt-4o" or "openai:gpt-4o-mini" are
+# transparently remapped to a model available on the custom endpoint.
+_MODEL_REMAP = {
+    "openai:gpt-4o": os.getenv("TEST_MODEL_OVERRIDE", "openai:gpt-5-nano"),
+    "openai:gpt-4o-mini": os.getenv("TEST_MODEL_OVERRIDE", "openai:gpt-5-nano"),
+}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def remap_hardcoded_test_models():
+    """Remap hardcoded gpt-4o/gpt-4o-mini to a custom-available model.
+
+    Controlled via the ``TEST_MODEL_OVERRIDE`` environment variable.
+    """
+    from unittest.mock import patch
+
+    import llmling_models
+    import llmling_models.models.helpers as helpers
+
+    original = helpers.infer_model
+
+    def _patched_infer(model):
+        if isinstance(model, str) and model in _MODEL_REMAP:
+            return original(_MODEL_REMAP[model])
+        return original(model)
+
+    with (
+        patch.object(helpers, "infer_model", _patched_infer),
+        patch.object(llmling_models, "infer_model", _patched_infer),
+    ):
+        yield

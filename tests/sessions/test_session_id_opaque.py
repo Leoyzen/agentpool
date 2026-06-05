@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.sessions import SessionData
-from agentpool.sessions.manager import SessionManager
 from agentpool.sessions.store import MemorySessionStore
 
 
@@ -109,12 +108,12 @@ class TestSessionStoreOpaqueLookup:
 
 
 # ---------------------------------------------------------------------------
-# 2. SessionManager.create_child_session produces opaque IDs
+# 2. SessionPool.create_session produces opaque IDs
 # ---------------------------------------------------------------------------
 
 
-class TestSessionManagerOpaqueChildId:
-    """SessionManager must generate opaque child session IDs."""
+class TestSessionPoolOpaqueChildId:
+    """SessionPool must generate opaque child session IDs."""
 
     @pytest.fixture
     def mock_pool(self) -> MagicMock:
@@ -126,11 +125,16 @@ class TestSessionManagerOpaqueChildId:
         self, mock_pool: MagicMock
     ) -> None:
         """Child session IDs must be non-empty opaque strings."""
-        manager = SessionManager(pool=mock_pool, store=None)
-        child_id = await manager.create_child_session(
-            parent_session_id="parent_1",
+        from agentpool.orchestrator import SessionPool
+        from agentpool.utils.identifiers import generate_session_id
+
+        session_pool = SessionPool(pool=mock_pool, store=None)
+        state = await session_pool.create_session(
+            session_id=generate_session_id(),
             agent_name="coder",
+            parent_session_id="parent_1",
         )
+        child_id = state.session_id
         assert isinstance(child_id, str)
         assert len(child_id) > 0
         # Must not raise — treat as opaque
@@ -148,17 +152,21 @@ class TestSessionManagerOpaqueChildId:
     async def test_create_child_with_opaque_parent_id(
         self, mock_pool: MagicMock, parent_id: str
     ) -> None:
-        """create_child_session must accept any string as parent_session_id."""
+        """create_session must accept any string as parent_session_id."""
+        from agentpool.orchestrator import SessionPool
+        from agentpool.utils.identifiers import generate_session_id
+
         store = MemorySessionStore()
         parent = SessionData(session_id=parent_id, agent_name="parent_agent")
         await store.save(parent)
 
-        manager = SessionManager(pool=mock_pool, store=store)
-        async with manager:
-            child_id = await manager.create_child_session(
-                parent_session_id=parent_id,
-                agent_name="child_agent",
-            )
+        session_pool = SessionPool(pool=mock_pool, store=store)
+        state = await session_pool.create_session(
+            session_id=generate_session_id(),
+            agent_name="child_agent",
+            parent_session_id=parent_id,
+        )
+        child_id = state.session_id
 
         child = await store.load(child_id)
         assert child is not None
@@ -175,18 +183,22 @@ class TestSessionManagerOpaqueChildId:
     async def test_get_child_sessions_with_opaque_parent_id(
         self, mock_pool: MagicMock, parent_id: str
     ) -> None:
-        """get_child_sessions must find children by opaque parent ID."""
+        """get_children must find children by opaque parent ID."""
+        from agentpool.orchestrator import SessionPool
+        from agentpool.utils.identifiers import generate_session_id
+
         store = MemorySessionStore()
         parent = SessionData(session_id=parent_id, agent_name="parent_agent")
         await store.save(parent)
 
-        manager = SessionManager(pool=mock_pool, store=store)
-        async with manager:
-            child_id = await manager.create_child_session(
-                parent_session_id=parent_id,
-                agent_name="child_agent",
-            )
-            children = await manager.get_child_sessions(parent_id)
+        session_pool = SessionPool(pool=mock_pool, store=store)
+        state = await session_pool.create_session(
+            session_id=generate_session_id(),
+            agent_name="child_agent",
+            parent_session_id=parent_id,
+        )
+        child_id = state.session_id
+        children = session_pool.sessions.get_children(parent_id)
 
         assert child_id in children
 

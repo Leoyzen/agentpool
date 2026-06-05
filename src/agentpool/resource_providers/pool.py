@@ -9,6 +9,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from agentpool import AgentPool
@@ -71,3 +72,11 @@ class PoolResourceProvider(ResourceProvider):
         """Get resources from pool's manifest."""
         # Here we could expose knowledge bases or other resources from manifest
         return []
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

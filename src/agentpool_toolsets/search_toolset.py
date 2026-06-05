@@ -9,6 +9,7 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
+    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from searchly.base import (
@@ -191,3 +192,11 @@ class SearchTools(ResourceProvider):
                 self.create_tool(self.news_search, read_only=True, idempotent=True, open_world=True)
             )
         return tools
+
+    def as_capability(self) -> AbstractCapability | None:
+        """Return a pydantic-ai capability for this provider.
+
+        Returns:
+            A pydantic-ai AbstractCapability instance, or None.
+        """
+        return None

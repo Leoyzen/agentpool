@@ -21,6 +21,7 @@ from agentpool.prompts.prompts import PromptMessage, StaticPrompt
 from agentpool.resource_providers import StaticResourceProvider
 from agentpool_config import BaseToolConfig, NativeAgentToolConfig
 from agentpool_config.builtin_tools import BaseBuiltinToolConfig
+from agentpool_config.capabilities import CapabilityConfig
 from agentpool_config.knowledge import Knowledge  # noqa: TC001
 from agentpool_config.nodes import BaseAgentConfig
 from agentpool_config.session import MemoryConfig, SessionQuery
@@ -204,6 +205,13 @@ class NativeAgentConfig(BaseAgentConfig):
     - "codemode": Tools are wrapped in a Python execution environment
     """
 
+    capabilities: list[Any] = Field(default_factory=list)
+    """Additional pydantic-ai capabilities to attach to the agent.
+
+    Can contain either CapabilityConfig objects (for YAML-loaded capabilities)
+    or pre-instantiated AbstractCapability objects (for Python API usage).
+    """
+
     @model_validator(mode="before")
     @classmethod
     def validate_output_type(cls, data: dict[str, Any]) -> dict[str, Any]:
@@ -236,6 +244,20 @@ class NativeAgentConfig(BaseAgentConfig):
         """Convert model inputs to appropriate format."""
         if isinstance((model := data.get("model")), str):
             data["model"] = {"type": "string", "identifier": model}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_capabilities(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Convert capability dicts to CapabilityConfig objects."""
+        if capabilities := data.get("capabilities"):
+            resolved: list[Any] = []
+            for cap in capabilities:
+                if isinstance(cap, dict):
+                    resolved.append(CapabilityConfig(**cap))
+                else:
+                    resolved.append(cap)
+            data["capabilities"] = resolved
         return data
 
     @model_validator(mode="before")

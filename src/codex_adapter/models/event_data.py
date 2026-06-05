@@ -36,6 +36,7 @@ class ItemStartedData(CodexBaseModel):
     thread_id: str
     turn_id: str
     item: ThreadItem
+    started_at_ms: int | None = None
 
 
 class ItemCompletedData(CodexBaseModel):
@@ -44,6 +45,7 @@ class ItemCompletedData(CodexBaseModel):
     thread_id: str
     turn_id: str
     item: ThreadItem
+    completed_at_ms: int | None = None
 
 
 class RawResponseItemCompletedData(CodexBaseModel):
@@ -332,6 +334,13 @@ class ServerRequestResolvedData(CodexBaseModel):
     request_id: int | str
 
 
+class WarningEventData(CodexBaseModel):
+    """Payload for warning notification."""
+
+    message: str | None = None
+    thread_id: str | None = None
+
+
 class AccountUpdatedData(CodexBaseModel):
     """Payload for account/updated notification."""
 
@@ -393,4 +402,5 @@ EventData = (
     | AppListUpdatedData
     | ContextCompactedData
     | ServerRequestResolvedData
+    | WarningEventData
 )

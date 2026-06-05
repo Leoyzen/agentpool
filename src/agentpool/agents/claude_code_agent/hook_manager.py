@@ -107,8 +107,8 @@ class ClaudeCodeHookManager:
 
         result: SyncHookJSONOutput = {"continue_": True}
         # Consume pending injection from run context (isolated per-call)
-        # Fall back to _active_run_ctx for cross-task access (see interrupt() pattern)
-        run_ctx = self._agent._current_run_ctx or self._agent._active_run_ctx
+        # Use get_active_run_context() for ContextVar + SessionPool fallback.
+        run_ctx = self._agent.get_active_run_context()
         injection_manager = run_ctx.injection_manager if run_ctx else None
         if injection_manager and (injection := await injection_manager.consume()):
             tool_name = input_data.get("tool_name", "unknown")

@@ -529,24 +529,13 @@ class ACPSession:
         with suppress(Exception):
             self.agent.state_updated.disconnect(self._on_state_updated)
 
-        # Remove old per-session agent
-        if self.acp_agent:
-            await self.acp_agent.remove_session_agent(self.session_id)
+        # Remove session-specific mutations from old agent before switching
+        if isinstance(self.agent, Agent):
+            if self.get_cwd_context in self.agent.sys_prompts.prompts:
+                self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-        # Create new per-session agent for the target agent type
-        if self.acp_agent:
-            new_agent = await self.acp_agent.get_or_create_session_agent(
-                self.session_id, input_provider=None, agent_name=agent_name
-            )
-            # If get_or_create_session_agent fell back to default_agent
-            # (because agent_name is not in acp_agent's manifest),
-            # use the pool agent directly
-            if new_agent.name != agent_name:
-                new_agent = agents[agent_name]
-            self.agent = new_agent
-        else:
-            # Fallback: shared agent (shouldn't happen in production)
-            self.agent = agents[agent_name]
+        # Switch to the pool agent directly (per-session agents now managed by SessionPool)
+        self.agent = agents[agent_name]
 
         # Re-apply session-specific mutations
         self.agent.env = self.acp_env
@@ -616,8 +605,17 @@ class ACPSession:
 
             self.log.debug("Processing prompt", content_items=len(non_command_content))
             event_count = 0
+            # Derive turn-complete support from client capabilities
+            client_supports_turn_complete = (
+                bool(self.client_capabilities.turn_complete)
+                if self.client_capabilities is not None
+                else False
+            )
             # Create a new event converter for this prompt
-            converter = ACPEventConverter(subagent_display_mode=self.subagent_display_mode)
+            converter = ACPEventConverter(
+                subagent_display_mode=self.subagent_display_mode,
+                client_supports_turn_complete=client_supports_turn_complete,
+            )
             self._current_converter = converter  # Track for cancellation
 
             try:  # Use the session's persistent input provider

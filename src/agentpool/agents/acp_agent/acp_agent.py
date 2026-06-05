@@ -434,23 +434,23 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         current_response_parts: list[TextPart | ThinkingPart | ToolCallPart] = []
         text_chunks: list[str] = []
 
-        assert self.session_id is not None
+        assert session_id is not None
         yield RunStartedEvent(
-            session_id=self.session_id,
+            session_id=session_id,
             run_id=run_id,
             agent_name=self.name,
             parent_session_id=parent_session_id,
         )
         final_blocks = convert_to_acp_content(prompts)
         # Handle ephemeral execution (fork session if store_history=False)
-        session_id = self._sdk_session_id
+        acp_session_id = self._sdk_session_id
         if not store_history and self._sdk_session_id:
             cwd = self._cwd or str(Path.cwd())
             fork_response = await self._api.fork_session(self._sdk_session_id, cwd)
-            session_id = fork_response.session_id
-            self.log.debug("Forked session", parent=self._sdk_session_id, fork=session_id)
+            acp_session_id = fork_response.session_id
+            self.log.debug("Forked session", parent=self._sdk_session_id, fork=acp_session_id)
         self.log.debug("Starting streaming prompt", num_blocks=len(final_blocks))
-        prompt_task = asyncio.create_task(self._api.prompt(session_id, final_blocks))
+        prompt_task = asyncio.create_task(self._api.prompt(acp_session_id, final_blocks))
         self._prompt_task = prompt_task
 
         async def poll_acp_events() -> AsyncIterator[RichAgentStreamEvent[str]]:
@@ -473,11 +473,20 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     yield native_event
 
         tool_metadata: dict[str, dict[str, Any]] = {}
+        # Determine event source: event_bus when available, else event_queue
+        event_bus = run_ctx.event_bus
+        bus_queue: asyncio.Queue[Any] | None = None
+        event_source: asyncio.Queue[Any]
+        if event_bus is not None:
+            bus_queue = await event_bus.subscribe(session_id)
+            event_source = bus_queue
+        else:
+            event_source = run_ctx.event_queue
         try:
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
                 self._tool_bridge.set_run_context(agent_ctx, prompt=prompts),
-                merge_queue_into_iterator(poll_acp_events(), run_ctx.event_queue) as merged_events,
+                merge_queue_into_iterator(poll_acp_events(), event_source) as merged_events,
             ):
                 async for event in merged_events:
                     if isinstance(event, ToolResultMetadataEvent):
@@ -507,6 +516,15 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True
+        finally:
+            if event_bus is not None and bus_queue is not None:
+                try:
+                    await event_bus.unsubscribe(session_id, bus_queue)
+                except Exception:
+                    self.log.exception(
+                        "Failed to unsubscribe from event bus during cleanup",
+                        session_id=session_id,
+                    )
 
         if run_ctx.cancelled:
             message = ChatMessage[str](
@@ -514,7 +532,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 role="assistant",
                 name=self.name,
                 message_id=message_id or str(uuid.uuid4()),
-                session_id=self.session_id,
+                session_id=session_id,
                 parent_id=user_msg.message_id,
                 model_name=self.model_name,
                 messages=model_messages,
@@ -551,7 +569,7 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             role="assistant",
             name=self.name,
             message_id=message_id or str(uuid.uuid4()),
-            session_id=self.session_id,
+            session_id=session_id,
             parent_id=user_msg.message_id,
             model_name=self.model_name,
             messages=model_messages,
@@ -597,7 +615,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         if self._prompt_task and not self._prompt_task.done():
             self._prompt_task.cancel()
             self.log.info("Cancelled prompt task")
-        stream_task = self._active_run_ctx.current_task if self._active_run_ctx else None
+        run_ctx = self.get_active_run_context()
+        stream_task = run_ctx.current_task if run_ctx else None
         if stream_task and not stream_task.done():
             stream_task.cancel()
 
