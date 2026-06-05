@@ -22,6 +22,7 @@ from acp.schema.notifications import (  # noqa: TC001
 AgentMethod = Literal[
     "authenticate",
     "initialize",
+    "mcp/message",
     "providers/disable",
     "providers/list",
     "providers/set",

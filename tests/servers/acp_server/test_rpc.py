@@ -526,5 +526,64 @@ async def test_fork_session_method_is_routed(
         )
 
 
+async def test_mcp_message_method_is_routed_from_client(
+    test_agent: TestAgent, caplog: pytest.LogCaptureFixture
+):
+    """RED FLAG TEST: mcp/message must be routed when sent from client to agent.
+
+    Regression: mcp/message was only listed in ClientMethod, so when an ACP client
+    sent mcp/message to the agent, _agent_handler raised Method not found.
+    Per the MCP-over-ACP spec, mcp/message is bidirectional (x-side = "both").
+    """
+    caplog.set_level("CRITICAL")
+    async with _Server() as s:
+        assert s.client_writer is not None
+        assert s.client_reader is not None
+        assert s.server_writer is not None
+        assert s.server_reader is not None
+        _server_conn = AgentSideConnection(
+            lambda _conn: test_agent,
+            AsyncioWriterAdapter(s.server_writer),
+            AsyncioReaderAdapter(s.server_reader),
+        )
+
+        # Initialize first
+        init_req = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": 1},
+        }
+        s.client_writer.write((anyenv.dump_json(init_req) + "\n").encode())
+        await s.client_writer.drain()
+        line = await asyncio.wait_for(s.client_reader.readline(), timeout=1)
+        init_resp = anyenv.load_json(line)
+        assert "result" in init_resp
+
+        # Send mcp/message request from client to agent
+        req = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "mcp/message",
+            "params": {
+                "connectionId": "test-conn-1",
+                "message": {"jsonrpc": "2.0", "id": 42, "method": "test/ping"},
+            },
+        }
+        s.client_writer.write((anyenv.dump_json(req) + "\n").encode())
+        await s.client_writer.drain()
+
+        line = await asyncio.wait_for(s.client_reader.readline(), timeout=1)
+        resp = anyenv.load_json(line)
+        assert resp["id"] == 2
+        # MUST NOT get Method not found (-32601)
+        method_not_found_code = -32601
+        assert resp.get("error", {}).get("code") != method_not_found_code, (
+            f"mcp/message returned Method not found despite being bidirectional: {resp}"
+        )
+        # Should be routed to ext_method
+        assert resp.get("result", {}).get("ok") is True
+
+
 if __name__ == "__main__":
     pytest.main(["-v", __file__])
