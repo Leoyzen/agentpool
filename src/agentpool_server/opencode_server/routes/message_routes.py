@@ -159,41 +159,9 @@ async def _maybe_generate_title(
             session_id=session_id,
             node_name=node_name,
             initial_prompt=prompt_text,
-            on_title_generated=lambda title: _update_session_title(state, session_id, title),
         )
     except Exception:
         logger.exception("Failed to generate title", session_id=session_id)
-
-
-def _update_session_title(state: StateDep, session_id: str, title: str) -> None:
-    """Update session title in state and storage.
-
-    Args:
-        state: Server state
-        session_id: The session ID to update
-        title: The new title
-    """
-    import asyncio
-
-    # Update in-memory session
-    session = state.sessions.get(session_id)
-    if session:
-        session.title = title
-
-    # Update in storage (fire and forget)
-    async def _update() -> None:
-        try:
-            await state.pool.storage.update_session_title(session_id, title)
-        except Exception:
-            logger.exception("Failed to update session title", session_id=session_id)
-
-    # Schedule the async update
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(_update())
-    except RuntimeError:
-        # No event loop running, ignore
-        pass
 
 
 async def persist_message_to_storage(

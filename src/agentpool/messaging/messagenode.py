@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+import asyncio
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
+import warnings
 
 from anyenv.signals import Signal
 
@@ -134,7 +134,6 @@ class MessageNode[TDeps, TResult](ABC):
         initial_prompt: str | None = None,
         model: str | None = None,
         parent_session_id: str | None = None,
-        session_title_setter: Callable[[str], None] | None = None,
     ) -> None:
         """Log conversation to storage if enabled.
 
@@ -147,7 +146,6 @@ class MessageNode[TDeps, TResult](ABC):
             initial_prompt: Optional initial prompt to trigger title generation.
             model: Requested model identifier for this session.
             parent_session_id: Optional parent session ID.
-            session_title_setter: Optional callback for setting conversation title.
         """
         if self.enable_db_logging and self.storage and session_id:
             await self.storage.log_session(
@@ -156,7 +154,6 @@ class MessageNode[TDeps, TResult](ABC):
                 model=model,
                 initial_prompt=initial_prompt,
                 parent_session_id=parent_session_id,
-                on_title_generated=session_title_setter,
             )
 
     async def emit_agent_event(
