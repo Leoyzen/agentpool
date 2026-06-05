@@ -73,6 +73,14 @@ class BaseMCPServerConfig(Schema):
     )
     """Timeout for the server process in seconds."""
 
+    lazy: bool = Field(default=False, title="Lazy connection")
+    """Whether to defer connection until first actual use.
+
+    When True, the server will not connect during AgentPool startup,
+    reducing initialization overhead. The connection is established
+    on the first tool call or explicit access.
+    """
+
     enabled_tools: list[str] | None = Field(
         default=None,
         examples=[["read_file", "list_directory"], ["search", "fetch"]],
