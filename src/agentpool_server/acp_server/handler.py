@@ -221,7 +221,10 @@ class ACPProtocolHandler:
         # Ensure the session exists in the SessionPool
         await session_pool.create_session(session_id)
 
-        # Add session MCP providers to SessionPool's per-session agent
+        # Add session MCP providers to SessionPool's per-session agent.
+        # Use deduplication because get_or_create_session_agent returns a cached
+        # per-session agent; adding the same provider repeatedly causes tool name
+        # conflicts in pydantic-ai's CombinedToolset.
         acp_session = self.session_manager.get_session(session_id)
         if acp_session is not None and acp_session.session_mcp_providers:
             try:
@@ -229,7 +232,8 @@ class ACPProtocolHandler:
                     session_id
                 )
                 for provider in acp_session.session_mcp_providers:
-                    session_agent.tools.add_provider(provider)
+                    if provider not in session_agent.tools.external_providers:
+                        session_agent.tools.add_provider(provider)
                 logger.info(
                     "Added session MCP providers to SessionPool agent",
                     session_id=session_id,
