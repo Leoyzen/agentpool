@@ -37,10 +37,27 @@ ToolCallKind = Literal[
     "think",
     "fetch",
     "switch_mode",
+    "subagent",
     "other",
 ]
 ToolCallStatus = Literal["pending", "in_progress", "completed", "failed"]
 PermissionKind = Literal["allow_once", "allow_always", "reject_once", "reject_always"]
+
+
+class SubagentRunInfo(AnnotatedObject):
+    """Information about a subagent tool call."""
+
+    child_session_id: str
+    """The session ID of the child subagent session."""
+
+    subagent_id: str | None = None
+    """The ID of the subagent being invoked."""
+
+    run_mode: Literal["foreground", "background"] | None = None
+    """Whether the subagent runs in foreground or background mode."""
+
+    display_name: str | None = None
+    """Human-readable display name for the subagent run."""
 
 
 class ToolCall(AnnotatedObject):
@@ -63,6 +80,9 @@ class ToolCall(AnnotatedObject):
 
     status: ToolCallStatus | None = None
     """Update the execution status."""
+
+    subagent: SubagentRunInfo | None = None
+    """Subagent run information, if this is a subagent tool call."""
 
     title: str | None = None
     """Update the human-readable title."""

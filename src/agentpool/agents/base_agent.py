@@ -895,7 +895,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     )
 
                 final_message: ChatMessage[TResult] | None = None
-                async for event in session_pool.run_stream(effective_session_id, *prompts):  # type: ignore[arg-type]
+                async for event in session_pool.run_stream(
+                    effective_session_id,
+                    *prompts,  # type: ignore[arg-type]
+                    input_provider=input_provider,
+                ):
                     yield event
                     if isinstance(event, StreamCompleteEvent):
                         final_message = event.message

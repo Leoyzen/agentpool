@@ -1522,7 +1522,7 @@ class SessionPool:
             raise ValueError("No active run found with ID: " + run_id)
         run_handle.cancel()
 
-    async def run_stream(self, session_id: str, *prompts: str) -> AsyncIterator[Any]:
+    async def run_stream(self, session_id: str, *prompts: str, **kwargs: Any) -> AsyncIterator[Any]:
         """Process prompts and yield events from the EventBus.
 
         Convenience method for tests and standalone clients that want
@@ -1531,12 +1531,14 @@ class SessionPool:
         Args:
             session_id: The session to process the prompt for.
             *prompts: Prompts to process.
+            **kwargs: Additional arguments passed to the turn runner
+                (e.g. ``input_provider``).
 
         Yields:
             Events published to the EventBus for this session.
         """
         queue = await self.event_bus.subscribe(session_id)
-        process_task = asyncio.create_task(self.process_prompt(session_id, *prompts))
+        process_task = asyncio.create_task(self.process_prompt(session_id, *prompts, **kwargs))
         get_task: asyncio.Task[Any] | None = None
         try:
             while not process_task.done():
