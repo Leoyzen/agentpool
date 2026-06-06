@@ -101,7 +101,7 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
             logger.exception("LSP warmup failed")
 
     # Fire and forget - don't block message processing
-    _warmup_task = asyncio.create_task(warmup())
+    state.create_background_task(warmup(), name="warmup_lsp")
 
 
 async def _maybe_generate_title(
@@ -603,7 +603,15 @@ async def _process_message_locked(  # noqa: PLR0915
                 session_id=session_id,
             )
     except asyncio.CancelledError:
-        # Propagate cancellation so caller can handle cleanup
+        response_time = now_ms()
+        reason = "Request cancelled by user"
+        aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
+        msg_time = MessageTime(created=now, completed=response_time)
+        update = {"time": msg_time, "error": aborted_error}
+        updated_assistant = assistant_msg.model_copy(update=update)
+        assistant_msg_with_parts.info = updated_assistant
+        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
         raise
     except Exception as exc:
         # Any unexpected error during SessionPool routing
@@ -618,6 +626,8 @@ async def _process_message_locked(  # noqa: PLR0915
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
     finally:
+        # --- Stop SessionStatusBridge ---
+        await status_bridge.stop()
         # --- Unsubscribe from EventBus ---
         await session_pool.event_bus.unsubscribe(session_id, event_queue)
         # --- Mark session idle ---

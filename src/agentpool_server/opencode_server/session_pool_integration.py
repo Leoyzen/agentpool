@@ -53,8 +53,10 @@ def _session_state_to_opencode(state: SessionState) -> Session:
 
     from agentpool_storage.opencode_provider import helpers
 
-    created_ms = int(time.time() * 1000)
-    updated_ms = created_ms
+    now_mono = time.monotonic()
+    now_epoch = time.time()
+    created_ms = int((now_epoch - (now_mono - state.created_at)) * 1000)
+    updated_ms = int((now_epoch - (now_mono - state.last_active_at)) * 1000)
     directory = state.metadata.get("cwd", "")
     project_id = state.metadata.get("project_id", "")
     if not project_id and directory:
@@ -219,10 +221,17 @@ async def _create_and_persist_session(
 
     id_ = state.pool.manifest.config_file_path
     session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    if state.pool.session_pool is not None and state.pool.session_pool.sessions.store:
-        await state.pool.session_pool.sessions.store.save(session_data)
-    else:
-        await state.pool.storage.save_session(session_data)
+    try:
+        if state.pool.session_pool is not None and state.pool.session_pool.sessions.store:
+            await state.pool.session_pool.sessions.store.save(session_data)
+        else:
+            await state.pool.storage.save_session(session_data)
+    except Exception:
+        logger.warning(
+            "Failed to persist session to storage, degrading to in-memory",
+            session_id=session_id,
+            exc_info=True,
+        )
 
     state.sessions[session_id] = session
     state.ensure_runtime_session_state(session_id)
@@ -444,7 +453,10 @@ class OpenCodeSessionPoolIntegration:
     async def shutdown(self) -> None:
         """Shutdown the integration and stop all status bridges."""
         for session_id in list(self._status_bridges.keys()):
-            await self._stop_status_bridge(session_id)
+            try:
+                await self._stop_status_bridge(session_id)
+            except Exception:
+                logger.exception("Failed to stop status bridge during shutdown", session_id=session_id)
         await self.session_pool.shutdown()
 
     async def _start_status_bridge(self, session_id: str) -> None:

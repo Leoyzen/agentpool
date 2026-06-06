@@ -1030,7 +1030,6 @@ class TurnRunner:
                     ):
                         await self.event_bus.publish(session_id, event)
                     run_ctx.injection_manager.flush_pending_to_queue()
-<<<<<<< HEAD
             except (Exception, asyncio.CancelledError) as exc:
                 if run_handle is not None and run_handle.status not in (
                     RunStatus.completed,
