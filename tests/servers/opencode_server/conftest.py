@@ -188,6 +188,7 @@ def mock_pool(
     pool.session_pool.close_session = AsyncMock(side_effect=_mock_close_session)
     pool.session_pool.sessions = Mock()
     pool.session_pool.sessions.cancel_run_for_session = Mock()
+    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=Mock())
     pool.session_pool.sessions.store = Mock()
     pool.session_pool.sessions.store.save = storage_manager.save_session
     pool.session_pool.sessions.store.delete = storage_manager.delete_session

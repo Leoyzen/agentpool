@@ -110,7 +110,8 @@ class SessionStatusBridge:
                 await self._broadcast_idle()
             case RunFailedEvent(exception=exc):
                 await self._broadcast_idle()
-                await self._broadcast_error(exc)
+                if not isinstance(exc, asyncio.CancelledError):
+                    await self._broadcast_error(exc)
             case _:
                 pass
 

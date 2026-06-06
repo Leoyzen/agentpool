@@ -628,14 +628,20 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     # Delegate session creation to SessionPool
     session_pool = state.pool.session_pool
     if session_pool is not None:
-        await session_pool.create_session(
-            session_id=session_id,
-            agent_name=state.agent.name,
-            parent_session_id=session.parent_id,
-            project_id=project_id,
-            cwd=base_path,
-            title=session.title,
-        )
+        try:
+            await session_pool.create_session(
+                session_id=session_id,
+                agent_name=state.agent.name,
+                parent_session_id=session.parent_id,
+                project_id=project_id,
+                cwd=base_path,
+                title=session.title,
+            )
+        except Exception:
+            logger.exception(
+                "SessionPool session creation failed, falling back to in-memory",
+                session_id=session_id,
+            )
     # Cache in memory
     state.sessions[session_id] = session
     state.messages[session_id] = []
@@ -891,6 +897,20 @@ async def fork_session(  # noqa: D417
     if original_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Get messages from the original session
+    original_messages = state.messages.get(session_id, [])
+    messages_to_copy: list[MessageWithParts] = []
+    if request and request.message_id:
+        for msg in original_messages:
+            messages_to_copy.append(msg)
+            if msg.info.id == request.message_id:
+                break
+        else:
+            detail = f"Message {request.message_id} not found in session"
+            raise HTTPException(status_code=404, detail=detail)
+    else:
+        messages_to_copy = list(original_messages)
+
     # Create the new forked session
     now = now_ms()
     new_session_id = identifier.ascending("session")
@@ -909,20 +929,41 @@ async def fork_session(  # noqa: D417
     # Delegate forked session creation to SessionPool
     session_pool = state.pool.session_pool
     if session_pool is not None:
-        await session_pool.create_session(
-            session_id=new_session_id,
-            agent_name=state.agent.name,
-            parent_session_id=session_id,
-            project_id=original_session.project_id,
-            cwd=fork_directory,
-            title=forked_session.title,
-        )
+        try:
+            await session_pool.create_session(
+                session_id=new_session_id,
+                agent_name=state.agent.name,
+                parent_session_id=session_id,
+                project_id=original_session.project_id,
+                cwd=fork_directory,
+                title=forked_session.title,
+            )
+        except Exception:
+            logger.exception(
+                "SessionPool forked session creation failed, falling back to in-memory",
+                session_id=new_session_id,
+            )
 
     # Cache in memory
     state.sessions[new_session_id] = forked_session
     await state.mark_session_idle(new_session_id)
     state.todos[new_session_id] = []
-    state.messages[new_session_id] = []
+    # Copy messages to the new session (with updated session_id references)
+    copied_messages: list[MessageWithParts] = []
+    for msg_with_parts in messages_to_copy:
+        new_info = msg_with_parts.info.model_copy(update={"session_id": new_session_id})
+        new_parts = [
+            part.model_copy(update={"session_id": new_session_id}) for part in msg_with_parts.parts
+        ]
+        copied_messages.append(MessageWithParts(info=new_info, parts=new_parts))
+    state.messages[new_session_id] = copied_messages
+    if session_pool is not None:
+        fork_agent = await session_pool.sessions.get_or_create_session_agent(new_session_id)
+        fork_agent.conversation.chat_messages.clear()
+        from agentpool_server.opencode_server.converters import opencode_to_chat_message
+        for msg_with_parts in copied_messages:
+            chat_msg = opencode_to_chat_message(msg_with_parts, session_id=new_session_id)
+            fork_agent.conversation.chat_messages.append(chat_msg)
     # Broadcast session created event
     await state.broadcast_event(SessionCreatedEvent.create(forked_session))
     # Also broadcast session.updated so the CLI TUI upserts the forked
