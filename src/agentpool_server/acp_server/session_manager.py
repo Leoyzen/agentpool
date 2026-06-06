@@ -172,6 +172,20 @@ class ACPSessionManager:
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()
             await session.initialize_mcp_servers()
+            # Warm up lazy MCP providers now that the session is fully set up
+            try:
+                from agentpool.mcp_server.manager import MCPManager
+
+                for provider in session.agent.tools.external_providers:
+                    if isinstance(provider, MCPManager):
+                        await provider.warmup_all()
+                        break
+            except Exception:
+                logger.warning(
+                    "MCP warmup failed",
+                    session_id=session_id,
+                    exc_info=True,
+                )
             self._active[session_id] = session
             logger.info("Created ACP session", session_id=session_id, agent=session_agent.name)
             return session_id

@@ -278,6 +278,32 @@ class MCPManager:
 
         return capabilities
 
+    async def warmup_all(self) -> None:
+        """Warm up all lazy MCP providers by connecting them concurrently.
+
+        Idempotent: safe to call multiple times. Already-connected providers
+        are skipped. Failures are logged but not raised, so partial warmup
+        does not block the session.
+        """
+        pending = [
+            provider
+            for provider in self.providers
+            if not provider._client_connected
+        ]
+        if not pending:
+            return
+
+        results = await asyncio.gather(
+            *(p.warmup() for p in pending), return_exceptions=True
+        )
+        for provider, result in zip(pending, results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "MCP provider warmup failed",
+                    provider=provider.name,
+                    error=str(result),
+                )
+
     async def cleanup(self) -> None:
         """Clean up all MCP connections and providers."""
         try:

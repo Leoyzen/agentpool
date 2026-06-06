@@ -14,6 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from agentpool.log import get_logger
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -121,6 +124,12 @@ class BaseAgentAGUIAdapter:
             # history. The proper solution would be to convert the client's AG-UI
             # message history to our format and use it as the conversation context.
             prompt = self._get_user_prompt()
+
+            # Warm up lazy MCP providers before running the agent
+            try:
+                await self.agent.mcp.warmup_all()
+            except Exception:
+                logger.warning("MCP warmup failed", exc_info=True)
 
             async for agent_event in self.agent.run_stream(prompt, store_history=False):
                 # Transform compatible events through AGUIEventStream

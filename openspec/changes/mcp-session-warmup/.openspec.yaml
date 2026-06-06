@@ -1,0 +1,2 @@
+name: mcp-session-warmup
+description: Warm up lazy MCP connections on session connect to ensure tools are available before agent execution

@@ -322,6 +322,20 @@ class ServerState:
                     self._session_agents.pop(session_id, None)
                     raise
             self._session_agents[session_id] = agent
+            # Warm up MCP providers so tools are available immediately
+            try:
+                from agentpool.mcp_server.manager import MCPManager
+
+                for provider in agent.tools.external_providers:
+                    if isinstance(provider, MCPManager):
+                        await provider.warmup_all()
+                        break
+            except Exception:
+                logger.warning(
+                    "MCP warmup failed",
+                    session_id=session_id,
+                    exc_info=True,
+                )
             return agent
 
     def _create_session_agent(self, session_id: str) -> BaseAgent[Any, Any]:

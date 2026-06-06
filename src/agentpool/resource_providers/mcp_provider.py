@@ -142,6 +142,15 @@ class MCPResourceProvider(ResourceProvider):
             await self.exit_stack.enter_async_context(self.client)
             self._client_connected = True
 
+    async def warmup(self) -> None:
+        """Warm up the provider by ensuring the client is connected.
+
+        Idempotent: safe to call multiple times. For eager providers,
+        this is a no-op. For lazy providers, this triggers the deferred
+        connection so tools/prompts/resources are available immediately.
+        """
+        await self._ensure_client_connected()
+
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
