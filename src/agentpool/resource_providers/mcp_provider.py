@@ -74,7 +74,6 @@ class MCPResourceProvider(ResourceProvider):
             resource_change_callback=self._on_resources_changed,
             transport=transport,
         )
-        self._client_connected = False
         self._connect_lock = asyncio.Lock()
 
     def as_capability(self) -> AbstractCapability | None:
@@ -298,6 +297,7 @@ class MCPResourceProvider(ResourceProvider):
         """
         from mcp.types import BlobResourceContents, TextResourceContents
 
+        await self._ensure_client_connected()
         result: list[str] = []
         for content in await self.client.read_resource(uri):
             match content:
@@ -324,6 +324,7 @@ class MCPResourceProvider(ResourceProvider):
             List of ResourceTemplate objects from the server
         """
         try:
+            await self._ensure_client_connected()
             return await self.client.list_resource_templates()
         except Exception:
             logger.exception("Failed to list resource templates")
