@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from agentpool.agents.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
 from agentpool.log import get_logger
 from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
@@ -506,6 +507,15 @@ async def _process_message_locked(  # noqa: PLR0915
 
         # Route through SessionPool instead of calling agent.run_stream() directly.
         # Events will be delivered via the EventBus subscription below.
+        #
+        # Architecture note (auto-subscribe-subagent-events change):
+        # When SessionPool is enabled, the protocol layer auto-subscribes
+        # to the EventBus with scope="descendants". This means child session
+        # events are automatically received and forwarded to the frontend
+        # via SubAgentEvent without any manual subscription in message_routes.
+        # The _consume_events loop below only handles the parent session's
+        # direct agent events; child events flow through the EventBus
+        # independently via _consume_child_events.
         run_handle = await session_pool.receive_request(
             session_id=session_id,
             content=user_prompt,
@@ -515,20 +525,87 @@ async def _process_message_locked(  # noqa: PLR0915
 
         if run_handle is not None:
             # Consume events from EventBus and broadcast as OpenCode SSE events.
+            async def _consume_child_events(
+                child_session_id: str,
+                child_tasks: dict[str, asyncio.Task[Any]],
+            ) -> None:
+                """Consume events from a child session EventBus and broadcast them."""
+                child_queue = await session_pool.event_bus.subscribe(
+                    child_session_id, scope="session"
+                )
+                try:
+                    # Get child context from EventProcessor
+                    child_ctx = event_adapter._processor._child_contexts.get(
+                        child_session_id
+                    )
+                    if child_ctx is None:
+                        return
+
+                    child_adapter = OpenCodeEventAdapter(child_ctx)
+
+                    while True:
+                        event = await child_queue.get()
+                        if event is None:
+                            break
+
+                        # Handle nested subagents
+                        if isinstance(event, SpawnSessionStart):
+                            nested_task = asyncio.create_task(
+                                _consume_child_events(
+                                    event.child_session_id, child_tasks
+                                )
+                            )
+                            child_tasks[event.child_session_id] = nested_task
+                            continue
+
+                        # Stop on completion or error
+                        if isinstance(event, (StreamCompleteEvent, RunErrorEvent)):
+                            async for oc_event in child_adapter.convert_event(event):
+                                await state.broadcast_event(oc_event)
+                            break
+
+                        async for oc_event in child_adapter.convert_event(event):
+                            await state.broadcast_event(oc_event)
+                finally:
+                    await session_pool.event_bus.unsubscribe(
+                        child_session_id, child_queue
+                    )
+
             async def _consume_events() -> None:
-                while True:
-                    event = await event_queue.get()
-                    if event is None:
-                        break
-                    async for oc_event in event_adapter.convert_event(event):
-                        # Track StepFinishPart for finalize() suppression.
-                        if (
-                            isinstance(oc_event, PartUpdatedEvent)
-                            and isinstance(oc_event.properties.part, StepFinishPart)
-                            and oc_event.properties.part.session_id == session_id
-                        ):
-                            adapter._step_finish_emitted = True
-                        await state.broadcast_event(oc_event)
+                child_tasks: dict[str, asyncio.Task[Any]] = {}
+                try:
+                    while True:
+                        event = await event_queue.get()
+                        if event is None:
+                            break
+
+                        # Detect SpawnSessionStart and start child consumer
+                        if isinstance(event, SpawnSessionStart):
+                            child_task = asyncio.create_task(
+                                _consume_child_events(
+                                    event.child_session_id, child_tasks
+                                )
+                            )
+                            child_tasks[event.child_session_id] = child_task
+                            continue
+
+                        async for oc_event in event_adapter.convert_event(event):
+                            # Track StepFinishPart for finalize() suppression.
+                            if (
+                                isinstance(oc_event, PartUpdatedEvent)
+                                and isinstance(oc_event.properties.part, StepFinishPart)
+                                and oc_event.properties.part.session_id == session_id
+                            ):
+                                adapter._step_finish_emitted = True
+                            await state.broadcast_event(oc_event)
+                finally:
+                    for task in child_tasks.values():
+                        if not task.done():
+                            task.cancel()
+                    # Await cancellation to prevent unhandled CancelledError
+                    for task in child_tasks.values():
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
 
             consumer_task = asyncio.create_task(_consume_events())
             try:
