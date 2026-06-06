@@ -20,6 +20,4 @@ Or programmatically:
     # Use with uvicorn or other ASGI server
 """
 
-from agentpool_server.opencode_server.handler import OpenCodeProtocolHandler
-
-__all__ = ["OpenCodeProtocolHandler"]
+__all__ = []

@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic_ai import UserContent
 
-from agentpool.common_types import PathReference
 from agentpool.log import get_logger
-from agentpool.tasks.exceptions import RunAbortedError
+from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import (
@@ -20,6 +17,7 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
+from agentpool_server.opencode_server.event_adapter import OpenCodeEventAdapter
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
@@ -37,6 +35,7 @@ from agentpool_server.opencode_server.models import (
     SessionStatus,
     SessionStatusEvent,
     SessionUpdatedEvent,
+    StepFinishPart,
     StepStartPart,
     SubtaskPartInput,
     TextPartInput,
@@ -46,11 +45,16 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
-from agentpool_server.opencode_server.state import QueuedAsyncPrompt
+from agentpool_server.opencode_server.status_bridge import SessionStatusBridge
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pydantic_ai import UserContent
+
+    from agentpool.common_types import PathReference
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -97,7 +101,7 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
             logger.exception("LSP warmup failed")
 
     # Fire and forget - don't block message processing
-    asyncio.create_task(warmup())
+    _warmup_task = asyncio.create_task(warmup())
 
 
 async def _maybe_generate_title(
@@ -304,11 +308,6 @@ async def _process_message_locked(  # noqa: PLR0915
         mark_busy: Whether to emit a busy transition before processing.
         mark_idle: Whether to emit an idle transition when processing completes.
     """
-    # --- Register active message task so abort_session can cancel it ---
-    current_task = asyncio.current_task()
-    if current_task is not None:
-        state.register_active_message_task(session_id, current_task)
-
     # --- Clear revert marker (mirrors opencode-native's revert.cleanup()) ---
     # When a user does /undo then sends a new message, the session.revert
     # marker must be cleared so the frontend stops filtering messages with
@@ -377,6 +376,10 @@ async def _process_message_locked(  # noqa: PLR0915
         on_file_paths=lambda paths: _warmup_lsp_for_files(state, paths),
     )
 
+    # Event adapter shares the stream adapter's context for consistent
+    # part tracking and token accumulation.
+    event_adapter = OpenCodeEventAdapter.from_stream_adapter(adapter)
+
     response_time: int | None = None
     # Per-session agent: each session has its own agent instance,
     # so no global agent_lock is needed. Same-session serialization
@@ -408,6 +411,30 @@ async def _process_message_locked(  # noqa: PLR0915
     # Ensure agent is bound to this session
     input_provider = state.ensure_input_provider(session_id)
     agent._input_provider = input_provider
+
+    # --- SessionPool integration ---
+    session_pool = state.pool.session_pool
+    if session_pool is None:
+        msg = "SessionPool not available"
+        raise RuntimeError(msg)
+
+    # Ensure session exists in SessionPool before routing
+    if session_pool.sessions.get_session(session_id) is None:
+        await session_pool.create_session(
+            session_id,
+            agent_name=request.agent or state.agent.name or "default",
+        )
+
+    # Start SessionStatusBridge (idempotent — safe to call multiple times)
+    status_bridge = SessionStatusBridge(
+        server_state=state,
+        session_id=session_id,
+        event_bus=session_pool.event_bus,
+    )
+    await status_bridge.start()
+
+    # Subscribe to EventBus BEFORE receive_request so no events are dropped
+    event_queue = await session_pool.event_bus.subscribe(session_id)
 
     try:
         request_variant = request.model.variant if request.model else None
@@ -477,48 +504,112 @@ async def _process_message_locked(  # noqa: PLR0915
                 # Keep behavior stable for OpenCode (see PR #10 review iterations).
                 logger.warning("Failed to switch model", error=str(e))
 
-        iterator = agent.run_stream(*user_prompt, session_id=session_id, input_provider=input_provider)
-        async for oc_event in adapter.process_stream(iterator):
-            await state.broadcast_event(oc_event)
+        # Route through SessionPool instead of calling agent.run_stream() directly.
+        # Events will be delivered via the EventBus subscription below.
+        run_handle = await session_pool.receive_request(
+            session_id=session_id,
+            content=user_prompt,
+            priority="when_idle",
+            input_provider=input_provider,
+        )
 
-        for oc_event in adapter.finalize():
-            await state.broadcast_event(oc_event)
+        if run_handle is not None:
+            # Consume events from EventBus and broadcast as OpenCode SSE events.
+            async def _consume_events() -> None:
+                while True:
+                    event = await event_queue.get()
+                    if event is None:
+                        break
+                    async for oc_event in event_adapter.convert_event(event):
+                        # Track StepFinishPart for finalize() suppression.
+                        if (
+                            isinstance(oc_event, PartUpdatedEvent)
+                            and isinstance(oc_event.properties.part, StepFinishPart)
+                            and oc_event.properties.part.session_id == session_id
+                        ):
+                            adapter._step_finish_emitted = True
+                        await state.broadcast_event(oc_event)
 
-        # --- Finalize assistant message ---
-        response_time = now_ms()
-        preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
-        logger.info("Response text", text_preview=preview)
-        tokens = Tokens.from_pydantic_ai(adapter.usage)
-        cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
-        msg_time = MessageTime(created=now, completed=response_time)
-        update = {"time": msg_time, "tokens": tokens, "cost": cost}
-        updated_assistant = assistant_msg.model_copy(update=update)
-        assistant_msg_with_parts.info = updated_assistant
-        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
-        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-    except (asyncio.CancelledError, TimeoutError, RunAbortedError) as exc:
-        # User cancelled the request (e.g., pressed ESC), or an external
-        # timeout (e.g. anyio.fail_after in a tool call) propagated as
-        # TimeoutError instead of CancelledError on Python 3.12+, or the
-        # agent aborted the run (e.g. question_for_user raised RunAbortedError
-        # when the user cancelled the questionnaire).
-        # All three cases require the same cleanup: finalize the assistant
-        # message with an aborted state so the TUI doesn't get stuck.
-        if isinstance(exc, asyncio.CancelledError):
-            reason = "Request cancelled by user"
-        elif isinstance(exc, RunAbortedError):
-            reason = str(exc) or "Run aborted by agent"
+            consumer_task = asyncio.create_task(_consume_events())
+            try:
+                await run_handle.complete_event.wait()
+            except asyncio.CancelledError:
+                run_handle.cancel()
+                raise
+            finally:
+                consumer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await consumer_task
+                # Drain any remaining events that were queued before cancellation.
+                while True:
+                    try:
+                        event = event_queue.get_nowait()
+                        if event is None:
+                            break
+                        async for oc_event in event_adapter.convert_event(event):
+                            if (
+                                isinstance(oc_event, PartUpdatedEvent)
+                                and isinstance(oc_event.properties.part, StepFinishPart)
+                                and oc_event.properties.part.session_id == session_id
+                            ):
+                                adapter._step_finish_emitted = True
+                            await state.broadcast_event(oc_event)
+                    except asyncio.QueueEmpty:
+                        break
+
+            # Finalize based on run outcome
+            if run_handle.status != RunStatus.failed:
+                for oc_event in adapter.finalize():
+                    await state.broadcast_event(oc_event)
+
+                # --- Finalize assistant message ---
+                response_time = now_ms()
+                preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
+                logger.info("Response text", text_preview=preview)
+                tokens = Tokens.from_pydantic_ai(adapter.usage)
+                cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
+                msg_time = MessageTime(created=now, completed=response_time)
+                update = {"time": msg_time, "tokens": tokens, "cost": cost}
+                updated_assistant = assistant_msg.model_copy(update=update)
+                assistant_msg_with_parts.info = updated_assistant
+                await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+                await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+            else:
+                # Run failed — finalize assistant message with aborted state
+                response_time = now_ms()
+                reason = "Run failed"
+                aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
+                msg_time = MessageTime(created=now, completed=response_time)
+                update = {"time": msg_time, "error": aborted_error}
+                updated_assistant = assistant_msg.model_copy(update=update)
+                assistant_msg_with_parts.info = updated_assistant
+                await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+                await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+
+                # Add the aborted assistant message to the SessionPool agent's
+                # in-memory conversation so history remains consistent.
+                sp_session = session_pool.sessions.get_session(session_id)
+                if sp_session is not None and sp_session.agent is not None:
+                    chat_msg = opencode_to_chat_message(
+                        assistant_msg_with_parts, session_id=session_id
+                    )
+                    sp_session.agent.conversation.add_chat_messages(
+                        [chat_msg], extend_last=True
+                    )
         else:
-            reason = "Request timed out"
-        logger.info(reason, session_id=session_id)
-
-        # Finalize the assistant message with aborted state.
-        # This mirrors upstream OpenCode's cleanup() in processor.ts:518
-        # and prompt.ts:637-638, 853-854. Without setting time.completed
-        # and error, the TUI's `pending` memo permanently finds this
-        # stale assistant message, causing all subsequent user messages
-        # to display as "QUEUED".
+            # Message was queued for later processing (session busy)
+            logger.info(
+                "Message queued in SessionPool for later processing",
+                session_id=session_id,
+            )
+    except asyncio.CancelledError:
+        # Propagate cancellation so caller can handle cleanup
+        raise
+    except Exception as exc:
+        # Any unexpected error during SessionPool routing
+        logger.exception("SessionPool routing failed", session_id=session_id, error=str(exc))
         response_time = now_ms()
+        reason = f"Error: {exc}"
         aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
         msg_time = MessageTime(created=now, completed=response_time)
         update = {"time": msg_time, "error": aborted_error}
@@ -526,27 +617,13 @@ async def _process_message_locked(  # noqa: PLR0915
         assistant_msg_with_parts.info = updated_assistant
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-
-        # Add the aborted assistant message to the agent's in-memory conversation.
-        # Without this, the agent's conversation.chat_messages only has the user
-        # message (added by _run_stream_once at base_agent.py:784) but not the
-        # assistant response. On the next message, get_or_load_session() skips
-        # reloading because agent.session_id matches, so the LLM receives
-        # incomplete history — it doesn't know it already (partially) responded.
-        #
-        # This is safe because the agent is a per-session instance — concurrent
-        # sessions each have their own agent, so there is no history contamination
-        # between sessions.
-        chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
-        agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
-        # --- Unregister active message task ---
-        state.unregister_active_message_task(session_id)
+        # --- Unsubscribe from EventBus ---
+        await session_pool.event_bus.unsubscribe(session_id, event_queue)
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:
             await state.mark_session_idle(session_id)
-            await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
         # --- Update session timestamp ---
         if response_time is not None:
             session = state.sessions[session_id]
@@ -556,65 +633,6 @@ async def _process_message_locked(  # noqa: PLR0915
                 }
             )
     return assistant_msg_with_parts
-
-
-async def _ensure_async_prompt_worker(
-    session_id: str,
-    state: StateDep,
-    *,
-    mark_busy: bool,
-) -> None:
-    """Start the per-session async prompt worker when queued work exists."""
-    if not state.has_pending_async_prompts(session_id):
-        return
-    if state.has_session_background_task(session_id):
-        return
-
-    if mark_busy:
-        busy = SessionStatus(type="busy")
-        state.session_status[session_id] = busy
-        await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
-
-    state.create_background_task(
-        _run_async_prompt_queue(session_id, state),
-        name=f"process_message_{session_id}",
-    )
-
-
-async def _run_async_prompt_queue(session_id: str, state: StateDep) -> None:
-    """Drain queued async prompts for a session in FIFO order."""
-    lock = state.get_session_lock(session_id)
-    try:
-        while True:
-            async with lock:
-                queued_prompt = state.pop_next_async_prompt(session_id)
-                if queued_prompt is None:
-                    await state.mark_session_idle(session_id)
-                    return
-
-                await _process_message_locked(
-                    session_id,
-                    queued_prompt.request,
-                    state,
-                    queued_prompt.user_msg_id,
-                    queued_prompt.user_msg_with_parts,
-                    mark_busy=False,
-                    mark_idle=False,
-                )
-
-                if state.has_pending_async_prompts(session_id):
-                    await state.emit_session_turn_complete(session_id)
-                    continue
-
-                await state.mark_session_idle(session_id)
-                return
-    except asyncio.CancelledError:
-        logger.info("Async prompt worker cancelled", session_id=session_id)
-        raise
-    except Exception:
-        logger.exception("Async prompt worker failed", session_id=session_id)
-        await state.mark_session_idle(session_id)
-        raise
 
 
 @router.post("/message")
@@ -638,8 +656,8 @@ async def send_message(
 async def send_message_async(session_id: str, request: MessageRequest, state: StateDep) -> None:
     """Send a message asynchronously without waiting for response.
 
-    Starts the agent processing in the background and returns immediately.
-    If the session is busy, the message is queued in server state and
+    Routes the prompt through the SessionPool and returns immediately.
+    If the session is busy, the message is queued by the SessionPool and
     processed after the current run completes.
 
     Client should listen to SSE events to get updates.
@@ -690,29 +708,30 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
-    # 2. Atomically queue work, then start a single per-session worker if needed.
-    lock = state.get_session_lock(session_id)
-    async with lock:
-        state.enqueue_async_prompt(
-            session_id,
-            QueuedAsyncPrompt(
-                request=request,
-                user_msg_id=user_msg_id,
-                user_msg_with_parts=user_msg_with_parts,
-            ),
+    # 2. Route through SessionPool instead of server-owned queue
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        sp_session = session_pool.sessions.get_session(session_id)
+        if sp_session is None:
+            await session_pool.create_session(
+                session_id,
+                agent_name=request.agent or state.agent.name or "default",
+            )
+
+        user_prompt = await extract_user_prompt_from_parts(
+            request.parts,
+            fs=state.fs,
+            tools=state.agent.tools,
+        )
+        input_provider = state.ensure_input_provider(session_id)
+
+        await session_pool.receive_request(
+            session_id=session_id,
+            content=user_prompt,
+            priority="when_idle",
+            input_provider=input_provider,
         )
 
-        current_status = state.session_status.get(session_id)
-        mark_busy = current_status is None or current_status.type != "busy"
-        if not mark_busy:
-            logger.info(
-                "Session became busy before async dispatch, keeping prompt in server queue",
-                session_id=session_id,
-            )
-        else:
-            logger.info("Session idle, starting background task", session_id=session_id)
-
-        await _ensure_async_prompt_worker(session_id, state, mark_busy=mark_busy)
 
 
 @router.get("/message/{message_id}")
