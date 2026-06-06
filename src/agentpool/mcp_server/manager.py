@@ -85,7 +85,7 @@ class MCPManager:
 
     async def __aenter__(self) -> Self:
         try:
-            if tasks := [self.setup_server(server) for server in self.servers if not server.lazy]:
+            if tasks := [self.setup_server(server) for server in self.servers]:
                 await asyncio.gather(*tasks)
         except Exception as e:
             await self.__aexit__(type(e), e, e.__traceback__)

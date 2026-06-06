@@ -13,7 +13,6 @@ Comprehensive tests covering:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -153,8 +152,9 @@ async def test_lazy_server_skipped_during_manager_enter(
         manager = MCPManager(servers=[lazy_stdio_config], _warn=False)
 
         async with manager:
-            # Lazy server should NOT have been set up -> no providers
-            assert len(manager.providers) == 0
+            # Lazy server should have been set up (provider created) but not connected
+            assert len(manager.providers) == 1
+            assert not manager.providers[0]._client_connected
 
     # Client's __aenter__ should never be called for lazy server
     mock_mcp_client.__aenter__.assert_not_called()
@@ -296,9 +296,12 @@ async def test_mixed_lazy_and_eager_servers(
         )
 
         async with manager:
-            # Only eager server should have a provider
-            assert len(manager.providers) == 1
-            assert manager.providers[0].server.name == "eager_server"
+            # Both servers should have providers, but only eager is connected
+            assert len(manager.providers) == 2
+            eager_provider = next(p for p in manager.providers if p.server.name == "eager_server")
+            lazy_provider = next(p for p in manager.providers if p.server.name == "lazy_server")
+            assert eager_provider._client_connected is True
+            assert lazy_provider._client_connected is False
             assert manager.servers[0].lazy is False
             assert manager.servers[1].lazy is True
 

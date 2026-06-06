@@ -74,6 +74,7 @@ class MCPResourceProvider(ResourceProvider):
             transport=transport,
         )
         self._client_connected = False
+        self._connect_lock = asyncio.Lock()
 
     def as_capability(self) -> AbstractCapability | None:
         """Return a pydantic-ai capability for this provider.
@@ -129,8 +130,10 @@ class MCPResourceProvider(ResourceProvider):
     async def _ensure_client_connected(self) -> None:
         """Ensure the MCP client is connected, entering it lazily if needed."""
         if self.server.lazy and not self._client_connected:
-            await self.exit_stack.enter_async_context(self.client)
-            self._client_connected = True
+            async with self._connect_lock:
+                if not self._client_connected:
+                    await self.exit_stack.enter_async_context(self.client)
+                    self._client_connected = True
 
     async def __aexit__(
         self,
