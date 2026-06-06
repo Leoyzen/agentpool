@@ -169,7 +169,7 @@ async def test_inject_prompt_from_different_task_with_session_pool(
     )
 
     # Clean up
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
 
@@ -216,7 +216,7 @@ async def test_queue_prompt_from_different_task_with_session_pool(
         "the active run's injection_manager via SessionPool fallback."
     )
 
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
 
@@ -264,7 +264,7 @@ async def test_has_queued_prompts_from_different_task_with_session_pool(
         "and return True when prompts are queued."
     )
 
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
 
@@ -312,7 +312,7 @@ async def test_has_pending_injections_from_different_task_with_session_pool(
         "and return True when injections are pending."
     )
 
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
 
@@ -363,7 +363,7 @@ async def test_clear_queued_prompts_from_different_task_with_session_pool(
         "run's injection_manager via SessionPool fallback."
     )
 
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
 
@@ -416,7 +416,7 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
         "Injection from different task must reach injection_manager via SessionPool fallback"
     )
 
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)
 
@@ -532,6 +532,6 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
         "so the hook manager can consume it"
     )
 
-    await slow_agent.interrupt()
+    await slow_agent.interrupt(session_id="test-session")
     with suppress(asyncio.CancelledError):
         await asyncio.wait_for(task, timeout=3.0)

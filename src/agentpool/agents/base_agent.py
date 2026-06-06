@@ -159,7 +159,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     - conversation: MessageHistory for conversation state
     - event_handler: MultiEventHandler for event distribution
     - _event_queue: Queue for streaming events
-    - _input_provider: Provider for user input/confirmations
+    - _input_provider: Provider for user input/confirmations (deprecated: use SessionState.input_provider)
     - env: ExecutionEnvironment for running code/commands
     - context property: Returns NodeContext for the agent
 
@@ -270,14 +270,21 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             case _ as unreachable:
                 assert_never(unreachable)
         self._input_provider = input_provider
+        if input_provider is not None:
+            warnings.warn(
+                "BaseAgent._input_provider is deprecated. "
+                "Use SessionState.input_provider instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._output_type: type[TResult] = output_type
         self.tools = ToolManager(_warn=False)
         handlers = resolve_event_handlers(event_handlers)
         self.event_handler: MultiEventHandler[IndividualEventHandler] = MultiEventHandler(handlers)
         self.hooks = hooks
         self._cancelled = False
-        self._active_run_ctx: AgentRunContext | None = None
-        """Foreground run context for cross-task access (legacy path without SessionPool)."""
+        # _background_run_ctx is used only for the background task's internal state.
+        # It is intentionally NOT used as a fallback in get_active_run_context().
         self._background_run_ctx: AgentRunContext | None = None
         # Deferred initialization support - subclasses set True in __aenter__,
         # override ensure_initialized() to do actual connection
@@ -593,21 +600,25 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """Get active run context from SessionPool for cross-task access.
 
         Args:
-            session_id: Optional session ID to look up. Uses the provided
-                value directly instead of instance state.
+            session_id: Optional session ID to look up. Falls back to
+                self._events.session_id if not provided.
 
         Returns:
             The session's active run context, or None if not found.
         """
-        if self.agent_pool is not None and session_id is not None:
+        if self.agent_pool is not None:
             session_pool = self.agent_pool.session_pool
             if session_pool is None:
                 return None
-            session = session_pool.sessions.get_session(session_id)
-            if session is not None and session.current_run_id is not None:
-                run_handle = session_pool.get_run(session.current_run_id)
-                if run_handle is not None and not run_handle.run_ctx.completed:
-                    return run_handle.run_ctx
+            effective_session_id = session_id or getattr(self._events, "session_id", None)
+            if effective_session_id is not None:
+                session = session_pool.sessions.get_session(effective_session_id)
+                if session is not None and session.current_run_id is not None:
+                    run_handle = session_pool.get_run(session.current_run_id)
+                    if run_handle is not None:
+                        run_ctx = run_handle.run_ctx
+                        if run_ctx is not None and not run_ctx.completed:
+                            return run_ctx
         return None
 
     def get_active_run_context(self, session_id: str | None = None) -> AgentRunContext | None:
@@ -617,9 +628,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         turn is active and access the run context without relying on
         private attributes.
 
-        Tries _current_run_ctx_var (ContextVar) first, then falls back to
-        SessionPool's session.current_run_id + get_run() for cross-task access, then
-        _background_run_ctx.
+        Uses two-level fallback:
+        1. SessionPool lookup when pooled (via session_id or agent_pool)
+        2. ContextVar (_current_run_ctx_var) for standalone execution
 
         Args:
             session_id: Optional session ID for SessionPool lookup.
@@ -629,17 +640,22 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns:
             The active run context, or None if no turn is running.
         """
+        # Level 1: SessionPool lookup when pooled and session has active run
+        if self.agent_pool is not None:
+            session_pool = self.agent_pool.session_pool
+            if session_pool is not None:
+                effective_session_id = session_id or getattr(self._events, "session_id", None)
+                if effective_session_id is not None:
+                    session = session_pool.sessions.get_session(effective_session_id)
+                    if session is not None and session.current_run_id is not None:
+                        run_handle = session_pool.get_run(session.current_run_id)
+                        if run_handle is not None and not run_handle.run_ctx.completed:
+                            return run_handle.run_ctx
+                # No active run in SessionPool for this session — fall through to ContextVar
+        # Level 2: ContextVar for standalone execution
         run_ctx = _current_run_ctx_var.get()
         if run_ctx is not None and not run_ctx.completed:
             return run_ctx
-        # Instance-level fallback for cross-task access (legacy path without SessionPool)
-        if self._active_run_ctx is not None and not self._active_run_ctx.completed:
-            return self._active_run_ctx
-        run_ctx = self._get_session_run_ctx(session_id=session_id)
-        if run_ctx is not None:
-            return run_ctx
-        if self._background_run_ctx is not None and not self._background_run_ctx.completed:
-            return self._background_run_ctx
         return None
 
     def is_turn_active(self) -> bool:
@@ -778,12 +794,13 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # No active run context — delegate to SessionPool for auto-resume
         effective_session_id = session_id or (run_ctx.session_id if run_ctx else None)
         if self.agent_pool is not None and effective_session_id is not None:
-            session_pool = self.agent_pool.session_pool
-            assert session_pool is not None
+            _session_pool = self.agent_pool.session_pool
+            if _session_pool is None:
+                return
             # Fire-and-forget: delegate to SessionPool for auto-resume.
             # Use task_manager to prevent GC of the task mid-execution.
             self.task_manager.fire_and_forget(
-                session_pool.inject_prompt(effective_session_id, message)
+                _session_pool.inject_prompt(effective_session_id, message)
             )
             return
 
@@ -934,7 +951,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
-        self._active_run_ctx = run_ctx
 
         # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
         # token is initialized so finally always has a bound name; reset only if set() succeeded.
@@ -1003,7 +1019,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     _current_run_ctx_var.reset(token)
             if run_ctx.injection_manager is not None:
                 run_ctx.injection_manager.clear()
-            self._active_run_ctx = None
 
     async def _run_stream_once(
         self,
@@ -1395,10 +1410,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             effective_run_ctx = _current_run_ctx_var.get()
         if effective_run_ctx is None:
             effective_run_ctx = self._get_session_run_ctx(session_id=session_id)
-        # Fallback to instance-level active run context for cross-task access
-        # when SessionPool is not available (e.g. standalone agent usage).
-        if effective_run_ctx is None:
-            effective_run_ctx = self._active_run_ctx
         if effective_run_ctx:
             effective_run_ctx.cancelled = True
         if self._background_run_ctx:

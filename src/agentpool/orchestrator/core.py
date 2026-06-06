@@ -25,6 +25,7 @@ from agentpool.sessions.models import SessionData
 
 if TYPE_CHECKING:
     from agentpool.agents.base_agent import BaseAgent
+    from agentpool.agents.native_agent import Agent
     from agentpool.delegation import AgentPool
     from agentpool.sessions.store import SessionStore
 
@@ -474,8 +475,9 @@ class SessionController:
                         session_id=session_id,
                         limit=self._mcp_max_processes,
                     )
+                    # Store input_provider on session, NOT on shared agent
                     if input_provider is not None:
-                        base_agent._input_provider = input_provider
+                        session.input_provider = input_provider
                     self._session_agents[session_id] = base_agent
                     session.agent = base_agent
                     return base_agent
@@ -485,7 +487,7 @@ class SessionController:
                 from agentpool_config.context import ConfigContextManager
 
                 with ConfigContextManager(self.pool._config_file_path):
-                    agent = cfg.get_agent(
+                    agent: Agent[Any, Any] = cfg.get_agent(
                         input_provider=input_provider,
                         pool=self.pool,
                     )
@@ -508,8 +510,9 @@ class SessionController:
                 agent_name=agent_name,
                 agent_type=type(base_agent).__name__,
             )
+            # Store input_provider on session, NOT on shared agent
             if input_provider is not None:
-                base_agent._input_provider = input_provider
+                session.input_provider = input_provider
             self._session_agents[session_id] = base_agent
             session.agent = base_agent
             return base_agent
@@ -700,9 +703,13 @@ class SessionController:
                         self._turn_runner.run_loop(session_id, content, **kwargs),
                     )
                     run_handle.start(task)
-                    task.add_done_callback(
-                        lambda _t, rid=run_handle.run_id: self._cleanup_run(rid),
-                    )
+
+                    def _cleanup_on_done(
+                        _t: asyncio.Task[None], rid: str = run_handle.run_id
+                    ) -> None:
+                        self._cleanup_run(rid)
+
+                    task.add_done_callback(_cleanup_on_done)
                 return run_handle
 
         # Session has an active run - delegate after releasing the request lock
@@ -929,13 +936,37 @@ class TurnRunner:
         _session = self.sessions.get_session(session_id)
 
         from agentpool.agents.base_agent import _current_run_ctx_var
-        from agentpool.agents.context import AgentRunContext
+        from agentpool.orchestrator.run import RunHandle, RunStatus
 
         run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
-        run_ctx = AgentRunContext(
-            deps=kwargs.get("deps"),
-            run_id=run_id_override or uuid.uuid4().hex,
-        )
+        # If no pending run_id, check if session already has a current_run_id
+        # (e.g., manually created RunHandle in tests)
+        if run_id_override is None and _session is not None and _session.current_run_id is not None:
+            run_id_override = _session.current_run_id
+        run_id = run_id_override or uuid.uuid4().hex
+
+        # Get or create RunHandle (create if called directly, not via receive_request)
+        run_handle = self.sessions._runs.get(run_id)
+        created_run_handle = False
+        if run_handle is None:
+            agent_type = (
+                _session.metadata.get("agent_type", "unknown")
+                if _session is not None
+                else "unknown"
+            )
+            run_handle = RunHandle(
+                run_id=run_id,
+                session_id=session_id,
+                agent_type=agent_type,
+            )
+            self.sessions._runs[run_id] = run_handle
+            created_run_handle = True
+        run_handle.start(asyncio.current_task())
+
+        # Use RunHandle's run_ctx as the authoritative context
+        run_ctx = run_handle.run_ctx
+        run_ctx.deps = kwargs.get("deps")
+        run_ctx.run_id = run_id
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()
         run_ctx.event_bus = self.event_bus
@@ -943,7 +974,7 @@ class TurnRunner:
         _current_run_ctx_var.set(run_ctx)
 
         if _session is not None and _session.current_run_id is None:
-            _session.current_run_id = run_ctx.run_id
+            _session.current_run_id = run_id
         self._runs[run_ctx.run_id] = run_ctx
 
         # Consume events from run_ctx.event_queue and publish to EventBus.
@@ -1000,10 +1031,11 @@ class TurnRunner:
                         await self.event_bus.publish(session_id, event)
                     run_ctx.injection_manager.flush_pending_to_queue()
             except Exception as exc:
-                if _session is not None and _session.current_run_id is not None:
-                    run_handle = self.sessions._runs.get(_session.current_run_id)
-                    if run_handle is not None:
-                        run_handle.fail(exception=exc, event_bus=self.event_bus)
+                if run_handle is not None and run_handle.status not in (
+                    RunStatus.completed,
+                    RunStatus.failed,
+                ):
+                    run_handle.fail(exception=exc, event_bus=self.event_bus)
                 raise
         finally:
             # CRITICAL: Mark run as completed BEFORE any await so that
@@ -1030,6 +1062,13 @@ class TurnRunner:
             self._turn_timings.append((turn_start, turn_end))
             if len(self._turn_timings) > self._max_turn_timing_history:
                 self._turn_timings.pop(0)
+
+            # Clean up RunHandle if we created it
+            if created_run_handle and run_handle is not None:
+                if run_handle.status not in (RunStatus.completed, RunStatus.failed):
+                    run_handle.complete()
+                run_handle.complete_event.set()
+                self.sessions._runs.pop(run_id, None)
 
     async def run_turn(
         self,

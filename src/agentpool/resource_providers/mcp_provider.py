@@ -64,6 +64,7 @@ class MCPResourceProvider(ResourceProvider):
         self._prompts_cache: list[MCPClientPrompt] | None = None
         self._resources_cache: list[ResourceInfo] | None = None
         self._skills_cache: list[Skill] | None = None
+        self._client_connected = False
         self.client = MCPClient(
             config=self.server,
             sampling_callback=self._sampling_callback,
@@ -115,8 +116,9 @@ class MCPResourceProvider(ResourceProvider):
                 assert_never(unreachable)  # ty: ignore[type-assertion-failure]
 
     async def __aenter__(self) -> Self:
-        if self.server.lazy:
+        if getattr(self.server, "lazy", False):
             return self
+
         try:
             await self.exit_stack.enter_async_context(self.client)
             self._client_connected = True
@@ -128,12 +130,18 @@ class MCPResourceProvider(ResourceProvider):
         return self
 
     async def _ensure_client_connected(self) -> None:
-        """Ensure the MCP client is connected, entering it lazily if needed."""
-        if self.server.lazy and not self._client_connected:
-            async with self._connect_lock:
-                if not self._client_connected:
-                    await self.exit_stack.enter_async_context(self.client)
-                    self._client_connected = True
+        """Ensure the MCP client is connected, entering the context if needed.
+
+        Idempotent: safe to call multiple times.
+        """
+        if self._client_connected:
+            return
+
+        async with self._connect_lock:
+            if self._client_connected:
+                return
+            await self.exit_stack.enter_async_context(self.client)
+            self._client_connected = True
 
     async def __aexit__(
         self,

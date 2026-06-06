@@ -63,14 +63,22 @@ def mock_client() -> MagicMock:
 
 
 @pytest.fixture
+def mock_session_manager() -> MagicMock:
+    """Return a mocked ACPSessionManager."""
+    return MagicMock()
+
+
+@pytest.fixture
 def handler(
     mock_pool: MagicMock,
+    mock_session_manager: MagicMock,
     mock_event_converter: MagicMock,
     mock_client: MagicMock,
 ) -> ACPProtocolHandler:
     """Return an ACPProtocolHandler backed by mocked dependencies."""
     return ACPProtocolHandler(
         agent_pool=mock_pool,
+        session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
         client_capabilities=None,
@@ -80,6 +88,7 @@ def handler(
 @pytest.fixture
 def handler_with_elicitation(
     mock_pool: MagicMock,
+    mock_session_manager: MagicMock,
     mock_event_converter: MagicMock,
     mock_client: MagicMock,
 ) -> ACPProtocolHandler:
@@ -88,6 +97,7 @@ def handler_with_elicitation(
 
     return ACPProtocolHandler(
         agent_pool=mock_pool,
+        session_manager=mock_session_manager,
         event_converter=mock_event_converter,
         client=mock_client,
         client_capabilities=ClientCapabilities(
@@ -187,6 +197,7 @@ class TestHandlePromptInputProvider:
         mock_pool.main_agent.metadata = {"use_session_pool": False}
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
+            session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
         )
@@ -208,6 +219,7 @@ class TestHandlePromptInputProvider:
         mock_pool.session_pool = None
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
+            session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
         )
@@ -262,6 +274,7 @@ class TestEventConsumerConverterFlag:
 
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
+            session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
             client_capabilities=ClientCapabilities(turn_complete=True),
@@ -320,6 +333,7 @@ class TestHandlePromptBlockingBehavior:
 
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
+            session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
             client_capabilities=ClientCapabilities(turn_complete=True),
@@ -426,6 +440,7 @@ class TestHandlePromptBlockingBehavior:
 
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
+            session_manager=MagicMock(),
             event_converter=mock_event_converter,
             client=mock_client,
             client_capabilities=None,

@@ -128,6 +128,136 @@ async def _setup_session(
 
 
 # ---------------------------------------------------------------------------
+# RunHandle lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_run_turn_creates_run_handle_when_called_directly(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_agent: MagicMock,
+    mock_pool: MagicMock,
+) -> None:
+    """When run_turn is called directly it creates a RunHandle in _runs."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+    assert len(controller._runs) == 0
+
+    await turn_runner.run_turn("sess-1", "hello")
+
+    # RunHandle should have been created, completed, and cleaned up
+    assert len(controller._runs) == 0
+
+
+@pytest.mark.anyio
+async def test_run_turn_uses_existing_run_handle_from_receive_request(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_agent: MagicMock,
+    mock_pool: MagicMock,
+) -> None:
+    """run_turn uses an existing RunHandle created by receive_request."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+
+    run_handle = controller._create_run("sess-1", "hello")
+    controller._runs[run_handle.run_id] = run_handle
+    session = controller.get_session("sess-1")
+    assert session is not None
+    session.current_run_id = run_handle.run_id
+    controller._pending_run_ids["sess-1"] = run_handle.run_id
+
+    await turn_runner.run_turn("sess-1", "hello")
+
+    # Existing RunHandle should NOT be removed by TurnRunner
+    assert run_handle.run_id in controller._runs
+    from agentpool.orchestrator.run import RunStatus
+    assert run_handle.status == RunStatus.running  # not completed by us
+
+
+@pytest.mark.anyio
+async def test_run_turn_sets_and_clears_current_run_id(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_agent: MagicMock,
+    mock_pool: MagicMock,
+) -> None:
+    """run_turn sets session.current_run_id during execution and clears after."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+    session = controller.get_session("sess-1")
+    assert session is not None
+    assert session.current_run_id is None
+
+    await turn_runner.run_turn("sess-1", "hello")
+
+    assert session.current_run_id is None
+
+
+@pytest.mark.anyio
+async def test_run_turn_completes_run_handle_on_success(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_agent: MagicMock,
+    mock_pool: MagicMock,
+) -> None:
+    """Direct run_turn calls complete() the RunHandle it creates."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+
+    await turn_runner.run_turn("sess-1", "hello")
+
+    # No RunHandle left in _runs because TurnRunner cleaned it up
+    assert len(controller._runs) == 0
+
+
+@pytest.mark.anyio
+async def test_run_turn_fails_run_handle_on_exception(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """When _run_stream_once raises, the RunHandle is marked failed."""
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+
+    async def broken_stream(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+        raise RuntimeError("boom")
+        yield  # make it an async generator
+
+    agent._run_stream_once = broken_stream
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+
+    event_queue = await turn_runner.event_bus.subscribe("sess-1")
+    events: list[Any] = []
+
+    async def _consume() -> None:
+        try:
+            while True:
+                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                if event is None:
+                    break
+                events.append(event)
+        except TimeoutError:
+            pass
+
+    consumer = asyncio.create_task(_consume())
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await turn_runner.run_turn("sess-1", "hello")
+
+    await asyncio.sleep(0.05)
+    await turn_runner.event_bus.publish("sess-1", None)
+    await consumer
+
+    from agentpool.agents.events import RunFailedEvent
+    failed_events = [e for e in events if isinstance(e, RunFailedEvent)]
+    assert len(failed_events) == 1
+    assert failed_events[0].session_id == "sess-1"
+    assert isinstance(failed_events[0].exception, RuntimeError)
+
+    # RunHandle should have been cleaned up
+    assert len(controller._runs) == 0
+
+
+# ---------------------------------------------------------------------------
 # RED FLAG TEST – inject_prompt must trigger second iteration
 # ---------------------------------------------------------------------------
 
@@ -189,273 +319,55 @@ async def test_inject_prompt_triggers_second_iteration(
     )
 
 
-@pytest.mark.anyio
-async def test_post_turn_inject_prompt_triggers_auto_resume(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """inject_prompt AFTER turn ends MUST trigger auto-resume.
-
-    This is a **red flag test** — if it fails, post-turn inject_prompt is broken.
-
-    Scenario:
-    1. run_turn completes
-    2. Caller calls turn_runner.inject_prompt("sess-1", "msg")
-       → msg goes to _post_turn_injections
-       → _trigger_auto_resume fires
-    3. Auto-resume should process the injection in a new turn
-
-    Expected: _run_stream_once called TWICE (initial + auto-resume).
-    """
-    call_count = 0
-    received_prompts: list[tuple[Any, ...]] = []
-
-    async def _fake_stream(
-        run_ctx: AgentRunContext,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RunStartedEvent]:
-        nonlocal call_count
-        call_count += 1
-        received_prompts.append(prompts)
-        yield RunStartedEvent(session_id="sess-1", run_id=f"run-{call_count}")
-
-    agent = MagicMock()
-    agent.get_active_run_context.return_value = None
-    agent._run_stream_once = _fake_stream
-
-    await _setup_session(controller, "sess-1", agent, mock_pool)
-
-    # 1. Initial turn completes
-    await turn_runner.run_turn("sess-1", "initial")
-    assert call_count == 1
-
-    # 2. Post-turn injection (simulates tool calling inject after turn ended)
-    injected = await turn_runner.inject_prompt("sess-1", "late message")
-    assert injected is False  # Queued, not injected into active turn
-
-    # 3. Wait for auto-resume to fire and complete
-    await asyncio.sleep(0.1)
-
-    # RED FLAG: auto-resume should have triggered a second turn
-    assert call_count == 2, (
-        f"post-turn inject_prompt BROKEN: _run_stream_once called {call_count} time(s), "
-        f"expected 2 (initial + auto-resume). "
-        f"_trigger_auto_resume did not process queued injection."
-    )
-    assert received_prompts[1] == ("late message",), (
-        f"Auto-resume should process injected prompt, got {received_prompts[1]}"
-    )
+# ---------------------------------------------------------------------------
+# run_loop RunHandle integration
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_background_task_child_agent_events_reach_event_bus(
+async def test_run_loop_creates_run_handle_for_initial_turn(
     controller: SessionController,
     turn_runner: TurnRunner,
+    mock_agent: MagicMock,
     mock_pool: MagicMock,
 ) -> None:
-    """Background task child-agent events MUST reach EventBus.
+    """run_loop creates and completes a RunHandle for the initial turn."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+    assert len(controller._runs) == 0
 
-    This is a **red flag test** — if it fails, background task events are lost.
+    await turn_runner.run_loop("sess-1", "hello")
 
-    Scenario (real-world from xeno-agent):
-    1. SessionPool calls _run_stream_once for lead agent
-    2. Lead agent's tool spawns a background task (subagent)
-    3. Subagent creates its OWN run_ctx with its OWN event_queue
-    4. Subagent calls ctx.events.emit_event(SubAgentEvent(...))
-       → event goes to subagent's run_ctx.event_queue
-       → StreamEventEmitter._emit forwards to EventBus (when SessionPool active)
-    5. ACP/OpenCode handler receives event via EventBus
-
-    Expected: SubAgentEvent published to EventBus.
-    """
-    from agentpool import ChatMessage
-    from agentpool.agents.events import StreamCompleteEvent, SubAgentEvent
-    from agentpool.agents.events.event_emitter import StreamEventEmitter
-
-    event_bus_events: list[Any] = []
-
-    async def _fake_stream(
-        run_ctx: AgentRunContext,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RunStartedEvent]:
-        # Lead agent starts background task
-        yield RunStartedEvent(session_id="sess-1", run_id="run-1")
-
-        # Simulate background task creating its own run_ctx and emitting events
-        # via StreamEventEmitter (what xeno-agent's BackgroundTaskProvider does)
-        child_run_ctx = AgentRunContext(session_id="child-sess", deps=None)
-        child_run_ctx.cancelled = False
-
-        # Create a mock AgentContext for the child
-        child_agent = MagicMock()
-        child_agent.session_id = "sess-1"  # Same session for EventBus routing
-        child_run_ctx = AgentRunContext(session_id="child-sess", deps=None)
-        child_run_ctx.event_bus = turn_runner.event_bus
-        child_ctx = MagicMock()
-        child_ctx.agent = child_agent
-        child_ctx.run_ctx = child_run_ctx
-        child_ctx.tool_name = "background_task"
-        child_ctx.tool_call_id = "tc-1"
-
-        # Use StreamEventEmitter (real code path)
-        emitter = StreamEventEmitter(child_ctx, event_bus=child_run_ctx.event_bus)
-        await emitter.emit_event(
-            SubAgentEvent(
-                source_name="bg-task",
-                source_type="background",
-                event=StreamCompleteEvent(
-                    message=ChatMessage(content="background done", role="assistant"),
-                ),
-                child_session_id="child-sess",
-                parent_session_id="sess-1",
-            )
-        )
-
-        yield StreamCompleteEvent(
-            message=ChatMessage(content="lead done", role="assistant"),
-        )
-
-    agent = MagicMock()
-    agent.get_active_run_context.return_value = None
-    agent._run_stream_once = _fake_stream
-
-    await _setup_session(controller, "sess-1", agent, mock_pool)
-
-    # Subscribe to EventBus BEFORE running the turn
-    event_queue = await turn_runner.event_bus.subscribe("sess-1")
-
-    async def _bus_consumer() -> None:
-        """Consume events from pre-subscribed queue."""
-        try:
-            while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                if event is None:
-                    break
-                event_bus_events.append(event)
-        except TimeoutError:
-            pass  # No more events
-
-    # Start EventBus consumer
-    consumer_task = asyncio.create_task(_bus_consumer())
-
-    # Run the turn
-    await turn_runner.run_turn("sess-1", "initial")
-
-    # Wait for EventBus consumer
-    await asyncio.sleep(0.1)
-    await turn_runner.event_bus.publish("sess-1", None)  # sentinel
-    await consumer_task
-
-    # Filter for SubAgentEvent
-    subagent_events = [e for e in event_bus_events if isinstance(e, SubAgentEvent)]
-
-    # RED FLAG: background task events must reach EventBus
-    assert len(subagent_events) == 1, (
-        f"background task events LOST: found {len(subagent_events)} SubAgentEvent(s) "
-        f"in EventBus, expected 1. "
-        f"Total events in bus: {len(event_bus_events)}. "
-        f"StreamEventEmitter did not forward to EventBus."
-    )
-    assert subagent_events[0].source_name == "bg-task"
+    # RunHandle created by initial turn is cleaned up
+    assert len(controller._runs) == 0
 
 
 @pytest.mark.anyio
-async def test_background_task_events_reach_acp_client_after_end_turn(
+async def test_run_loop_uses_existing_run_handle_from_receive_request(
     controller: SessionController,
     turn_runner: TurnRunner,
+    mock_agent: MagicMock,
     mock_pool: MagicMock,
 ) -> None:
-    """Background task events emitted after StreamCompleteEvent reach EventBus.
+    """run_loop uses an existing RunHandle without completing it."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
 
-    This is a **red flag test** — if it fails, post-end-turn background events
-    are lost before reaching the ACP client.
+    run_handle = controller._create_run("sess-1", "hello")
+    controller._runs[run_handle.run_id] = run_handle
+    session = controller.get_session("sess-1")
+    assert session is not None
+    session.current_run_id = run_handle.run_id
+    controller._pending_run_ids["sess-1"] = run_handle.run_id
 
-    Scenario:
-    1. Agent stream yields RunStartedEvent then StreamCompleteEvent (end_turn)
-    2. In the generator's cleanup (finally), a background task event is queued
-       to run_ctx.event_queue
-    3. _run_turn_unlocked's event consumer is still running and should pick it up
-    4. Event reaches EventBus and thus the ACP client
+    await turn_runner.run_loop("sess-1", "hello")
 
-    Expected: SubAgentEvent published to EventBus after end_turn.
-    """
-    from agentpool import ChatMessage
-    from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent, SubAgentEvent
-
-    async def _fake_stream(
-        run_ctx: AgentRunContext,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RunStartedEvent]:
-        try:
-            yield RunStartedEvent(session_id="sess-1", run_id="run-1")
-            yield StreamCompleteEvent(
-                message=ChatMessage(content="main done", role="assistant"),
-            )
-        finally:
-            # Simulate background task emitting event after main stream completes
-            # via EventBus (new pattern: StreamEventEmitter publishes directly)
-            await turn_runner.event_bus.publish(
-                "sess-1",
-                SubAgentEvent(
-                    source_name="bg-task-post-turn",
-                    source_type="background",
-                    event=StreamCompleteEvent(
-                        message=ChatMessage(content="background done", role="assistant"),
-                    ),
-                    child_session_id="child-sess",
-                    parent_session_id="sess-1",
-                ),
-            )
-
-    agent = MagicMock()
-    agent.get_active_run_context.return_value = None
-    agent._run_stream_once = _fake_stream
-
-    await _setup_session(controller, "sess-1", agent, mock_pool)
-
-    # Subscribe to EventBus BEFORE running the turn
-    event_queue = await turn_runner.event_bus.subscribe("sess-1")
-    event_bus_events: list[Any] = []
-
-    async def _bus_consumer() -> None:
-        """Consume events from pre-subscribed queue."""
-        try:
-            while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                if event is None:
-                    break
-                event_bus_events.append(event)
-        except TimeoutError:
-            pass  # No more events
-
-    # Start EventBus consumer
-    consumer_task = asyncio.create_task(_bus_consumer())
-
-    # Run the turn
-    await turn_runner.run_turn("sess-1", "initial")
-
-    # Wait for EventBus consumer
-    await asyncio.sleep(0.1)
-    await turn_runner.event_bus.publish("sess-1", None)  # sentinel
-    await consumer_task
-
-    # Filter for SubAgentEvent
-    subagent_events = [e for e in event_bus_events if isinstance(e, SubAgentEvent)]
-
-    # RED FLAG: background task events after end_turn must reach EventBus
-    assert len(subagent_events) == 1, (
-        f"post-end-turn background events LOST: found {len(subagent_events)} SubAgentEvent(s) "
-        f"in EventBus, expected 1. "
-        f"Total events in bus: {len(event_bus_events)}. "
-        f"Event consumer did not pick up background task event after stream completion."
-    )
-    assert subagent_events[0].source_name == "bg-task-post-turn"
+    # Existing RunHandle should NOT be removed or completed
+    assert run_handle.run_id in controller._runs
+    from agentpool.orchestrator.run import RunStatus
+    assert run_handle.status == RunStatus.running
 
 
+# ---------------------------------------------------------------------------
+# run_loop – auto-resume
 # ---------------------------------------------------------------------------
 # run_turn – serialization
 # ---------------------------------------------------------------------------

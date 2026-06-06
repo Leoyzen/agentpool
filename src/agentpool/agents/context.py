@@ -117,6 +117,22 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         provider = self.get_input_provider()
         return await provider.get_elicitation(params)
 
+    def get_session_state(self) -> Any | None:
+        """Get the SessionState for the current run if available.
+
+        Returns:
+            The SessionState from SessionPool, or None if not in a pooled session.
+        """
+        if self.run_ctx is None:
+            return None
+        session_id = self.run_ctx.session_id
+        if not session_id:
+            return None
+        pool = getattr(self.node, "agent_pool", None)
+        if pool is None or pool.session_pool is None:
+            return None
+        return pool.session_pool.sessions.get_session(session_id)
+
     async def report_progress(self, progress: float, total: float | None, message: str) -> None:
         """Report progress by emitting event into the agent's stream."""
         from agentpool.agents.events import ToolCallProgressEvent

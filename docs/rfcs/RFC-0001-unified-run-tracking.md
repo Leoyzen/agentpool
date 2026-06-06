@@ -91,7 +91,7 @@ AgentPool's session orchestration lives in `src/agentpool/orchestrator/core.py`,
 
 **Description**: 
 - Phase 1: Build `RunHandle` managed by `SessionPool._runs` for all agent types, keeping existing manual queues
-- Phase 2: Migrate native agents to PydanticAI `enqueue()`, extract `LegacyTurnRunner` for non-native agents
+- Phase 2: Migrate native agents to PydanticAI `enqueue()`, unify non-native agents into `TurnRunner`
 
 **Advantages**:
 - **Lower risk**: Phase 1 validates run tracking without changing execution semantics
@@ -104,7 +104,7 @@ AgentPool's session orchestration lives in `src/agentpool/orchestrator/core.py`,
 **Disadvantages**:
 - **Two-phase complexity**: Requires maintaining both old and new paths during transition
 - **Timeline**: Takes longer than a single-phase approach
-- **Legacy code**: `LegacyTurnRunner` persists indefinitely for non-native agents
+- **Legacy code**: Non-native agent queue logic persists in `TurnRunner` (necessary; non-native agents cannot use PydanticAI)
 
 **Evaluation Against Criteria**:
 
@@ -217,7 +217,7 @@ AgentPool's session orchestration lives in `src/agentpool/orchestrator/core.py`,
 - Sets foundation for future pool-level orchestration features (load balancing, circuit breakers, monitoring)
 
 **Acknowledged trade-offs**:
-- `LegacyTurnRunner` persists indefinitely for non-native agents (necessary; non-native agents cannot use PydanticAI)
+- Non-native agent queue logic persists in `TurnRunner` (necessary; non-native agents cannot use PydanticAI)
 - Two queue systems create some cognitive overhead (mitigated by clear documentation and agent-type-aware routing)
 - Phase 2 requires a successful event mapping prototype before proceeding
 
@@ -243,8 +243,7 @@ AgentPool's session orchestration lives in `src/agentpool/orchestrator/core.py`,
 │  │  │                                                      │   │ │
 │  │  │  receive_request(session_id, content, priority)      │   │ │
 │  │  │    ├─ Native agent? ──► _create_run() or enqueue()   │   │ │
-│  │  │    └─ Non-native? ───► TurnRunner.inject_prompt()    │   │ │
-│  │  │                             (LegacyTurnRunner in P2) │   │ │
+    │  │  │    └─ Non-native? ───► TurnRunner.inject_prompt()    │   │ │
 │  │  │                                                      │   │ │
 │  │  │  _create_run() → RunHandle → add to _runs            │   │ │
 │  │  │  _cleanup_run() → remove from _runs                  │   │ │
@@ -444,10 +443,9 @@ run task finally block:
    - [ ] Map PydanticAI events to AgentPool EventBus
    - [ ] Preserve isolated `agent_iteration_task` pattern
 
-2. **LegacyTurnRunner Extraction**
-   - [ ] Extract non-native queue logic into `LegacyTurnRunner`
-   - [ ] Ensure `LegacyTurnRunner` integrates with `SessionPool._runs`
-   - [ ] Keep `turn_lock` for turn serialization
+2. **TurnRunner Unification**
+   - [x] Non-native queue logic already in `TurnRunner`; verified integration with `SessionPool._runs`
+   - [x] `turn_lock` preserved for turn serialization
 
 3. **Native Agent Queue Migration**
    - [ ] Remove manual follow-up prompt queue for native agents

@@ -58,6 +58,7 @@ def _map_confirmation_result(
 async def _resolve_deferred_approvals(
     ctx: RunContext[AgentContext],
     requests: DeferredToolRequests,
+    input_provider: Any | None = None,
 ) -> DeferredToolResults | None:
     """Resolve deferred approval requests via InputProvider.
 
@@ -68,6 +69,8 @@ async def _resolve_deferred_approvals(
     Args:
         ctx: pydantic-ai RunContext with AgentContext as deps
         requests: Deferred tool requests from pydantic-ai
+        input_provider: Optional InputProvider to use directly instead of
+            resolving via ctx.deps.get_input_provider()
 
     Returns:
         DeferredToolResults with approval/denial for each request,
@@ -77,7 +80,10 @@ async def _resolve_deferred_approvals(
         return None
 
     agent_ctx = ctx.deps
-    provider = agent_ctx.get_input_provider()
+    # Use passed provider directly, fall back to ctx.deps resolution
+    provider = input_provider
+    if provider is None:
+        provider = agent_ctx.get_input_provider()
     # Access tool_confirmation_mode directly from node to avoid agent property assertion
     mode = getattr(agent_ctx.node, "tool_confirmation_mode", "per_tool")
 
@@ -120,7 +126,10 @@ async def _resolve_deferred_approvals(
     return DeferredToolResults(approvals=approvals)
 
 
-def create_approval_bridge_capability(agent: Agent[Any, Any]) -> HandleDeferredToolCalls[AgentContext[Any]]:
+def create_approval_bridge_capability(
+    agent: Agent[Any, Any],
+    input_provider: Any | None = None,
+) -> HandleDeferredToolCalls[AgentContext[Any]]:
     """Create a HandleDeferredToolCalls capability bridged to InputProvider.
 
     This capability intercepts pydantic-ai deferred tool approval requests
@@ -128,6 +137,8 @@ def create_approval_bridge_capability(agent: Agent[Any, Any]) -> HandleDeferredT
 
     Args:
         agent: The Agent instance (used to access tool_confirmation_mode)
+        input_provider: Optional InputProvider to use directly. If None,
+            resolves via ctx.deps.get_input_provider() at runtime.
 
     Returns:
         HandleDeferredToolCalls capability configured with the bridge handler
@@ -139,7 +150,7 @@ def create_approval_bridge_capability(agent: Agent[Any, Any]) -> HandleDeferredT
     ) -> DeferredToolResults | None:
         # Only handle approval requests (not external execution calls)
         if requests.approvals:
-            return await _resolve_deferred_approvals(ctx, requests)
+            return await _resolve_deferred_approvals(ctx, requests, input_provider)
         return None
 
     return HandleDeferredToolCalls(handler=handler)

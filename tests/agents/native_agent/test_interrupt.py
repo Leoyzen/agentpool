@@ -187,15 +187,18 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
 async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[None]) -> None:
     """interrupt() called with no run_ctx must cancel the asyncio.Task running run_stream.
 
-    Before the fix: interrupt() passes run_ctx=None to _interrupt(),
-    which checks `run_ctx.current_task if run_ctx else None` → None → no task cancelled.
-    After the fix: _interrupt() finds run_ctx via ContextVar (same task) or
-    SessionPool fallback (cross-task) and cancels current_task.
+    Cross-task access requires SessionPool fallback (since _active_run_ctx was removed).
     """
+    from agentpool.agents.base_agent import _current_run_ctx_var
+
     stream_started = asyncio.Event()
+    captured_run_ctx: list[Any] = []
 
     async def run_stream() -> None:
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             # Don't break — let interrupt() cancel us
 
@@ -204,8 +207,14 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
     # Wait for stream to start
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    # Call interrupt with NO run_ctx
-    await slow_agent.interrupt()
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback for cross-task access
+    _mock_session_pool(slow_agent, run_ctx)
+
+    # Call interrupt with NO run_ctx but WITH session_id for SessionPool lookup
+    await slow_agent.interrupt(session_id="test-session")
 
     # The task should be cancelled (not still running)
     try:
@@ -274,11 +283,17 @@ async def test_interrupt_cancels_iteration_task(slow_agent: Agent[None]) -> None
     After the fix: iteration_task is stored as self._iteration_task and
     directly cancelled by _interrupt().
     """
+    from agentpool.agents.base_agent import _current_run_ctx_var
+
     stream_started = asyncio.Event()
     interrupt_done = asyncio.Event()
+    captured_run_ctx: list[Any] = []
 
     async def run_stream():
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             if isinstance(event, StreamCompleteEvent):
                 break
@@ -291,8 +306,14 @@ async def test_interrupt_cancels_iteration_task(slow_agent: Agent[None]) -> None
     # Give it a moment to ensure iteration_task is running
     await asyncio.sleep(0.05)
 
-    # Call interrupt
-    await slow_agent.interrupt()
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback for cross-task access
+    _mock_session_pool(slow_agent, run_ctx)
+
+    # Call interrupt with session_id for SessionPool lookup
+    await slow_agent.interrupt(session_id="test-session")
     interrupt_done.set()
 
     # Wait for task to finish
@@ -365,13 +386,19 @@ async def test_opencode_abort_flow_stops_agent(slow_agent: Agent[None]) -> None:
     This test mirrors the real abort_session() code path:
         await state.agent.interrupt()  # No run_ctx!
 
-    The agent must stop running within a reasonable time after abort.
+    Cross-task access requires SessionPool fallback (since _active_run_ctx was removed).
     """
+    from agentpool.agents.base_agent import _current_run_ctx_var
+
     stream_started = asyncio.Event()
     events_received: list[Any] = []
+    captured_run_ctx: list[Any] = []
 
     async def run_stream():
         async for event in slow_agent.run_stream("Test prompt"):
+            run_ctx = _current_run_ctx_var.get()
+            if run_ctx is not None and not captured_run_ctx:
+                captured_run_ctx.append(run_ctx)
             stream_started.set()
             events_received.append(event)
             if isinstance(event, StreamCompleteEvent):
@@ -382,8 +409,14 @@ async def test_opencode_abort_flow_stops_agent(slow_agent: Agent[None]) -> None:
     # Wait for stream to start producing events
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    # Simulate abort_session: call interrupt() with NO run_ctx
-    await slow_agent.interrupt()
+    assert len(captured_run_ctx) == 1
+    run_ctx = captured_run_ctx[0]
+
+    # Set up SessionPool fallback for cross-task access
+    _mock_session_pool(slow_agent, run_ctx)
+
+    # Simulate abort_session: call interrupt() with session_id for SessionPool lookup
+    await slow_agent.interrupt(session_id="test-session")
     # Simulate the sleep in abort_session
     await asyncio.sleep(0.1)
 
