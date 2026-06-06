@@ -95,6 +95,11 @@ class RunHandle:
             )
         self._cleanup_run()
 
+    @property
+    def cancelled(self) -> bool:
+        """Whether the run has been cancelled."""
+        return self.run_ctx.cancelled
+
     def cancel(self) -> None:
         """Cancel the run without triggering synchronous cleanup.
 

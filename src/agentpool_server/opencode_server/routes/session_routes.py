@@ -21,7 +21,6 @@ from agentpool_server.opencode_server.converters import (
     session_data_to_opencode,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
     CommandExecutedEvent,
@@ -505,9 +504,34 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     if cached_session is not None and session_id in state.messages:
         return cached_session
 
-    # Need to load/reload session history into the session agent
-    existing_messages = state.messages.get(session_id) if is_subagent_session else None
+    # Load from SessionPool store when available
+    session_pool = state.pool.session_pool
+    if session_pool is not None and session_pool.sessions.store is not None:
+        data = await session_pool.sessions.store.load(session_id)
+        if data is not None:
+            session = session_data_to_opencode(data)
+            state.sessions[session_id] = session
+            state.ensure_runtime_session_state(session_id)
+            if session_id not in state.session_status:
+                await state.mark_session_idle(session_id)
+            # Load conversation history from agent
+            agent = await state.get_or_create_agent(session_id)
+            state.messages[session_id] = [
+                chat_message_to_opencode(
+                    chat_msg,
+                    session_id=session_id,
+                    working_dir=state.working_dir,
+                    agent_name=agent.name,
+                    model_id=chat_msg.model_name or "sonnet",
+                    provider_id=chat_msg.provider_name or "claude-code",
+                )
+                for chat_msg in agent.conversation.chat_messages
+            ]
+            await state.broadcast_event(SessionUpdatedEvent.create(session))
+            return session
 
+    # Fallback: load via agent.load_session()
+    existing_messages = state.messages.get(session_id) if is_subagent_session else None
     agent = await state.get_or_create_agent(session_id)
     data = await agent.load_session(session_id)
     if data is None:
@@ -601,20 +625,16 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
         parent_id=request.parent_id if request else None,
     )
 
-    # Persist to storage
-    id_ = state.pool.manifest.config_file_path
-    session_data = opencode_to_session_data(session, agent_name=state.agent.name, pool_id=id_)
-    # Save to BOTH the session store (MemorySessionStore) AND the storage manager.
-    # The session store is used by the opencode server's session management,
-    # while agent.load_session() reads from StorageManager (SQL/etc.).
-    # If we only save to one, get_or_load_session fails when the other is queried.
-    if state.pool.session_pool and state.pool.session_pool.sessions.store:
-        await state.pool.session_pool.sessions.store.save(session_data)
-    try:
-        await state.pool.storage.save_session(session_data)
-    except Exception:
-        logger.warning(
-            "Failed to persist session to StorageManager", session_id=session_id, exc_info=True
+    # Delegate session creation to SessionPool
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        await session_pool.create_session(
+            session_id=session_id,
+            agent_name=state.agent.name,
+            parent_session_id=session.parent_id,
+            project_id=project_id,
+            cwd=base_path,
+            title=session.title,
         )
     # Cache in memory
     state.sessions[session_id] = session
@@ -795,9 +815,13 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     state.session_status.pop(session_id, None)
     state.todos.pop(session_id, None)
     state.reverted_messages.pop(session_id, None)
-    # Delete from storage
-    if state.pool.session_pool and state.pool.session_pool.sessions.store:
-        await state.pool.session_pool.sessions.store.delete(session_id)
+    # Delegate session cleanup to SessionPool
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        await session_pool.close_session(session_id)
+    # Ensure store delete if close_session did not handle it
+    if session_pool is not None and session_pool.sessions.store is not None:
+        await session_pool.sessions.store.delete(session_id)
     await state.broadcast_event(SessionDeletedEvent.create(session_id))
     return True
 
@@ -813,13 +837,10 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     # after the user answers a question that was already in-flight.
     state.cancel_session_pending_questions(session_id)
 
-    # Stop any in-flight prompt worker for this session.
-    await state.cancel_session_background_tasks(session_id)
-
-    # Cancel the active message processing task (covers the sync
-    # send_message path where the stream runs in the request handler
-    # task, which is NOT tracked in background_tasks).
-    await state.cancel_active_message_task(session_id)
+    # Delegate run cancellation to SessionPool
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        session_pool.sessions.cancel_run_for_session(session_id)
 
     # Interrupt the correct session agent to cancel any ongoing stream
     try:
@@ -870,24 +891,6 @@ async def fork_session(  # noqa: D417
     if original_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Get messages from the original session
-    original_messages = state.messages.get(session_id, [])
-    # Filter messages if message_id is specified
-    messages_to_copy: list[MessageWithParts] = []
-    if request and request.message_id:
-        # Copy messages up to and including the specified message_id
-        for msg in original_messages:
-            messages_to_copy.append(msg)
-            if msg.info.id == request.message_id:
-                break
-        else:
-            # message_id not found in messages
-            detail = f"Message {request.message_id} not found in session"
-            raise HTTPException(status_code=404, detail=detail)
-    else:
-        # Copy all messages
-        messages_to_copy = list(original_messages)
-
     # Create the new forked session
     now = now_ms()
     new_session_id = identifier.ascending("session")
@@ -903,46 +906,23 @@ async def fork_session(  # noqa: D417
         parent_id=session_id,  # Link to original session
     )
 
-    # Persist the forked session to storage
-    session_data = opencode_to_session_data(
-        forked_session,
-        agent_name=state.agent.name,
-        pool_id=state.pool.manifest.config_file_path,
-    )
-    if state.pool.session_pool and state.pool.session_pool.sessions.store:
-        await state.pool.session_pool.sessions.store.save(session_data)
+    # Delegate forked session creation to SessionPool
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        await session_pool.create_session(
+            session_id=new_session_id,
+            agent_name=state.agent.name,
+            parent_session_id=session_id,
+            project_id=original_session.project_id,
+            cwd=fork_directory,
+            title=forked_session.title,
+        )
+
     # Cache in memory
     state.sessions[new_session_id] = forked_session
     await state.mark_session_idle(new_session_id)
     state.todos[new_session_id] = []
-    # Copy messages to the new session (with updated session_id references)
-    copied_messages: list[MessageWithParts] = []
-    for msg_with_parts in messages_to_copy:
-        # Create new message info with updated session_id
-        new_info = msg_with_parts.info.model_copy(update={"session_id": new_session_id})
-        # Copy parts with updated session_id
-        new_parts = [
-            part.model_copy(update={"session_id": new_session_id}) for part in msg_with_parts.parts
-        ]
-        copied_messages.append(MessageWithParts(info=new_info, parts=new_parts))
-
-    state.messages[new_session_id] = copied_messages
-    input_provider = OpenCodeInputProvider(state, new_session_id)
-    state.input_providers[new_session_id] = input_provider
-    # Create a dedicated session agent for the forked session.
-    # Load the copied conversation history into it so the fork starts
-    # with the same context as the original session.
-    fork_agent = await state.get_or_create_agent(new_session_id)
-    fork_agent.conversation.chat_messages.clear()
-    # Populate the agent's conversation with the forked history so the
-    # LLM sees the full context on the next message.  Without this the
-    # agent starts with an empty conversation despite state.messages
-    # having the copied messages (UI shows history but LLM does not).
-    from agentpool_server.opencode_server.converters import opencode_to_chat_message
-
-    for msg_with_parts in copied_messages:
-        chat_msg = opencode_to_chat_message(msg_with_parts, session_id=new_session_id)
-        fork_agent.conversation.chat_messages.append(chat_msg)
+    state.messages[new_session_id] = []
     # Broadcast session created event
     await state.broadcast_event(SessionCreatedEvent.create(forked_session))
     # Also broadcast session.updated so the CLI TUI upserts the forked

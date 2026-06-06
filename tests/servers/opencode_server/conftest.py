@@ -159,7 +159,35 @@ def mock_pool(
     pool.sessions.store.list_sessions = AsyncMock(return_value=[])
     # Mirror the same store on session_pool for the new access path
     pool.session_pool = Mock()
+
+    async def _mock_create_session(
+        session_id: str,
+        agent_name: str | None = None,
+        parent_session_id: str | None = None,
+        **metadata: Any,
+    ) -> Mock:
+        from datetime import datetime
+
+        from agentpool.sessions.models import SessionData
+
+        data = SessionData(
+            session_id=session_id,
+            agent_name=agent_name or "test-agent",
+            parent_id=parent_session_id,
+            created_at=datetime.now(),
+            last_active=datetime.now(),
+            metadata=metadata,
+        )
+        await storage_manager.save_session(data)
+        return Mock()
+
+    async def _mock_close_session(session_id: str) -> None:
+        await storage_manager.delete_session(session_id)
+
+    pool.session_pool.create_session = AsyncMock(side_effect=_mock_create_session)
+    pool.session_pool.close_session = AsyncMock(side_effect=_mock_close_session)
     pool.session_pool.sessions = Mock()
+    pool.session_pool.sessions.cancel_run_for_session = Mock()
     pool.session_pool.sessions.store = Mock()
     pool.session_pool.sessions.store.save = storage_manager.save_session
     pool.session_pool.sessions.store.delete = storage_manager.delete_session

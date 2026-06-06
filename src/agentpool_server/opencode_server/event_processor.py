@@ -739,7 +739,9 @@ class EventProcessor:
 
         # 3. Ensure child session exists if ID provided
         if child_session_id:
-            await ctx.state.ensure_session(child_session_id, parent_id=ctx.session_id)
+            from agentpool_server.opencode_server.session_pool_integration import ensure_session
+
+            await ensure_session(ctx.state, child_session_id, parent_id=ctx.session_id)
 
         # 4. Get or create child context
         child_ctx: EventProcessorContext | None = None
@@ -990,7 +992,9 @@ class EventProcessor:
             return
 
         # Ensure child session exists
-        await ctx.state.ensure_session(event.child_session_id, parent_id=ctx.session_id)
+        from agentpool_server.opencode_server.session_pool_integration import ensure_session
+
+        await ensure_session(ctx.state, event.child_session_id, parent_id=ctx.session_id)
 
         # Import identifiers
         from agentpool.utils import identifiers

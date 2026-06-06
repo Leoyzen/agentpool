@@ -32,7 +32,6 @@ from agentpool_server.opencode_server.routes import (
     session_router,
     tui_router,
 )
-from agentpool_server.opencode_server.handler import OpenCodeProtocolHandler
 from agentpool_server.opencode_server.skill_bridge import OpenCodeSkillBridge
 from agentpool_server.opencode_server.state import ServerState
 
@@ -119,14 +118,6 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         raise ValueError(msg)
 
     state = ServerState(working_dir=working_dir or str(Path.cwd()), agent=agent)
-
-    # Initialize OpenCode protocol handler for SessionPool integration.
-    # When opencode.use_session_pool=True, routes can delegate session
-    # management to this handler instead of the legacy ServerState code.
-    state.protocol_handler = OpenCodeProtocolHandler(
-        agent_pool=agent.agent_pool,
-        state=state,
-    )
 
     # Setup skill command bridge if pool has skill commands configured
     if state.pool.skill_commands is not None:
@@ -293,8 +284,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         state.on_first_subscriber = check_for_updates
         # Pool context is managed externally (by the caller)
         yield
-        # Shutdown - clean up per-session agents and background tasks first
-        await state.cleanup_all_session_agents()
+        # Shutdown - clean up background tasks first
         await state.cleanup_tasks()
         # Then tear down watchers and shared infrastructure
         state.pool.todos.on_change = None
