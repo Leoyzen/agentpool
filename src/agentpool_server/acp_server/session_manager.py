@@ -172,13 +172,14 @@ class ACPSessionManager:
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()
             await session.initialize_mcp_servers()
-            # Warm up lazy MCP providers now that the session is fully set up
+            # Warm up lazy MCP providers in the background so tools are
+            # available immediately without blocking session creation.
             try:
                 from agentpool.mcp_server.manager import MCPManager
 
                 for provider in session.agent.tools.external_providers:
                     if isinstance(provider, MCPManager):
-                        await provider.warmup_all()
+                        asyncio.create_task(provider.warmup_all())
                         break
             except Exception:
                 logger.warning(

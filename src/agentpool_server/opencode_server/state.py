@@ -322,13 +322,14 @@ class ServerState:
                     self._session_agents.pop(session_id, None)
                     raise
             self._session_agents[session_id] = agent
-            # Warm up MCP providers so tools are available immediately
+            # Warm up lazy MCP providers in the background so tools are
+            # available immediately without blocking session creation.
             try:
                 from agentpool.mcp_server.manager import MCPManager
 
                 for provider in agent.tools.external_providers:
                     if isinstance(provider, MCPManager):
-                        await provider.warmup_all()
+                        asyncio.create_task(provider.warmup_all())
                         break
             except Exception:
                 logger.warning(

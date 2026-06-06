@@ -11,10 +11,12 @@ Custom events like ToolCallProgressEvent are silently ignored.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agentpool.log import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -125,9 +127,10 @@ class BaseAgentAGUIAdapter:
             # message history to our format and use it as the conversation context.
             prompt = self._get_user_prompt()
 
-            # Warm up lazy MCP providers before running the agent
+            # Warm up lazy MCP providers in the background so tools are
+            # available immediately without blocking the stream.
             try:
-                await self.agent.mcp.warmup_all()
+                asyncio.create_task(self.agent.mcp.warmup_all())
             except Exception:
                 logger.warning("MCP warmup failed", exc_info=True)
 
