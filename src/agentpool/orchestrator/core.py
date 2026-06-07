@@ -497,6 +497,11 @@ class SessionController:
                     agent._model = base_model
                     agent.model_settings = getattr(base_agent, "model_settings", None)
                 await agent.__aenter__()
+                # Add pool-level providers to per-session agent (same as shared agents get in AgentPool.__aenter__)
+                if self.pool is not None:
+                    agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
+                    if self.pool.skills_instruction_provider:
+                        agent.tools.add_provider(self.pool.skills_instruction_provider)
                 self._session_agents[session_id] = agent
                 session.agent = agent
                 session.is_per_session_agent = True
