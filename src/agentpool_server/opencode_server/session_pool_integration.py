@@ -21,6 +21,9 @@ from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
 from agentpool_server.opencode_server.models import (
+    MessagePath,
+    MessageTime,
+    MessageUpdatedEvent,
     MessageWithParts,
     SessionCreatedEvent,
     SessionStatus,
@@ -556,12 +559,15 @@ class OpenCodeSessionPoolIntegration:
         )
 
         assistant_msg_id = identifier.ascending("message")
-        assistant_msg = MessageWithParts(
-            info=UserMessage(
-                id=assistant_msg_id,
-                session_id=session_id,
-                time=TimeCreated.now(),
-            )
+        assistant_msg = MessageWithParts.assistant(
+            message_id=assistant_msg_id,
+            session_id=session_id,
+            time=MessageTime(created=now_ms()),
+            agent_name="agentpool",
+            model_id="default",
+            parent_id=session_id,
+            provider_id="agentpool",
+            path=MessagePath(cwd=self.server_state.working_dir, root=self.server_state.working_dir),
         )
         ctx = EventProcessorContext(
             session_id=session_id,
@@ -572,6 +578,7 @@ class OpenCodeSessionPoolIntegration:
         )
         event_adapter = OpenCodeEventAdapter(ctx)
         child_tasks: dict[str, asyncio.Task[Any]] = {}
+        message_registered = False
 
         try:
             while True:
@@ -587,6 +594,14 @@ class OpenCodeSessionPoolIntegration:
                     )
                     child_tasks[event.child_session_id] = child_task
                     continue
+
+                # Register message on first non-spawn event so the TUI
+                # can render parts. Without this, PartUpdatedEvents are
+                # ignored because the message store lacks the entry.
+                if not message_registered:
+                    self.server_state.messages.setdefault(session_id, []).append(assistant_msg)
+                    await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
+                    message_registered = True
 
                 async for oc_event in event_adapter.convert_event(event):
                     await self.server_state.broadcast_event(oc_event)
