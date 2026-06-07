@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from agentpool.agents.events import RunErrorEvent, SpawnSessionStart, StreamCompleteEvent
 from agentpool.log import get_logger
 from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
@@ -36,7 +35,6 @@ from agentpool_server.opencode_server.models import (
     SessionStatus,
     SessionStatusEvent,
     SessionUpdatedEvent,
-    StepFinishPart,
     StepStartPart,
     SubtaskPartInput,
     TextPartInput,
@@ -46,7 +44,6 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
-from agentpool_server.opencode_server.status_bridge import SessionStatusBridge
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
@@ -414,28 +411,25 @@ async def _process_message_locked(  # noqa: PLR0915
     agent._input_provider = input_provider
 
     # --- SessionPool integration ---
+    integration = state.session_pool_integration
     session_pool = state.pool.session_pool
     if session_pool is None:
         msg = "SessionPool not available"
         raise RuntimeError(msg)
 
     # Ensure session exists in SessionPool before routing
-    if session_pool.sessions.get_session(session_id) is None:
-        await session_pool.create_session(
-            session_id,
-            agent_name=request.agent or state.agent.name or "default",
-        )
-
-    # Start SessionStatusBridge (idempotent — safe to call multiple times)
-    status_bridge = SessionStatusBridge(
-        server_state=state,
-        session_id=session_id,
-        event_bus=session_pool.event_bus,
-    )
-    await status_bridge.start()
-
-    # Subscribe to EventBus BEFORE receive_request so no events are dropped
-    event_queue = await session_pool.event_bus.subscribe(session_id)
+    if integration is not None:
+        if integration.session_pool.sessions.get_session(session_id) is None:
+            await integration.create_session(
+                session_id,
+                agent_name=request.agent or state.agent.name or "default",
+            )
+    else:
+        if session_pool.sessions.get_session(session_id) is None:
+            await session_pool.create_session(
+                session_id,
+                agent_name=request.agent or state.agent.name or "default",
+            )
 
     try:
         request_variant = request.model.variant if request.model else None
@@ -516,123 +510,31 @@ async def _process_message_locked(  # noqa: PLR0915
         # The _consume_events loop below only handles the parent session's
         # direct agent events; child events flow through the EventBus
         # independently via _consume_child_events.
-        run_handle = await session_pool.receive_request(
-            session_id=session_id,
-            content=user_prompt,
-            priority="when_idle",
-            input_provider=input_provider,
-        )
+        if integration is not None:
+            run_handle = await integration.route_message(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
+        else:
+            run_handle = await session_pool.receive_request(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
 
         if run_handle is not None:
-            # Consume events from EventBus and broadcast as OpenCode SSE events.
-            async def _consume_child_events(
-                child_session_id: str,
-                child_tasks: dict[str, asyncio.Task[Any]],
-            ) -> None:
-                """Consume events from a child session EventBus and broadcast them."""
-                child_queue = await session_pool.event_bus.subscribe(
-                    child_session_id, scope="session"
-                )
-                try:
-                    # Get child context from EventProcessor
-                    child_ctx = event_adapter._processor._child_contexts.get(
-                        child_session_id
-                    )
-                    if child_ctx is None:
-                        return
-
-                    child_adapter = OpenCodeEventAdapter(child_ctx)
-
-                    while True:
-                        event = await child_queue.get()
-                        if event is None:
-                            break
-
-                        # Handle nested subagents
-                        if isinstance(event, SpawnSessionStart):
-                            nested_task = asyncio.create_task(
-                                _consume_child_events(
-                                    event.child_session_id, child_tasks
-                                )
-                            )
-                            child_tasks[event.child_session_id] = nested_task
-                            continue
-
-                        # Stop on completion or error
-                        if isinstance(event, (StreamCompleteEvent, RunErrorEvent)):
-                            async for oc_event in child_adapter.convert_event(event):
-                                await state.broadcast_event(oc_event)
-                            break
-
-                        async for oc_event in child_adapter.convert_event(event):
-                            await state.broadcast_event(oc_event)
-                finally:
-                    await session_pool.event_bus.unsubscribe(
-                        child_session_id, child_queue
-                    )
-
-            async def _consume_events() -> None:
-                child_tasks: dict[str, asyncio.Task[Any]] = {}
-                try:
-                    while True:
-                        event = await event_queue.get()
-                        if event is None:
-                            break
-
-                        # Detect SpawnSessionStart and start child consumer
-                        if isinstance(event, SpawnSessionStart):
-                            child_task = asyncio.create_task(
-                                _consume_child_events(
-                                    event.child_session_id, child_tasks
-                                )
-                            )
-                            child_tasks[event.child_session_id] = child_task
-                            continue
-
-                        async for oc_event in event_adapter.convert_event(event):
-                            # Track StepFinishPart for finalize() suppression.
-                            if (
-                                isinstance(oc_event, PartUpdatedEvent)
-                                and isinstance(oc_event.properties.part, StepFinishPart)
-                                and oc_event.properties.part.session_id == session_id
-                            ):
-                                adapter._step_finish_emitted = True
-                            await state.broadcast_event(oc_event)
-                finally:
-                    for task in child_tasks.values():
-                        if not task.done():
-                            task.cancel()
-                    # Await cancellation to prevent unhandled CancelledError
-                    for task in child_tasks.values():
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await task
-
-            consumer_task = asyncio.create_task(_consume_events())
+            # Wait for the full run loop (including auto-resume) to complete.
+            # The session-scoped EventBus consumer (started in create_session)
+            # handles all event streaming; this handler only synchronises on
+            # completion and finalises the assistant message.
             try:
                 await run_handle.complete_event.wait()
             except asyncio.CancelledError:
                 run_handle.cancel()
                 raise
-            finally:
-                consumer_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await consumer_task
-                # Drain any remaining events that were queued before cancellation.
-                while True:
-                    try:
-                        event = event_queue.get_nowait()
-                        if event is None:
-                            break
-                        async for oc_event in event_adapter.convert_event(event):
-                            if (
-                                isinstance(oc_event, PartUpdatedEvent)
-                                and isinstance(oc_event.properties.part, StepFinishPart)
-                                and oc_event.properties.part.session_id == session_id
-                            ):
-                                adapter._step_finish_emitted = True
-                            await state.broadcast_event(oc_event)
-                    except asyncio.QueueEmpty:
-                        break
 
             # Finalize based on run outcome
             if run_handle.status != RunStatus.failed:
@@ -665,7 +567,8 @@ async def _process_message_locked(  # noqa: PLR0915
 
                 # Add the aborted assistant message to the SessionPool agent's
                 # in-memory conversation so history remains consistent.
-                sp_session = session_pool.sessions.get_session(session_id)
+                sp_session_pool = integration.session_pool if integration is not None else session_pool
+                sp_session = sp_session_pool.sessions.get_session(session_id)
                 if sp_session is not None and sp_session.agent is not None:
                     chat_msg = opencode_to_chat_message(
                         assistant_msg_with_parts, session_id=session_id
@@ -689,7 +592,18 @@ async def _process_message_locked(  # noqa: PLR0915
         assistant_msg_with_parts.info = updated_assistant
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-        raise
+
+        # Add the aborted assistant message to the SessionPool agent's
+        # in-memory conversation so history remains consistent.
+        sp_session_pool = integration.session_pool if integration is not None else session_pool
+        sp_session = sp_session_pool.sessions.get_session(session_id)
+        if sp_session is not None and sp_session.agent is not None:
+            chat_msg = opencode_to_chat_message(
+                assistant_msg_with_parts, session_id=session_id
+            )
+            sp_session.agent.conversation.add_chat_messages(
+                [chat_msg], extend_last=True
+            )
     except Exception as exc:
         # Any unexpected error during SessionPool routing
         logger.exception("SessionPool routing failed", session_id=session_id, error=str(exc))
@@ -702,11 +616,24 @@ async def _process_message_locked(  # noqa: PLR0915
         assistant_msg_with_parts.info = updated_assistant
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+
+        # Add the aborted assistant message to the SessionPool agent's
+        # in-memory conversation so history remains consistent.
+        sp_session_pool = integration.session_pool if integration is not None else session_pool
+        sp_session = sp_session_pool.sessions.get_session(session_id)
+        if sp_session is not None and sp_session.agent is not None:
+            chat_msg = opencode_to_chat_message(
+                assistant_msg_with_parts, session_id=session_id
+            )
+            sp_session.agent.conversation.add_chat_messages(
+                [chat_msg], extend_last=True
+            )
     finally:
-        # --- Stop SessionStatusBridge ---
-        await status_bridge.stop()
-        # --- Unsubscribe from EventBus ---
-        await session_pool.event_bus.unsubscribe(session_id, event_queue)
+        # Session-scoped resources (EventBus consumer, SessionStatusBridge)
+        # are managed by OpenCodeSessionPoolIntegration and are NOT torn
+        # down here.  They outlive individual HTTP requests so that auto-
+        # resume events are still streamed to the frontend.
+        #
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:

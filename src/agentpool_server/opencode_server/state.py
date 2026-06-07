@@ -90,6 +90,7 @@ class ServerState:
     auth_service: Any = field(default_factory=create_default_auth_service)
     skill_bridge: Any = field(default=None)
     command_store: CommandStore | None = field(default=None)
+    session_pool_integration: Any = field(default=None)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""

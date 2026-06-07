@@ -119,6 +119,24 @@ def cancellable_mock_agent():
 
     agent.agent_pool = pool
 
+    # Set up SessionPool mock for new architecture
+    from agentpool.orchestrator.run import RunStatus
+
+    session_pool = Mock()
+    session_pool.sessions = Mock()
+    # Create a mock session with the agent attached
+    mock_session = Mock()
+    mock_session.agent = agent
+    session_pool.sessions.get_session = Mock(return_value=mock_session)
+    session_pool.sessions.store = None
+    # Create a RunHandle that raises CancelledError when waiting
+    run_handle = Mock()
+    run_handle.status = RunStatus.running
+    run_handle.complete_event = Mock()
+    run_handle.complete_event.wait = AsyncMock(side_effect=asyncio.CancelledError)
+    session_pool.receive_request = AsyncMock(return_value=run_handle)
+    pool.session_pool = session_pool
+
     # Set up env mock
     env = Mock()
     fs = Mock()

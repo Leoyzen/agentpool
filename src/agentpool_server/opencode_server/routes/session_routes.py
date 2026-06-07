@@ -821,11 +821,12 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     state.session_status.pop(session_id, None)
     state.todos.pop(session_id, None)
     state.reverted_messages.pop(session_id, None)
-    # Delegate session cleanup to SessionPool
-    session_pool = state.pool.session_pool
-    if session_pool is not None:
-        await session_pool.close_session(session_id)
+    # Delegate session cleanup to OpenCodeSessionPoolIntegration
+    integration = state.session_pool_integration
+    if integration is not None:
+        await integration.close_session(session_id)
     # Ensure store delete if close_session did not handle it
+    session_pool = state.pool.session_pool
     if session_pool is not None and session_pool.sessions.store is not None:
         await session_pool.sessions.store.delete(session_id)
     await state.broadcast_event(SessionDeletedEvent.create(session_id))

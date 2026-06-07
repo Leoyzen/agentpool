@@ -1067,7 +1067,10 @@ class TurnRunner:
             if created_run_handle and run_handle is not None:
                 if run_handle.status not in (RunStatus.completed, RunStatus.failed):
                     run_handle.complete()
-                run_handle.complete_event.set()
+                # Note: complete_event is NOT set here — it is deferred to
+                # run_loop() so that it covers the full run loop including
+                # auto-resume turns.  Per-request waiters (e.g. sync HTTP
+                # endpoint) should wait for the entire session run cycle.
                 self.sessions._runs.pop(run_id, None)
 
     async def run_turn(
@@ -1126,6 +1129,14 @@ class TurnRunner:
                 logger.exception("Turn loop failed", session_id=session_id)
                 await self._drain_post_turn_injections(session_id)
                 await self._drain_post_turn_prompts(session_id)
+            finally:
+                # Signal completion after the full run loop (including auto-resume)
+                # so that per-request waiters observe the full session run cycle.
+                run_id = session.current_run_id
+                if run_id is not None:
+                    run_handle = self.sessions._runs.get(run_id)
+                    if run_handle is not None:
+                        run_handle.complete_event.set()
 
     async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Inject a message into a session.

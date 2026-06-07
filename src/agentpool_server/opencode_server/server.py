@@ -119,6 +119,17 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
 
     state = ServerState(working_dir=working_dir or str(Path.cwd()), agent=agent)
 
+    # Set up SessionPool integration for session-scoped event consumption
+    if state.pool.session_pool is not None:
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        state.session_pool_integration = OpenCodeSessionPoolIntegration(
+            session_pool=state.pool.session_pool,
+            server_state=state,
+        )
+
     # Setup skill command bridge if pool has skill commands configured
     if state.pool.skill_commands is not None:
         state.skill_bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
@@ -284,7 +295,10 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         state.on_first_subscriber = check_for_updates
         # Pool context is managed externally (by the caller)
         yield
-        # Shutdown - clean up background tasks first
+        # Shutdown - clean up session pool integration first
+        if state.session_pool_integration is not None:
+            await state.session_pool_integration.shutdown()
+        # Then clean up background tasks
         await state.cleanup_tasks()
         # Then tear down watchers and shared infrastructure
         state.pool.todos.on_change = None
