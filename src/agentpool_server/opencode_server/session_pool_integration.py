@@ -8,8 +8,11 @@ consuming events from the SessionPool's EventBus.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
+from agentpool.agents.events.events import SpawnSessionStart
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -271,6 +274,7 @@ class OpenCodeSessionPoolIntegration:
         self.session_pool = session_pool
         self.server_state = server_state
         self._status_bridges: dict[str, SessionStatusBridge] = {}
+        self._event_consumers: dict[str, asyncio.Task[Any]] = {}
 
     async def create_session(
         self,
@@ -290,6 +294,7 @@ class OpenCodeSessionPoolIntegration:
         """
         state = await self.session_pool.create_session(session_id, agent_name, **metadata)
         await self._start_status_bridge(session_id)
+        await self._start_event_consumer(session_id)
 
         # Broadcast session.created event so OpenCode clients can upsert
         session = _session_state_to_opencode(state)
@@ -320,6 +325,19 @@ class OpenCodeSessionPoolIntegration:
         )
         await self._start_status_bridge(new_session_id)
         return state
+
+    async def close_session(self, session_id: str) -> None:
+        """Close a session and clean up its resources.
+
+        Stops the session-scoped event consumer and status bridge,
+        then delegates to SessionPool.close_session().
+
+        Args:
+            session_id: The session to close.
+        """
+        await self._stop_event_consumer(session_id)
+        await self._stop_status_bridge(session_id)
+        await self.session_pool.close_session(session_id)
 
     async def route_message(
         self,
@@ -451,7 +469,12 @@ class OpenCodeSessionPoolIntegration:
         return status
 
     async def shutdown(self) -> None:
-        """Shutdown the integration and stop all status bridges."""
+        """Shutdown the integration and stop all consumers and bridges."""
+        for session_id in list(self._event_consumers.keys()):
+            try:
+                await self._stop_event_consumer(session_id)
+            except Exception:
+                logger.exception("Failed to stop event consumer during shutdown", session_id=session_id)
         for session_id in list(self._status_bridges.keys()):
             try:
                 await self._stop_status_bridge(session_id)
@@ -484,3 +507,100 @@ class OpenCodeSessionPoolIntegration:
         bridge = self._status_bridges.pop(session_id, None)
         if bridge is not None:
             await bridge.stop()
+
+    async def _start_event_consumer(self, session_id: str) -> None:
+        """Start a session-scoped EventBus consumer for a session.
+
+        The consumer runs for the entire session lifecycle, converting
+        AgentPool events to OpenCode SSE events via EventBus subscription.
+
+        Args:
+            session_id: The session to start consuming events for.
+        """
+        if session_id in self._event_consumers:
+            return
+        task = asyncio.create_task(
+            self._event_consumer_loop(session_id),
+            name=f"event_consumer_{session_id}",
+        )
+        self._event_consumers[session_id] = task
+        logger.info("Started session-scoped event consumer", session_id=session_id)
+
+    async def _stop_event_consumer(self, session_id: str) -> None:
+        """Stop the session-scoped EventBus consumer for a session.
+
+        Args:
+            session_id: The session to stop consuming events for.
+        """
+        task = self._event_consumers.pop(session_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        logger.info("Stopped session-scoped event consumer", session_id=session_id)
+
+    async def _event_consumer_loop(self, session_id: str) -> None:
+        """Consume events from EventBus and broadcast as OpenCode SSE events.
+
+        Subscribes with ``scope="descendants"`` so that child session events
+        (e.g. subagent output) are also received and forwarded.
+
+        Handles ``SpawnSessionStart`` by creating child-session consumers
+        recursively so nested subagents also stream to the frontend.
+
+        Args:
+            session_id: The session whose events to consume.
+        """
+        queue = await self.session_pool.event_bus.subscribe(
+            session_id, scope="descendants"
+        )
+
+        assistant_msg_id = identifier.ascending("message")
+        assistant_msg = MessageWithParts(
+            info=UserMessage(
+                id=assistant_msg_id,
+                session_id=session_id,
+                time=TimeCreated.now(),
+            )
+        )
+        ctx = EventProcessorContext(
+            session_id=session_id,
+            assistant_msg_id=assistant_msg_id,
+            assistant_msg=assistant_msg,
+            state=self.server_state,
+            working_dir=self.server_state.working_dir,
+        )
+        event_adapter = OpenCodeEventAdapter(ctx)
+        child_tasks: dict[str, asyncio.Task[Any]] = {}
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+
+                # Spawn child-session consumers for nested subagents
+                if isinstance(event, SpawnSessionStart):
+                    child_task = asyncio.create_task(
+                        self._event_consumer_loop(event.child_session_id),
+                        name=f"event_consumer_{event.child_session_id}",
+                    )
+                    child_tasks[event.child_session_id] = child_task
+                    continue
+
+                async for oc_event in event_adapter.convert_event(event):
+                    await self.server_state.broadcast_event(oc_event)
+        except asyncio.CancelledError:
+            logger.debug("Event consumer cancelled", session_id=session_id)
+            raise
+        except Exception:
+            logger.exception("Event consumer loop failed", session_id=session_id)
+        finally:
+            # Cancel and await any child consumers
+            for task in child_tasks.values():
+                if not task.done():
+                    task.cancel()
+            for task in child_tasks.values():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            await self.session_pool.event_bus.unsubscribe(session_id, queue)
