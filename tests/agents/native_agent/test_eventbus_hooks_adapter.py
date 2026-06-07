@@ -194,14 +194,18 @@ async def test_after_run_delegates_to_original_and_returns_result(
     assert returned is mock_result
 
 
-async def test_before_tool_execute_publishes_tool_call_start_event(
+async def test_before_tool_execute_is_transparent_passthrough(
     event_bus: EventBus,
     mock_run_context: RunContext[Any],
     session_id: str,
     sample_tool_call: ToolCallPart,
     sample_tool_def: ToolDefinition,
 ) -> None:
-    """before_tool_execute should publish ToolCallStartEvent to EventBus."""
+    """before_tool_execute should be a transparent passthrough (no EventBus publish).
+
+    ToolCallStartEvent is now produced by the stream path in
+    NativeAgent._run_agentlet_core() and RunExecutor.
+    """
     capability = _adapt(Hooks(), event_bus)
 
     queue = await event_bus.subscribe(session_id)
@@ -214,23 +218,23 @@ async def test_before_tool_execute_publishes_tool_call_start_event(
     )
 
     assert returned == args
-    event = queue.get_nowait()
-    assert isinstance(event, ToolCallStartEvent)
-    assert event.tool_call_id == "tc-123"
-    assert event.tool_name == "test_tool"
-    assert event.title == "Executing: test_tool"
-    assert event.raw_input == args
-    assert event.event_kind == "tool_call_start"
+    # No event should be published (tool events now come from stream path)
+    with pytest.raises(asyncio.QueueEmpty):
+        queue.get_nowait()
 
 
-async def test_after_tool_execute_publishes_tool_call_complete_event(
+async def test_after_tool_execute_is_transparent_passthrough(
     event_bus: EventBus,
     mock_run_context: RunContext[Any],
     session_id: str,
     sample_tool_call: ToolCallPart,
     sample_tool_def: ToolDefinition,
 ) -> None:
-    """after_tool_execute should publish ToolCallCompleteEvent to EventBus."""
+    """after_tool_execute should be a transparent passthrough (no EventBus publish).
+
+    ToolCallCompleteEvent is now produced by the stream path via
+    process_tool_event() and enqueued by the caller.
+    """
     capability = _adapt(Hooks(), event_bus)
 
     queue = await event_bus.subscribe(session_id)
@@ -245,14 +249,9 @@ async def test_after_tool_execute_publishes_tool_call_complete_event(
     )
 
     assert returned == tool_result
-    event = queue.get_nowait()
-    assert isinstance(event, ToolCallCompleteEvent)
-    assert event.tool_call_id == "tc-123"
-    assert event.tool_name == "test_tool"
-    assert event.tool_input == args
-    assert event.tool_result == tool_result
-    assert event.agent_name == "test-agent"
-    assert event.event_kind == "tool_call_complete"
+    # No event should be published (tool events now come from stream path)
+    with pytest.raises(asyncio.QueueEmpty):
+        queue.get_nowait()
 
 
 async def test_missing_session_id_skips_publishing(
@@ -1038,7 +1037,7 @@ async def test_concurrent_tool_events_isolated(
     sample_tool_call: ToolCallPart,
     sample_tool_def: ToolDefinition,
 ) -> None:
-    """Tool events from concurrent sessions should be isolated."""
+    """Tool events from concurrent sessions should be isolated (passthrough, no publish)."""
     capability = _adapt(Hooks(), event_bus)
 
     queue_1 = await event_bus.subscribe(session_id)
@@ -1053,13 +1052,7 @@ async def test_concurrent_tool_events_isolated(
         ),
     )
 
-    event_1 = queue_1.get_nowait()
-    event_2 = queue_2.get_nowait()
-
-    assert isinstance(event_1, ToolCallStartEvent)
-    assert isinstance(event_2, ToolCallStartEvent)
-    assert event_1.tool_call_id == event_2.tool_call_id  # same tool call ID
-
+    # No events should be published (tool events now come from stream path)
     with pytest.raises(asyncio.QueueEmpty):
         queue_1.get_nowait()
     with pytest.raises(asyncio.QueueEmpty):
@@ -1104,7 +1097,11 @@ async def test_adapter_with_actual_pydantic_ai_agent(event_bus: EventBus, sessio
 async def test_adapter_run_and_tool_events_with_actual_agent(
     event_bus: EventBus, session_id: str
 ) -> None:
-    """Adapter publishes both run and tool events during actual agent execution."""
+    """Adapter publishes only run events during actual agent execution.
+
+    Tool events are now produced by the stream path in
+    NativeAgent._run_agentlet_core() and RunExecutor, not by the hooks adapter.
+    """
     from pydantic_ai import Agent as PydanticAgent
     from pydantic_ai.models.test import TestModel
 
@@ -1139,24 +1136,18 @@ async def test_adapter_run_and_tool_events_with_actual_agent(
     except asyncio.QueueEmpty:
         pass
 
-    # Should have at least run started + tool start + tool complete
-    assert len(events) >= 3, f"Expected at least 3 events, got {len(events)}: {[type(e).__name__ for e in events]}"
+    # Should have only RunStartedEvent (tool events now come from stream path)
+    assert len(events) >= 1, f"Expected at least 1 event, got {len(events)}: {[type(e).__name__ for e in events]}"
 
     # First event should be RunStartedEvent
     assert isinstance(events[0], RunStartedEvent)
     assert events[0].session_id == session_id
 
-    # Should have ToolCallStartEvent
+    # Should NOT have ToolCallStartEvent or ToolCallCompleteEvent from hooks adapter
     start_events = [e for e in events if isinstance(e, ToolCallStartEvent)]
-    assert len(start_events) >= 1
-    assert start_events[0].tool_name == "greet"
-    assert start_events[0].title == "Executing: greet"
-
-    # Should have ToolCallCompleteEvent
+    assert len(start_events) == 0, "ToolCallStartEvent should not come from hooks adapter"
     complete_events = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
-    assert len(complete_events) >= 1
-    assert complete_events[0].tool_name == "greet"
-    assert complete_events[0].agent_name == "test-agent"
+    assert len(complete_events) == 0, "ToolCallCompleteEvent should not come from hooks adapter"
 
 
 # ---------------------------------------------------------------------------
