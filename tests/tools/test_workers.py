@@ -282,8 +282,10 @@ async def test_worker_emits_subagent_events(tmp_path: Path):
         await main_agent.set_model(main_model)
         await worker.set_model(worker_model)
 
-        # Collect events through run_stream
-        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
+        # Collect events through run_stream with descendants scope to catch child events
+        async for event in session_pool.run_stream(
+            "ses_test", "Ask worker: do something", scope="descendants"
+        ):
             if isinstance(event, SubAgentEvent):
                 subagent_events.append(event)
 
@@ -517,7 +519,9 @@ async def test_subagent_event_depth_propagation(tmp_path: Path):
         await main_agent.set_model(main_model)
         await worker.set_model(worker_model)
 
-        async for event in session_pool.run_stream("ses_test", "Ask worker: do something"):
+        async for event in session_pool.run_stream(
+            "ses_test", "Ask worker: do something", scope="descendants"
+        ):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
             elif isinstance(event, SubAgentEvent):

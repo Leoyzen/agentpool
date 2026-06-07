@@ -1,4 +1,10 @@
-"""Provider for worker agent tools."""
+"""Provider for worker agent tools.
+
+Worker tools delegate to agents/teams in the pool. All event routing is handled
+by the SessionPool's TurnRunner — the business layer does not manually wrap or
+forward events. The protocol layer subscribes with ``scope="descendants"`` and
+receives child session events automatically.
+"""
 
 from __future__ import annotations
 
@@ -80,6 +86,11 @@ class WorkersTools(ResourceProvider):
                 msg = "No agent pool available"
                 raise ToolError(msg)
 
+            session_pool = ctx.pool.session_pool
+            if session_pool is None:
+                msg = "SessionPool is required for worker tool execution"
+                raise ToolError(msg)
+
             # Look for agent in both agents and teams
             worker = None
             agents = ctx.pool.get_agents()
@@ -108,16 +119,8 @@ class WorkersTools(ResourceProvider):
                 elif reset_history_on_run:
                     await worker.conversation.clear()
 
-            # Create child session via AgentContext (RFC-0028)
-            from agentpool.utils.identifiers import generate_session_id
-
             parent_session_id = getattr(ctx.node, "session_id", None) or (
-                ctx.run_ctx.session_id if ctx.run_ctx else generate_session_id()
-            )
-            child_session_id = await ctx.create_child_session(
-                agent_name=agent_name,
-                agent_type=worker.agent_type,
-                parent_session_id=parent_session_id,
+                ctx.run_ctx.session_id if ctx.run_ctx else ""
             )
 
             # Determine source type for events
@@ -133,7 +136,20 @@ class WorkersTools(ResourceProvider):
                 msg = f"Agent {agent_name} does not support streaming"
                 raise ToolError(msg)
 
-            # Emit SpawnSessionStart before streaming begins
+            child_session_id = await ctx.create_child_session(
+                agent_name=agent_name,
+                agent_type=worker.agent_type,
+                parent_session_id=parent_session_id,
+                source_name=agent_name,
+                source_type=source_type,
+                depth=child_depth,
+                tool_call_id=ctx.tool_call_id,
+            )
+
+            # Emit SpawnSessionStart so the protocol layer can detect child session
+            # creation. All other stream events flow through TurnRunner → EventBus
+            # and reach the frontend via protocol-layer ``scope="descendants"``
+            # subscription — no manual business-layer forwarding is required.
             spawn_event = SpawnSessionStart(
                 child_session_id=child_session_id,
                 parent_session_id=parent_session_id,
@@ -149,32 +165,13 @@ class WorkersTools(ResourceProvider):
 
             try:
                 input_provider = ctx.get_input_provider() if ctx.input_provider else None
-                # Use run_stream instead of run for consistent event handling
-                stream = worker.run_stream(
-                    prompt,
-                    session_id=child_session_id,
-                    parent_session_id=parent_session_id,
-                    depth=child_depth,
-                    input_provider=input_provider,
-                )
-
                 final_content = ""
-                async for event in stream:
-                    # Wrap the event in SubAgentEvent
-                    subagent_event = SubAgentEvent(
-                        source_name=agent_name,
-                        source_type=source_type,
-                        event=event,
-                        depth=child_depth,
-                        child_session_id=child_session_id,
-                        parent_session_id=parent_session_id,
-                        tool_call_id=ctx.tool_call_id,
-                    )
-                    await ctx.events.emit_event(subagent_event)
-
-                    # Extract final content from StreamCompleteEvent
-                    if isinstance(event, StreamCompleteEvent):
-                        content = event.message.content
+                async for event in session_pool.run_stream(
+                    child_session_id, prompt, input_provider=input_provider
+                ):
+                    inner = event.event if isinstance(event, SubAgentEvent) else event
+                    if isinstance(inner, StreamCompleteEvent):
+                        content = inner.message.content
                         final_content = str(content) if content else ""
 
                 return final_content
@@ -198,6 +195,11 @@ class WorkersTools(ResourceProvider):
                 msg = "No agent pool available"
                 raise ToolError(msg)
 
+            session_pool = ctx.pool.session_pool
+            if session_pool is None:
+                msg = "SessionPool is required for worker tool execution"
+                raise ToolError(msg)
+
             # Look for worker in both nodes and teams
             worker = None
             if node_name in ctx.pool.nodes:
@@ -216,14 +218,15 @@ class WorkersTools(ResourceProvider):
             if child_depth > MAX_DELEGATION_DEPTH:
                 raise DelegationDepthError(child_depth)
 
-            # Create child session via AgentContext (RFC-0028)
-            from agentpool.utils.identifiers import generate_session_id
-
-            parent_session_id = getattr(ctx.node, "session_id", None) or generate_session_id()
+            parent_session_id = getattr(ctx.node, "session_id", None) or ""
             child_session_id = await ctx.create_child_session(
                 agent_name=node_name,
                 agent_type=worker.agent_type,
                 parent_session_id=parent_session_id,
+                source_name=node_name,
+                source_type="agent",  # Will be updated below
+                depth=child_depth,
+                tool_call_id=ctx.tool_call_id,
             )
 
             # Determine source type for events
@@ -239,7 +242,10 @@ class WorkersTools(ResourceProvider):
                 msg = f"Node {node_name} does not support streaming"
                 raise ToolError(msg)
 
-            # Emit SpawnSessionStart before streaming begins
+            # Emit SpawnSessionStart so the protocol layer can detect child session
+            # creation. All other stream events flow through TurnRunner → EventBus
+            # and reach the frontend via protocol-layer ``scope="descendants"``
+            # subscription — no manual business-layer forwarding is required.
             spawn_event = SpawnSessionStart(
                 child_session_id=child_session_id,
                 parent_session_id=parent_session_id,
@@ -253,33 +259,14 @@ class WorkersTools(ResourceProvider):
             )
             await ctx.events.emit_event(spawn_event)
 
-            # Use run_stream for consistent event handling
             input_provider = ctx.get_input_provider() if ctx.input_provider else None
-            stream = worker.run_stream(
-                prompt,
-                session_id=child_session_id,
-                parent_session_id=parent_session_id,
-                depth=child_depth,
-                input_provider=input_provider,
-            )
-
             final_content = ""
-            async for event in stream:
-                # Wrap the event in SubAgentEvent
-                subagent_event = SubAgentEvent(
-                    source_name=node_name,
-                    source_type=source_type,
-                    event=event,
-                    depth=child_depth,
-                    child_session_id=child_session_id,
-                    parent_session_id=parent_session_id,
-                    tool_call_id=ctx.tool_call_id,
-                )
-                await ctx.events.emit_event(subagent_event)
-
-                # Extract final content from StreamCompleteEvent
-                if isinstance(event, StreamCompleteEvent):
-                    content = event.message.content
+            async for event in session_pool.run_stream(
+                child_session_id, prompt, input_provider=input_provider
+            ):
+                inner = event.event if isinstance(event, SubAgentEvent) else event
+                if isinstance(inner, StreamCompleteEvent):
+                    content = inner.message.content
                     final_content = str(content) if content else ""
 
             return final_content

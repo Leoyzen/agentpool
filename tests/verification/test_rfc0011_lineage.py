@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from pydantic_ai.models.test import TestModel
@@ -5,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.events import RunStartedEvent, SubAgentEvent
+from agentpool.agents.events import RunStartedEvent, SpawnSessionStart, SubAgentEvent
 from agentpool_config.storage import SQLStorageConfig, StorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
 from agentpool_storage.sql_provider.models import Conversation
@@ -52,37 +53,41 @@ async def test_pool(sql_provider):
 async def test_subagent_independent_session(test_pool):
     """Test that subagent runs in independent session with unique ID."""
     parent = test_pool.get_agent("parent")
-    child = test_pool.get_agent("child")
-
-    # We want to verify that when parent calls 'task', child gets a new session ID.
-    # We can capture the call to run_stream on the child agent.
-    original_run_stream = child.run_stream
-    child_run_kwargs = []
-
-    async def mocked_run_stream(*args, **kwargs):
-        child_run_kwargs.append(kwargs)
-        async for event in original_run_stream(*args, **kwargs):
-            yield event
-
-    child.run_stream = mocked_run_stream
-
-    # Execute task tool on parent
-    ctx = parent.get_context()
-    tools = SubagentTools()
 
     parent_session_id = "parent-session-123"
     parent.session_id = parent_session_id
 
-    # In SubagentTools.task, it calls node.run_stream
-    await tools.task(ctx, agent_or_team="child", prompt="Do something", description="test task")
+    # Execute task tool on parent and capture SpawnSessionStart
+    ctx = parent.get_context()
+    tools = SubagentTools()
 
-    assert len(child_run_kwargs) == 1
-    kwargs = child_run_kwargs[0]
+    captured_events: list[SpawnSessionStart] = []
 
-    child_session_id = kwargs.get("session_id")
+    # Patch StreamEventEmitter.emit_event to capture events
+    from agentpool.agents.events import StreamEventEmitter
+    original_emit = StreamEventEmitter.emit_event
+
+    async def mock_emit(self, event):
+        if isinstance(event, SpawnSessionStart):
+            captured_events.append(event)
+        await original_emit(self, event)
+
+    StreamEventEmitter.emit_event = mock_emit
+
+    try:
+        await tools.task(
+            ctx, agent_or_team="child", prompt="Do something", description="test task"
+        )
+    finally:
+        StreamEventEmitter.emit_event = original_emit
+
+    assert len(captured_events) == 1, "Expected exactly one SpawnSessionStart"
+    spawn = captured_events[0]
+    child_session_id = spawn.child_session_id
+
     assert child_session_id is not None
     assert child_session_id != parent_session_id
-    assert kwargs.get("parent_session_id") == parent_session_id
+    assert spawn.parent_session_id == parent_session_id
 
     assert isinstance(child_session_id, str)
     assert len(child_session_id) > 0
@@ -105,47 +110,39 @@ async def test_run_started_event_lineage(test_pool):
 
 @pytest.mark.asyncio
 async def test_subagent_event_lineage(test_pool):
-    """Test that SubAgentEvent contains both child_session_id and parent_session_id."""
-    parent = test_pool.get_agent("parent")
-    child = test_pool.get_agent("child")
+    """Test that child session events are wrapped in SubAgentEvent by TurnRunner."""
+    pool = test_pool
+    parent = pool.get_agent("parent")
 
     parent_session_id = "parent-456"
+    assert pool.session_pool is not None
 
-    from agentpool_toolsets.builtin.subagent_tools import _stream_task
+    # Subscribe to parent with descendants scope to catch child events
+    queue = await pool.session_pool.event_bus.subscribe(parent_session_id, scope="descendants")
 
+    # Run parent which will delegate to child via task tool
     ctx = parent.get_context()
+    tools = SubagentTools()
     parent.session_id = parent_session_id
 
-    child_session_id = "child-789"
+    await tools.task(ctx, agent_or_team="child", prompt="Do something", description="test lineage")
 
-    captured_events = []
-    # Mock ctx.events.emit_event to capture events
-    original_emit = ctx.events.emit_event
+    # Collect all events from the queue
+    subagent_events: list[SubAgentEvent] = []
+    await asyncio.sleep(0.1)  # Give events time to propagate
 
-    async def mock_emit(event):
-        captured_events.append(event)
-        await original_emit(event)
+    while not queue.empty():
+        event = queue.get_nowait()
+        if event is None:
+            break
+        if isinstance(event, SubAgentEvent):
+            subagent_events.append(event)
 
-    ctx.events.emit_event = mock_emit
+    await pool.session_pool.event_bus.unsubscribe(parent_session_id, queue)
 
-    # We need a stream from the child
-    child_stream = child.run_stream(
-        "child prompt", session_id=child_session_id, parent_session_id=parent_session_id
-    )
-
-    await _stream_task(
-        ctx,
-        source_name="child",
-        source_type="agent",
-        stream=child_stream,
-        child_session_id=child_session_id,
-        parent_session_id=parent_session_id,
-    )
-
-    subagent_events = [e for e in captured_events if isinstance(e, SubAgentEvent)]
-    assert len(subagent_events) > 0
+    assert len(subagent_events) > 0, "Expected SubAgentEvents from child session"
     for e in subagent_events:
-        assert e.child_session_id == child_session_id
+        assert e.child_session_id is not None
         assert e.parent_session_id == parent_session_id
 
 
