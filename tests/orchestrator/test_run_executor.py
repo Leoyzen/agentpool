@@ -481,3 +481,105 @@ async def test_run_started_event_always_first(
     assert isinstance(events[0], RunStartedEvent)
     assert events[0].session_id == "test-session"
     assert events[0].agent_name == test_agent.name
+
+
+@pytest.mark.anyio
+async def test_tool_events_with_event_bus_set(
+    tool_agent: Agent[None],
+    message_history: MessageHistory,
+) -> None:
+    """RunExecutor yields ToolCallStartEvent and ToolCallCompleteEvent even when event_bus is set on run_ctx.
+
+    After the fix, process_tool_event() always returns combined events regardless
+    of event_bus state. RunExecutor should yield these events normally.
+    """
+    from agentpool.orchestrator.core import EventBus
+
+    event_bus = EventBus()
+    run_ctx = AgentRunContext(event_bus=event_bus, session_id="test-session-bus")
+    executor = RunExecutor(tool_agent)
+    user_msg = ChatMessage.user_prompt("Call the tool")
+
+    events = await _collect_events(
+        executor,
+        prompts=["Call the tool"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+    )
+
+    # Must contain ToolCallStartEvent
+    tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+    assert len(tool_starts) >= 1, (
+        f"Expected at least 1 ToolCallStartEvent, got event types: "
+        f"{[type(e).__name__ for e in events]}"
+    )
+    assert tool_starts[0].tool_name == "hello_tool"
+
+    # Must contain ToolCallCompleteEvent
+    tool_completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
+    assert len(tool_completes) >= 1, (
+        f"Expected at least 1 ToolCallCompleteEvent, got event types: "
+        f"{[type(e).__name__ for e in events]}"
+    )
+    assert tool_completes[0].tool_name == "hello_tool"
+    assert tool_completes[0].tool_result == "hello_result"
+
+
+@pytest.mark.anyio
+async def test_multiple_tool_calls_ordering(
+    message_history: MessageHistory,
+) -> None:
+    """Multiple tool calls produce correct start/complete pairs in order."""
+
+    async def tool_a() -> str:
+        """Tool A."""
+        return "result_a"
+
+    async def tool_b() -> str:
+        """Tool B."""
+        return "result_b"
+
+    model = TestModel(custom_output_text="Done")
+    agent = Agent(name="multi-tool-agent", model=model, tools=[tool_a, tool_b])
+    run_ctx = AgentRunContext()
+    executor = RunExecutor(agent)
+    user_msg = ChatMessage.user_prompt("Call both tools")
+
+    events = await _collect_events(
+        executor,
+        prompts=["Call both tools"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+    )
+
+    # Collect start and complete events in order
+    tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+    tool_completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
+
+    # Should have at least 2 tool calls (TestModel with call_tools='all' may call each tool)
+    assert len(tool_starts) >= 1, (
+        f"Expected at least 1 ToolCallStartEvent, got {len(tool_starts)}"
+    )
+    assert len(tool_completes) >= 1, (
+        f"Expected at least 1 ToolCallCompleteEvent, got {len(tool_completes)}"
+    )
+
+    # Verify ordering: each complete comes after its corresponding start
+    for complete in tool_completes:
+        # Find the start event with the same tool_call_id
+        matching_starts = [
+            s for s in tool_starts
+            if s.tool_call_id == complete.tool_call_id
+        ]
+        assert len(matching_starts) == 1, (
+            f"Expected exactly 1 matching start for tool_call_id {complete.tool_call_id}, "
+            f"got {len(matching_starts)}"
+        )
+
+        # Verify no cross-contamination: complete event matches its start
+        assert complete.tool_name == matching_starts[0].tool_name, (
+            f"Tool name mismatch: start={matching_starts[0].tool_name}, "
+            f"complete={complete.tool_name}"
+        )

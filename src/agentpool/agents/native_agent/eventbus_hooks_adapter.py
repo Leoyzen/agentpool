@@ -16,7 +16,7 @@ from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import RunContext, ToolDefinition
 
 from agentpool.agents.context import AgentContext
-from agentpool.agents.events import RunStartedEvent, ToolCallCompleteEvent, ToolCallStartEvent
+from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import EventBus
 
 
@@ -126,7 +126,12 @@ class EventBusHooksAdapter:
         return wrapped
 
     def _wrap_before_tool_execute(self):
-        """Wrap before_tool_execute hook to publish ToolCallStartEvent."""
+        """Wrap before_tool_execute hook as transparent passthrough.
+
+        ToolCallStartEvent is now produced by the stream path in
+        NativeAgent._run_agentlet_core() and RunExecutor, making
+        EventBus publication here redundant.
+        """
         original = self._hooks.before_tool_execute
 
         async def wrapped(
@@ -136,17 +141,6 @@ class EventBusHooksAdapter:
             tool_def: ToolDefinition,
             args: ValidatedToolArgs,
         ) -> ValidatedToolArgs:
-            session_id = self._get_session_id(ctx)
-            if session_id:
-                await self._event_bus.publish(
-                    session_id,
-                    ToolCallStartEvent(
-                        tool_call_id=call.tool_call_id,
-                        tool_name=call.tool_name,
-                        title=f"Executing: {call.tool_name}",
-                        raw_input=dict(args),
-                    ),
-                )
             if original is not None:
                 return await original(ctx, call=call, tool_def=tool_def, args=args)
             return args
@@ -154,7 +148,12 @@ class EventBusHooksAdapter:
         return wrapped
 
     def _wrap_after_tool_execute(self):
-        """Wrap after_tool_execute hook to publish ToolCallCompleteEvent."""
+        """Wrap after_tool_execute hook as transparent passthrough.
+
+        ToolCallCompleteEvent is now produced by the stream path via
+        process_tool_event() and enqueued by the caller, making
+        EventBus publication here redundant.
+        """
         original = self._hooks.after_tool_execute
 
         async def wrapped(
@@ -165,19 +164,6 @@ class EventBusHooksAdapter:
             args: ValidatedToolArgs,
             result: Any,
         ) -> Any:
-            session_id = self._get_session_id(ctx)
-            if session_id:
-                await self._event_bus.publish(
-                    session_id,
-                    ToolCallCompleteEvent(
-                        tool_name=call.tool_name,
-                        tool_call_id=call.tool_call_id,
-                        tool_input=dict(args),
-                        tool_result=result,
-                        agent_name=ctx.deps.node_name if ctx.deps else "",
-                        message_id=str(uuid.uuid4()),
-                    ),
-                )
             if original is not None:
                 return await original(ctx, call=call, tool_def=tool_def, args=args, result=result)
             return result

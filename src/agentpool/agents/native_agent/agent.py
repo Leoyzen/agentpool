@@ -14,6 +14,11 @@ from uuid import uuid4
 import warnings
 
 import logfire
+from pydantic_ai import (
+    BaseToolCallPart,
+    FunctionToolCallEvent,
+    PartStartEvent,
+)
 from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
 from pydantic_graph import End
@@ -34,6 +39,7 @@ from agentpool.agents.context import AgentContext
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
+    ToolCallStartEvent,
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
@@ -42,6 +48,7 @@ from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
+from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.result_utils import to_type
 from agentpool.utils.streams import merge_queue_into_iterator
 
@@ -929,6 +936,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 usage_limits=self._default_usage_limits,
             ) as agent_run:
                 pending_tcs: dict[str, BaseToolCallPart] = {}
+                emitted_tool_starts: set[str] = set()
                 async for node in agent_run:
                     if run_ctx.cancelled:
                         self.log.info("Stream cancelled by user")
@@ -942,14 +950,50 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                 async for event in stream:
                                     if run_ctx.cancelled:
                                         break
+
+                                    # Map tool call start events to ToolCallStartEvent
+                                    if isinstance(event, FunctionToolCallEvent):
+                                        tool_part = event.part
+                                        if tool_part.tool_call_id not in emitted_tool_starts:
+                                            emitted_tool_starts.add(tool_part.tool_call_id)
+                                            await event_queue.put(
+                                                ToolCallStartEvent(
+                                                    tool_call_id=tool_part.tool_call_id,
+                                                    tool_name=tool_part.tool_name,
+                                                    title=f"Executing: {tool_part.tool_name}",
+                                                    raw_input=safe_args_as_dict(
+                                                        tool_part,
+                                                        default={},
+                                                    ),
+                                                )
+                                            )
+                                    elif isinstance(event, PartStartEvent) and isinstance(
+                                        event.part, BaseToolCallPart
+                                    ):
+                                        tool_part = event.part
+                                        if tool_part.tool_call_id not in emitted_tool_starts:
+                                            emitted_tool_starts.add(tool_part.tool_call_id)
+                                            await event_queue.put(
+                                                ToolCallStartEvent(
+                                                    tool_call_id=tool_part.tool_call_id,
+                                                    tool_name=tool_part.tool_name,
+                                                    title=f"Executing: {tool_part.tool_name}",
+                                                    raw_input=safe_args_as_dict(
+                                                        tool_part,
+                                                        default={},
+                                                    ),
+                                                )
+                                            )
+
                                     await event_queue.put(event)
-                                    await process_tool_event(
+                                    if combined := await process_tool_event(
                                         self.name,
                                         event,  # type: ignore[arg-type]
                                         pending_tcs,
                                         message_id,
                                         run_ctx,
-                                    )
+                                    ):
+                                        await event_queue.put(combined)
                             else:
                                 async with merge_queue_into_iterator(
                                     stream, run_ctx.event_queue
