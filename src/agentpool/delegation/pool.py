@@ -192,6 +192,12 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 max_skills=self.manifest.skills.instruction.max_skills,
                 owner="pool",
             )
+            from agentpool_toolsets.builtin.skills import SkillsTools
+
+            self.skills_tools_provider = SkillsTools(
+                injection_mode=self.manifest.skills.instruction.mode,
+                max_skills=self.manifest.skills.instruction.max_skills,
+            )
             self._tasks = TaskRegistry()
             self._skill_commands: SkillCommandRegistry | None = None
             self._skill_resolver: SkillURIResolver | None = None
@@ -277,6 +283,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                     agent.tools.add_provider(aggregating_provider)
                     if self.skills_instruction_provider:
                         agent.tools.add_provider(self.skills_instruction_provider)
+                    agent.tools.add_provider(self.skills_tools_provider)
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 if self._session_store is not None:
@@ -350,6 +357,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                     agent.tools.remove_provider(aggregating_provider.name)
                     if self.skills_instruction_provider:
                         agent.tools.remove_provider(self.skills_instruction_provider.name)
+                    agent.tools.remove_provider(self.skills_tools_provider.name)
                 # Clean up skill provider and resolver
                 if self._skill_provider is not None:
                     self._skill_provider.skills_changed.disconnect(self._on_skills_changed)
