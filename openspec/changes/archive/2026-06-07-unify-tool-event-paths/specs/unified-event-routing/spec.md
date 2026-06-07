@@ -3,8 +3,6 @@
 ### Requirement: All events flow through EventBus with stream bridge
 The system SHALL publish all agent stream events and tool events to `EventBus` through the stream consumer (`_stream_events()`). `process_tool_event()` SHALL NOT publish events directly to `EventBus`. `run_ctx.event_queue` SHALL NOT be used as an event channel between tools and the stream consumer. `TurnRunner` SHALL create a per-run EventBus subscriber that feeds events back into the stream. `TurnRunner` SHALL NOT start a `_consume_event_queue` background task.
 
-**ADDED**: Business layer code (tools, workers, delegators) SHALL NOT perform manual event routing, wrapping, or subscription. All event forwarding from business layer to frontend SHALL be handled exclusively by the protocol layer via EventBus `scope="descendants"` subscription.
-
 #### Scenario: Tool event does not enter run_ctx.event_queue
 - **WHEN** a tool emits an event via `StreamEventEmitter._emit()`
 - **THEN** the event is published directly to `EventBus`
@@ -50,19 +48,6 @@ The system SHALL publish all agent stream events and tool events to `EventBus` t
 - **THEN** the system maps it to `ToolCallStartEvent` and places the mapped event into the local event queue
 - **AND** the original `PartStartEvent` is also placed into the local event queue for `process_tool_event()` tracking
 - **AND** `process_tool_event()` processes the original `PartStartEvent` to update `pending_tool_calls`
-
-#### Scenario: Business layer does not manually route events
-- **WHEN** a business layer tool or worker initiates a subagent run
-- **THEN** the business layer SHALL NOT subscribe to EventBus directly
-- **AND** the business layer SHALL NOT wrap events in `SubAgentEvent` and emit via local event system
-- **AND** the business layer SHALL NOT consume events from EventBus to write to filesystem or other side channels
-- **AND** all events from the subagent run SHALL reach EventBus exclusively via the agent's native stream path
-
-#### Scenario: Protocol layer receives all subagent events
-- **WHEN** a protocol handler subscribes to a session with `scope="descendants"`
-- **AND** a subagent is spawned within that session
-- **THEN** all events from the subagent run are received by the protocol handler
-- **AND** no manual event forwarding from business layer is required
 
 #### Scenario: ClaudeCodeAgent event flow
 - **WHEN** a ClaudeCodeAgent runs through SessionPool

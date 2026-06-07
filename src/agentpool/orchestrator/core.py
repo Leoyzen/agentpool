@@ -915,6 +915,56 @@ class TurnRunner:
                 self._injection_locks[session_id] = lock
             return lock
 
+    def _maybe_wrap_event(self, session_id: str, event: Any) -> Any:
+        """Wrap event in SubAgentEvent if session is a child session.
+
+        Child sessions created by the business layer store SubAgentEvent
+        metadata in their SessionState.metadata. When TurnRunner publishes
+        events for a child session, it wraps them so the protocol layer
+        can route them to the correct child session UI.
+
+        Args:
+            session_id: The session ID the event belongs to.
+            event: The event to potentially wrap.
+
+        Returns:
+            The original event, or a SubAgentEvent wrapping it.
+        """
+        from agentpool.agents.events import SubAgentEvent
+
+        session = self.sessions.get_session(session_id)
+        if session is None or session.parent_session_id is None:
+            return event
+
+        # Already wrapped — don't double-wrap
+        if isinstance(event, SubAgentEvent):
+            return event
+
+        metadata = session.metadata
+        source_name = metadata.get("source_name") or session.agent_name or "unknown"
+        source_type = metadata.get("source_type", "agent")
+        depth = metadata.get("depth", 1)
+        tool_call_id = metadata.get("tool_call_id")
+        model_id = metadata.get("model_id")
+        mode = metadata.get("mode")
+
+        return SubAgentEvent(
+            source_name=source_name,
+            source_type=source_type,
+            event=event,
+            depth=depth,
+            child_session_id=session_id,
+            parent_session_id=session.parent_session_id,
+            tool_call_id=tool_call_id,
+            model_id=model_id,
+            mode=mode,
+        )
+
+    async def _publish_event(self, session_id: str, event: Any) -> None:
+        """Publish event to EventBus, wrapping for child sessions if needed."""
+        wrapped = self._maybe_wrap_event(session_id, event)
+        await self.event_bus.publish(session_id, wrapped)
+
     async def _run_turn_unlocked(
         self,
         session_id: str,
@@ -994,7 +1044,7 @@ class TurnRunner:
                     event = await run_ctx.event_queue.get()
                     if event is None:
                         break
-                    await self.event_bus.publish(session_id, event)
+                    await self._publish_event(session_id, event)
             except asyncio.CancelledError:
                 pass
 
@@ -1023,7 +1073,7 @@ class TurnRunner:
                 async for event in agent._run_stream_once(
                     run_ctx, *prompts, session_id=session_id, **stream_kwargs
                 ):
-                    await self.event_bus.publish(session_id, event)
+                    await self._publish_event(session_id, event)
 
                 # After _run_stream_once completes, flush unconsumed injections
                 # to queued prompts and continue processing if any remain.
@@ -1035,7 +1085,7 @@ class TurnRunner:
                     async for event in agent._run_stream_once(
                         run_ctx, *current_prompts, session_id=session_id, **stream_kwargs
                     ):
-                        await self.event_bus.publish(session_id, event)
+                        await self._publish_event(session_id, event)
                     run_ctx.injection_manager.flush_pending_to_queue()
             except (Exception, asyncio.CancelledError) as exc:
                 if run_handle is not None and run_handle.status not in (
@@ -1599,7 +1649,13 @@ class SessionPool:
             raise ValueError("No active run found with ID: " + run_id)
         run_handle.cancel()
 
-    async def run_stream(self, session_id: str, *prompts: str, **kwargs: Any) -> AsyncIterator[Any]:
+    async def run_stream(
+        self,
+        session_id: str,
+        *prompts: str,
+        scope: str = "session",
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
         """Process prompts and yield events from the EventBus.
 
         Convenience method for tests and standalone clients that want
@@ -1608,13 +1664,15 @@ class SessionPool:
         Args:
             session_id: The session to process the prompt for.
             *prompts: Prompts to process.
+            scope: Subscription scope - "session" (exact match),
+                "descendants" (self + children), or "subtree" (self + parent + siblings).
             **kwargs: Additional arguments passed to the turn runner
                 (e.g. ``input_provider``).
 
         Yields:
             Events published to the EventBus for this session.
         """
-        queue = await self.event_bus.subscribe(session_id)
+        queue = await self.event_bus.subscribe(session_id, scope=scope)
         process_task = asyncio.create_task(self.process_prompt(session_id, *prompts, **kwargs))
         get_task: asyncio.Task[Any] | None = None
         try:

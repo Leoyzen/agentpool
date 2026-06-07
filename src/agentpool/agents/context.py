@@ -202,6 +202,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         agent_name: str,
         agent_type: str,
         parent_session_id: str | None = None,
+        **metadata: Any,
     ) -> str:
         """Create a child session for a subagent delegation.
 
@@ -217,6 +218,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             agent_type: Type of the child agent (``"native"``, ``"claude"``, etc.).
             parent_session_id: Explicit parent session ID.  When *None* the
                 current node's ``session_id`` is used as the parent.
+            **metadata: Additional metadata to attach to the child session.
 
         Returns:
             The child session ID string.
@@ -232,6 +234,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     agent_name=agent_name,
                     parent_session_id=effective_parent,
                     agent_type=agent_type,
+                    **metadata,
                 )
                 return child_session.session_id
         # Fallback: no pool, no session_pool, or no parent — generate ephemeral ID.
