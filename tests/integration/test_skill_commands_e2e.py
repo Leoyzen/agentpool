@@ -443,9 +443,7 @@ class TestOpenCodeEndToEnd:
 
         assert len(commands) == 3
         for cmd in commands:
-            assert cmd.name.startswith("skill:")
-            skill_name = cmd.name.removeprefix("skill:")
-            assert skill_name in ["hello-world", "test-with-args", "test-lifecycle"]
+            assert cmd.name in ["hello-world", "test-with-args", "test-lifecycle"]
 
     async def test_opencode_command_format(self, command_registry: SkillCommandRegistry) -> None:
         """Test that OpenCode commands follow slashed command format."""
@@ -456,8 +454,8 @@ class TestOpenCodeEndToEnd:
         command_dict = {cmd.name: cmd for cmd in commands}
 
         # Verify hello-world format
-        hello_cmd = command_dict["skill:hello-world"]
-        assert hello_cmd.name == "skill:hello-world"
+        hello_cmd = command_dict["hello-world"]
+        assert hello_cmd.name == "hello-world"
         assert "greeting" in hello_cmd.description.lower()
         assert hello_cmd.category == "skill"
 
@@ -768,10 +766,10 @@ class TestCrossProtocolConsistency:
             assert tool.name.startswith("skill__")
             assert "___" not in tool.name  # No triple underscore
 
-        # OpenCode: skill: prefix
+        # OpenCode: no prefix (plain skill name)
         for cmd in opencode.get_commands():
-            assert cmd.name.startswith("skill:")
-            assert "__" not in cmd.name  # Uses colon, not underscore
+            assert "__" not in cmd.name
+            assert ":" not in cmd.name
 
 
 # =============================================================================

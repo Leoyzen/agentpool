@@ -940,7 +940,7 @@ def test_bypass_session_pool_contextvar_true() -> None:
 
 
 def test_bypass_session_pool_agui_stack_inspection() -> None:
-    """AG-UI callers still bypass via stack inspection (preserved until Migration B)."""
+    """AG-UI callers still bypass via stack inspection (permanent — see docs/audit/agui-bypass-audit.md)."""
     import types
     from typing import Any
 
@@ -958,5 +958,5 @@ def test_bypass_session_pool_agui_stack_inspection() -> None:
     check_fn = agui_module.__dict__["_check"]
     result = check_fn()
     assert result is True, (
-        "AG-UI stack inspection should still bypass SessionPool (Migration B)"
+        "AG-UI stack inspection should bypass SessionPool (permanent — see docs/audit/agui-bypass-audit.md)"
     )
