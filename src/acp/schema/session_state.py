@@ -115,6 +115,54 @@ class SessionInfo(AnnotatedObject):
     meta: dict[str, Any] | None = None
     """Arbitrary session metadata."""
 
+    parent_session_id: str | None = None
+    """ID of the parent session if this session was spawned as a subagent."""
+
+    child_session_ids: Sequence[str] | None = None
+    """IDs of child sessions spawned from this session."""
+
+    depth: int | None = Field(default=None, ge=0)
+    """Nesting depth in the session hierarchy (0 for root sessions)."""
+
+
+class SubagentCapabilities(AnnotatedObject):
+    """Capabilities of an available subagent."""
+
+    streaming: bool | None = False
+    """Whether the subagent supports streaming updates."""
+
+    tools: bool | None = False
+    """Whether the subagent can use tools."""
+
+    delegation: bool | None = False
+    """Whether the subagent can delegate to other subagents."""
+
+    prompt_delegation: bool | None = False
+    """Whether the subagent supports prompt delegation (Phase 2)."""
+
+    background: bool | None = False
+    """Whether the subagent supports background execution (Phase 2)."""
+
+
+class SubagentInfo(AnnotatedObject):
+    """Information about an available subagent for delegation.
+
+    Advertised during session lifecycle so clients know which subagents
+    can be invoked.
+    """
+
+    subagent_id: str
+    """Unique identifier for the subagent."""
+
+    name: str
+    """Human-readable name of the subagent."""
+
+    description: str | None = None
+    """Optional description of the subagent."""
+
+    capabilities: SubagentCapabilities | None = None
+    """Capabilities of the subagent."""
+
 
 class SessionConfigSelectOption(AnnotatedObject):
     """A possible value for a configuration selector."""

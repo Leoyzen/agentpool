@@ -8,6 +8,7 @@ from pydantic import field_validator
 
 from acp.schema.base import AnnotatedObject
 from acp.schema.providers import ProvidersCapabilities
+from acp.schema.session_state import SubagentCapabilities
 
 
 class FileSystemCapability(AnnotatedObject):
@@ -332,6 +333,9 @@ class AgentCapabilities(AnnotatedObject):
     via the providers/list, providers/set, and providers/disable methods.
     """
 
+    subagents: SubagentCapabilities | None = None
+    """Subagent capabilities supported by the agent."""
+
     @classmethod
     def create(
         cls,
@@ -347,6 +351,7 @@ class AgentCapabilities(AnnotatedObject):
         close_session: bool = False,
         fork_session: bool = False,
         providers: bool = False,
+        subagents: SubagentCapabilities | None = None,
         turn_complete: bool = False,
     ) -> Self:
         """Create an instance of AgentCapabilities.
@@ -364,6 +369,7 @@ class AgentCapabilities(AnnotatedObject):
             close_session: Whether the agent supports `session/close` (unstable).
             fork_session: Whether the agent supports `session/fork` (unstable).
             providers: Whether the agent supports `providers/*` methods.
+            subagents: Subagent capabilities supported by the agent.
             turn_complete: Whether the agent emits `turn_complete` updates (unstable).
         """
         session_caps = SessionCapabilities(
@@ -377,6 +383,7 @@ class AgentCapabilities(AnnotatedObject):
         return cls(
             load_session=load_session,
             providers=providers_caps,
+            subagents=subagents,
             mcp_capabilities=McpCapabilities(
                 http=http_mcp_servers, sse=sse_mcp_servers, acp=acp_mcp_servers
             ),

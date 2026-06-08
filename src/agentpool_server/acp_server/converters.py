@@ -196,11 +196,18 @@ def to_session_config_option(category: ModeCategory) -> SessionConfigOption:
 
 
 def to_session_info(session_data: SessionData) -> SessionInfo:
+    meta: dict[str, Any] = dict(session_data.metadata) if session_data.metadata else {}
+    # Compute depth: 0 for root sessions, 1 for direct children
+    # (full nested depth computation would require traversing the parent chain)
+    depth = 0 if session_data.parent_id is None else 1
     return SessionInfo(
         session_id=session_data.session_id,
         cwd=session_data.cwd or "",
         title=session_data.title,
         updated_at=session_data.updated_at,
+        meta=meta if meta else None,
+        parent_session_id=session_data.parent_id,
+        depth=depth,
     )
 
 

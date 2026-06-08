@@ -21,12 +21,15 @@ from tokonomics.model_discovery.model_info import ModelInfo
 
 from acp.agent.acp_requests import ACPRequests
 from acp.agent.notifications import ACPNotifications
+from acp.exceptions import RequestError
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent, AgentPool
+from acp.schema.requests import PromptDelegation
+from agentpool import Agent, AgentPool  # noqa: TC001
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
+from agentpool.common_types import SupportsRunStream
 from agentpool.log import get_logger
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_commands.base import NodeCommand
@@ -145,6 +148,18 @@ def infer_stop_reason(error_msg: str) -> StopReason:
     return "max_tokens"  # Default to max_tokens for other usage limits
 
 
+def _is_subagent_tool(tool: Any) -> bool:
+    """Check if a tool is a subagent delegation tool.
+
+    Args:
+        tool: A Tool instance to check.
+
+    Returns:
+        True if the tool's category is "subagent", False otherwise.
+    """
+    return tool.category == "subagent"
+
+
 @dataclass
 class ACPSession:
     """Individual ACP session state and management.
@@ -191,12 +206,6 @@ class ACPSession:
     manager: ACPSessionManager | None = None
     """Session manager for managing sessions. Used for session management commands."""
 
-    subagent_display_mode: Literal["inline", "tool_box"] = "tool_box"
-    """How to display subagent output:
-    - 'inline': Subagent output flows into main message stream
-    - 'tool_box': Subagent output contained in the tool call's progress box (default)
-    """
-
     def __post_init__(self) -> None:
         """Initialize session state and set up providers."""
         self.mcp_servers = self.mcp_servers or []
@@ -204,6 +213,7 @@ class ACPSession:
         self._task_lock = asyncio.Lock()
         self._cancelled = False
         self._current_converter: ACPEventConverter | None = None
+        self._foreground_children: set[str] = set()
         self.last_usage: Usage | None = None
         self.fs = ACPFileSystem(self.client, session_id=self.session_id)
         self.command_store = CommandStore(commands=get_all_commands())
@@ -557,6 +567,9 @@ class ACPSession:
         which handles protocol-specific cancellation (e.g., sending CancelNotification
         for ACP agents, calling SDK interrupt for ClaudeCodeAgent, etc.).
 
+        Foreground child sessions are also cancelled via the session manager.
+        Background child sessions survive this cancellation.
+
         Note:
             Tool call cleanup is handled in process_prompt() to avoid race conditions
             with the converter state being modified from multiple async contexts.
@@ -567,16 +580,42 @@ class ACPSession:
             await self.agent.interrupt()
         except Exception:
             self.log.exception("Failed to interrupt agent")
+        # Cancel foreground children
+        await self._cancel_foreground_children()
+
+    def _sync_foreground_children(self) -> None:
+        """Synchronize foreground children from the active event converter.
+
+        Copies the current converter's _foreground_children into the session's
+        own set so that cancellation propagates to all foreground subagents.
+        """
+        if self._current_converter is not None:
+            self._foreground_children.update(self._current_converter._foreground_children)
+
+    async def _cancel_foreground_children(self) -> None:
+        """Cancel all foreground child sessions via the session manager."""
+        self._sync_foreground_children()
+        for child_id in list(self._foreground_children):
+            if self.manager:
+                try:
+                    await self.manager.cancel_session(child_id)
+                except Exception:
+                    self.log.exception("Failed to cancel child session", child_session_id=child_id)
 
     def is_cancelled(self) -> bool:
         """Check if the session is cancelled."""
         return self._cancelled
 
-    async def process_prompt(self, content_blocks: Sequence[ContentBlock]) -> StopReason:  # noqa: PLR0911
+    async def process_prompt(
+        self,
+        content_blocks: Sequence[ContentBlock],
+        delegation: PromptDelegation | None = None,
+    ) -> StopReason:  # noqa: PLR0911
         """Process a prompt request and stream responses.
 
         Args:
             content_blocks: List of content blocks from the prompt request
+            delegation: Optional delegation configuration for this prompt
 
         Returns:
             Stop reason
@@ -589,6 +628,26 @@ class ACPSession:
             self.log.warning("Empty prompt received")
             return "refusal"
         commands, non_command_content = split_commands(contents, self.command_store)
+
+        # Handle delegation policies if capability is advertised
+        if delegation and self.acp_agent.prompt_delegation_enabled:
+            match delegation.policy:
+                case "auto":
+                    pass  # Normal flow
+                case "disable":
+                    return await self._process_prompt_with_disabled_subagent_tools(
+                        non_command_content, commands
+                    )
+                case "prefer" | "require":
+                    subagent_id = delegation.subagent_id
+                    if subagent_id is not None and self.agent_pool is not None:
+                        subagent = self.agent_pool.nodes.get(subagent_id)
+                        if subagent and isinstance(subagent, SupportsRunStream):
+                            return await self._run_subagent_directly(subagent, non_command_content)
+                    if delegation.policy == "require":
+                        msg = f"Subagent '{delegation.subagent_id}' not available"
+                        raise RequestError(-32602, msg)
+
         async with self._task_lock:
             if commands:  # Process commands if found
                 for command in commands:
@@ -600,6 +659,66 @@ class ACPSession:
                     return "end_turn"
 
             self.log.debug("Processing prompt", content_items=len(non_command_content))
+            return await self._run_agent_stream(non_command_content)
+
+    async def _process_prompt_with_disabled_subagent_tools(
+        self,
+        non_command_content: list[UserContent | PathReference],
+        commands: list[str],
+    ) -> StopReason:
+        """Process prompt with subagent tools temporarily disabled.
+
+        Args:
+            non_command_content: Content to process after command splitting
+            commands: Slash commands to execute
+
+        Returns:
+            Stop reason
+        """
+        async with self._task_lock:
+            # Identify and disable currently-enabled subagent tools
+            all_tools = await self.agent.tools.get_tools()
+            subagent_tools = [t for t in all_tools if _is_subagent_tool(t) and t.enabled]
+            for tool in subagent_tools:
+                await self.agent.tools.disable_tool(tool.name)
+
+            try:
+                if commands:
+                    for command in commands:
+                        self.log.info("Processing slash command", command=command)
+                        await self.execute_slash_command(command)
+
+                    if not non_command_content and len(self.agent.staged_content) == 0:
+                        return "end_turn"
+
+                self.log.debug(
+                    "Processing prompt with subagent tools disabled",
+                    content_items=len(non_command_content),
+                )
+                return await self._run_agent_stream(non_command_content)
+            finally:
+                for tool in subagent_tools:
+                    try:
+                        await self.agent.tools.enable_tool(tool.name)
+                    except Exception:
+                        self.log.exception("Failed to re-enable subagent tool", tool_name=tool.name)
+
+    async def _run_subagent_directly(
+        self,
+        subagent: SupportsRunStream[Any],
+        contents: list[UserContent | PathReference],
+    ) -> StopReason:
+        """Run a subagent directly with the given content and stream results.
+
+        Args:
+            subagent: The subagent node to run
+            contents: Content blocks to send to the subagent
+
+        Returns:
+            Stop reason
+        """
+        async with self._task_lock:
+            self.log.info("Running subagent directly")
             event_count = 0
             # Derive turn-complete support from client capabilities
             client_supports_turn_complete = (
@@ -609,97 +728,38 @@ class ACPSession:
             )
             # Create a new event converter for this prompt
             converter = ACPEventConverter(
-                subagent_display_mode=self.subagent_display_mode,
                 client_supports_turn_complete=client_supports_turn_complete,
             )
             self._current_converter = converter  # Track for cancellation
 
-            try:  # Use the session's persistent input provider
-                # Staged content is automatically injected by run_stream
-                # Inject session-level MCP providers for this run.
-                # We use add_provider/remove_provider instead of with_session_providers
-                # because NativeAgent.run_stream() may delegate to SessionPool, which
-                # re-enters agent.run_stream() in a different async context where
-                # with_session_providers() is no longer active.
-                #
-                # CRITICAL: SessionPool creates per-session agents via
-                # get_or_create_session_agent() which returns a fresh agent instance.
-                # We must add providers to BOTH the local agent and the SessionPool
-                # session agent to ensure tools are available regardless of which
-                # execution path is taken.
-                for provider in self.session_mcp_providers:
-                    self.agent.tools.add_provider(provider)
-
-                # Also add to SessionPool's per-session agent if SessionPool is active
-                session_pool_agent = None
-                agent_pool = getattr(self.agent, "agent_pool", None)
-                if agent_pool is not None and agent_pool.session_pool is not None:
-                    try:
-                        sp = agent_pool.session_pool.sessions
-                        session_pool_agent = await sp.get_or_create_session_agent(
-                            self.session_id
+            try:
+                async for event in subagent.run_stream(
+                    *contents,
+                    parent_session_id=self.session_id,
+                    depth=1,
+                ):
+                    if self._cancelled:
+                        self.log.info(
+                            "Cancelled during subagent event loop, cleaning up tool calls"
                         )
-                        for provider in self.session_mcp_providers:
-                            session_pool_agent.tools.add_provider(provider)
-                    except Exception:
-                        self.log.exception(
-                            "Failed to add MCP providers to SessionPool agent"
-                        )
+                        async for cancel_update in converter.cancel_pending_tools():
+                            await self.notifications.send_update(cancel_update)
+                        await anyio.sleep(0.05)
+                        self._current_converter = None
+                        return "cancelled"
 
-                try:
-                    async for event in self.agent.run_stream(
-                        *non_command_content,
-                        input_provider=self.input_provider,
-                        deps=self,
-                        session_id=self.session_id,  # Tie agent conversation to ACP session
-                    ):
-                        if self._cancelled:
-                            self.log.info("Cancelled during event loop, cleaning up tool calls")
-                            # Send cancellation notifications for any pending tool calls
-                            # This happens in the same async context as the converter
-                            async for cancel_update in converter.cancel_pending_tools():
-                                await self.notifications.send_update(cancel_update)
-                            # CRITICAL: Allow time for client to process tool completion notifications
-                            # before sending PromptResponse. Without this delay, the client may receive
-                            # and process the PromptResponse before the tool notifications, causing UI
-                            # state desync where subsequent prompts appear stuck/unresponsive.
-                            # This is needed because even though send() awaits the write, the client
-                            # may process messages asynchronously or out of order.
-                            await anyio.sleep(0.05)
-                            self._current_converter = None
-                            return "cancelled"
-
-                        event_count += 1
-                        async for update in converter.convert(event):
-                            await self.notifications.send_update(update)
-                        # Yield control to allow notifications to be sent immediately
-                        await anyio.sleep(0.01)
-                    self.log.info("Streaming finished", events_processed=event_count)
-                finally:
-                    from contextlib import suppress
-
-                    # Remove session-level MCP providers so they don't leak into other sessions
-                    # or persist after this run.
-                    for provider in self.session_mcp_providers:
-                        with suppress(ValueError):
-                            self.agent.tools.remove_provider(provider)
-
-                    # Also remove from SessionPool's per-session agent
-                    if session_pool_agent is not None:
-                        for provider in self.session_mcp_providers:
-                            with suppress(ValueError):
-                                session_pool_agent.tools.remove_provider(provider)
+                    event_count += 1
+                    async for update in converter.convert(event):
+                        await self.notifications.send_update(update)
+                    await anyio.sleep(0.01)
+                self.log.info("Subagent streaming finished", events_processed=event_count)
 
             except asyncio.CancelledError:
-                # Task was cancelled (e.g., via interrupt()) - return proper stop reason
-                # This is critical: CancelledError doesn't inherit from Exception,
-                # so we must catch it explicitly to send the PromptResponse
-                self.log.info("Stream cancelled via CancelledError, cleaning up tool calls")
-                # Send cancellation notifications for any pending tool calls
+                self.log.info(
+                    "Subagent stream cancelled via CancelledError, cleaning up tool calls"
+                )
                 async for cancel_update in converter.cancel_pending_tools():
                     await self.notifications.send_update(cancel_update)
-                # CRITICAL: Allow time for client to process tool completion notifications
-                # before sending PromptResponse. See comment in cancellation branch above.
                 await anyio.sleep(0.05)
                 self._current_converter = None
                 return "cancelled"
@@ -707,20 +767,107 @@ class ACPSession:
                 self.log.info("Usage limit exceeded", error=str(e))
                 return infer_stop_reason(str(e))
             except Exception as e:
-                self._current_converter = None  # Clear converter reference
-                self.log.exception("Error during streaming")
-                # Send error as toast notification instead of polluting chat history
+                self._current_converter = None
+                self.log.exception("Error during subagent streaming")
                 await self._send_toast(
-                    message=f"Agent error: {e}",
+                    message=f"Subagent error: {e}",
                     level="error",
                 )
-                await anyio.sleep(0.05)  # Allow network buffers to flush
+                await anyio.sleep(0.05)
                 return "end_turn"
             else:
-                # Title generation is now handled automatically by log_session
                 self.last_usage = converter.last_usage
-                self._current_converter = None  # Clear converter reference
+                self._current_converter = None
                 return "end_turn"
+
+    async def _run_agent_stream(
+        self,
+        non_command_content: list[UserContent | PathReference],
+    ) -> StopReason:
+        """Run the agent stream and convert events to ACP updates.
+
+        Args:
+            non_command_content: Content to send to the agent
+
+        Returns:
+            Stop reason
+        """
+        event_count = 0
+        # Derive turn-complete support from client capabilities
+        client_supports_turn_complete = (
+            bool(self.client_capabilities.turn_complete)
+            if self.client_capabilities is not None
+            else False
+        )
+        converter = ACPEventConverter(
+            client_supports_turn_complete=client_supports_turn_complete,
+        )
+        self._current_converter = converter  # Track for cancellation
+
+        try:  # Use the session's persistent input provider
+            # Staged content is automatically injected by run_stream
+            # Inject session-level MCP providers for this run
+            async with self.agent.tools.with_session_providers(self.session_mcp_providers):
+                async for event in self.agent.run_stream(
+                    *non_command_content,
+                    input_provider=self.input_provider,
+                    deps=self,
+                    session_id=self.session_id,  # Tie agent conversation to ACP session
+                ):
+                    if self._cancelled:
+                        self.log.info("Cancelled during event loop, cleaning up tool calls")
+                        # Send cancellation notifications for any pending tool calls
+                        # This happens in the same async context as the converter
+                        async for cancel_update in converter.cancel_pending_tools():
+                            await self.notifications.send_update(cancel_update)
+                        # CRITICAL: Allow time for client to process tool completion notifications
+                        # before sending PromptResponse. Without this delay, the client may receive
+                        # and process the PromptResponse before the tool notifications, causing UI
+                        # state desync where subsequent prompts appear stuck/unresponsive.
+                        # This is needed because even though send() awaits the write, the client
+                        # may process messages asynchronously or out of order.
+                        await anyio.sleep(0.05)
+                        self._current_converter = None
+                        return "cancelled"
+
+                    event_count += 1
+                    async for update in converter.convert(event):
+                        await self.notifications.send_update(update)
+                    # Yield control to allow notifications to be sent immediately
+                    await anyio.sleep(0.01)
+                self.log.info("Streaming finished", events_processed=event_count)
+
+        except asyncio.CancelledError:
+            # Task was cancelled (e.g., via interrupt()) - return proper stop reason
+            # This is critical: CancelledError doesn't inherit from Exception,
+            # so we must catch it explicitly to send the PromptResponse
+            self.log.info("Stream cancelled via CancelledError, cleaning up tool calls")
+            # Send cancellation notifications for any pending tool calls
+            async for cancel_update in converter.cancel_pending_tools():
+                await self.notifications.send_update(cancel_update)
+            # CRITICAL: Allow time for client to process tool completion notifications
+            # before sending PromptResponse. See comment in cancellation branch above.
+            await anyio.sleep(0.05)
+            self._current_converter = None
+            return "cancelled"
+        except UsageLimitExceeded as e:
+            self.log.info("Usage limit exceeded", error=str(e))
+            return infer_stop_reason(str(e))
+        except Exception as e:
+            self._current_converter = None  # Clear converter reference
+            self.log.exception("Error during streaming")
+            # Send error as toast notification instead of polluting chat history
+            await self._send_toast(
+                message=f"Agent error: {e}",
+                level="error",
+            )
+            await anyio.sleep(0.05)  # Allow network buffers to flush
+            return "end_turn"
+        else:
+            # Title generation is now handled automatically by log_session
+            self.last_usage = converter.last_usage
+            self._current_converter = None  # Clear converter reference
+            return "end_turn"
 
     async def _send_toast(
         self,
@@ -787,6 +934,9 @@ class ACPSession:
                         "Error cleaning up session MCP provider", provider=provider.name
                     )
             self.session_mcp_providers.clear()
+
+            # Cancel foreground children before full cleanup
+            await self._cancel_foreground_children()
 
             # NEW: Disconnect state_updated signal to prevent stale callbacks
             with suppress(Exception):

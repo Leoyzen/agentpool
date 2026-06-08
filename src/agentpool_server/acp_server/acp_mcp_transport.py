@@ -34,7 +34,9 @@ class AcpMcpTransport(ClientTransport):
     with an MCP server over the existing ACP connection.
     """
 
-    def __init__(self, connection: AcpMcpConnection, timeout: float = DEFAULT_READ_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self, connection: AcpMcpConnection, timeout: float = DEFAULT_READ_TIMEOUT_SECONDS
+    ) -> None:
         """Initialize the transport with an active ACP MCP connection.
 
         Args:

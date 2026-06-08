@@ -22,7 +22,7 @@ from acp.schema.content_blocks import (  # noqa: TC001
     TextContentBlock,
     TextResourceContents,
 )
-from acp.schema.session_state import SessionConfigOption  # noqa: TC001
+from acp.schema.session_state import SessionConfigOption, SubagentInfo  # noqa: TC001
 from acp.schema.slash_commands import AvailableCommand  # noqa: TC001
 from acp.schema.tool_call import (  # noqa: TC001
     SubagentRunInfo,
@@ -317,7 +317,7 @@ class ToolCallProgress(AnnotatedObject):
     """Update the execution status."""
 
     subagent: SubagentRunInfo | None = None
-    """Subagent run information, if this is a subagent tool call."""
+    """Information about the subagent being invoked."""
 
     title: str | None = None
     """Update the human-readable title."""
@@ -432,7 +432,7 @@ class ToolCallStart(AnnotatedObject):
     """Current execution status of the tool call."""
 
     subagent: SubagentRunInfo | None = None
-    """Subagent run information, if this is a subagent tool call."""
+    """Information about the subagent being invoked."""
 
     title: str
     """Human-readable title describing what the tool is doing."""
@@ -514,6 +514,17 @@ class SessionInfoUpdate(AnnotatedObject):
     """Additional metadata to merge, or None to leave unchanged."""
 
 
+class AvailableSubagentsUpdate(AnnotatedObject):
+    """Available subagents for delegation have changed."""
+
+    session_update: Literal["available_subagents_update"] = Field(
+        default="available_subagents_update", init=False
+    )
+
+    available_subagents: Sequence[SubagentInfo]
+    """The current list of available subagents for this session."""
+
+
 class TurnCompleteUpdate(AnnotatedObject):
     """Signal that all updates for the current prompt turn have been delivered.
 
@@ -540,6 +551,7 @@ SessionUpdate = Annotated[
         | ToolCallStart
         | ToolCallProgress
         | AvailableCommandsUpdate
+        | AvailableSubagentsUpdate
         | AgentPlanUpdate
         | CurrentModeUpdate
         | CurrentModelUpdate

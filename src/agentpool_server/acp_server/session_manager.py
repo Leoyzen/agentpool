@@ -69,7 +69,6 @@ class ACPSessionManager:
         session_id: str | None = None,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
         parent_session_id: str | None = None,
     ) -> str:
         """Create a new ACP session.
@@ -83,7 +82,6 @@ class ACPSessionManager:
             session_id: Optional specific session ID (generated if None)
             client_capabilities: Client capabilities for tool registration
             client_info: Client implementation info (name, version)
-            subagent_display_mode: Display mode for subagent outputs
             parent_session_id: Optional parent session ID for child sessions.
                 When provided, creates a child session that inherits
                 project_id/cwd from the parent via SessionManager.
@@ -167,7 +165,6 @@ class ACPSessionManager:
                 client_capabilities=client_capabilities or ClientCapabilities(),
                 client_info=client_info,
                 manager=self,
-                subagent_display_mode=subagent_display_mode,
             )
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()
@@ -180,6 +177,19 @@ class ACPSessionManager:
         """Get an active session by ID."""
         return self._active.get(session_id)
 
+    async def cancel_session(self, session_id: str) -> None:
+        """Cancel an active session.
+
+        Delegates to the session's cancel() method if the session is active.
+        No-op if the session is not found.
+
+        Args:
+            session_id: Session identifier to cancel
+        """
+        session = self._active.get(session_id)
+        if session:
+            await session.cancel()
+
     async def resume_session(
         self,
         session_id: str,
@@ -187,7 +197,6 @@ class ACPSessionManager:
         acp_agent: AgentPoolACPAgent,
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
-        subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
     ) -> ACPSession | None:
         """Resume a session from storage.
 
@@ -197,7 +206,6 @@ class ACPSessionManager:
             acp_agent: ACP agent instance
             client_capabilities: Client capabilities
             client_info: Client implementation info (name, version)
-            subagent_display_mode: Display mode for subagent outputs
 
         Returns:
             Resumed ACPSession if found, None otherwise
@@ -231,7 +239,6 @@ class ACPSessionManager:
                 client_capabilities=client_capabilities or ClientCapabilities(),
                 client_info=client_info,
                 manager=self,
-                subagent_display_mode=subagent_display_mode,
             )
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()

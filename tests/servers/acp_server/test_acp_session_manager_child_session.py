@@ -180,7 +180,9 @@ async def test_child_session_uses_effective_cwd_for_acp_session():
 
         # Verify ACPSession was constructed with the inherited cwd
         call_kwargs = MockSession.call_args
-        assert call_kwargs.kwargs.get("cwd") == parent_cwd or call_kwargs[1].get("cwd") == parent_cwd
+        assert (
+            call_kwargs.kwargs.get("cwd") == parent_cwd or call_kwargs[1].get("cwd") == parent_cwd
+        )
 
 
 async def test_no_parent_session_id_preserves_existing_behavior():

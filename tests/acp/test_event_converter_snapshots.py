@@ -21,7 +21,8 @@ Per RFC-0001:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -34,6 +35,29 @@ if TYPE_CHECKING:
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from tests.fixtures.subagent_events import TEST_EVENT_SEQUENCES
 
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_INLINE_UUID_RE = re.compile(
+    r"^([a-zA-Z0-9_]+:(?:output|think):)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
+_PYD_AI_ID_RE = re.compile(r"^(.*:pyd_ai_)([0-9a-f]{32}$)")
+
+
+def _normalize_uuids(obj: object) -> Any:
+    """Recursively replace UUID strings with '<UUID>' for deterministic snapshots."""
+    if isinstance(obj, dict):
+        return {k: _normalize_uuids(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_uuids(v) for v in obj]
+    if isinstance(obj, str):
+        if _UUID_RE.match(obj):
+            return "<UUID>"
+        if m := _INLINE_UUID_RE.match(obj):
+            return m.group(1) + "<UUID>"
+        if m := _PYD_AI_ID_RE.match(obj):
+            return m.group(1) + "<UUID>"
+    return obj
+
+
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging.messages import ChatMessage
 from pydantic_ai.usage import RequestUsage
@@ -43,15 +67,16 @@ async def collect_updates(converter: ACPEventConverter, event) -> list[dict[str,
     """Helper to collect all updates from an event and convert to dict for snapshots.
 
     Snapshot tests need serializable objects, so we convert to dict.
+    UUIDs are normalized to '<UUID>' for deterministic comparison.
     """
     updates: list[dict[str, object]] = []
     async for update in converter.convert(event):
         # Convert Pydantic models to dict for snapshot comparison
         if hasattr(update, "model_dump"):
-            updates.append(update.model_dump(exclude_none=True))
+            updates.append(_normalize_uuids(update.model_dump(exclude_none=True)))
         else:
             # Fallback for non-Pydantic objects
-            updates.append({"_str": str(update)})
+            updates.append(_normalize_uuids({"_str": str(update)}))
     return updates
 
 

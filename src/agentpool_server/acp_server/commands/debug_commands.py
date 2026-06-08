@@ -101,7 +101,7 @@ class DebugSendToolCallCommand(NodeCommand):
             ctx: Command context
             title: Tool call title/description
             kind: Tool kind ('read', 'edit', 'delete', 'move', 'search',
-                  'execute', 'think', 'fetch', 'other')
+                  'execute', 'think', 'fetch', 'subagent', 'other')
         """
         session = ctx.context.data
         assert session

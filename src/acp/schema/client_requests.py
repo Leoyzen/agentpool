@@ -12,6 +12,7 @@ from acp.schema.capabilities import AuthCapabilities, ClientCapabilities, FileSy
 from acp.schema.common import Implementation
 from acp.schema.content_blocks import ContentBlock  # noqa: TC001
 from acp.schema.mcp import McpServer  # noqa: TC001
+from acp.schema.requests import PromptDelegation  # noqa: TC001
 
 
 if TYPE_CHECKING:
@@ -161,6 +162,13 @@ class PromptRequest(Request):
 
     session_id: str
     """The ID of the session to send this user message to."""
+
+    delegation: PromptDelegation | None = None
+    """Optional delegation configuration for this prompt.
+
+    When provided, controls whether and how the agent may delegate this
+    prompt to a subagent. See [`PromptDelegation`] for policy details.
+    """
 
 
 class SetSessionModelRequest(Request):

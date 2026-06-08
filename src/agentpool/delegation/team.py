@@ -233,6 +233,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 depth=child_depth,
                 description=f"Spawning {node.name} as team member",
                 spawn_mechanism="spawn",
+                run_mode="foreground",
             )
 
             if not isinstance(node, SupportsRunStream):

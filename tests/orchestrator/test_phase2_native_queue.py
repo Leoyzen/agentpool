@@ -5,7 +5,7 @@ Covers:
 - enqueue() during tool execution on native agents
 - inject_prompt() tool result augmentation pipeline
 - RunExecutor event stream parity with _stream_events()
-- Non-native agents use manual queue (TurnRunner)
+- Non-native agents use manual queue (LegacyTurnRunner)
 - Native agent interrupt() via SessionPool
 - receive_request() routing for native agents
 - Full integration: native agent auto-resumes with queued prompts
@@ -37,7 +37,8 @@ from agentpool.agents.events import (
     ToolCallStartEvent,
 )
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.core import SessionController, SessionPool, TurnRunner
+from agentpool.orchestrator.core import SessionController, SessionPool
+from agentpool.orchestrator.legacy_runner import LegacyTurnRunner
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.orchestrator.run_executor import RunExecutor
 
@@ -107,9 +108,9 @@ def controller(mock_pool: MagicMock) -> SessionController:
 
 
 @pytest.fixture
-def turn_runner(controller: SessionController) -> TurnRunner:
-    """Return a TurnRunner with auto-resume enabled."""
-    return TurnRunner(session_controller=controller, enable_auto_resume=True)
+def legacy_runner(controller: SessionController) -> LegacyTurnRunner:
+    """Return a LegacyTurnRunner with auto-resume enabled."""
+    return LegacyTurnRunner(session_controller=controller, enable_auto_resume=True)
 
 
 @pytest.fixture
@@ -508,7 +509,7 @@ async def test_run_executor_event_stream_matches_stream_events(
 
 
 # ---------------------------------------------------------------------------
-# 8. Non-native agents still use manual queue (TurnRunner)
+# 8. Non-native agents still use manual queue (LegacyTurnRunner)
 # ---------------------------------------------------------------------------
 
 
@@ -541,16 +542,16 @@ async def test_non_native_agent_uses_manual_injection_manager(
 
 
 @pytest.mark.anyio
-async def test_non_native_agent_uses_turn_runner(
+async def test_non_native_agent_uses_legacy_turn_runner(
     controller: SessionController,
-    turn_runner: TurnRunner,
+    legacy_runner: LegacyTurnRunner,
     mock_pool: MagicMock,
 ) -> None:
-    """Non-native agents are processed by TurnRunner with manual queue."""
+    """Non-native agents are processed by LegacyTurnRunner with manual queue."""
     session_id = "non-native-sess"
     state = await controller.get_or_create_session(session_id)
 
-    agent = _MockNonNativeAgent(name="non-native-test")
+    agent = _MockNonNativeAgent(name="legacy-test")
     state.agent = agent
     controller._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent
@@ -575,10 +576,10 @@ async def test_non_native_agent_uses_turn_runner(
 
     agent._run_stream_once = _fake_stream  # type: ignore[method-assign]
 
-    await turn_runner.run_turn(session_id, "initial")
+    await legacy_runner.run_turn(session_id, "initial")
 
     assert call_count == 2, (
-        f"TurnRunner should process injection + initial turn, got {call_count} calls"
+        f"LegacyTurnRunner should process injection + initial turn, got {call_count} calls"
     )
     assert received_prompts[1] == ("injected message",)
 

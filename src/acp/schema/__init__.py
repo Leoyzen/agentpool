@@ -118,6 +118,7 @@ from acp.schema.providers import (
     ProvidersCapabilities,
     ProviderStatus,
 )
+from acp.schema.requests import PromptDelegation
 from acp.schema.messages import AgentMethod, ClientMethod
 from acp.schema.notifications import (
     AgentNotification,
@@ -138,6 +139,8 @@ from acp.schema.session_state import (
     SessionMode,
     SessionModeState,
     SessionModelState,
+    SubagentCapabilities,
+    SubagentInfo,
 )
 from acp.schema.slash_commands import (
     AvailableCommand,
@@ -152,6 +155,7 @@ from acp.schema.tool_call import (
     FileEditToolCallContent,
     PermissionKind,
     PermissionOption,
+    SubagentRunInfo,
     TerminalToolCallContent,
     ToolCall,
     ToolCallContent,
@@ -164,6 +168,7 @@ from acp.schema.session_updates import (
     AgentPlanUpdate,
     AgentThoughtChunk,
     AvailableCommandsUpdate,
+    AvailableSubagentsUpdate,
     ConfigOptionUpdate,
     Cost,
     CurrentModeUpdate,
@@ -205,6 +210,7 @@ __all__ = [
     "AvailableCommand",
     "AvailableCommandInput",
     "AvailableCommandsUpdate",
+    "AvailableSubagentsUpdate",
     "BlobResourceContents",
     "CancelNotification",
     "ClientCapabilities",
@@ -264,6 +270,7 @@ __all__ = [
     "PlanEntryPriority",
     "PlanEntryStatus",
     "PromptCapabilities",
+    "PromptDelegation",
     "PromptRequest",
     "PromptResponse",
     "ProviderCurrentConfig",
@@ -310,6 +317,9 @@ __all__ = [
     "CloseSessionRequest",
     "CloseSessionResponse",
     "StopReason",
+    "SubagentCapabilities",
+    "SubagentInfo",
+    "SubagentRunInfo",
     "TerminalExitStatus",
     "TerminalOutputRequest",
     "TerminalOutputResponse",

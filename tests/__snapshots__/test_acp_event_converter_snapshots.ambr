@@ -2,304 +2,452 @@
 # name: TestInlineModeSnapshots.test_long_text[asyncio]
   list([
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'This is a long message that gets streamed in multi',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'kind': 'other',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [writer]',
-      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+      'title': '[`writer`] Output',
+      'tool_call_id': 'writer:output:<UUID>',
     }),
     dict({
-      'raw_output': 'This is a long message that gets streamed in multi',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'This is a long message that gets streamed in multiple chunks. Each chunk should be a separate delta ',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+      'tool_call_id': 'writer:output:<UUID>',
     }),
     dict({
-      'raw_output': 'ple chunks. Each chunk should be a separate delta ',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'This is a long message that gets streamed in multiple chunks. Each chunk should be a separate delta event. The header should only be emitted once. Sub',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+      'tool_call_id': 'writer:output:<UUID>',
     }),
     dict({
-      'raw_output': 'event. The header should only be emitted once. Sub',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'This is a long message that gets streamed in multiple chunks. Each chunk should be a separate delta event. The header should only be emitted once. Subsequent deltas should have no prefix repetition.',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
-    }),
-    dict({
-      'raw_output': 'sequent deltas should have no prefix repetition.',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+      'tool_call_id': 'writer:output:<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '76840677-1954-48e5-9db4-25047acceb8b',
+      'tool_call_id': 'writer:output:<UUID>',
     }),
   ])
 # ---
 # name: TestInlineModeSnapshots.test_mixed_events[asyncio]
   list([
     dict({
+      'kind': 'think',
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '[`analyzer`] Thinking',
+      'tool_call_id': 'analyzer:think:<UUID>',
+    }),
+    dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Need to analyze',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'session_update': 'tool_call_update',
+      'status': 'in_progress',
+      'tool_call_id': 'analyzer:think:<UUID>',
+    }),
+    dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Let me check',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'kind': 'other',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [analyzer]',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+      'title': '[`analyzer`] Output',
+      'tool_call_id': 'analyzer:output:<UUID>',
     }),
     dict({
-      'raw_output': 'Thinking: Need to analyze',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+      'kind': 'think',
+      'raw_input': dict({
+        'pattern': 'error',
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '[`analyzer`]: Searching: error',
+      'tool_call_id': 'analyzer:grep:call_002',
     }),
     dict({
-      'raw_output': 'Let me check',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'No errors found',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'raw_output': 'No errors found',
       'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+      'status': 'completed',
+      'tool_call_id': 'analyzer:grep:pyd_ai_<UUID>',
     }),
     dict({
-      'raw_output': '''
-        
-        🔧 [analyzer] Using tool: grep
-  
-      ''',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Let me check - all good!',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
-    }),
-    dict({
-      'raw_output': '''
-        ✅ [analyzer] grep: No errors found
-  
-      ''',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
-    }),
-    dict({
-      'raw_output': ' - all good!',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+      'tool_call_id': 'analyzer:output:<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '4fa12d75-8697-4488-b615-ba34cbf3ae15',
+      'tool_call_id': 'analyzer:output:<UUID>',
+    }),
+    dict({
+      'session_update': 'tool_call_update',
+      'status': 'completed',
+      'tool_call_id': 'analyzer:think:<UUID>',
     }),
   ])
 # ---
 # name: TestInlineModeSnapshots.test_nested_subagents[asyncio]
   list([
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Delegating to researcher',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'kind': 'other',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [coordinator]',
-      'tool_call_id': '08e9f150-dad2-4e20-9328-206b4b18bae6',
-    }),
-    dict({
-      'raw_output': 'Delegating to researcher',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '08e9f150-dad2-4e20-9328-206b4b18bae6',
+      'title': '[`coordinator`] Output',
+      'tool_call_id': 'coordinator:output:<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '08e9f150-dad2-4e20-9328-206b4b18bae6',
+      'tool_call_id': 'coordinator:output:<UUID>',
     }),
     dict({
-      'kind': 'other',
+      'kind': 'think',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [researcher]',
-      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+      'title': '[`researcher`] Thinking',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
     dict({
-      'raw_output': 'Thinking: Searching',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Searching',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
     dict({
-      'raw_output': '''
-        
-        🔧 [researcher] Using tool: search
-  
-      ''',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+      'kind': 'search',
+      'raw_input': dict({
+        'query': 'test',
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '[`researcher`]: Searching: test',
+      'tool_call_id': 'researcher:search:call_nested_001',
     }),
     dict({
-      'raw_output': '''
-        ✅ [researcher] search: Results found
-  
-      ''',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Results found',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'raw_output': 'Results found',
       'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+      'status': 'completed',
+      'tool_call_id': 'researcher:search:pyd_ai_<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': 'dcb69673-b51a-4644-bd0f-896b918b57ba',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
   ])
 # ---
 # name: TestInlineModeSnapshots.test_text_stream[asyncio]
   list([
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Hello',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'kind': 'other',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [assistant]',
-      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+      'title': '[`assistant`] Output',
+      'tool_call_id': 'assistant:output:<UUID>',
     }),
     dict({
-      'raw_output': 'Hello',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Hello world',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+      'tool_call_id': 'assistant:output:<UUID>',
     }),
     dict({
-      'raw_output': ' world',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Hello world!',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
-    }),
-    dict({
-      'raw_output': '!',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+      'tool_call_id': 'assistant:output:<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '2c2f7e86-8684-464c-9ef8-ecfdbaa01aa5',
+      'tool_call_id': 'assistant:output:<UUID>',
     }),
   ])
 # ---
 # name: TestInlineModeSnapshots.test_thinking_stream[asyncio]
   list([
     dict({
-      'kind': 'other',
+      'kind': 'think',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [researcher]',
-      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+      'title': '[`researcher`] Thinking',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
     dict({
-      'raw_output': 'Thinking: Analyzing',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Analyzing',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
     dict({
-      'raw_output': 'Thinking:  the',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Analyzing the',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
     dict({
-      'raw_output': 'Thinking:  problem',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Analyzing the problem',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '7cd0bc57-8c2a-40d0-b885-c5133f706c14',
+      'tool_call_id': 'researcher:think:<UUID>',
     }),
   ])
 # ---
 # name: TestInlineModeSnapshots.test_tool_call[asyncio]
   list([
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': "I'll search for files",
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'kind': 'other',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [coder]',
-      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+      'title': '[`coder`] Output',
+      'tool_call_id': 'coder:output:<UUID>',
     }),
     dict({
-      'raw_output': "I'll search for files",
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+      'kind': 'search',
+      'raw_input': dict({
+        'pattern': '*.py',
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '[`coder`]: Searching: *.py',
+      'tool_call_id': 'coder:search:call_001',
     }),
     dict({
-      'raw_output': '''
-        
-        🔧 [coder] Using tool: search
-  
-      ''',
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Found 3 files',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'raw_output': 'Found 3 files',
       'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
-    }),
-    dict({
-      'raw_output': '''
-        ✅ [coder] search: Found 3 files
-  
-      ''',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+      'status': 'completed',
+      'tool_call_id': 'coder:search:pyd_ai_<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '5ca8188c-4017-4173-8606-8a6889b1a7a0',
+      'tool_call_id': 'coder:output:<UUID>',
     }),
   ])
 # ---
 # name: TestInlineModeSnapshots.test_tool_call_error[asyncio]
   list([
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': 'Executing command',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'kind': 'other',
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [executor]',
-      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+      'title': '[`executor`] Output',
+      'tool_call_id': 'executor:output:<UUID>',
     }),
     dict({
-      'raw_output': 'Executing command',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+      'kind': 'execute',
+      'raw_input': dict({
+        'command': 'make build',
+      }),
+      'session_update': 'tool_call',
+      'status': 'pending',
+      'title': '[`executor`]: Running: make build',
+      'tool_call_id': 'executor:bash:call_003',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              Error: Build failed: missing dependency
+              
+              Fix the errors and try again.
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
       'raw_output': '''
-        
-        🔧 [executor] Using tool: bash
-  
-      ''',
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
-    }),
-    dict({
-      'raw_output': '''
-        ❌ [executor] bash: Build failed: missing dependency
+        Build failed: missing dependency
         
         Fix the errors and try again.
-  
       ''',
       'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+      'status': 'failed',
+      'tool_call_id': 'executor:bash:pyd_ai_<UUID>',
     }),
     dict({
       'session_update': 'tool_call_update',
       'status': 'completed',
-      'tool_call_id': '504ccf34-fed3-4a04-bec2-785e74c1ecf1',
+      'tool_call_id': 'executor:output:<UUID>',
     }),
   ])
 # ---
@@ -313,6 +461,7 @@
         ''',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
@@ -320,6 +469,7 @@
         'text': 'Hello',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
@@ -327,6 +477,7 @@
         'text': ' world',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
@@ -334,6 +485,7 @@
         'text': '!',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
@@ -345,6 +497,7 @@
         ''',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
   ])
@@ -359,6 +512,7 @@
         ''',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
@@ -366,27 +520,30 @@
         'text': "I'll search for files",
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
       'content': dict({
         'text': '''
           
-            🔧 [coder] Using tool: search
+            - 🔧 [`coder`] Using tool: ``search``
   
         ''',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
       'content': dict({
         'text': '''
-            ✅ [coder] search: Found 3 files
+            - ✅ [`coder`] `search`
   
         ''',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
     dict({
@@ -398,6 +555,7 @@
         ''',
         'type': 'text',
       }),
+      'message_id': '<UUID>',
       'session_update': 'agent_message_chunk',
     }),
   ])
@@ -410,38 +568,27 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [writer]: agent start',
-      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+      'title': '🤖 [`writer`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              This is a long message that gets streamed in multi
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [writer]: streaming...',
-      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'title': '🤖 [writer]: streaming...',
-      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'title': '🤖 [writer]: streaming...',
-      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'title': '🤖 [writer]: streaming...',
-      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [writer]: completed',
-      'tool_call_id': '51b2d2eb-f2b2-4364-a2ce-224c37f7107f',
+      'title': '🤖 [`writer`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---
@@ -453,44 +600,112 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [analyzer]: agent start',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+      'title': '🤖 [`analyzer`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Need to analyze
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'think',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '💭 [analyzer]: thinking...',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+      'title': '💭 [`analyzer`]: thinking...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Need to analyze
+              Let me check
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [analyzer]: streaming...',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+      'title': '🤖 [`analyzer`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Need to analyze
+              Let me check
+              - calling `grep`
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🔧 [analyzer]: calling grep...',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+      'title': '🔧 [`analyzer`]: calling `grep`...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Need to analyze
+              Let me check
+              - calling `grep`
+              - `grep` completed
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '✅ [analyzer]: grep completed',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+      'title': '✅ [`analyzer`]: `grep` completed',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Need to analyze
+              Let me check
+              - calling `grep`
+              - `grep` completed - all good!
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [analyzer]: streaming...',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [analyzer]: completed',
-      'tool_call_id': 'c48b8c18-ed5d-4af0-90e8-0b704ee23153',
+      'title': '🤖 [`analyzer`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---
@@ -502,20 +717,27 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [coordinator]: agent start',
-      'tool_call_id': 'bc8ffa5f-2ee2-4f96-b942-d1c5ca04d171',
+      'title': '🤖 [`coordinator`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              Delegating to researcher
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [coordinator]: streaming...',
-      'tool_call_id': 'bc8ffa5f-2ee2-4f96-b942-d1c5ca04d171',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [coordinator]: completed',
-      'tool_call_id': 'bc8ffa5f-2ee2-4f96-b942-d1c5ca04d171',
+      'title': '🤖 [`coordinator`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
       'kind': 'other',
@@ -523,32 +745,68 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [researcher]: agent start',
-      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+      'title': '🤖 [`researcher`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Searching
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'think',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '💭 [researcher]: thinking...',
-      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+      'title': '💭 [`researcher`]: thinking...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Searching
+              - calling `search`
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🔧 [researcher]: calling search...',
-      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+      'title': '🔧 [`researcher`]: calling `search`...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Searching
+              - calling `search`
+              - `search` completed
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '✅ [researcher]: search completed',
-      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [researcher]: completed',
-      'tool_call_id': 'f77c6ca5-a8f8-4e5e-b646-63af107343e4',
+      'title': '✅ [`researcher`]: `search` completed',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---
@@ -560,32 +818,27 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [assistant]: agent start',
-      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+      'title': '🤖 [`assistant`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              Hello
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [assistant]: streaming...',
-      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'title': '🤖 [assistant]: streaming...',
-      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'in_progress',
-      'title': '🤖 [assistant]: streaming...',
-      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [assistant]: completed',
-      'tool_call_id': '44ae8044-93e8-4780-a99a-0a0b4a9291ab',
+      'title': '🤖 [`assistant`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---
@@ -597,32 +850,65 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [researcher]: agent start',
-      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+      'title': '🤖 [`researcher`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Analyzing
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'think',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '💭 [researcher]: thinking...',
-      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+      'title': '💭 [`researcher`]: thinking...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Analyzing the
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'think',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '💭 [researcher]: thinking...',
-      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+      'title': '💭 [`researcher`]: thinking...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              > **Thinking** :Analyzing the problem
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'think',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '💭 [researcher]: thinking...',
-      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [researcher]: completed',
-      'tool_call_id': '0f20b654-4185-4f70-b141-2a6b25e1ec2f',
+      'title': '💭 [`researcher`]: thinking...',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---
@@ -634,32 +920,68 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [coder]: agent start',
-      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+      'title': '🤖 [`coder`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              I'll search for files
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [coder]: streaming...',
-      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+      'title': '🤖 [`coder`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              I'll search for files
+              - calling `search`
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🔧 [coder]: calling search...',
-      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+      'title': '🔧 [`coder`]: calling `search`...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              I'll search for files
+              - calling `search`
+              - `search` completed
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '✅ [coder]: search completed',
-      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [coder]: completed',
-      'tool_call_id': 'a0c8f0b2-d987-4c36-84a2-e5431ff832e2',
+      'title': '✅ [`coder`]: `search` completed',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---
@@ -671,32 +993,70 @@
       }),
       'session_update': 'tool_call',
       'status': 'pending',
-      'title': '🤖 [executor]: agent start',
-      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+      'title': '🤖 [`executor`]: agent start',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              Executing command
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🤖 [executor]: streaming...',
-      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+      'title': '🤖 [`executor`]: Output...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              Executing command
+              - calling `bash`
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '🔧 [executor]: calling bash...',
-      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+      'title': '🔧 [`executor`]: calling `bash`...',
+      'tool_call_id': '<UUID>',
     }),
     dict({
+      'content': list([
+        dict({
+          'content': dict({
+            'text': '''
+              
+              Executing command
+              - calling `bash`
+              - `bash` failed: `Build failed: missing dependency
+              
+              Fix the errors and try again.`
+            ''',
+            'type': 'text',
+          }),
+          'type': 'content',
+        }),
+      ]),
+      'kind': 'other',
       'session_update': 'tool_call_update',
       'status': 'in_progress',
-      'title': '❌ [executor]: bash failed',
-      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
-    }),
-    dict({
-      'session_update': 'tool_call_update',
-      'status': 'completed',
-      'title': '✅ [executor]: completed',
-      'tool_call_id': '51ecf6e9-e506-4653-9818-79f973c523b6',
+      'title': '❌ [`executor`]: `bash` failed',
+      'tool_call_id': '<UUID>',
     }),
   ])
 # ---

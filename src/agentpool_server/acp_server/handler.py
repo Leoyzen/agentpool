@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
     from agentpool.agents.events import RichAgentStreamEvent
-    from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
 
@@ -52,14 +51,12 @@ class ACPProtocolHandler:
     def __init__(
         self,
         agent_pool: AgentPool[Any],
-        session_manager: ACPSessionManager,
         event_converter: ACPEventConverter,
         client: Client,
         client_capabilities: ClientCapabilities | None = None,
     ) -> None:
         """Initialize the protocol handler."""
         self.agent_pool = agent_pool
-        self.session_manager = session_manager
         self._event_converter_template = event_converter
         self.client = client
         self.client_capabilities = client_capabilities
@@ -128,13 +125,11 @@ class ACPProtocolHandler:
 
         # Derive turn_complete support from stored client capabilities
         client_supports_turn_complete = (
-            self.client_capabilities is not None
-            and self.client_capabilities.turn_complete is True
+            self.client_capabilities is not None and self.client_capabilities.turn_complete is True
         )
 
         # Create a per-session converter so tool-call state is isolated
         converter = ACPEventConverter(
-            subagent_display_mode=self._event_converter_template.subagent_display_mode,
             client_supports_turn_complete=client_supports_turn_complete,
         )
 
@@ -162,6 +157,7 @@ class ACPProtocolHandler:
                     break
                 except Exception as e:
                     import anyio
+
                     if isinstance(e, (anyio.ClosedResourceError, anyio.EndOfStream)):
                         logger.debug(
                             "Stream closed gracefully",
@@ -221,30 +217,6 @@ class ACPProtocolHandler:
         # Ensure the session exists in the SessionPool
         await session_pool.create_session(session_id)
 
-        # Add session MCP providers to SessionPool's per-session agent.
-        # Use deduplication because get_or_create_session_agent returns a cached
-        # per-session agent; adding the same provider repeatedly causes tool name
-        # conflicts in pydantic-ai's CombinedToolset.
-        acp_session = self.session_manager.get_session(session_id)
-        if acp_session is not None and acp_session.session_mcp_providers:
-            try:
-                session_agent = await session_pool.sessions.get_or_create_session_agent(
-                    session_id
-                )
-                for provider in acp_session.session_mcp_providers:
-                    if provider not in session_agent.tools.external_providers:
-                        session_agent.tools.add_provider(provider)
-                logger.info(
-                    "Added session MCP providers to SessionPool agent",
-                    session_id=session_id,
-                    num_providers=len(acp_session.session_mcp_providers),
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to add session MCP providers to SessionPool agent",
-                    session_id=session_id,
-                )
-
         # Start event consumer before processing so no events are dropped
         self._ensure_event_consumer(session_id)
 
@@ -268,8 +240,7 @@ class ACPProtocolHandler:
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.
             if run_handle is not None and not (
-                self.client_capabilities is not None
-                and self.client_capabilities.turn_complete
+                self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
                 await run_handle.complete_event.wait()
         except asyncio.CancelledError:

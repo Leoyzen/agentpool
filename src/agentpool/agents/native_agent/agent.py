@@ -786,7 +786,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             create_approval_bridge_capability,
         )
 
-        tool_capabilities.append(create_approval_bridge_capability(self, input_provider))
+        tool_capabilities.append(create_approval_bridge_capability(self))
         # 4. MCP servers
         mcp_capabilities = self.mcp.as_capability()
         tool_capabilities.extend(mcp_capabilities)

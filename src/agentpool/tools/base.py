@@ -51,6 +51,7 @@ ToolKind = Literal[
     "think",
     "fetch",
     "switch_mode",
+    "subagent",
     "other",
 ]
 

@@ -8,12 +8,14 @@ from pydantic import Field
 from acp.schema.base import Response
 from acp.schema.capabilities import AgentCapabilities
 from acp.schema.common import AuthMethod, Implementation
+from acp.schema.session_state import SubagentCapabilities
 from acp.schema.providers import ProviderInfo  # noqa: TC001
 from acp.schema.session_state import (  # noqa: TC001
     SessionConfigOption,
     SessionInfo,
     SessionModelState,
     SessionModeState,
+    SubagentInfo,
 )
 from acp.schema.session_updates import Usage  # noqa: TC001
 
@@ -73,6 +75,9 @@ class NewSessionResponse(Response):
     See RFD: Session Config Options
     """
 
+    available_subagents: Sequence[SubagentInfo] | None = None
+    """Subagents available for delegation in this session."""
+
     session_id: str
     """Unique identifier for the created session.
 
@@ -100,6 +105,9 @@ class LoadSessionResponse(Response):
     config_options: Sequence[SessionConfigOption] = []
     """The full list of config options with updated values."""
 
+    available_subagents: Sequence[SubagentInfo] | None = None
+    """Subagents available for delegation in this session."""
+
 
 class ForkSessionResponse(Response):
     """**UNSTABLE**: This capability is not part of the spec yet.
@@ -126,6 +134,9 @@ class ForkSessionResponse(Response):
 
     config_options: Sequence[SessionConfigOption] = []
     """The full list of config options with updated values."""
+
+    available_subagents: Sequence[SubagentInfo] | None = None
+    """Subagents available for delegation in this session."""
 
     @classmethod
     def create(
@@ -181,6 +192,9 @@ class ResumeSessionResponse(Response):
     config_options: Sequence[SessionConfigOption] = []
     """The full list of config options with updated values."""
 
+    available_subagents: Sequence[SubagentInfo] | None = None
+    """Subagents available for delegation in this session."""
+
     @classmethod
     def create(
         cls,
@@ -205,6 +219,7 @@ class ResumeSessionResponse(Response):
         )
         return cls(
             config_options=config_options or [],
+            available_subagents=None,
             models=model_state,
             modes=mode_state,
         )
@@ -297,6 +312,7 @@ class InitializeResponse(Response):
         close_session: bool = False,
         fork_session: bool = False,
         providers: bool = False,
+        subagents: SubagentCapabilities | None = None,
         turn_complete: bool = False,
         auth_methods: Sequence[AuthMethod] | None = None,
     ) -> Self:
@@ -319,6 +335,7 @@ class InitializeResponse(Response):
             close_session: Whether the agent supports `session/close` (unstable).
             fork_session: Whether the agent supports `session/fork` (unstable).
             providers: Whether the agent supports `providers/*` methods.
+            subagents: Subagent capabilities supported by the agent.
             turn_complete: Whether the agent emits `turn_complete` updates (unstable).
             auth_methods: The authentication methods supported by the agent.
         """
@@ -335,6 +352,7 @@ class InitializeResponse(Response):
             close_session=close_session,
             fork_session=fork_session,
             providers=providers,
+            subagents=subagents,
             turn_complete=turn_complete,
         )
         return cls(

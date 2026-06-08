@@ -199,9 +199,9 @@ class SubagentTools(StaticResourceProvider):
         self._batch_stream_deltas = batch_stream_deltas
         for tool in [
             self.create_tool(
-                self.list_available_nodes, category="search", read_only=True, idempotent=True
+                self.list_available_nodes, category="subagent", read_only=True, idempotent=True
             ),
-            self.create_tool(self.task, category="other"),
+            self.create_tool(self.task, category="subagent"),
         ]:
             self.add_tool(tool)
 
@@ -333,6 +333,8 @@ class SubagentTools(StaticResourceProvider):
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
             agent_type=node.agent_type,
+            parent_tool_call_id=ctx.tool_call_id,
+            subagent_id=agent_or_team,
         )
         child_depth = current_depth + 1
 
@@ -353,6 +355,7 @@ class SubagentTools(StaticResourceProvider):
             description=f"Run {agent_or_team} task",
             metadata={"prompt": prompt[:200]} if prompt else {},
             model_id=node_model_id,
+            run_mode="background" if async_mode else "foreground",
         )
         await ctx.events.emit_event(spawn_event)
 
@@ -367,7 +370,6 @@ class SubagentTools(StaticResourceProvider):
 
             # Use SessionPool if available for proper event routing
             session_pool = ctx.pool.session_pool if ctx.pool else None
-            input_provider = ctx.get_input_provider() if ctx.input_provider else None
             if session_pool is not None:
                 # Subscribe to EventBus for child session events
                 event_queue = await session_pool.event_bus.subscribe(
@@ -378,7 +380,7 @@ class SubagentTools(StaticResourceProvider):
                     """Run task through SessionPool and collect final result."""
                     try:
                         await session_pool.receive_request(
-                            child_session_id, prompt, input_provider=input_provider
+                            child_session_id, prompt
                         )
                     finally:
                         # Signal event consumer to stop
@@ -453,7 +455,6 @@ class SubagentTools(StaticResourceProvider):
                             session_id=child_session_id,
                             parent_session_id=parent_session_id,
                             depth=child_depth,
-                            input_provider=input_provider,
                         ),
                     ),
                     name=f"async_task_{task_id}",

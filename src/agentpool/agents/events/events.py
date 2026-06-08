@@ -706,6 +706,8 @@ class SpawnSessionStart:
     """Model identifier for the subagent (e.g., 'openai:gpt-4o'). Propagated to UI for display."""
     mode: str | None = None
     """Mode identifier for the subagent (e.g., 'code', 'ask'). Maps to OpenCode mode display."""
+    run_mode: Literal["foreground", "background"] | None = None
+    """Lifecycle mode for ACP protocol: 'foreground' (blocking) or 'background' (async)."""
     event_kind: Literal["spawn_session_start"] = "spawn_session_start"
     """Event type identifier."""
 

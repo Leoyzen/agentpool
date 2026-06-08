@@ -187,7 +187,10 @@ async def test_interrupt_without_run_ctx_sets_cancelled_flag(slow_agent: Agent[N
 async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[None]) -> None:
     """interrupt() called with no run_ctx must cancel the asyncio.Task running run_stream.
 
-    Cross-task access requires SessionPool fallback (since _active_run_ctx was removed).
+    Before the fix: interrupt() passes run_ctx=None to _interrupt(),
+    which checks `run_ctx.current_task if run_ctx else None` → None → no task cancelled.
+    After the fix: _interrupt() finds run_ctx via ContextVar (same task) or
+    SessionPool fallback (cross-task) and cancels current_task.
     """
     from agentpool.agents.base_agent import _current_run_ctx_var
 
@@ -207,14 +210,8 @@ async def test_interrupt_without_run_ctx_cancels_stream_task(slow_agent: Agent[N
     # Wait for stream to start
     await asyncio.wait_for(stream_started.wait(), timeout=2.0)
 
-    assert len(captured_run_ctx) == 1
-    run_ctx = captured_run_ctx[0]
-
-    # Set up SessionPool fallback for cross-task access
-    _mock_session_pool(slow_agent, run_ctx)
-
-    # Call interrupt with NO run_ctx but WITH session_id for SessionPool lookup
-    await slow_agent.interrupt(session_id="test-session")
+    # Call interrupt with NO run_ctx
+    await slow_agent.interrupt()
 
     # The task should be cancelled (not still running)
     try:

@@ -125,3 +125,13 @@ class SessionData(Schema):
     def updated_at(self) -> str | None:
         """ISO timestamp of last activity (for protocol compatibility)."""
         return self.last_active.isoformat() if self.last_active else None
+
+    @property
+    def parent_tool_call_id(self) -> str | None:
+        """Parent tool call ID for subagent sessions (from metadata)."""
+        return self.metadata.get("parent_tool_call_id")
+
+    @property
+    def subagent_id(self) -> str | None:
+        """Subagent identifier for delegated sessions (from metadata)."""
+        return self.metadata.get("subagent_id")

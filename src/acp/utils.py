@@ -253,4 +253,6 @@ def infer_tool_kind(tool_name: str) -> ToolCallKind:  # noqa: PLR0911
         return "think"
     if any(i in name_lower for i in ["fetch", "download", "request"]):
         return "fetch"
+    if any(i in name_lower for i in ["subagent", "delegate", "spawn"]):
+        return "subagent"
     return "other"  # Default to other

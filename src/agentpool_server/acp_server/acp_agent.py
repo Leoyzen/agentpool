@@ -37,6 +37,8 @@ from acp.schema import (
     SetSessionModelResponse,
     SetSessionModeRequest,
     SetSessionModeResponse,
+    SubagentCapabilities,
+    SubagentInfo,
 )
 from agentpool.log import get_logger
 from agentpool.utils.tasks import TaskManager
@@ -45,6 +47,7 @@ from agentpool_server.acp_server.commands.skill_commands import ACPSkillBridge
 from agentpool_server.acp_server.converters import to_session_config_option, to_session_info
 from agentpool_server.acp_server.provider_router import ProviderRouter
 from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentpool_server.acp_server.subagent_catalog import SubagentCatalogProvider
 
 
 if TYPE_CHECKING:
@@ -225,14 +228,14 @@ class AgentPoolACPAgent(ACPAgent):
     server: ACPServer | None = field(default=None)
     """Reference to the ACPServer for pool hot-switching."""
 
-    subagent_display_mode: Literal["inline", "tool_box"] = "tool_box"
-    """Display mode for subagent outputs (inline or tool_box)."""
-
     _skill_bridge: ACPSkillBridge | None = field(init=False, default=None)
     """Bridge for exposing skill commands as ACP slash commands."""
 
     _mcp_manager: AcpMcpConnectionManager = field(init=False)
     """Manager for MCP-over-ACP connection lifecycle."""
+
+    _catalog_provider: SubagentCatalogProvider = field(init=False)
+    """Provider for subagent catalog with debounced updates."""
 
     _protocol_handler: ACPProtocolHandler | None = field(init=False, default=None)
     """SessionPool-backed protocol handler when ``acp.use_session_pool`` is enabled."""
@@ -259,8 +262,12 @@ class AgentPoolACPAgent(ACPAgent):
         self._mcp_manager = AcpMcpConnectionManager()
         # RFC-0034: Initialize provider router with None manifest (will be updated in initialize)
         self.provider_router = ProviderRouter(None)
+        # Initialize subagent catalog provider with debounced updates
+        self._catalog_provider = SubagentCatalogProvider(pool=self.agent_pool)
+        self._catalog_provider.register_update_callback(self._on_catalog_updated)
         # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
+
         if (
             self.agent_pool
             and self.agent_pool.main_agent
@@ -273,19 +280,13 @@ class AgentPoolACPAgent(ACPAgent):
                 self._agent_config = cfg
 
         # Initialize SessionPool-backed protocol handler if feature flag is enabled
-        if (
-            self.agent_pool
-            and self.agent_pool.manifest.acp.use_session_pool
-        ):
+        if self.agent_pool and self.agent_pool.manifest.acp.use_session_pool:
             from agentpool_server.acp_server.event_converter import ACPEventConverter
             from agentpool_server.acp_server.handler import ACPProtocolHandler
 
             self._protocol_handler = ACPProtocolHandler(
                 agent_pool=self.agent_pool,
-                session_manager=self.session_manager,
-                event_converter=ACPEventConverter(
-                    subagent_display_mode=self.subagent_display_mode,
-                ),
+                event_converter=ACPEventConverter(),
                 client=self.client,
                 client_capabilities=self.client_capabilities,
             )
@@ -365,7 +366,45 @@ class AgentPoolACPAgent(ACPAgent):
         """Get the agent pool from the default agent."""
         return self.default_agent.agent_pool
 
-        # Note: Tool registration happens after initialize() when we know client caps
+    def get_subagent_catalog(
+        self, ancestor_agent_ids: set[str] | None = None
+    ) -> list[SubagentInfo]:
+        """Get the current subagent catalog, optionally filtering ancestors.
+
+        Args:
+            ancestor_agent_ids: Optional set of agent IDs to exclude to
+                prevent circular delegation.
+
+        Returns:
+            List of SubagentInfo for available subagents.
+        """
+        return self._catalog_provider.get_catalog(ancestor_agent_ids=ancestor_agent_ids)
+
+    def _get_available_subagents(self) -> list[SubagentInfo]:
+        """Build list of available subagents from the pool.
+
+        Returns:
+            List of SubagentInfo for each agent in the pool.
+        """
+        return self.get_subagent_catalog()
+
+    async def _on_catalog_updated(self, catalog: list[SubagentInfo]) -> None:
+        """Handle catalog updates by notifying all active sessions.
+
+        Args:
+            catalog: The updated subagent catalog.
+        """
+        from acp.schema import AvailableSubagentsUpdate
+
+        update = AvailableSubagentsUpdate(available_subagents=catalog)
+        for session in list(self.session_manager._active.values()):
+            try:
+                await session.notifications.send_update(update)
+            except Exception:
+                logger.exception(
+                    "Failed to send catalog update",
+                    session_id=session.session_id,
+                )
 
     async def initialize(self, params: InitializeRequest) -> InitializeResponse:
         """Initialize the agent and negotiate capabilities."""
@@ -402,8 +441,17 @@ class AgentPoolACPAgent(ACPAgent):
             embedded_context_prompts=True,
             image_prompts=True,
             providers=True,
+            subagents=SubagentCapabilities(
+                prompt_delegation=True,
+                background=True,
+            ),
             turn_complete=turn_complete,
         )
+
+    @property
+    def prompt_delegation_enabled(self) -> bool:
+        """Whether prompt delegation capability is advertised to clients."""
+        return True
 
     async def new_session(self, params: NewSessionRequest) -> NewSessionResponse:
         """Create a new session."""
@@ -422,7 +470,6 @@ class AgentPoolACPAgent(ACPAgent):
                 mcp_servers=params.mcp_servers,
                 client_capabilities=self.client_capabilities,
                 client_info=self.client_info,
-                subagent_display_mode=self.subagent_display_mode,
             )
             state: SessionModeState | None = None
             models: SessionModelState | None = None
@@ -476,6 +523,7 @@ class AgentPoolACPAgent(ACPAgent):
                 modes=state,
                 models=models,
                 config_options=config_options if config_options else None,
+                available_subagents=self._get_available_subagents(),
             )
 
     async def load_session(self, params: LoadSessionRequest) -> LoadSessionResponse:
@@ -502,7 +550,6 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     session_id=params.session_id,
-                    subagent_display_mode=self.subagent_display_mode,
                 )
                 session = self.session_manager.get_session(session_id)
 
@@ -537,7 +584,12 @@ class AgentPoolACPAgent(ACPAgent):
             self.tasks.create_task(session.send_available_commands_update())
             self.tasks.create_task(session.agent.load_rules(session.cwd))
             logger.info("Session loaded", session_id=params.session_id)
-            return LoadSessionResponse(models=models, modes=mode_state, config_options=config_opts)
+            return LoadSessionResponse(
+                models=models,
+                modes=mode_state,
+                config_options=config_opts,
+                available_subagents=self._get_available_subagents(),
+            )
         except Exception:
             logger.exception("Failed to load session", session_id=params.session_id)
             return LoadSessionResponse()
@@ -601,9 +653,11 @@ class AgentPoolACPAgent(ACPAgent):
             mcp_servers=params.mcp_servers,
             client_capabilities=self.client_capabilities,
             client_info=self.client_info,
-            subagent_display_mode=self.subagent_display_mode,
         )
-        return ForkSessionResponse(session_id=session_id)
+        return ForkSessionResponse(
+            session_id=session_id,
+            available_subagents=self._get_available_subagents(),
+        )
 
     async def resume_session(self, params: ResumeSessionRequest) -> ResumeSessionResponse:
         """Resume an existing session without replaying history.
@@ -630,7 +684,6 @@ class AgentPoolACPAgent(ACPAgent):
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
                     session_id=params.session_id,
-                    subagent_display_mode=self.subagent_display_mode,
                 )
                 session = self.session_manager.get_session(session_id)
 
@@ -648,7 +701,9 @@ class AgentPoolACPAgent(ACPAgent):
             self.tasks.create_task(session.send_available_commands_update())
             self.tasks.create_task(session.agent.load_rules(session.cwd))
             logger.info("Session resumed", session_id=params.session_id)
-            return ResumeSessionResponse()
+            return ResumeSessionResponse(
+                available_subagents=self._get_available_subagents(),
+            )
 
         except Exception:
             logger.exception("Failed to resume session", session_id=params.session_id)
@@ -701,7 +756,6 @@ class AgentPoolACPAgent(ACPAgent):
                     session_id=params.session_id,
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
-                    subagent_display_mode=self.subagent_display_mode,
                 )
                 if session := self.session_manager.get_session(params.session_id):
                     # Initialize session extras
@@ -714,7 +768,7 @@ class AgentPoolACPAgent(ACPAgent):
         try:
             if not session:
                 raise ValueError(f"Session {params.session_id} not found")  # noqa: TRY301
-            stop_reason = await session.process_prompt(params.prompt)
+            stop_reason = await session.process_prompt(params.prompt, delegation=params.delegation)
             # Return the actual stop reason from the session
         except Exception as e:
             logger.exception("Failed to process prompt", session_id=params.session_id)
@@ -790,6 +844,7 @@ class AgentPoolACPAgent(ACPAgent):
             )
         except ValueError as e:
             from acp.exceptions import RequestError
+
             raise RequestError.invalid_params({"id": params.id}) from e
         return SetProvidersResponse()
 
@@ -799,6 +854,7 @@ class AgentPoolACPAgent(ACPAgent):
             await self.provider_router.disable_provider(params.id)
         except ValueError as e:
             from acp.exceptions import RequestError
+
             raise RequestError.invalid_params({"id": params.id}) from e
         return DisableProvidersResponse()
 
@@ -953,9 +1009,7 @@ class AgentPoolACPAgent(ACPAgent):
             with anyio.fail_after(30):
                 return await self.client.send_request("mcp/message", message)
 
-        await self._mcp_manager.create_connection(
-            connection_id, server, send_to_client
-        )
+        await self._mcp_manager.create_connection(connection_id, server, send_to_client)
         logger.info(
             "ACP MCP server connected",
             server_name=server.name,
@@ -972,9 +1026,7 @@ class AgentPoolACPAgent(ACPAgent):
             connection_id: The connection ID to disconnect.
         """
         try:
-            await self.client.send_request(
-                "mcp/disconnect", {"connectionId": connection_id}
-            )
+            await self.client.send_request("mcp/disconnect", {"connectionId": connection_id})
         except Exception:
             logger.exception(
                 "Failed to send mcp/disconnect to client",
@@ -1251,6 +1303,7 @@ class AgentPoolACPAgent(ACPAgent):
             if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
                 cfg = pool.manifest.agents[pool.main_agent.name]
                 from agentpool.models.agents import NativeAgentConfig
+
                 if isinstance(cfg, NativeAgentConfig):
                     if cfg.name is None:
                         cfg = cfg.model_copy(update={"name": pool.main_agent.name})
@@ -1258,6 +1311,7 @@ class AgentPoolACPAgent(ACPAgent):
             elif pool.manifest.agents:
                 cfg = next(iter(pool.manifest.agents.values()))
                 from agentpool.models.agents import NativeAgentConfig
+
                 if isinstance(cfg, NativeAgentConfig):
                     self._agent_config = cfg
             else:

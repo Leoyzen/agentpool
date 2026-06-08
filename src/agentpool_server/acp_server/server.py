@@ -30,16 +30,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SubagentDisplayMode = Literal["inline", "tool_box"]
-
-
-def _coerce_subagent_display_mode(value: str) -> SubagentDisplayMode:
-    """Normalize config strings to the ACP literal union."""
-    if value == "inline":
-        return "inline"
-    return "tool_box"
-
-
 def _acp_event_observer(show_detailed: bool = False):
     """Create an ACP stream observer that prints JSON-RPC messages to stderr.
 
@@ -86,7 +76,6 @@ class ACPServer(BaseServer):
         load_skills: bool | None = None,
         config_path: str | None = None,
         transport: Transport = "stdio",
-        subagent_display_mode: SubagentDisplayMode = "tool_box",
         show_events: bool = False,
         show_events_detailed: bool = False,
     ) -> None:
@@ -103,7 +92,6 @@ class ACPServer(BaseServer):
                 If None (default), uses the manifest's skills.include_default setting.
             config_path: Path to the configuration file (for tracking/hot-switching)
             transport: Transport configuration ("stdio", "websocket", or transport object)
-            subagent_display_mode: How to display nested agent output in ACP clients
             show_events: Whether to print agent stream events to stderr
             show_events_detailed: Whether to print detailed agent stream events to stderr
         """
@@ -115,7 +103,6 @@ class ACPServer(BaseServer):
         self.load_skills = load_skills
         self.config_path = config_path
         self.transport: Transport = transport
-        self.subagent_display_mode: SubagentDisplayMode = subagent_display_mode
         self.show_events = show_events
         self.show_events_detailed = show_events_detailed
 
@@ -130,7 +117,6 @@ class ACPServer(BaseServer):
         agent: str | None = None,
         load_skills: bool | None = None,
         transport: Transport = "stdio",
-        subagent_display_mode: SubagentDisplayMode | None = None,
         show_events: bool = False,
         show_events_detailed: bool = False,
     ) -> Self:
@@ -145,7 +131,6 @@ class ACPServer(BaseServer):
             load_skills: Whether to load client-side skills from .claude/skills.
                 If None (default), uses the manifest's skills.include_default setting.
             transport: Transport configuration ("stdio", "websocket", or transport object)
-            subagent_display_mode: Override for subagent display mode (argument > config > default)
 
         Returns:
             Configured ACP server instance with agent pool
@@ -158,17 +143,6 @@ class ACPServer(BaseServer):
 
         # Determine config_path for tracking
         config_path = config.config_file_path if isinstance(config, AgentsManifest) else str(config)
-
-        # Resolve subagent_display_mode with priority: argument > config > default
-        resolved_display_mode: SubagentDisplayMode
-        if subagent_display_mode is not None:
-            resolved_display_mode = subagent_display_mode
-        # Fall back to config value
-        elif isinstance(config, AgentsManifest):
-            config_mode: str = getattr(config.pool_server, "subagent_display_mode", "tool_box")
-            resolved_display_mode = _coerce_subagent_display_mode(config_mode)
-        else:
-            resolved_display_mode = "tool_box"
 
         # Resolve transport with priority: argument > config > default
         resolved_transport: Transport
@@ -207,7 +181,6 @@ class ACPServer(BaseServer):
             load_skills=resolved_load_skills,
             config_path=config_path,
             transport=resolved_transport,
-            subagent_display_mode=resolved_display_mode,
             show_events=show_events,
             show_events_detailed=show_events_detailed,
         )
@@ -255,7 +228,6 @@ class ACPServer(BaseServer):
             debug_commands=self.debug_commands,
             load_skills=self.load_skills,
             server=self,
-            subagent_display_mode=self.subagent_display_mode,
         )
         debug_file = self.debug_file if self.debug_messages else None
         observers = None

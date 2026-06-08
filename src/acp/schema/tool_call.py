@@ -367,4 +367,33 @@ class PermissionOption(AnnotatedObject):
     """Unique identifier for this permission option."""
 
 
+class SubagentRunInfo(AnnotatedObject):
+    """Information about a subagent invocation within a tool call.
+
+    Provides metadata for clients to identify and track subagent executions,
+    enabling subagent-specific UI treatment such as expandable cards.
+    """
+
+    subagent_id: str
+    """Unique identifier for the subagent being invoked."""
+
+    name: str
+    """Human-readable name of the subagent."""
+
+    description: str | None = None
+    """Optional description of what the subagent does."""
+
+    status: Literal["pending", "running", "completed", "failed"] | None = None
+    """Current execution status of the subagent run."""
+
+    depth: int | None = Field(default=None, ge=0)
+    """Nesting depth of the subagent invocation in the hierarchy."""
+
+    child_session_id: str | None = None
+    """ID of the child session created for this subagent run."""
+
+    run_mode: Literal["foreground", "background"] | None = None
+    """Lifecycle mode: 'foreground' (blocking) or 'background' (async)."""
+
+
 ToolCallContent = ContentToolCallContent | FileEditToolCallContent | TerminalToolCallContent

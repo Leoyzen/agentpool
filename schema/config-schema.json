@@ -53,6 +53,12 @@
             "null"
           ]
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the agent.\n\nCan be used for feature flags, annotations, and other per-agent\nconfiguration that doesn't fit into standard fields.\n\nExample:\n    ```yaml\n    metadata:\n      use_session_pool: true\n    ```",
+          "title": "Agent metadata",
+          "type": "object"
+        },
         "triggers": {
           "description": "Event sources that activate this agent / team",
           "examples": [
@@ -214,6 +220,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -229,6 +236,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -886,6 +896,20 @@
       "title": "ACPAgentWorkerConfig",
       "type": "object"
     },
+    "ACPConfig": {
+      "additionalProperties": false,
+      "description": "ACP protocol-specific configuration.",
+      "properties": {
+        "use_session_pool": {
+          "default": false,
+          "description": "Whether to use the SessionPool for ACP protocol session management.",
+          "title": "Use session pool",
+          "type": "boolean"
+        }
+      },
+      "title": "ACPConfig",
+      "type": "object"
+    },
     "ACPPoolServerConfig": {
       "additionalProperties": false,
       "description": "Configuration for ACP (Agent Client Protocol) server.",
@@ -921,15 +945,41 @@
           "title": "Raise exceptions",
           "type": "boolean"
         },
-        "subagent_display_mode": {
-          "default": "tool_box",
-          "description": "How to display nested agent output in ACP clients:\n- \"tool_box\": Displays subagent output in a tool box (current default)\n- \"inline\": Displays subagent output inline with the main agent's text",
+        "transport": {
+          "default": "stdio",
+          "description": "Transport type to use.",
           "enum": [
-            "inline",
-            "tool_box"
+            "stdio",
+            "streamable-http"
           ],
-          "title": "Subagent display mode",
+          "examples": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport type",
           "type": "string"
+        },
+        "host": {
+          "default": "localhost",
+          "description": "Host to bind server to (streamable-http only).",
+          "examples": [
+            "localhost",
+            "0.0.0.0",
+            "127.0.0.1"
+          ],
+          "title": "Server host",
+          "type": "string"
+        },
+        "port": {
+          "default": 8080,
+          "description": "Port to listen on (streamable-http only).",
+          "examples": [
+            8080,
+            9000
+          ],
+          "exclusiveMinimum": 0,
+          "title": "Server port",
+          "type": "integer"
         }
       },
       "title": "ACPPoolServerConfig",
@@ -1038,6 +1088,12 @@
             "string",
             "null"
           ]
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the agent.\n\nCan be used for feature flags, annotations, and other per-agent\nconfiguration that doesn't fit into standard fields.\n\nExample:\n    ```yaml\n    metadata:\n      use_session_pool: true\n    ```",
+          "title": "Agent metadata",
+          "type": "object"
         },
         "triggers": {
           "description": "Event sources that activate this agent / team",
@@ -1200,6 +1256,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -1215,6 +1272,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -1552,6 +1612,133 @@
       "title": "AGUIAgentWorkerConfig",
       "type": "object"
     },
+    "AcpMCPServerConfig": {
+      "additionalProperties": false,
+      "description": "MCP server using ACP channel transport.\n\nConnects to a server over the existing ACP connection.",
+      "properties": {
+        "type": {
+          "const": "acp",
+          "default": "acp",
+          "description": "ACP server configuration.",
+          "title": "Type",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "description": "Optional name for referencing the server.",
+          "examples": [
+            "my_server",
+            "api_connector",
+            "file_handler"
+          ],
+          "title": "Server name",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether this server is currently enabled.",
+          "title": "Server enabled",
+          "type": "boolean"
+        },
+        "env": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Environment variables to pass to the server process.",
+          "title": "Environment variables"
+        },
+        "timeout": {
+          "default": 60.0,
+          "description": "Timeout for the server process in seconds.",
+          "examples": [
+            30.0,
+            60.0,
+            120.0
+          ],
+          "exclusiveMinimum": 0,
+          "title": "Server timeout",
+          "type": "number"
+        },
+        "enabled_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If set, only these tools will be available (whitelist).\nMutually exclusive with disabled_tools.",
+          "examples": [
+            [
+              "read_file",
+              "list_directory"
+            ],
+            [
+              "search",
+              "fetch"
+            ]
+          ],
+          "title": "Enabled tools"
+        },
+        "disabled_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tools to exclude from this server (blacklist). Mutually exclusive with enabled_tools.",
+          "examples": [
+            [
+              "delete_file",
+              "write_file"
+            ],
+            [
+              "dangerous_tool"
+            ]
+          ],
+          "title": "Disabled tools"
+        },
+        "acp_id": {
+          "description": "Unique identifier for the ACP-transport MCP server.",
+          "examples": [
+            "uuid-xxx",
+            "server-123"
+          ],
+          "title": "ACP server ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "acp_id"
+      ],
+      "title": "AcpMCPServerConfig",
+      "type": "object",
+      "x-doc-title": "ACP MCP Server"
+    },
     "AgentCliToolConfig": {
       "additionalProperties": false,
       "description": "Configuration for agent CLI tool.\n\nExample:\n    ```yaml\n    tools:\n      - type: agent_cli\n    ```",
@@ -1771,6 +1958,7 @@
               "additionalProperties": {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -1786,6 +1974,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               },
@@ -5334,6 +5525,12 @@
             "null"
           ]
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the agent.\n\nCan be used for feature flags, annotations, and other per-agent\nconfiguration that doesn't fit into standard fields.\n\nExample:\n    ```yaml\n    metadata:\n      use_session_pool: true\n    ```",
+          "title": "Agent metadata",
+          "type": "object"
+        },
         "triggers": {
           "description": "Event sources that activate this agent / team",
           "examples": [
@@ -5495,6 +5692,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -5510,6 +5708,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -6187,6 +6388,12 @@
           "default": false,
           "description": "Force usage of Claude subscription instead of API key.\n\nWhen True, sets ANTHROPIC_API_KEY to empty string, forcing Claude Code\nto use your Claude.ai subscription for authentication instead of an API key.\n\nThis is useful when:\n- You have a Claude Pro/Team subscription with higher rate limits\n- You want to use subscription credits instead of API credits\n- You're using features only available to subscribers\n\nNote: Requires an active Claude subscription and logged-in session.",
           "title": "Use Claude Subscription",
+          "type": "boolean"
+        },
+        "dangerously_skip_permissions": {
+          "default": false,
+          "description": "Skip all permission checks without prompting.\n\nWhen True, bypasses all tool use confirmation dialogs. Use with caution\nas this allows the agent to execute arbitrary code and make changes\nwithout user approval.",
+          "title": "Dangerously Skip Permissions",
           "type": "boolean"
         },
         "tools": {
@@ -7288,6 +7495,12 @@
             "null"
           ]
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the agent.\n\nCan be used for feature flags, annotations, and other per-agent\nconfiguration that doesn't fit into standard fields.\n\nExample:\n    ```yaml\n    metadata:\n      use_session_pool: true\n    ```",
+          "title": "Agent metadata",
+          "type": "object"
+        },
         "triggers": {
           "description": "Event sources that activate this agent / team",
           "examples": [
@@ -7449,6 +7662,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -7464,6 +7678,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -22686,6 +22903,12 @@
             "null"
           ]
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the agent.\n\nCan be used for feature flags, annotations, and other per-agent\nconfiguration that doesn't fit into standard fields.\n\nExample:\n    ```yaml\n    metadata:\n      use_session_pool: true\n    ```",
+          "title": "Agent metadata",
+          "type": "object"
+        },
         "triggers": {
           "description": "Event sources that activate this agent / team",
           "examples": [
@@ -22847,6 +23070,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -22862,6 +23086,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -24428,6 +24655,12 @@
             "codemode"
           ],
           "title": "Tool execution mode"
+        },
+        "capabilities": {
+          "description": "Additional pydantic-ai capabilities to attach to the agent.\n\nCan contain either CapabilityConfig objects (for YAML-loaded capabilities)\nor pre-instantiated AbstractCapability objects (for Python API usage).",
+          "items": {},
+          "title": "Capabilities",
+          "type": "array"
         }
       },
       "required": [
@@ -25646,6 +25879,20 @@
         "fo"
       ],
       "title": "OpenAPI Configuration",
+      "type": "object"
+    },
+    "OpenCodeConfig": {
+      "additionalProperties": false,
+      "description": "OpenCode protocol-specific configuration.",
+      "properties": {
+        "use_session_pool": {
+          "default": false,
+          "description": "Whether to use the SessionPool for OpenCode protocol session management.",
+          "title": "Use session pool",
+          "type": "boolean"
+        }
+      },
+      "title": "OpenCodeConfig",
       "type": "object"
     },
     "OpenCodeFileAgentConfig": {
@@ -28226,6 +28473,12 @@
             "null"
           ]
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the agent.\n\nCan be used for feature flags, annotations, and other per-agent\nconfiguration that doesn't fit into standard fields.\n\nExample:\n    ```yaml\n    metadata:\n      use_session_pool: true\n    ```",
+          "title": "Agent metadata",
+          "type": "object"
+        },
         "triggers": {
           "description": "Event sources that activate this agent / team",
           "examples": [
@@ -28387,6 +28640,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -28402,6 +28656,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -31003,6 +31260,54 @@
       "title": "SerperConfig",
       "type": "object"
     },
+    "SessionPoolConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for the SessionPool orchestration layer.\n\nControls session lifecycle management, turn execution, event routing,\nand auto-resume capabilities for agent sessions.",
+      "properties": {
+        "enable_auto_resume": {
+          "default": true,
+          "description": "Whether to enable the auto-resume loop for post-turn work.",
+          "title": "Enable auto-resume",
+          "type": "boolean"
+        },
+        "enable_event_bus": {
+          "default": true,
+          "description": "Whether to enable cross-turn event routing via the event bus.",
+          "title": "Enable event bus",
+          "type": "boolean"
+        },
+        "session_ttl_seconds": {
+          "default": 3600.0,
+          "description": "Time-to-live for sessions in seconds. Expired sessions are cleaned up.",
+          "exclusiveMinimum": 0,
+          "title": "Session TTL seconds",
+          "type": "number"
+        },
+        "max_auto_resume": {
+          "default": 10,
+          "description": "Maximum number of auto-resume iterations per turn loop.",
+          "minimum": 0,
+          "title": "Max auto-resume",
+          "type": "integer"
+        },
+        "max_queue_size": {
+          "default": 1000,
+          "description": "Maximum size for event bus subscriber queues.",
+          "minimum": 1,
+          "title": "Max queue size",
+          "type": "integer"
+        },
+        "mcp_max_processes": {
+          "default": 100,
+          "description": "Maximum number of MCP processes for per-session agents.",
+          "minimum": 1,
+          "title": "MCP max processes",
+          "type": "integer"
+        }
+      },
+      "title": "SessionPoolConfig",
+      "type": "object"
+    },
     "SessionQuery": {
       "additionalProperties": false,
       "description": "Query configuration for session recovery.",
@@ -31124,7 +31429,7 @@
       "description": "Configuration for custom skill discovery paths.\n\nSkills are discovered from configured directories, allowing\nusers to add custom skills from local paths. The discovery\nfollows \"first path wins\" semantics - earlier paths in the list\ntake precedence over later ones.\n\nDefault paths (when include_default=True):\n- ~/.claude/skills/ (user home directory)\n- .claude/skills/ (relative to current directory)",
       "properties": {
         "paths": {
-          "description": "List of custom paths to search for skills.\n\nPaths can be:\n- Absolute: /home/user/skills\n- Relative: ./my-skills (resolved against config file location or CWD)\n- Remote: s3://bucket/skills, github://org/repo/skills\n\nEarlier paths take precedence over later ones (\"first path wins\").",
+          "description": "List of custom paths to search for skills.\n\nPaths can be:\n- Absolute: /home/user/skills\n- Relative: ./my-skills (resolved against config file location or CWD)\n- Remote: s3://bucket/skills, github://org/repo/skills\n\nEarlier paths take precedence over later ones (\"first path wins\").\n\nPaths are automatically resolved relative to the config file location\nvia ConfigPath validation.",
           "examples": [
             [
               "/path/to/skills",
@@ -34862,6 +35167,17 @@
             "null"
           ]
         },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Arbitrary metadata for the node.\n\nCan be used for feature flags, annotations, or other protocol-specific\nconfiguration that does not fit into structured fields.",
+          "examples": [
+            {
+              "use_session_pool": true
+            }
+          ],
+          "title": "Node metadata",
+          "type": "object"
+        },
         "triggers": {
           "description": "Event sources that activate this agent / team",
           "examples": [
@@ -35023,6 +35339,7 @@
               {
                 "discriminator": {
                   "mapping": {
+                    "acp": "#/$defs/AcpMCPServerConfig",
                     "sse": "#/$defs/SSEMCPServerConfig",
                     "stdio": "#/$defs/StdioMCPServerConfig",
                     "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -35038,6 +35355,9 @@
                   },
                   {
                     "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/AcpMCPServerConfig"
                   }
                 ]
               }
@@ -35846,6 +36166,7 @@
       "type": "object"
     },
     "UsageLimits": {
+      "description": "Limits on model usage.\n\nThe request count is tracked by pydantic_ai, and the request limit is checked before each request to the model.\nToken counts are provided in responses from the model, and the token limits are checked after each response.\n\nEach of the limits can be set to `None` to disable that limit.",
       "properties": {
         "request_limit": {
           "default": 50,
@@ -35894,7 +36215,7 @@
         },
         "count_tokens_before_request": {
           "default": false,
-          "description": "If True, perform a token counting pass before sending the request to the model,\nto enforce `request_tokens_limit` ahead of time.\n\nThis may incur additional overhead (from calling the model's `count_tokens` API before making the actual request) and is disabled by default.\n\nSupported by:\n\n- Anthropic\n- Google\n- Bedrock Converse\n\nSupport for OpenAI is in development: https://github.com/pydantic/pydantic-ai/issues/3430",
+          "description": "If True, perform a token counting pass before sending the request to the model,\nto enforce `input_tokens_limit` ahead of time.\n\nThis may incur additional overhead (from calling the model's `count_tokens` API before making the actual request)\nand is disabled by default.\n\nSupported by:\n\n- Anthropic\n- Google\n- Bedrock Converse\n- OpenAI Responses",
           "title": "Count Tokens Before Request",
           "type": "boolean"
         }
@@ -38959,6 +39280,7 @@
           {
             "discriminator": {
               "mapping": {
+                "acp": "#/$defs/AcpMCPServerConfig",
                 "sse": "#/$defs/SSEMCPServerConfig",
                 "stdio": "#/$defs/StdioMCPServerConfig",
                 "streamable-http": "#/$defs/StreamableHTTPMCPServerConfig"
@@ -38974,6 +39296,9 @@
               },
               {
                 "$ref": "#/$defs/StreamableHTTPMCPServerConfig"
+              },
+              {
+                "$ref": "#/$defs/AcpMCPServerConfig"
               }
             ]
           }
@@ -39002,6 +39327,18 @@
     "skills": {
       "$ref": "#/$defs/SkillsConfig",
       "description": "Custom skill discovery paths configuration.\n\nDefines where to search for custom skills. Skills are discovered from\nconfigured directories following \"first path wins\" semantics.\n\nExample:\n    ```yaml\n    skills:\n      paths:\n        - ./my-skills\n        - s3://bucket/skills\n      include_default: true\n    ```"
+    },
+    "session_pool": {
+      "$ref": "#/$defs/SessionPoolConfig",
+      "description": "Session pool configuration for session lifecycle management.\n\nControls session TTL, auto-resume, event bus, and queue sizing.\n\nExample:\n    ```yaml\n    session_pool:\n      enable_auto_resume: true\n      enable_event_bus: true\n      session_ttl_seconds: 3600.0\n      max_auto_resume: 10\n      max_queue_size: 1000\n      mcp_max_processes: 100\n    ```"
+    },
+    "acp": {
+      "$ref": "#/$defs/ACPConfig",
+      "description": "ACP protocol-specific configuration.\n\nExample:\n    ```yaml\n    acp:\n      use_session_pool: true\n    ```"
+    },
+    "opencode": {
+      "$ref": "#/$defs/OpenCodeConfig",
+      "description": "OpenCode protocol-specific configuration.\n\nExample:\n    ```yaml\n    opencode:\n      use_session_pool: true\n    ```"
     },
     "commands": {
       "additionalProperties": {

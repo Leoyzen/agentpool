@@ -531,5 +531,31 @@ async def test_subagent_event_depth_propagation(tmp_path: Path):
         assert sa_event.depth == expected_depth
 
 
+async def test_worker_spawn_session_start_has_run_mode_foreground(tmp_path: Path):
+    """Worker tool emits SpawnSessionStart with run_mode='foreground'."""
+    config_path = write_config(BASIC_WORKERS, tmp_path)
+    manifest = AgentsManifest.from_file(config_path)
+
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        main_agent = pool.get_agent("main")
+        worker = pool.get_agent("worker")
+        assert isinstance(main_agent, Agent)
+        assert isinstance(worker, Agent)
+
+        main_model = TestModel(call_tools=["ask_worker"])
+        worker_model = TestModel(custom_output_text="Worker result")
+        await main_agent.set_model(main_model)
+        await worker.set_model(worker_model)
+
+        async for event in main_agent.run_stream("Ask worker: do something"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    assert len(spawn_events) == 1
+    assert spawn_events[0].run_mode == "foreground"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

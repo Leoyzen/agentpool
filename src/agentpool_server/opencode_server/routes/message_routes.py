@@ -406,8 +406,7 @@ async def _process_message_locked(  # noqa: PLR0915
             else:
                 agent = all_agents[request.agent]
     # Ensure agent is bound to this session
-    input_provider = state.ensure_input_provider(session_id)
-    agent._input_provider = input_provider
+    agent._input_provider = state.ensure_input_provider(session_id)
 
     try:
         request_variant = request.model.variant if request.model else None

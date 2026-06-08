@@ -191,6 +191,7 @@ class TestSkillsIncludeDefault:
 
         # Without explicit override, load_skills should follow manifest
         from agentpool_server.acp_server.server import ACPServer
+
         server = ACPServer.from_config(manifest)
         assert server.load_skills is False, (
             "ACP server should not load skills when manifest has include_default=False "
@@ -262,13 +263,18 @@ class TestSkillsIncludeDefault:
         try:
             # Debug: print paths
             from agentpool.resource_providers.local import LocalResourceProvider
-            print(f"DEBUG: skills_manager.registry.skills_dirs = {skills_manager.registry.skills_dirs}")
+
+            print(
+                f"DEBUG: skills_manager.registry.skills_dirs = {skills_manager.registry.skills_dirs}"
+            )
             provider = skills_manager.resource_provider
             assert isinstance(provider, LocalResourceProvider)
             print(f"DEBUG: provider.skills_dirs = {provider.skills_dirs}")
             print(f"DEBUG: provider._registry.skills_dirs = {provider._registry.skills_dirs}")
 
-            print(f"DEBUG: skills_manager.registry.list_items() = {skills_manager.registry.list_items()}")
+            print(
+                f"DEBUG: skills_manager.registry.list_items() = {skills_manager.registry.list_items()}"
+            )
 
             skills = await provider.get_skills()
             skill_names = {s.name for s in skills}

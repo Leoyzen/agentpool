@@ -14,27 +14,9 @@
   },
   {
     "payload": {
+      "kind": "other",
       "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "first step (0%)",
-      "toolCallId": "pyd_ai_tool_call_id__test_progress"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "second step (50%)",
-      "toolCallId": "pyd_ai_tool_call_id__test_progress"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "third step (99%)",
+      "title": "Executing: test_progress",
       "toolCallId": "pyd_ai_tool_call_id__test_progress"
     },
     "type": "tool_call_update"

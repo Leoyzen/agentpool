@@ -202,6 +202,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         agent_name: str,
         agent_type: str,
         parent_session_id: str | None = None,
+        *,
+        parent_tool_call_id: str | None = None,
+        subagent_id: str | None = None,
     ) -> str:
         """Create a child session for a subagent delegation.
 
@@ -217,6 +220,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             agent_type: Type of the child agent (``"native"``, ``"claude"``, etc.).
             parent_session_id: Explicit parent session ID.  When *None* the
                 current node's ``session_id`` is used as the parent.
+            parent_tool_call_id: Optional ID of the tool call that triggered
+                this subagent delegation.
+            subagent_id: Optional identifier of the subagent being delegated to.
 
         Returns:
             The child session ID string.
@@ -234,7 +240,6 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     agent_type=agent_type,
                 )
                 return child_session.session_id
-        # Fallback: no pool, no session_pool, or no parent — generate ephemeral ID.
         from agentpool.utils.identifiers import generate_session_id
 
         return generate_session_id()

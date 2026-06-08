@@ -71,7 +71,9 @@ def resume_session_request():
 
 
 @pytest.mark.unit
-async def test_resume_session_calls_agent_load_session(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_calls_agent_load_session(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that agent.load_session() is called during resume_session."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -82,7 +84,9 @@ async def test_resume_session_calls_agent_load_session(mock_acp_agent, mock_sess
 
 
 @pytest.mark.unit
-async def test_resume_session_does_not_call_replay(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_does_not_call_replay(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that notifications.replay() is NOT called during resume_session."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -93,7 +97,9 @@ async def test_resume_session_does_not_call_replay(mock_acp_agent, mock_session,
 
 
 @pytest.mark.unit
-async def test_resume_session_schedules_commands_update(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_schedules_commands_update(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that send_available_commands_update() is scheduled after resume."""
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
@@ -106,7 +112,9 @@ async def test_resume_session_schedules_commands_update(mock_acp_agent, mock_ses
 
 
 @pytest.mark.unit
-async def test_resume_session_agent_load_fails(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_agent_load_fails(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test resume_session handles agent.load_session() failure gracefully."""
     mock_session.agent.load_session = AsyncMock(return_value=False)
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
@@ -120,7 +128,9 @@ async def test_resume_session_agent_load_fails(mock_acp_agent, mock_session, res
 
 
 @pytest.mark.unit
-async def test_resume_session_creates_session_if_not_found(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_creates_session_if_not_found(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that resume_session creates a new session wrapper if session not found."""
     mock_acp_agent.session_manager.get_session = MagicMock(side_effect=[None, mock_session])
     mock_acp_agent.session_manager.create_session = AsyncMock(return_value="test-session-id")
@@ -132,7 +142,9 @@ async def test_resume_session_creates_session_if_not_found(mock_acp_agent, mock_
 
 
 @pytest.mark.unit
-async def test_resume_session_exception_returns_empty_response(mock_acp_agent, mock_session, resume_session_request):
+async def test_resume_session_exception_returns_empty_response(
+    mock_acp_agent, mock_session, resume_session_request
+):
     """Test that resume_session returns empty ResumeSessionResponse on exception."""
     mock_session.agent.load_session = AsyncMock(side_effect=RuntimeError("boom"))
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)

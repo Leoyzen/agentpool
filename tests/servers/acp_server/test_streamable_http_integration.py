@@ -203,6 +203,7 @@ async def test_serve_streamable_http_uses_internal_shutdown_when_no_event(
     mock_uvicorn: MagicMock,
 ) -> None:
     """When no shutdown_event is provided, an internal event should be used."""
+
     # Use a serve method that can be cancelled
     async def cancellable_serve() -> None:
         while True:
@@ -309,9 +310,10 @@ async def test_handle_acp_creates_stream_adapters(
 
     mock_uvicorn._server.serve = quick_serve
 
-    with patch("acp.transports._StarletteWebSocketReadStream") as mock_reader, patch(
-        "acp.transports._StarletteWebSocketWriteStream"
-    ) as mock_writer:
+    with (
+        patch("acp.transports._StarletteWebSocketReadStream") as mock_reader,
+        patch("acp.transports._StarletteWebSocketWriteStream") as mock_writer,
+    ):
         task = asyncio.create_task(
             _serve_streamable_http(
                 TestAgent(),

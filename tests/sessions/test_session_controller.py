@@ -71,6 +71,40 @@ class TestSessionData:
         # Original should be unchanged
         assert "key2" not in original.metadata
 
+    def test_parent_tool_call_id_from_metadata(self) -> None:
+        """Test parent_tool_call_id property reads from metadata."""
+        data = SessionData(
+            session_id="test_session",
+            agent_name="test_agent",
+            metadata={"parent_tool_call_id": "tc_abc123"},
+        )
+        assert data.parent_tool_call_id == "tc_abc123"
+
+    def test_parent_tool_call_id_none_when_missing(self) -> None:
+        """Test parent_tool_call_id returns None when not in metadata."""
+        data = SessionData(
+            session_id="test_session",
+            agent_name="test_agent",
+        )
+        assert data.parent_tool_call_id is None
+
+    def test_subagent_id_from_metadata(self) -> None:
+        """Test subagent_id property reads from metadata."""
+        data = SessionData(
+            session_id="test_session",
+            agent_name="test_agent",
+            metadata={"subagent_id": "sub_def456"},
+        )
+        assert data.subagent_id == "sub_def456"
+
+    def test_subagent_id_none_when_missing(self) -> None:
+        """Test subagent_id returns None when not in metadata."""
+        data = SessionData(
+            session_id="test_session",
+            agent_name="test_agent",
+        )
+        assert data.subagent_id is None
+
 
 class TestMemoryProviderSessions:
     """Tests for session CRUD on MemoryStorageProvider."""

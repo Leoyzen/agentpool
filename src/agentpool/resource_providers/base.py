@@ -200,7 +200,6 @@ class ResourceProvider(ABC):
             # Copy metadata
             wrapper.__name__ = tool.name
             wrapper.__doc__ = tool.description
-            wrapper.__wrapped__ = original_fn  # type: ignore[attr-defined]
 
             # Build signature: RunContext + other params (without AgentContext/RunContext)
             new_params = [inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=RunContext)]

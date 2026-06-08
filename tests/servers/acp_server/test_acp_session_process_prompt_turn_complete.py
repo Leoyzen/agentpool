@@ -57,7 +57,7 @@ class TestProcessPromptTurnCompleteFlag:
         mock_acp_agent: MagicMock,
     ) -> None:
         """When client_capabilities.turn_complete=True, ACPEventConverter must be
-created with client_supports_turn_complete=True."""
+        created with client_supports_turn_complete=True."""
         agent = agent_pool.get_agent("test_agent")
         mock_client = AsyncMock()
 
@@ -101,7 +101,7 @@ created with client_supports_turn_complete=True."""
         mock_acp_agent: MagicMock,
     ) -> None:
         """When client_capabilities.turn_complete=False, ACPEventConverter must be
-created with client_supports_turn_complete=False."""
+        created with client_supports_turn_complete=False."""
         agent = agent_pool.get_agent("test_agent")
         mock_client = AsyncMock()
 
@@ -143,7 +143,7 @@ created with client_supports_turn_complete=False."""
         mock_acp_agent: MagicMock,
     ) -> None:
         """When client_capabilities.turn_complete=None, ACPEventConverter must be
-created with client_supports_turn_complete=False (default)."""
+        created with client_supports_turn_complete=False (default)."""
         agent = agent_pool.get_agent("test_agent")
         mock_client = AsyncMock()
 

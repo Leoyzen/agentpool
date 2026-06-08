@@ -15,15 +15,9 @@
   },
   {
     "payload": {
-      "content": [
-        {
-          "terminalId": "code_0001",
-          "type": "terminal"
-        }
-      ],
+      "kind": "other",
       "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
-      "title": "Running: python",
+      "title": "Executing: execute_code",
       "toolCallId": "pyd_ai_tool_call_id__execute_code"
     },
     "type": "tool_call_update"
@@ -32,13 +26,13 @@
     "payload": {
       "content": [
         {
-          "terminalId": "code_0001",
+          "terminalId": "local_4630070480",
           "type": "terminal"
         }
       ],
       "sessionUpdate": "tool_call_update",
       "status": "in_progress",
-      "title": "3\n",
+      "title": "Running: execute(24 chars)",
       "toolCallId": "pyd_ai_tool_call_id__execute_code"
     },
     "type": "tool_call_update"
@@ -47,12 +41,27 @@
     "payload": {
       "content": [
         {
-          "terminalId": "code_0001",
+          "terminalId": "local_4630070480",
+          "type": "terminal"
+        }
+      ],
+      "sessionUpdate": "tool_call_update",
+      "status": "in_progress",
+      "title": "3",
+      "toolCallId": "pyd_ai_tool_call_id__execute_code"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "content": [
+        {
+          "terminalId": "local_4630070480",
           "type": "terminal"
         },
         {
           "content": {
-            "text": "3\n",
+            "text": "3",
             "type": "text"
           },
           "type": "content"
@@ -67,7 +76,7 @@
   },
   {
     "payload": {
-      "rawOutput": "3\n",
+      "rawOutput": "3",
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__execute_code"

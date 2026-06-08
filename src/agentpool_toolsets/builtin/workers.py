@@ -144,6 +144,7 @@ class WorkersTools(ResourceProvider):
                 depth=child_depth,
                 description=f"Run {agent_name} worker",
                 metadata={"prompt": prompt[:200]} if prompt else {},
+                run_mode="foreground",
             )
             await ctx.events.emit_event(spawn_event)
 
@@ -250,6 +251,7 @@ class WorkersTools(ResourceProvider):
                 depth=child_depth,
                 description=f"Run {node_name} worker",
                 metadata={"prompt": prompt[:200]} if prompt else {},
+                run_mode="foreground",
             )
             await ctx.events.emit_event(spawn_event)
 

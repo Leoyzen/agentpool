@@ -413,6 +413,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                     source_name=node.name,
                     depth=child_depth,
                     description=f"Sequential team member {node.name!r}",
+                    run_mode="foreground",
                 )
 
                 # Extract model_id from BaseAgent nodes

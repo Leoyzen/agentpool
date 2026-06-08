@@ -372,3 +372,77 @@ async def test_subagent_tools_does_not_import_identifiers() -> None:
     assert not hasattr(mod, "identifier"), (
         "subagent_tools should not import 'identifier' — it should use ctx.create_child_session()"
     )
+
+
+# ---------------------------------------------------------------------------
+# run_mode field on SpawnSessionStart (RFC-0028 T3)
+# ---------------------------------------------------------------------------
+
+
+async def test_task_sync_mode_sets_run_mode_foreground() -> None:
+    """task() with async_mode=False sets run_mode='foreground' on SpawnSessionStart."""
+    manifest = AgentsManifest.from_yaml("""
+agents:
+  worker:
+    model:
+      type: test
+      custom_output_text: "Done"
+    system_prompt: Worker.
+
+  orchestrator:
+    model:
+      type: test
+      call_tools: ["task"]
+      tool_args:
+        task:
+          agent_or_team: worker
+          prompt: "Work"
+          description: "Sync run_mode test"
+    tools:
+      - type: subagent
+""")
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        orch = pool.get_agent("orchestrator")
+        async for event in orch.run_stream("Delegate"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    assert len(spawn_events) == 1
+    assert spawn_events[0].run_mode == "foreground"
+
+
+async def test_task_async_mode_sets_run_mode_background() -> None:
+    """task() with async_mode=True sets run_mode='background' on SpawnSessionStart."""
+    manifest = AgentsManifest.from_yaml("""
+agents:
+  worker:
+    model:
+      type: test
+      custom_output_text: "Done"
+    system_prompt: Worker.
+
+  orchestrator:
+    model:
+      type: test
+      call_tools: ["task"]
+      tool_args:
+        task:
+          agent_or_team: worker
+          prompt: "Work"
+          description: "Async run_mode test"
+          async_mode: true
+    tools:
+      - type: subagent
+""")
+    spawn_events: list[SpawnSessionStart] = []
+
+    async with AgentPool(manifest) as pool:
+        orch = pool.get_agent("orchestrator")
+        async for event in orch.run_stream("Delegate"):
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+
+    assert len(spawn_events) == 1
+    assert spawn_events[0].run_mode == "background"

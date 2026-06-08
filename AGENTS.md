@@ -505,14 +505,14 @@ AgentPool maintains two queue systems because native and non-native agents use d
 
 Native agents drive execution through `RunExecutor`, which calls `agent_run.next(node)` in a loop. The bare `async for node in agent_run:` pattern does not fire `after_node_run` hooks, so `"when_idle"` messages would never drain. `RunExecutor` avoids this by using explicit `next()` calls.
 
-**Non-native agents** (ACP, ClaudeCode, AGUI) do not use PydanticAI's agent loop. They communicate through subprocess JSON-RPC, Claude SDK, or HTTP/SSE. These agents use `TurnRunner`, which preserves the manual queue system:
+**Non-native agents** (ACP, ClaudeCode, AGUI) do not use PydanticAI's agent loop. They communicate through subprocess JSON-RPC, Claude SDK, or HTTP/SSE. These agents continue using `LegacyTurnRunner`, which preserves the manual queue system:
 
 - `_post_turn_injections` for immediate injections.
 - `_post_turn_prompts` for follow-up prompts.
 - `_process_queued_work()` and `_trigger_auto_resume()` for the auto-resume loop.
 - `SessionState.turn_lock` for turn serialization.
 
-`TurnRunner` creates `RunHandle` instances and registers them in `SessionController._runs` just like native runs. This gives the pool a unified view of all active execution.
+`LegacyTurnRunner` creates `RunHandle` instances and registers them in `SessionController._runs` just like native runs. This gives the pool a unified view of all active execution.
 
 #### RunHandle Lifecycle
 
@@ -560,7 +560,7 @@ The `RunExecutor` runs PydanticAI iteration in a background task and pushes even
 
 **For all agents**, `inject()` and `consume()` handle tool result augmentation. When a tool finishes, `after_tool_execute` hooks call `consume()` to inject additional context into the conversation. If no tool runs, `flush_pending_to_queue()` moves unconsumed injections into the queued prompts.
 
-**For non-native agents**, `queue()` and `pop_queued()` also handle follow-up prompts after a turn ends. `TurnRunner` drains these queues through `_process_queued_work()`.
+**For non-native agents**, `queue()` and `pop_queued()` also handle follow-up prompts after a turn ends. `LegacyTurnRunner` drains these queues through `_process_queued_work()`.
 
 **For native agents**, the follow-up prompt queue (`queue()` / `pop_queued()`) is replaced by PydanticAI's `PendingMessageDrainCapability`. `inject()` / `consume()` remain in use for tool augmentation.
 

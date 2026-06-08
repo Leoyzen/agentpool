@@ -147,8 +147,7 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
         agent.run_stream = original_run_stream  # type: ignore[method-assign]
 
     assert run_stream_called, (
-        "agent.run_stream should be called when skill command "
-        "injects content into staged_content"
+        "agent.run_stream should be called when skill command injects content into staged_content"
     )
 
 
