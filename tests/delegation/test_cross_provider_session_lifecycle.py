@@ -258,15 +258,21 @@ agents:
     child_session_ids_from_run_started: list[str] = []
 
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
-        async for event in orch.run_stream("Delegate", session_id="ses_test"):
+        session_pool = pool.session_pool
+        assert session_pool is not None, "SessionPool not initialized"
+        # Create session with the orchestrator agent so the correct agent runs
+        await session_pool.create_session("ses_test", agent_name="orchestrator")
+        # Use SessionPool with scope="descendants" to receive child session events
+        async for event in session_pool.run_stream(
+            "ses_test", "Delegate", scope="descendants"
+        ):
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
-            elif isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
-                child_session_ids_from_run_started.append(event.event.session_id)
+            elif isinstance(event, RunStartedEvent):
+                child_session_ids_from_run_started.append(event.session_id)
 
     assert child_session_id_from_spawn is not None
-    assert child_session_ids_from_run_started, "No RunStartedEvent found in SubAgentEvents"
+    assert child_session_ids_from_run_started, "No RunStartedEvent found in stream"
     assert child_session_id_from_spawn in child_session_ids_from_run_started, (
         f"RunStartedEvent.session_id {child_session_ids_from_run_started} "
         f"should contain SpawnSessionStart.child_session_id {child_session_id_from_spawn}"

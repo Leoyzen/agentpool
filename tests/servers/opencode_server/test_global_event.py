@@ -225,6 +225,9 @@ class _MockState:
         """No-op mock for SSE disconnect handler."""
         return []
 
+    def get_next_event_id(self) -> int:
+        return 1
+
 
 async def _collect_events(
     state: _MockState,

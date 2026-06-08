@@ -191,14 +191,14 @@ class TestProtocolFeatureFlags:
     """Test per-protocol session pool feature flags on AgentsManifest."""
 
     def test_acp_config_default(self) -> None:
-        """ACPConfig.use_session_pool should default to False."""
+        """ACPConfig.use_session_pool should default to True."""
         manifest = AgentsManifest()
-        assert manifest.acp.use_session_pool is False
+        assert manifest.acp.use_session_pool is True
 
     def test_opencode_config_default(self) -> None:
-        """OpenCodeConfig.use_session_pool should default to False."""
+        """OpenCodeConfig.use_session_pool should default to True."""
         manifest = AgentsManifest()
-        assert manifest.opencode.use_session_pool is False
+        assert manifest.opencode.use_session_pool is True
 
     def test_acp_config_from_yaml(self) -> None:
         """ACP config should parse from YAML."""

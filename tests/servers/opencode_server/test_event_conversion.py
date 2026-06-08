@@ -484,7 +484,6 @@ class TestRunStartedEventConversion:
 class TestRunErrorEventConversion:
     """Tests for RunErrorEvent -> SessionErrorEvent."""
 
-    @pytest.mark.xfail(reason="EventProcessor lacks RunErrorEvent handler")
     @pytest.mark.asyncio
     async def test_run_error_yields_session_error_event(
         self,
@@ -503,7 +502,7 @@ class TestRunErrorEventConversion:
         error_events = [e for e in events if isinstance(e, SessionErrorEvent)]
         assert len(error_events) == 1
         assert error_events[0].properties.error is not None
-        assert error_events[0].properties.error.name == "RunErrorEvent"
+        assert error_events[0].properties.error.name == "ERR_001"
 
 
 # =============================================================================
