@@ -263,3 +263,111 @@ async def test_single_thinking_phase_accumulates_correctly():
     final_content = adapter.main_context.reasoning_part.text
     expected = "Start middle end"
     assert final_content == expected, f"Expected '{expected}', got '{final_content}'"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_part_gets_end_time_when_text_starts():
+    """Verify that ReasoningPart gets time.end set when text starts (thinking ends)."""
+    mock_msg = MagicMock()
+    mock_msg.parts = []
+    mock_msg.update_part = MagicMock()
+
+    mock_state = MagicMock()
+
+    adapter = OpenCodeStreamAdapter(
+        state=mock_state,
+        session_id="test-session",
+        assistant_msg_id="msg-1",
+        assistant_msg=mock_msg,
+        working_dir=".",
+    )
+
+    events = []
+
+    # Thinking phase
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
+        )
+    ])
+
+    # Text starts - this should close out the reasoning part
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=1, part=TextPart(content="Response"))
+        )
+    ])
+
+    # The reasoning part should have been updated with an end time
+    reasoning_final_events = [
+        e for e in events
+        if isinstance(e, PartUpdatedEvent)
+        and isinstance(e.properties, PartUpdatedEventProperties)
+        and isinstance(e.properties.part, ReasoningPart)
+        and e.properties.part.time is not None
+        and e.properties.part.time.end is not None
+    ]
+
+    assert len(reasoning_final_events) >= 1, (
+        "Expected at least one ReasoningPart with time.end set when text starts"
+    )
+
+    # The context should have cleared the reasoning_part reference
+    assert adapter.main_context.reasoning_part is None, (
+        "reasoning_part should be cleared from context after text starts"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reasoning_part_gets_end_time_on_stream_complete():
+    """Verify that ReasoningPart gets time.end set on stream complete if still active."""
+    mock_msg = MagicMock()
+    mock_msg.parts = []
+    mock_msg.update_part = MagicMock()
+
+    mock_state = MagicMock()
+
+    adapter = OpenCodeStreamAdapter(
+        state=mock_state,
+        session_id="test-session",
+        assistant_msg_id="msg-1",
+        assistant_msg=mock_msg,
+        working_dir=".",
+    )
+
+    events = []
+
+    # Thinking phase only (no text follows)
+    events.extend([
+        e
+        async for e in adapter._handle_event(
+            PartStartEvent(index=0, part=ThinkingPart(content="Thinking..."))
+        )
+    ])
+
+    # Stream completes without any text starting
+    # Simulate what happens when _process_stream_complete is called
+    from agentpool.messaging import ChatMessage
+    chat_msg = ChatMessage(content="", role="assistant")
+    events.extend(list(adapter.processor._process_stream_complete(adapter.main_context, chat_msg)))
+
+    # The reasoning part should have been finalized with an end time
+    reasoning_final_events = [
+        e for e in events
+        if isinstance(e, PartUpdatedEvent)
+        and isinstance(e.properties, PartUpdatedEventProperties)
+        and isinstance(e.properties.part, ReasoningPart)
+        and e.properties.part.time is not None
+        and e.properties.part.time.end is not None
+    ]
+
+    assert len(reasoning_final_events) >= 1, (
+        "Expected ReasoningPart with time.end set on stream complete"
+    )
+
+    # The context should have cleared the reasoning_part reference
+    assert adapter.main_context.reasoning_part is None, (
+        "reasoning_part should be cleared from context after stream complete"
+    )
