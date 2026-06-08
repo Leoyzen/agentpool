@@ -73,7 +73,9 @@ if TYPE_CHECKING:
     from agentpool_config.mcp_server import MCPServerConfig
 
     # Union type for state updates emitted via state_updated signal
-    type StateUpdate = ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged | ToastInfo
+    type StateUpdate = (
+        ModeInfo | ModelInfo | AvailableCommandsUpdate | ConfigOptionChanged | ToastInfo
+    )
 
 
 # ContextVar for per-execution isolation of _current_run_ctx (RFC-0021 compliance)
@@ -276,8 +278,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         self._input_provider = input_provider
         if input_provider is not None:
             warnings.warn(
-                "BaseAgent._input_provider is deprecated. "
-                "Use SessionState.input_provider instead.",
+                "BaseAgent._input_provider is deprecated. Use SessionState.input_provider instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -778,8 +779,21 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         return
                     # No active run: delegate to SessionPool for auto-resume
                     self.task_manager.fire_and_forget(
+                        session_pool.receive_request(effective_session_id, message, priority="asap")
+                    )
+                    return
+                # FALLBACK: effective_session_id is None but session_pool exists.
+                # This happens when BackgroundTaskProvider calls inject_prompt
+                # after the lead agent's run has ended (no active run context
+                # and agent's _events.session_id is None for shared agents).
+                # Try to find the most recently active session for this agent.
+                session_pool = self.agent_pool.session_pool
+                sessions = session_pool.sessions.find_sessions_by_agent_name(self.name)
+                if sessions:
+                    most_recent = max(sessions, key=lambda s: s.last_active_at)
+                    self.task_manager.fire_and_forget(
                         session_pool.receive_request(
-                            effective_session_id, message, priority="asap"
+                            most_recent.session_id, message, priority="asap"
                         )
                     )
                     return
@@ -807,6 +821,22 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 _session_pool.inject_prompt(effective_session_id, message)
             )
             return
+
+        # FALLBACK for shared agents: effective_session_id is None but session_pool exists.
+        # This handles the case where BackgroundTaskProvider calls inject_prompt
+        # after background task completion when the agent has no fixed session_id.
+        if self.agent_pool is not None:
+            _session_pool = self.agent_pool.session_pool
+            if _session_pool is not None:
+                sessions = _session_pool.sessions.find_sessions_by_agent_name(self.name)
+                if sessions:
+                    most_recent = max(sessions, key=lambda s: s.last_active_at)
+                    self.task_manager.fire_and_forget(
+                        _session_pool.receive_request(
+                            most_recent.session_id, message, priority="asap"
+                        )
+                    )
+                    return
 
         # No pool or session_id available — log warning
         self.log.warning(
@@ -1443,7 +1473,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         )
         return self._cancelled or background_cancelled
 
-    async def interrupt(self, run_ctx: AgentRunContext | None = None, session_id: str | None = None) -> None:
+    async def interrupt(
+        self, run_ctx: AgentRunContext | None = None, session_id: str | None = None
+    ) -> None:
         """Interrupt the currently running stream.
 
         Sets the cancelled flag, calls subclass-specific _interrupt(),
@@ -1597,9 +1629,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     "event_handlers": event_handlers,
                 }
                 process_task = asyncio.create_task(
-                    session_pool.process_prompt(
-                        effective_session_id, *prompts, **process_kwargs
-                    )
+                    session_pool.process_prompt(effective_session_id, *prompts, **process_kwargs)
                 )
                 final_message: ChatMessage[TResult] | None = None
                 try:
@@ -1629,9 +1659,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # Route from the base agent so Talk targets still receive the message.
                 session = session_pool.sessions.get_session(effective_session_id)
                 if session is not None and getattr(session, "is_per_session_agent", False):
-                    await self.connections.route_message(
-                        final_message, wait=wait_for_connections
-                    )
+                    await self.connections.route_message(final_message, wait=wait_for_connections)
                 return final_message
 
         # Direct execution path for AG-UI bypass and standalone mode.
