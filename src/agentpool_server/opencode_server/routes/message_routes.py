@@ -48,6 +48,9 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
+from agentpool_server.opencode_server.session_pool_integration import (
+    get_messages_for_session,
+)
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
