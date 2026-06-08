@@ -806,8 +806,9 @@ class OpenCodeSessionPoolIntegration:
         for part in assistant_msg.parts:
             if (
                 isinstance(part, ToolPart)
-                and part.metadata is not None
-                and part.metadata.get("sessionId") == child_session_id
+                and hasattr(part.state, "metadata")
+                and isinstance(part.state.metadata, dict)
+                and part.state.metadata.get("sessionId") == child_session_id
             ):
                 tool_part = part
                 break
@@ -893,8 +894,9 @@ class OpenCodeSessionPoolIntegration:
         for part in assistant_msg.parts:
             if (
                 isinstance(part, ToolPart)
-                and part.metadata is not None
-                and part.metadata.get("sessionId") == child_session_id
+                and hasattr(part.state, "metadata")
+                and isinstance(part.state.metadata, dict)
+                and part.state.metadata.get("sessionId") == child_session_id
             ):
                 tool_part = part
                 break

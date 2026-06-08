@@ -219,8 +219,21 @@ class EventProcessor:
             PartUpdatedEvent for the created text part.
         """
         ctx.set_text(delta)
-        # Reset reasoning part reference when text starts (marks end of thinking phase)
-        ctx.reasoning_part = None
+        # Close out any active reasoning part before text starts
+        if ctx.reasoning_part is not None:
+            start_time = ctx.reasoning_part.time.start if ctx.reasoning_part.time else now_ms()
+            final_reasoning = ReasoningPart(
+                id=ctx.reasoning_part.id,
+                message_id=ctx.assistant_msg_id,
+                session_id=ctx.session_id,
+                text=ctx.reasoning_part.text,
+                time=TimeStartEndOptional(start=start_time, end=now_ms()),
+                metadata=ctx.reasoning_part.metadata,
+            )
+            ctx.assistant_msg.update_part(final_reasoning)
+            ctx.reasoning_part = final_reasoning
+            yield PartUpdatedEvent.create(final_reasoning)
+            ctx.reasoning_part = None
 
         text_part = TextPart(
             id=identifier.ascending("part"),
@@ -666,6 +679,21 @@ class EventProcessor:
         response_time = now_ms()
         start = ctx.stream_start_ms
 
+        # Close out any active reasoning part before finalizing text
+        if ctx.reasoning_part is not None:
+            reasoning_start = ctx.reasoning_part.time.start if ctx.reasoning_part.time else start
+            final_reasoning = ReasoningPart(
+                id=ctx.reasoning_part.id,
+                message_id=ctx.assistant_msg_id,
+                session_id=ctx.session_id,
+                text=ctx.reasoning_part.text,
+                time=TimeStartEndOptional(start=reasoning_start, end=response_time),
+                metadata=ctx.reasoning_part.metadata,
+            )
+            ctx.assistant_msg.update_part(final_reasoning)
+            ctx.reasoning_part = None
+            yield PartUpdatedEvent.create(final_reasoning)
+
         # Final text part
         if ctx.response_text and ctx.text_part is None:
             # Text was never streamed incrementally — create a text part now
@@ -688,6 +716,7 @@ class EventProcessor:
                 time=TimeStartEndOptional(start=start, end=response_time),
             )
             ctx.assistant_msg.update_part(final_text_part)
+            yield PartUpdatedEvent.create(final_text_part)
 
         # Step finish part
         cache = TokenCache(read=0, write=0)
