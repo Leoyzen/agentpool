@@ -86,11 +86,15 @@ class ServerState:
     _first_subscriber_triggered: bool = field(default=False, repr=False)
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     _active_message_tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
+    _run_handles: dict[str, Any] = field(default_factory=dict)
     event_managers: dict[str, Any] = field(default_factory=dict)
     auth_service: Any = field(default_factory=create_default_auth_service)
     skill_bridge: Any = field(default=None)
     command_store: CommandStore | None = field(default=None)
     session_pool_integration: Any = field(default=None)
+    session_controller: Any = field(default=None)
+    event_bridge: Any = field(default=None, repr=False)
+    _shell_env: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
@@ -101,6 +105,37 @@ class ServerState:
         # later migration step.
         self._pool: AgentPool[Any] | None = self.agent.agent_pool
         self._storage: StorageManager | None = self.agent.storage
+
+        # Create a standalone execution environment for shell commands.
+        # This preserves direct execution semantics (no SessionPool turn)
+        # and avoids depending on the shared agent for shell operations.
+        agent_env = self.agent.env
+        match agent_env:
+            case _ if hasattr(agent_env, "cwd"):
+                from exxec import LocalExecutionEnvironment
+
+                self._shell_env = LocalExecutionEnvironment(cwd=agent_env.cwd)
+            case _:
+                # Fallback: reference the same env (preserves remote env support)
+                self._shell_env = agent_env
+
+        # Instantiate the OpenCodeEventBridge when a SessionController is
+        # available.  The bridge dual-publishes events to SSE subscribers
+        # (backward compat) and the SessionPool EventBus.
+        if self.session_controller is not None:
+            event_bus = None
+            if self._pool is not None:
+                session_pool = getattr(self._pool, "session_pool", None)
+                if session_pool is not None:
+                    event_bus = getattr(session_pool, "event_bus", None)
+
+            if event_bus is not None:
+                from agentpool_server.opencode_server.event_bridge import (
+                    OpenCodeEventBridge,
+                )
+
+                self.event_bridge = OpenCodeEventBridge(self, event_bus)
+
 
     def get_event_factory(self) -> GlobalEventFactory:
         """Get or lazily create the GlobalEventFactory for event wrapping.
@@ -135,6 +170,16 @@ class ServerState:
     def fs(self) -> AsyncFileSystem:
         """Get the fsspec filesystem from the agent's environment."""
         return self.agent.env.get_fs()
+
+    @property
+    def shell_env(self) -> Any:
+        """Get the standalone execution environment for shell commands.
+
+        Returns the cached execution environment that was created from
+        ``self.agent.env`` during ``__post_init__``.  This avoids
+        depending on the shared agent for shell execution.
+        """
+        return self._shell_env
 
     @property
     def base_path(self) -> str:
@@ -184,14 +229,76 @@ class ServerState:
             self.session_locks[session_id] = asyncio.Lock()
         return self.session_locks[session_id]
 
+    def get_session(self, session_id: str) -> Any:
+        """Get a session by ID.
+
+        Shim that delegates to the session controller when available.
+        Falls back to the local sessions dict for backward compatibility.
+
+        Args:
+            session_id: The session ID to look up.
+
+        Returns:
+            The session state, or None if not found.
+        """
+        if self.session_controller is not None:
+            return self.session_controller.get_session(session_id)
+        return None
+
+    def list_sessions(self) -> list[Any]:
+        """List all active sessions.
+
+        Shim that delegates to the session controller when available.
+
+        Returns:
+            A list of SessionInfo DTOs when session_controller is set,
+            otherwise an empty list.
+        """
+        if self.session_controller is not None:
+            return self.session_controller.list_sessions()
+        return []
+
+    def get_session_status(self, session_id: str) -> dict[str, Any]:
+        """Get status information for a session.
+
+        Shim that aggregates data from the session controller and
+        local runtime state.
+
+        Args:
+            session_id: The session ID to look up.
+
+        Returns:
+            A dictionary with session status information.
+        """
+        status: dict[str, Any] = {"session_id": session_id}
+        session = self.get_session(session_id)
+        if session is not None:
+            status["agent_name"] = session.agent_name
+            status["is_per_session_agent"] = getattr(session, "is_per_session_agent", False)
+            status["created_at"] = getattr(session, "created_at", None)
+            status["last_active_at"] = getattr(session, "last_active_at", None)
+        local_status = self.session_status.get(session_id)
+        if local_status is not None:
+            status["local_status"] = local_status
+        return status
+
     def ensure_input_provider(self, session_id: str) -> OpenCodeInputProvider:
-        """Get or create the OpenCode input provider for a session."""
+        """Get or create the OpenCode input provider for a session.
+
+        Stores the provider on both ServerState (backward compat) and
+        SessionState (via SessionController) when available.
+        """
         from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 
         input_provider = self.input_providers.get(session_id)
         if input_provider is None:
             input_provider = OpenCodeInputProvider(self, session_id)
             self.input_providers[session_id] = input_provider
+            # Also store on SessionState when session_controller is available
+            if self.session_controller is not None:
+                session = self.session_controller.get_session(session_id)
+                if session is not None:
+                    session.input_provider = input_provider
         return input_provider
 
     @property
@@ -222,6 +329,8 @@ class ServerState:
 
     def cancel_session_pending_questions(self, session_id: str) -> list[str]:
         """Cancel pending questions for a specific session and return their IDs."""
+        if self.session_controller is not None:
+            return self.session_controller.cancel_session_pending_questions(session_id)
         cancelled_ids: list[str] = []
         for question_id, pending in list(self.pending_questions.items()):
             if pending.session_id == session_id and not pending.future.done():
@@ -231,6 +340,8 @@ class ServerState:
 
     def cancel_all_pending_questions(self) -> list[str]:
         """Cancel all pending questions and return their IDs."""
+        if self.session_controller is not None:
+            return self.session_controller.cancel_all_pending_questions()
         cancelled_ids: list[str] = []
         for question_id, pending in self.pending_questions.items():
             if not pending.future.done():
@@ -246,40 +357,8 @@ class ServerState:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
         self.background_tasks.clear()
 
-    @property
-    def _session_agents(self) -> dict[str, BaseAgent[Any, Any]]:
-        """DEPRECATED: Per-session agent cache.
-
-        Maintained for backward compatibility during the migration to
-        SessionPool-based agent resolution.  New code should obtain agents
-        via ``self.pool.get_agent()`` or ``session_pool.receive_request()``.
-        """
-        return getattr(self, "__session_agents", {})
-
-    @_session_agents.setter
-    def _session_agents(self, value: dict[str, BaseAgent[Any, Any]]) -> None:
-        self.__session_agents = value
-
-    async def get_or_create_agent(
-        self,
-        session_id: str,
-    ) -> BaseAgent[Any, Any]:
-        """DEPRECATED: Obtain the agent for a session.
-
-        Returns the shared server agent.  Per-session agent instances have
-        been removed; SessionPool now manages agent lifecycle.
-        """
-        return self.agent
-
-    async def remove_session_agent(self, session_id: str) -> None:
-        """DEPRECATED: No-op during SessionPool migration.
-
-        SessionPool owns agent lifecycle now.  This method exists so that
-        legacy callers do not need to be updated in this changeset.
-        """
-
-    async def broadcast_event(self, event: Event) -> None:
-        """Broadcast an event to all SSE subscribers.
+    async def _broadcast_event_impl(self, event: Event) -> None:
+        """Original SSE broadcast implementation.
 
         Isolates failures: if one subscriber's queue raises,
         other subscribers still receive the event.
@@ -293,6 +372,18 @@ class ServerState:
                 logger.warning("SSE subscriber queue error, removing subscriber")
                 with contextlib.suppress(ValueError):
                     self.event_subscribers.remove(queue)
+
+    async def broadcast_event(self, event: Event) -> None:
+        """Broadcast an event to all SSE subscribers.
+
+        When :attr:`event_bridge` is present, delegates to the bridge so
+        that events are also republished to the SessionPool EventBus.
+        Otherwise falls back to the original SSE-only path.
+        """
+        if self.event_bridge is not None:
+            await self.event_bridge.publish(event)
+        else:
+            await self._broadcast_event_impl(event)
 
     async def mark_session_idle(self, session_id: str) -> None:
         """Mark a session idle and broadcast the matching status events."""

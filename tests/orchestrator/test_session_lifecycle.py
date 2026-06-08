@@ -96,7 +96,7 @@ async def _setup_session(
     mock_pool: MagicMock,
 ) -> None:
     """Create a session and attach the mock agent directly."""
-    state = await ctrl.get_or_create_session(session_id)
+    state, _ = await ctrl.get_or_create_session(session_id)
     state.agent = agent
     ctrl._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent
@@ -139,8 +139,8 @@ class TestSessionControllerParentChild:
     @pytest.mark.anyio
     async def test_creates_child_session(self) -> None:
         ctrl = SessionController(pool=MagicMock())
-        parent = await ctrl.get_or_create_session("parent1")
-        child = await ctrl.get_or_create_session(
+        parent, _ = await ctrl.get_or_create_session("parent1")
+        child, _ = await ctrl.get_or_create_session(
             "child1", parent_session_id="parent1"
         )
         assert child.parent_session_id == "parent1"

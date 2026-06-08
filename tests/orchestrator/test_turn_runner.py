@@ -101,7 +101,7 @@ async def _setup_session(
     turn_runner: TurnRunner | None = None,
 ) -> SessionState:
     """Create a session and attach the mock agent directly."""
-    state = await controller.get_or_create_session(session_id)
+    state, _ = await controller.get_or_create_session(session_id)
     state.agent = agent
     controller._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent
@@ -858,3 +858,105 @@ async def test_run_turn_passes_input_provider_to_agent(
 
     assert len(calls) == 1
     assert calls[0].get("input_provider") is fake_provider
+
+
+# ---------------------------------------------------------------------------
+# _bypass_session_pool ContextVar
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_bypass_session_pool_set_during_run_turn(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """SessionPool-internal _run_stream_once sees _bypass_session_pool=True."""
+    from agentpool.agents.base_agent import _bypass_session_pool
+
+    seen_values: list[bool] = []
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        seen_values.append(_bypass_session_pool.get())
+        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
+
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "hello")
+
+    assert seen_values == [True], (
+        f"_bypass_session_pool should be True during TurnRunner turns, got {seen_values}"
+    )
+
+
+@pytest.mark.anyio
+async def test_bypass_session_pool_cleared_after_run_turn(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+    mock_agent: MagicMock,
+) -> None:
+    """_bypass_session_pool is reset to False after run_turn completes."""
+    from agentpool.agents.base_agent import _bypass_session_pool
+
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "hello")
+
+    assert _bypass_session_pool.get() is False, (
+        "_bypass_session_pool should be reset after TurnRunner turn completes"
+    )
+
+
+def test_bypass_session_pool_external_call() -> None:
+    """External calls (no ContextVar set, no AG-UI stack) do NOT bypass SessionPool."""
+    from agentpool.agents.base_agent import _should_bypass_session_pool
+
+    result = _should_bypass_session_pool()
+    assert result is False, (
+        "External calls should not bypass SessionPool when ContextVar is unset "
+        "and no AG-UI frames are in the stack"
+    )
+
+
+def test_bypass_session_pool_contextvar_true() -> None:
+    """When _bypass_session_pool ContextVar is True, bypass is active."""
+    from agentpool.agents.base_agent import _bypass_session_pool, _should_bypass_session_pool
+
+    token = _bypass_session_pool.set(True)
+    try:
+        result = _should_bypass_session_pool()
+        assert result is True, (
+            "_should_bypass_session_pool should return True when ContextVar is set"
+        )
+    finally:
+        _bypass_session_pool.reset(token)
+
+
+def test_bypass_session_pool_agui_stack_inspection() -> None:
+    """AG-UI callers still bypass via stack inspection (preserved until Migration B)."""
+    import types
+    from typing import Any
+
+    from agentpool.agents.base_agent import _should_bypass_session_pool
+
+    agui_module: Any = types.ModuleType("agui_test_module")
+    agui_module.__dict__["_should_bypass_session_pool"] = _should_bypass_session_pool
+
+    # Execute function definition inside the module so its f_globals are agui_module's
+    exec(
+        "def _check():\n    return _should_bypass_session_pool()\n",
+        agui_module.__dict__,
+    )
+
+    check_fn = agui_module.__dict__["_check"]
+    result = check_fn()
+    assert result is True, (
+        "AG-UI stack inspection should still bypass SessionPool (Migration B)"
+    )

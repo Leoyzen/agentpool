@@ -128,6 +128,10 @@ def cancellable_mock_agent():
     mock_session = Mock()
     mock_session.agent = agent
     session_pool.sessions.get_session = Mock(return_value=mock_session)
+    session_pool.sessions.get_or_create_session = AsyncMock(
+        return_value=(mock_session, True)
+    )
+    session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     session_pool.sessions.store = None
     # Create a RunHandle that raises CancelledError when waiting
     run_handle = Mock()

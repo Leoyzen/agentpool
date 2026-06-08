@@ -17,7 +17,6 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.event_adapter import OpenCodeEventAdapter
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
@@ -155,8 +154,7 @@ async def _maybe_generate_title(
 
         # Trigger title generation via log_session with initial_prompt
         # Use the session agent's name if available, fallback to template agent name
-        session_agent = state._session_agents.get(session_id)
-        node_name = session_agent.name if session_agent else state.agent.name
+        node_name = state.agent.name
         await storage.log_session(
             session_id=session_id,
             node_name=node_name,
@@ -374,15 +372,15 @@ async def _process_message_locked(  # noqa: PLR0915
         on_file_paths=lambda paths: _warmup_lsp_for_files(state, paths),
     )
 
-    # Event adapter shares the stream adapter's context for consistent
-    # part tracking and token accumulation.
-    event_adapter = OpenCodeEventAdapter.from_stream_adapter(adapter)
+    # The stream adapter will be fed events directly from the EventBus
+    # subscriber loop below so that its mutable context (text, tokens,
+    # step-finish tracking) is updated before finalize() is called.
 
     response_time: int | None = None
     # Per-session agent: each session has its own agent instance,
     # so no global agent_lock is needed. Same-session serialization
     # is handled by get_session_lock() in _process_message().
-    agent = await state.get_or_create_agent(session_id)
+    agent = state.agent
     # Delegate agent resolution (for subagent requests).
     # Only resolve a delegate when the request names a *different* agent
     # from the default session agent.  A request.agent value of "default"
@@ -390,9 +388,9 @@ async def _process_message_locked(  # noqa: PLR0915
     # agent" — no delegation needed.
     #
     # NOTE: Subagents from state.pool.all_agents are shared singleton
-    # instances.  Mutating session_id/_input_provider on them is safe ONLY
-    # because same-session serialization (via get_session_lock) prevents
-    # concurrent access.  Per-session subagent instances are NOT feasible
+    # instances.  Input providers are stored on SessionState and passed
+    # to agents at run time via SessionController — never mutated on the
+    # shared agent itself.  Per-session subagent instances are NOT feasible
     # due to MCP subprocess overhead.  If OpenCode ever supports direct
     # multi-agent selection, this must be redesigned via AgentPool's
     # delegation/team mechanism instead.
@@ -406,9 +404,9 @@ async def _process_message_locked(  # noqa: PLR0915
                 pass  # Use per-session agent, don't replace with pool singleton
             else:
                 agent = all_agents[request.agent]
-    # Ensure agent is bound to this session
+    # Get input provider for this session — stored on SessionState, NOT on agent.
+    # SessionController passes input_provider to the agent via kwargs at run time.
     input_provider = state.ensure_input_provider(session_id)
-    agent._input_provider = input_provider
 
     # --- SessionPool integration ---
     integration = state.session_pool_integration
@@ -419,17 +417,24 @@ async def _process_message_locked(  # noqa: PLR0915
 
     # Ensure session exists in SessionPool before routing
     if integration is not None:
-        if integration.session_pool.sessions.get_session(session_id) is None:
-            await integration.create_session(
-                session_id,
-                agent_name=request.agent or state.agent.name or "default",
-            )
+        sp_state = await integration.create_session(
+            session_id,
+            agent_name=request.agent or state.agent.name or "default",
+        )
     else:
-        if session_pool.sessions.get_session(session_id) is None:
-            await session_pool.create_session(
-                session_id,
-                agent_name=request.agent or state.agent.name or "default",
-            )
+        sp_state, _was_created = await session_pool.sessions.get_or_create_session(
+            session_id,
+            agent_name=request.agent or state.agent.name or "default",
+        )
+    sp_state.input_provider = input_provider
+
+    # Obtain per-session agent for model switching so each session
+    # gets its own isolated model configuration.
+    session_agent = await session_pool.sessions.get_or_create_session_agent(
+        session_id,
+        agent_name=request.agent or state.agent.name or "default",
+        input_provider=input_provider,
+    )
 
     try:
         request_variant = request.model.variant if request.model else None
@@ -437,7 +442,7 @@ async def _process_message_locked(  # noqa: PLR0915
             # set_mode raises ValueError (or its subclasses UnknownModeError/
             # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
             try:
-                await agent.set_mode(request_variant, category_id="thought_level")
+                await session_agent.set_mode(request_variant, category_id="thought_level")
             except ValueError:
                 logger.debug("Variant mode not applicable", variant=request_variant)
 
@@ -455,7 +460,7 @@ async def _process_message_locked(  # noqa: PLR0915
             logger.info("Model selection requested", provider=provider_id, model_id=model_id)
 
             try:
-                available_models = await agent.get_available_models()
+                available_models = await session_agent.get_available_models()
                 is_valid = False
 
                 # Check 1: Is model_id a variant name in manifest?
@@ -480,7 +485,7 @@ async def _process_message_locked(  # noqa: PLR0915
                         "Switching model for session",
                         requested_model=requested_model,
                     )
-                    await agent.set_model(requested_model)
+                    await session_agent.set_model(requested_model)
                     logger.info("Switched to requested model", model=requested_model)
                 else:
                     logger.warning(
@@ -526,6 +531,27 @@ async def _process_message_locked(  # noqa: PLR0915
             )
 
         if run_handle is not None:
+            # Subscribe to EventBus locally so the adapter receives events
+            # and accumulates response_text / tokens for finalize().
+            # The session-scoped consumer (_event_consumer_loop) already
+            # broadcasts SSE events; we only feed the adapter context here.
+            event_queue = await session_pool.event_bus.subscribe(session_id)
+
+            async def _feed_adapter() -> None:
+                try:
+                    while True:
+                        event = await event_queue.get()
+                        if event is None:
+                            break
+                        async for _ in adapter.convert_event(event):
+                            pass  # Context updated; broadcast by session consumer
+                except asyncio.CancelledError:
+                    raise
+
+            adapter_task = asyncio.create_task(
+                _feed_adapter(), name=f"adapter_feed_{session_id}"
+            )
+
             # Wait for the full run loop (including auto-resume) to complete.
             # The session-scoped EventBus consumer (started in create_session)
             # handles all event streaming; this handler only synchronises on
@@ -535,6 +561,11 @@ async def _process_message_locked(  # noqa: PLR0915
             except asyncio.CancelledError:
                 run_handle.cancel()
                 raise
+            finally:
+                adapter_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await adapter_task
+                await session_pool.event_bus.unsubscribe(session_id, event_queue)
 
             # Finalize based on run outcome
             if run_handle.status != RunStatus.failed:
@@ -725,19 +756,18 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     # 2. Route through SessionPool instead of server-owned queue
     session_pool = state.pool.session_pool
     if session_pool is not None:
-        sp_session = session_pool.sessions.get_session(session_id)
-        if sp_session is None:
-            await session_pool.create_session(
-                session_id,
-                agent_name=request.agent or state.agent.name or "default",
-            )
+        sp_state, _was_created = await session_pool.sessions.get_or_create_session(
+            session_id,
+            agent_name=request.agent or state.agent.name or "default",
+        )
+        input_provider = state.ensure_input_provider(session_id)
+        sp_state.input_provider = input_provider
 
         user_prompt = await extract_user_prompt_from_parts(
             request.parts,
             fs=state.fs,
             tools=state.agent.tools,
         )
-        input_provider = state.ensure_input_provider(session_id)
 
         await session_pool.receive_request(
             session_id=session_id,

@@ -84,33 +84,6 @@ def state(shared_agent: Mock, tmp_path: Any) -> ServerState:
 
 
 # =============================================================================
-# Test: shutdown cleans up all session agents
-# =============================================================================
-
-
-async def test_shutdown_cleans_up_session_agents(state: ServerState) -> None:
-    """Shutdown sequence calls cleanup_all_session_agents and removes all agents.
-
-    After creating session agents via get_or_create_agent, the shutdown
-    cleanup must call __aexit__ on every agent and clear the registry.
-    """
-    agent_a = await state.get_or_create_agent("session-a")
-    agent_b = await state.get_or_create_agent("session-b")
-
-    # Simulate the shutdown sequence from server.py lifespan
-    await state.cleanup_all_session_agents()
-    await state.cleanup_tasks()
-
-    # Every session agent should have had __aexit__ called
-    agent_a.__aexit__.assert_called_once()
-    agent_b.__aexit__.assert_called_once()
-
-    # Registry should be empty
-    assert len(state._session_agents) == 0
-    assert len(state._session_agent_locks) == 0
-
-
-# =============================================================================
 # Test: shutdown cancels background tasks
 # =============================================================================
 
@@ -133,7 +106,6 @@ async def test_shutdown_cancels_background_tasks(state: ServerState) -> None:
     task = state.create_background_task(long_running(), name="test-bg-task")
 
     # Simulate the shutdown sequence from server.py lifespan
-    await state.cleanup_all_session_agents()
     await state.cleanup_tasks()
 
     # Task should have been cancelled (not completed normally)

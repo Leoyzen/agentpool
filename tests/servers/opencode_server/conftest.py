@@ -188,7 +188,23 @@ def mock_pool(
     pool.session_pool.close_session = AsyncMock(side_effect=_mock_close_session)
     pool.session_pool.sessions = Mock()
     pool.session_pool.sessions.cancel_run_for_session = Mock()
-    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=Mock())
+    _mock_session_agent = Mock()
+    _mock_session_agent.load_session = AsyncMock(return_value=None)
+    _mock_session_agent.conversation = Mock()
+    _mock_session_agent.conversation.chat_messages = []
+    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
+        return_value=_mock_session_agent
+    )
+    pool.session_pool.sessions.get_or_create_session = AsyncMock(
+        return_value=(Mock(), True)
+    )
+    _run_handle = Mock()
+    _run_handle.complete_event = Mock()
+    _run_handle.complete_event.wait = AsyncMock()
+    pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
+    pool.session_pool.event_bus = Mock()
+    pool.session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    pool.session_pool.event_bus.unsubscribe = AsyncMock()
     pool.session_pool.sessions.store = Mock()
     pool.session_pool.sessions.store.save = storage_manager.save_session
     pool.session_pool.sessions.store.delete = storage_manager.delete_session

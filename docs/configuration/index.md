@@ -167,6 +167,16 @@ The built-in fallback config (e.g., `acp_assistant.yml`) is **only loaded if no 
 | `AGENTPOOL_CONFIG_CONTENT` | Inline YAML/JSON config content |
 | `AGENTPOOL_NO_GLOBAL_CONFIG` | Set to disable global config loading |
 | `AGENTPOOL_NO_PROJECT_CONFIG` | Set to disable project config discovery |
+| `AGENTPOOL_USE_SESSION_POOL_FOR_COMMANDS` | Set to `1`, `true`, or `yes` to route commands through SessionPool |
+| `AGENTPOOL_USE_SESSION_POOL_FOR_SKILLS` | Set to `1`, `true`, or `yes` to route skills through SessionPool |
+| `AGENTPOOL_USE_SESSION_POOL_FOR_INIT` | Set to `1`, `true`, or `yes` to use SessionPool during initialization |
+| `AGENTPOOL_USE_SESSION_POOL_FOR_SUMMARIZE` | Set to `1`, `true`, or `yes` to route summarization through SessionPool |
+| `AGENTPOOL_USE_SESSION_POOL_FOR_MCP` | Set to `1`, `true`, or `yes` to route MCP calls through SessionPool |
+
+!!! note "SessionPool Feature Flags"
+    Category flags are only evaluated when the global `use_session_pool` setting is `True`.
+    The `OpenCodeConfig.should_use_session_pool_for(category)` helper checks the global
+    master switch first, then the specific category flag.
 
 ### CLI Commands
 

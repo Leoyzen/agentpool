@@ -230,7 +230,7 @@ class TestMetricsCollectorActiveRuns:
         collector = MetricsCollector(session_pool)
 
         # Create two sessions: one native (per-session), one non-native
-        state_native = await session_pool.sessions.get_or_create_session("sess-native")
+        state_native, _ = await session_pool.sessions.get_or_create_session("sess-native")
         state_native.metadata["agent_type"] = "native"
         handle_native = RunHandle(
             run_id="run-1",
@@ -240,7 +240,7 @@ class TestMetricsCollectorActiveRuns:
         )
         session_pool.sessions._runs["run-1"] = handle_native
 
-        state_non_native = await session_pool.sessions.get_or_create_session("sess-non-native")
+        state_non_native, _ = await session_pool.sessions.get_or_create_session("sess-non-native")
         state_non_native.metadata["agent_type"] = "non-native"
         handle_non_native = RunHandle(
             run_id="run-2",

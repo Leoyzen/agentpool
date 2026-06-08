@@ -82,6 +82,12 @@ _current_run_ctx_var: ContextVar[AgentRunContext | None] = ContextVar(
     default=None,
 )
 
+# ContextVar for SessionPool bypass flag (set by TurnRunner before agent calls)
+_bypass_session_pool: ContextVar[bool] = ContextVar(
+    "_bypass_session_pool",
+    default=False,
+)
+
 
 logger = get_logger(__name__)
 
@@ -116,34 +122,27 @@ def _is_slash_command(text: str) -> bool:
 def _should_bypass_session_pool() -> bool:
     """Detect if the caller should bypass SessionPool delegation.
 
-    Two cases require bypass:
-    1. AG-UI adapter code: AG-UI uses direct streaming and must not go
-       through SessionPool to preserve its event handling.
-    2. SessionPool internal turns: When run()/run_stream() is called from
+    Three cases require bypass:
+    1. SessionPool internal turns: When run()/run_stream() is called from
        within a TurnRunner turn (e.g., via message forwarding), delegating
        back to SessionPool would cause a deadlock on the per-session turn_lock.
-
-    Uses sys._getframe() to walk the call stack efficiently and identify
-    these frames. This avoids the overhead of inspect.stack() which
-    constructs full FrameInfo objects for every frame.
+       Detected via _bypass_session_pool ContextVar set by TurnRunner.
+    2. AG-UI adapter code: AG-UI uses direct streaming and must not go
+       through SessionPool to preserve its event handling.
+    3. AG-UI server frame detection (legacy, preserved until Migration B).
 
     Returns:
         True if SessionPool delegation should be bypassed, False otherwise.
     """
+    # Case 1: ContextVar set by TurnRunner before agent calls
+    if _bypass_session_pool.get():
+        return True
+
+    # Cases 2 & 3: AG-UI stack inspection (preserved until Migration B)
     frame = sys._getframe(1)
     while frame:
-        # Avoid inspect.getmodule() which performs expensive sys.modules lookups.
-        # frame.f_globals.get("__name__") is O(1) and sufficient for module detection.
         module_name = frame.f_globals.get("__name__", "")
-        # AG-UI adapter bypass
         if "agui" in module_name:
-            return True
-        # SessionPool internal turn bypass (prevents turn_lock deadlock)
-        if "orchestrator" in module_name and frame.f_code.co_name in (
-            "_run_turn_unlocked",
-            "run_loop",
-            "run_turn",
-        ):
             return True
         if "agui_server" in frame.f_code.co_filename:
             return True

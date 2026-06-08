@@ -304,11 +304,12 @@ class TestSessionControllerPersistence:
         """SessionController saves session to store on creation."""
         controller = SessionController(pool=mock_pool, store=store)
 
-        state = await controller.get_or_create_session(
+        state, was_created = await controller.get_or_create_session(
             session_id="test_session",
             agent_name="test_agent",
         )
 
+        assert was_created is True
         assert state.session_id == "test_session"
         assert state.agent_name == "test_agent"
 
@@ -411,7 +412,7 @@ class TestSessionControllerPersistence:
         """SessionController works without a store."""
         controller = SessionController(pool=mock_pool, store=None)
 
-        state = await controller.get_or_create_session(
+        state, _ = await controller.get_or_create_session(
             session_id="test_session",
             agent_name="test_agent",
         )

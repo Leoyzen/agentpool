@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 
 from agentpool_server.opencode_server.dependencies import StateDep
@@ -43,15 +45,48 @@ def _extract_permission_reply(reply: QuestionReply) -> str | None:
             return None
 
 
+def _get_all_pending_questions(state: StateDep) -> dict[str, Any]:
+    """Get all pending questions from SessionController or ServerState."""
+    if state.session_controller is not None:
+        result: dict[str, Any] = {}
+        for session in state.session_controller._sessions.values():
+            result.update(session.pending_questions)
+        return result
+    return state.pending_questions
+
+
+def _get_pending_question(state: StateDep, question_id: str) -> Any | None:
+    """Look up a pending question across SessionController or ServerState."""
+    if state.session_controller is not None:
+        for session in state.session_controller._sessions.values():
+            if question_id in session.pending_questions:
+                return session.pending_questions[question_id]
+    return state.pending_questions.get(question_id)
+
+
+def _remove_pending_question(state: StateDep, question_id: str) -> bool:
+    """Remove a pending question from SessionController or ServerState."""
+    if state.session_controller is not None:
+        for session in state.session_controller._sessions.values():
+            if question_id in session.pending_questions:
+                del session.pending_questions[question_id]
+                return True
+    if question_id in state.pending_questions:
+        del state.pending_questions[question_id]
+        return True
+    return False
+
+
 @router.get("/", response_model=list[QuestionRequest])
 async def list_questions(state: StateDep) -> list[QuestionRequest]:
     """List all pending question requests.
 
     Returns a list of all pending questions awaiting user response.
     """
+    pending = _get_all_pending_questions(state)
     return [
         QuestionRequest(id=question_id, session_id=i.session_id, questions=i.questions, tool=i.tool)
-        for question_id, i in state.pending_questions.items()
+        for question_id, i in pending.items()
     ]
 
 
@@ -74,7 +109,7 @@ async def reply_to_question(requestID: str, reply: QuestionReply, state: StateDe
     Raises:
         HTTPException: If question not found or invalid provider
     """
-    pending = state.pending_questions.get(requestID)
+    pending = _get_pending_question(state, requestID)
     if not pending:
         permission_target = _find_permission_provider(state, requestID)
         if permission_target is None:
@@ -129,7 +164,7 @@ async def reject_question(requestID: str, state: StateDep) -> bool:  # noqa: N80
     Raises:
         HTTPException: If question not found
     """
-    pending = state.pending_questions.get(requestID)
+    pending = _get_pending_question(state, requestID)
     if not pending:
         permission_target = _find_permission_provider(state, requestID)
         if permission_target is None:
@@ -150,7 +185,7 @@ async def reject_question(requestID: str, state: StateDep) -> bool:  # noqa: N80
     if not pending.future.done():
         pending.future.cancel()
     # Remove from pending
-    del state.pending_questions[requestID]
+    _remove_pending_question(state, requestID)
     # Broadcast rejected event
     event = QuestionRejectedEvent.create(session_id=pending.session_id, request_id=requestID)
     await state.broadcast_event(event)

@@ -289,7 +289,10 @@ async def _event_generator(
         # returns ElicitResult(action="cancel"), leading to RunAbortedError,
         # which propagates through _process_message_locked's except handler
         # and releases agent_lock.
-        cancelled = state.cancel_all_pending_questions()
+        if state.session_controller is not None:
+            cancelled = state.session_controller.cancel_all_pending_questions()
+        else:
+            cancelled = state.cancel_all_pending_questions()
         if cancelled:
             logger.info(
                 "SSE: Cancelled pending questions on disconnect",

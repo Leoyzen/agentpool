@@ -19,8 +19,10 @@ import uuid
 
 from agentpool.agents.context import AgentRunContext
 from agentpool.log import get_logger
+from agentpool.models.pending_interaction import PendingPermission, PendingQuestion
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.sessions.models import SessionData
+from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
 if TYPE_CHECKING:
@@ -84,6 +86,8 @@ class SessionState:
     current_run_id: str | None = None
     _request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     input_provider: Any | None = None
+    pending_questions: dict[str, Any] = field(default_factory=dict)
+    """Pending questions stored on SessionState for per-session isolation."""
 
     @property
     def closing(self) -> bool:
@@ -340,7 +344,7 @@ class SessionController:
         parent_session_id: str | None = None,
         lifecycle_policy: str | None = None,
         **metadata: Any,
-    ) -> SessionState:
+    ) -> tuple[SessionState, bool]:
         """Get or create a session.
 
         Uses single global lock for simplicity and safety.
@@ -354,7 +358,8 @@ class SessionController:
             **metadata: Arbitrary metadata to attach to the session.
 
         Returns:
-            The session state.
+            A tuple of (session_state, was_created) where was_created is True
+            if the session was newly created, False if it already existed.
         """
         if not session_id or not session_id.strip():
             raise ValueError("session_id cannot be empty or whitespace")
@@ -392,7 +397,7 @@ class SessionController:
         parent_session_id: str | None = None,
         lifecycle_policy: str | None = None,
         **metadata: Any,
-    ) -> SessionState:
+    ) -> tuple[SessionState, bool]:
         """Get or create a session - caller MUST hold self._lock.
 
         This internal method avoids deadlock when called from
@@ -406,12 +411,13 @@ class SessionController:
             **metadata: Arbitrary metadata to attach to the session.
 
         Returns:
-            The session state.
+            A tuple of (session_state, was_created) where was_created is True
+            if the session was newly created, False if it already existed.
         """
         if session_id in self._sessions:
             state = self._sessions[session_id]
             state.last_active_at = time.monotonic()
-            return state
+            return state, False
 
         effective_policy = lifecycle_policy or (
             self._sessions.get(parent_session_id, SessionState("", "")).lifecycle_policy
@@ -432,7 +438,7 @@ class SessionController:
         if parent_session_id:
             self._children.setdefault(parent_session_id, []).append(session_id)
         logger.info("Created session", session_id=session_id, agent_name=state.agent_name)
-        return state
+        return state, True
 
     async def get_or_create_session_agent(
         self,
@@ -459,7 +465,7 @@ class SessionController:
             if session_id in self._session_agents:
                 return self._session_agents[session_id]
 
-            session = await self._get_or_create_session_locked(session_id, agent_name)
+            session, _was_created = await self._get_or_create_session_locked(session_id, agent_name)
             agent_name = agent_name or session.agent_name
 
             base_agent = self.pool.get_agent(agent_name)
@@ -480,6 +486,7 @@ class SessionController:
                         session.input_provider = input_provider
                     self._session_agents[session_id] = base_agent
                     session.agent = base_agent
+                    session.is_per_session_agent = False
                     return base_agent
 
                 if cfg.name is None:
@@ -522,7 +529,52 @@ class SessionController:
                 session.input_provider = input_provider
             self._session_agents[session_id] = base_agent
             session.agent = base_agent
+            session.is_per_session_agent = False
             return base_agent
+
+    def list_sessions(self) -> list[SessionInfo]:
+        """List all active sessions.
+
+        Returns:
+            A list of SessionInfo DTOs for all active sessions.
+        """
+        return [
+            SessionInfo(
+                session_id=s.session_id,
+                agent_name=s.agent_name,
+                created_at=s.created_at,
+                last_active_at=s.last_active_at,
+                is_per_session_agent=s.is_per_session_agent,
+                status="busy" if s.current_run_id is not None else "idle",
+            )
+            for s in self._sessions.values()
+        ]
+
+    def get_session_agent(self, session_id: str) -> BaseAgent[Any, Any] | None:
+        """Get the agent for a session.
+
+        Returns the per-session agent if one exists, otherwise the shared
+        agent that was assigned to the session.  If the session has no
+        agent assigned yet, a warning is logged and None is returned.
+
+        Args:
+            session_id: The session ID to look up.
+
+        Returns:
+            The agent instance, or None if the session is unknown.
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            logger.warning("Session not found", session_id=session_id)
+            return None
+        agent = self._session_agents.get(session_id)
+        if agent is None:
+            logger.warning(
+                "No agent assigned for session - falling back to shared agent",
+                session_id=session_id,
+            )
+            return None
+        return agent
 
     async def _close_session_unlocked(self, session_id: str) -> None:
         """Close a session without acquiring the main lock (caller must hold lock)."""
@@ -803,6 +855,65 @@ class SessionController:
         """
         self._mcp_process_count = max(0, self._mcp_process_count - 1)
 
+    def list_pending_questions(self) -> list[Any]:
+        """List all pending questions across sessions.
+
+        Aggregates pending questions from each session's SessionState.
+
+        Returns:
+            A list of pending question objects.
+        """
+        result: list[Any] = []
+        for session in self._sessions.values():
+            result.extend(session.pending_questions.values())
+        return result
+
+    def cancel_all_pending_questions(self) -> list[str]:
+        """Cancel all pending questions across all sessions.
+
+        Iterates over every session, cancels each pending question's future,
+        and returns the IDs of all cancelled questions.
+
+        Returns:
+            List of cancelled question IDs.
+        """
+        cancelled_ids: list[str] = []
+        for session in self._sessions.values():
+            for question_id, pending in list(session.pending_questions.items()):
+                future = getattr(pending, "future", None)
+                if future is not None and not future.done():
+                    future.cancel()
+                    cancelled_ids.append(question_id)
+        return cancelled_ids
+
+    def cancel_session_pending_questions(self, session_id: str) -> list[str]:
+        """Cancel pending questions for a specific session.
+
+        Args:
+            session_id: The session whose pending questions should be cancelled.
+
+        Returns:
+            List of cancelled question IDs.
+        """
+        cancelled_ids: list[str] = []
+        session = self._sessions.get(session_id)
+        if session is None:
+            return cancelled_ids
+        for question_id, pending in list(session.pending_questions.items()):
+            future = getattr(pending, "future", None)
+            if future is not None and not future.done():
+                future.cancel()
+                cancelled_ids.append(question_id)
+        return cancelled_ids
+
+    def list_pending_permissions(self) -> list[PendingPermission]:
+        """List all pending permissions across sessions.
+
+        Returns:
+            A list of pending permissions. Currently returns an empty list.
+        """
+        return []
+
     async def start_cleanup_task(self) -> None:
         """Start background task to periodically clean up expired sessions."""
         if self._cleanup_task is None:
@@ -992,7 +1103,7 @@ class TurnRunner:
         )
         _session = self.sessions.get_session(session_id)
 
-        from agentpool.agents.base_agent import _current_run_ctx_var
+        from agentpool.agents.base_agent import _bypass_session_pool, _current_run_ctx_var
         from agentpool.orchestrator.run import RunHandle, RunStatus
 
         run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
@@ -1066,6 +1177,7 @@ class TurnRunner:
         stream_kwargs = dict(kwargs)
         if input_provider is not None and (has_var_keyword or "input_provider" in stream_params):
             stream_kwargs["input_provider"] = input_provider
+        _bypass_session_pool.set(True)
         try:
             try:
                 # Process prompts and handle injections/queued prompts
@@ -1109,6 +1221,7 @@ class TurnRunner:
 
             self._runs.pop(run_ctx.run_id, None)
             _current_run_ctx_var.set(None)
+            _bypass_session_pool.set(False)
 
             # Cancel the event consumer task
             event_consumer.cancel()
@@ -1146,7 +1259,7 @@ class TurnRunner:
             *prompts: Prompts to pass to the agent.
             **kwargs: Additional arguments passed to the agent.
         """
-        session = await self.sessions.get_or_create_session(session_id)
+        session, _was_created = await self.sessions.get_or_create_session(session_id)
 
         async with session.turn_lock:
             if session.is_closing:
@@ -1170,7 +1283,7 @@ class TurnRunner:
             *initial_prompts: Initial prompts to start the loop.
             **kwargs: Additional arguments passed to the agent.
         """
-        session = await self.sessions.get_or_create_session(session_id)
+        session, _was_created = await self.sessions.get_or_create_session(session_id)
 
         async with session.turn_lock:
             if session.is_closing:
@@ -1528,7 +1641,7 @@ class SessionPool:
             if parent_data is not None:
                 metadata.setdefault("project_id", parent_data.project_id)
                 metadata.setdefault("cwd", parent_data.cwd)
-        state = await self.sessions.get_or_create_session(
+        state, _was_created = await self.sessions.get_or_create_session(
             session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
         )
         return state

@@ -81,6 +81,9 @@ class TestSessionHistoryLoading:
 
         server_state.agent.load_session = mock_load_session  # type: ignore[method-assign]
 
+        # Disable SessionPool path to test shared-agent fallback
+        server_state._pool.session_pool = None
+
         # ACTION: Load session A
         loaded_session = await get_or_load_session(server_state, session_a_id)
 
@@ -230,6 +233,9 @@ class TestSessionHistoryLoading:
             return None
 
         server_state.agent.load_session = mock_load_session  # type: ignore[method-assign]
+
+        # Disable SessionPool path to test shared-agent fallback
+        server_state._pool.session_pool = None
 
         # ACTION: Switch back to session A
         await get_or_load_session(server_state, session_a_id)

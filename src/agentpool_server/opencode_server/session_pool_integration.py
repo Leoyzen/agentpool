@@ -155,11 +155,12 @@ async def ensure_session(
                 state.ensure_input_provider(session_id)
                 await state.mark_session_idle(session_id)
 
-                if session_data.parent_id is None:
-                    async with state.agent_lock:
-                        target_agent = state.agent
-                        input_provider = state.ensure_input_provider(session_id)
-                        target_agent._input_provider = input_provider
+                # Sync input_provider to SessionPool's SessionState for all sessions
+                input_provider = state.ensure_input_provider(session_id)
+                if state.pool.session_pool is not None:
+                    sp_session = state.pool.session_pool.sessions.get_session(session_id)
+                    if sp_session is not None:
+                        sp_session.input_provider = input_provider
 
                 from agentpool_server.opencode_server.models import (
                     SessionCreatedEvent,
@@ -243,11 +244,12 @@ async def _create_and_persist_session(
     state.ensure_runtime_session_state(session_id)
     await state.mark_session_idle(session_id)
 
-    if parent_id is None:
-        async with state.agent_lock:
-            target_agent = state.agent
-            input_provider = state.ensure_input_provider(session_id)
-            target_agent._input_provider = input_provider
+    # Sync input_provider to SessionPool's SessionState for all sessions
+    input_provider = state.ensure_input_provider(session_id)
+    if state.pool.session_pool is not None:
+        sp_session = state.pool.session_pool.sessions.get_session(session_id)
+        if sp_session is not None:
+            sp_session.input_provider = input_provider
 
     await state.broadcast_event(SessionCreatedEvent.create(session))
     await state.broadcast_event(SessionUpdatedEvent.create(session))
@@ -287,6 +289,9 @@ class OpenCodeSessionPoolIntegration:
     ) -> Any:
         """Create a session via SessionPool and start its status bridge.
 
+        Uses get_or_create_session so the call is idempotent: bridge and
+        consumer are only started when the session is actually new.
+
         Args:
             session_id: Unique identifier for the session.
             agent_name: Name of the agent to associate with the session.
@@ -295,13 +300,16 @@ class OpenCodeSessionPoolIntegration:
         Returns:
             The session state from the SessionPool.
         """
-        state = await self.session_pool.create_session(session_id, agent_name, **metadata)
-        await self._start_status_bridge(session_id)
-        await self._start_event_consumer(session_id)
+        state, was_created = await self.session_pool.sessions.get_or_create_session(
+            session_id, agent_name, **metadata
+        )
+        if was_created:
+            await self._start_status_bridge(session_id)
+            await self._start_event_consumer(session_id)
 
-        # Broadcast session.created event so OpenCode clients can upsert
-        session = _session_state_to_opencode(state)
-        await self.server_state.broadcast_event(SessionCreatedEvent.create(session))
+            # Broadcast session.created event so OpenCode clients can upsert
+            session = _session_state_to_opencode(state)
+            await self.server_state.broadcast_event(SessionCreatedEvent.create(session))
 
         return state
 
@@ -313,6 +321,9 @@ class OpenCodeSessionPoolIntegration:
     ) -> Any:
         """Fork a session, creating a child with a parent reference.
 
+        Uses get_or_create_session so the call is idempotent: bridge is
+        only started when the session is actually new.
+
         Args:
             parent_session_id: The parent session ID.
             new_session_id: The new child session ID.
@@ -321,12 +332,13 @@ class OpenCodeSessionPoolIntegration:
         Returns:
             The child session state.
         """
-        state = await self.session_pool.create_session(
+        state, was_created = await self.session_pool.sessions.get_or_create_session(
             new_session_id,
             agent_name=agent_name,
             parent_session_id=parent_session_id,
         )
-        await self._start_status_bridge(new_session_id)
+        if was_created:
+            await self._start_status_bridge(new_session_id)
         return state
 
     async def close_session(self, session_id: str) -> None:
