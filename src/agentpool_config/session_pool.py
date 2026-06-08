@@ -91,6 +91,27 @@ class OpenCodeConfig(Schema):
     )
     """Whether to route MCP tool calls through the SessionPool."""
 
+    use_session_pool_for_messages: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_MESSAGES", "true").lower() not in ("0", "false", "no"),
+        title="Use session pool for messages",
+    )
+    """Whether to use SessionPool as the exclusive source of truth for message history.
+
+    Defaults to True. Set to False to fall back to ServerState in-memory dictionaries
+    for emergency rollback only.
+    """
+
+    use_session_pool_for_status: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_STATUS", "true").lower() not in ("0", "false", "no"),
+        title="Use session pool for status",
+    )
+    """Whether to use SessionController/SessionStatusBridge as the exclusive source
+    of truth for session status.
+
+    Defaults to True. Set to False to fall back to ServerState in-memory dictionaries
+    for emergency rollback only.
+    """
+
     eventbus_replay_buffer_size: int = Field(
         default=100, ge=1, title="EventBus replay buffer size"
     )
