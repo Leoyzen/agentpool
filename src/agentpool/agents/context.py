@@ -28,6 +28,28 @@ ConfirmationResult = Literal["allow", "skip", "abort_run", "abort_chain"]
 logger = get_logger(__name__)
 
 
+class _DeprecatedField:
+    """Data descriptor that warns when a deprecated dataclass field is accessed."""
+
+    def __init__(self, *, default_factory: Any, msg: str) -> None:
+        self.default_factory = default_factory
+        self.msg = msg
+
+    def __get__(self, obj: Any, objtype: type[Any] | None = None) -> Any:
+        if obj is None:
+            return self
+        value = obj.__dict__.get("session_id")
+        if value is None:
+            value = self.default_factory()
+            obj.__dict__["session_id"] = value
+        logger.warning(self.msg)
+        return value
+
+    def __set__(self, obj: Any, value: Any) -> None:
+        logger.warning(self.msg)
+        obj.__dict__["session_id"] = value
+
+
 @dataclass(kw_only=True)
 class AgentRunContext:
     """Per-execution isolated state container for agent runs.
