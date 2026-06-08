@@ -85,7 +85,6 @@ class ServerState:
     on_first_subscriber: OnFirstSubscriberCallback | None = None
     _first_subscriber_triggered: bool = field(default=False, repr=False)
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
-    _active_message_tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
     _run_handles: dict[str, Any] = field(default_factory=dict)
     event_managers: dict[str, Any] = field(default_factory=dict)
     auth_service: Any = field(default_factory=create_default_auth_service)
@@ -95,6 +94,20 @@ class ServerState:
     session_controller: Any = field(default=None)
     event_bridge: Any = field(default=None, repr=False)
     _shell_env: Any = field(default=None, repr=False)
+    _sse_event_counter: int = field(default=0, repr=False)
+
+    def get_next_event_id(self) -> int:
+        """Get the next monotonic SSE event ID.
+
+        Increments a global counter shared across all SSE connections.
+        This ensures event IDs are monotonically increasing even across
+        reconnects, allowing proper deduplication via ``last_event_id``.
+
+        Returns:
+            The next event ID (starts at 1).
+        """
+        self._sse_event_counter += 1
+        return self._sse_event_counter
 
     def __post_init__(self) -> None:
         """Initialize derived state."""
@@ -228,59 +241,6 @@ class ServerState:
         if session_id not in self.session_locks:
             self.session_locks[session_id] = asyncio.Lock()
         return self.session_locks[session_id]
-
-    def get_session(self, session_id: str) -> Any:
-        """Get a session by ID.
-
-        Shim that delegates to the session controller when available.
-        Falls back to the local sessions dict for backward compatibility.
-
-        Args:
-            session_id: The session ID to look up.
-
-        Returns:
-            The session state, or None if not found.
-        """
-        if self.session_controller is not None:
-            return self.session_controller.get_session(session_id)
-        return None
-
-    def list_sessions(self) -> list[Any]:
-        """List all active sessions.
-
-        Shim that delegates to the session controller when available.
-
-        Returns:
-            A list of SessionInfo DTOs when session_controller is set,
-            otherwise an empty list.
-        """
-        if self.session_controller is not None:
-            return self.session_controller.list_sessions()
-        return []
-
-    def get_session_status(self, session_id: str) -> dict[str, Any]:
-        """Get status information for a session.
-
-        Shim that aggregates data from the session controller and
-        local runtime state.
-
-        Args:
-            session_id: The session ID to look up.
-
-        Returns:
-            A dictionary with session status information.
-        """
-        status: dict[str, Any] = {"session_id": session_id}
-        session = self.get_session(session_id)
-        if session is not None:
-            status["agent_name"] = session.agent_name
-            status["is_per_session_agent"] = getattr(session, "is_per_session_agent", False)
-            status["created_at"] = getattr(session, "created_at", None)
-            status["last_active_at"] = getattr(session, "last_active_at", None)
-        local_status = self.session_status.get(session_id)
-        if local_status is not None:
-            status["local_status"] = local_status
-        return status
 
     def ensure_input_provider(self, session_id: str) -> OpenCodeInputProvider:
         """Get or create the OpenCode input provider for a session.
