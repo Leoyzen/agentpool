@@ -12,7 +12,11 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-from agentpool.agents.events.events import SpawnSessionStart
+from agentpool.agents.events.events import (
+    RunErrorEvent,
+    SpawnSessionStart,
+    StreamCompleteEvent,
+)
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -25,11 +29,21 @@ from agentpool_server.opencode_server.models import (
     MessageTime,
     MessageUpdatedEvent,
     MessageWithParts,
+    PartUpdatedEvent,
     SessionCreatedEvent,
     SessionStatus,
     TimeCreated,
     TimeCreatedUpdated,
     UserMessage,
+)
+from agentpool_server.opencode_server.models.parts import (
+    TimeStart,
+    TimeStartEnd,
+    TimeStartEndCompacted,
+    ToolPart,
+    ToolStateCompleted,
+    ToolStateError,
+    ToolStateRunning,
 )
 from agentpool_server.opencode_server.models.session import Session
 from agentpool_server.opencode_server.status_bridge import SessionStatusBridge
@@ -576,6 +590,10 @@ class OpenCodeSessionPoolIntegration:
         Handles ``SpawnSessionStart`` by creating child-session consumers
         recursively so nested subagents also stream to the frontend.
 
+        Also handles child-session completion events (StreamCompleteEvent /
+        RunErrorEvent) to update the parent session's ToolPart, since
+        TurnRunner no longer wraps child events in SubAgentEvent.
+
         Args:
             session_id: The session whose events to consume.
         """
@@ -604,6 +622,8 @@ class OpenCodeSessionPoolIntegration:
         event_adapter = OpenCodeEventAdapter(ctx)
         child_tasks: dict[str, asyncio.Task[Any]] = {}
         message_registered = False
+        # Track child spawns so we can update parent ToolParts on completion
+        child_spawns: dict[str, SpawnSessionStart] = {}
 
         try:
             while True:
@@ -613,6 +633,10 @@ class OpenCodeSessionPoolIntegration:
 
                 # Spawn child-session consumers for nested subagents
                 if isinstance(event, SpawnSessionStart):
+                    # Record spawn info for later ToolPart updates
+                    child_spawns[event.child_session_id] = event
+                    # Create ToolPart in parent session before spawning child
+                    await self._create_subagent_tool_part(session_id, event)
                     child_task = asyncio.create_task(
                         self._event_consumer_loop(event.child_session_id),
                         name=f"event_consumer_{event.child_session_id}",
@@ -620,11 +644,38 @@ class OpenCodeSessionPoolIntegration:
                     child_tasks[event.child_session_id] = child_task
                     continue
 
-                # Skip events that belong to child sessions — child consumers
-                # handle them.  With TurnRunner._maybe_wrap_event removed,
-                # child events arrive raw via scope="descendants".
+                # Distinguish parent vs child events.  With
+                # TurnRunner._maybe_wrap_event removed, child events arrive
+                # raw via scope="descendants".
                 event_session_id = getattr(event, "session_id", None)
-                if event_session_id is not None and event_session_id != session_id:
+                is_child_event = (
+                    event_session_id is not None and event_session_id != session_id
+                )
+
+                if is_child_event:
+                    # For child completion events, update the parent ToolPart
+                    # before letting the child consumer handle them.
+                    child_id: str = event_session_id  # type: ignore[assignment]
+                    if isinstance(event, StreamCompleteEvent):
+                        spawn = child_spawns.get(child_id)
+                        if spawn is not None:
+                            await self._update_parent_toolpart(
+                                parent_session_id=session_id,
+                                child_session_id=child_id,
+                                spawn_event=spawn,
+                                event=event,
+                            )
+                    elif isinstance(event, RunErrorEvent):
+                        spawn = child_spawns.get(child_id)
+                        if spawn is not None:
+                            await self._update_parent_toolpart_error(
+                                parent_session_id=session_id,
+                                child_session_id=child_id,
+                                spawn_event=spawn,
+                                event=event,
+                            )
+                    # Child consumer (subscribed to the child session)
+                    # will render the child UI, so parent skips the rest.
                     continue
 
                 # Register message on first non-spawn event so the TUI
@@ -651,3 +702,243 @@ class OpenCodeSessionPoolIntegration:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
             await self.session_pool.event_bus.unsubscribe(session_id, queue)
+
+    async def _create_subagent_tool_part(
+        self,
+        parent_session_id: str,
+        spawn_event: SpawnSessionStart,
+    ) -> None:
+        """Create a ToolPart in the parent session representing a subagent.
+
+        This replaces the ToolPart creation that previously happened inside
+        EventProcessor._process_subagent_event when events were wrapped in
+        SubAgentEvent.
+
+        Args:
+            parent_session_id: The parent session ID.
+            spawn_event: The spawn event containing subagent metadata.
+        """
+        # Find the parent session's latest assistant message
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg = None
+        for msg in reversed(messages):
+            if msg.info.role == "assistant":
+                assistant_msg = msg
+                break
+
+        if assistant_msg is None:
+            logger.warning(
+                "No assistant message found for parent session %s, "
+                "skipping ToolPart creation",
+                parent_session_id,
+            )
+            return
+
+        # Check if ToolPart already exists for this child session
+        child_session_id = spawn_event.child_session_id
+        for part in assistant_msg.parts:
+            if (
+                isinstance(part, ToolPart)
+                and part.metadata is not None
+                and part.metadata.get("sessionId") == child_session_id
+            ):
+                logger.debug(
+                    "ToolPart already exists for child session %s", child_session_id
+                )
+                return
+
+        source_name = spawn_event.source_name or "subagent"
+        tool_title = source_name
+        ts = TimeStart(start=now_ms())
+        running_state = ToolStateRunning(
+            time=ts,
+            input={
+                "description": tool_title,
+                "subagent_type": tool_title,
+                "prompt": spawn_event.metadata.get("prompt", ""),
+            },
+            metadata={"sessionId": child_session_id, "title": tool_title},
+            title=tool_title,
+        )
+        tool_part = ToolPart(
+            id=identifier.ascending("part"),
+            message_id=assistant_msg.info.id,
+            session_id=parent_session_id,
+            tool="task",
+            call_id=identifier.ascending("part"),
+            state=running_state,
+        )
+        assistant_msg.parts.append(tool_part)
+        await self.server_state.broadcast_event(PartUpdatedEvent.create(tool_part))
+        logger.debug(
+            "Created ToolPart for child session %s in parent %s",
+            child_session_id,
+            parent_session_id,
+        )
+
+    async def _update_parent_toolpart(
+        self,
+        parent_session_id: str,
+        child_session_id: str,
+        spawn_event: SpawnSessionStart,
+        event: StreamCompleteEvent[Any],
+    ) -> None:
+        """Update parent ToolPart to Completed when child subagent finishes.
+
+        Args:
+            parent_session_id: The parent session ID.
+            child_session_id: The child session ID.
+            spawn_event: The spawn event containing subagent metadata.
+            event: The StreamCompleteEvent from the child.
+        """
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg = None
+        for msg in reversed(messages):
+            if msg.info.role == "assistant":
+                assistant_msg = msg
+                break
+
+        if assistant_msg is None:
+            return
+
+        # Find the ToolPart for this child session
+        tool_part = None
+        for part in assistant_msg.parts:
+            if (
+                isinstance(part, ToolPart)
+                and part.metadata is not None
+                and part.metadata.get("sessionId") == child_session_id
+            ):
+                tool_part = part
+                break
+
+        if tool_part is None:
+            logger.warning(
+                "No ToolPart found for child session %s in parent %s",
+                child_session_id,
+                parent_session_id,
+            )
+            return
+
+        source_name = spawn_event.source_name or "subagent"
+        tool_title = source_name
+        msg = event.message
+        content = str(msg.content) if msg.content else "(no output)"
+
+        start_time = (
+            tool_part.state.time.start
+            if isinstance(tool_part.state, ToolStateRunning)
+            else now_ms()
+        )
+        completed_state = ToolStateCompleted(
+            input={
+                "description": tool_title,
+                "subagent_type": tool_title,
+                "prompt": spawn_event.metadata.get("prompt", ""),
+            },
+            output=content,
+            title=tool_title,
+            metadata={"sessionId": child_session_id, "title": tool_title},
+            time=TimeStartEndCompacted(start=start_time, end=now_ms()),
+        )
+        updated = ToolPart(
+            id=tool_part.id,
+            message_id=tool_part.message_id,
+            session_id=tool_part.session_id,
+            tool=tool_part.tool,
+            call_id=tool_part.call_id,
+            state=completed_state,
+        )
+
+        # Replace the old part in the message
+        for i, part in enumerate(assistant_msg.parts):
+            if part.id == tool_part.id:
+                assistant_msg.parts[i] = updated
+                break
+
+        await self.server_state.broadcast_event(PartUpdatedEvent.create(updated))
+        logger.debug(
+            "Updated ToolPart to Completed for child session %s in parent %s",
+            child_session_id,
+            parent_session_id,
+        )
+
+    async def _update_parent_toolpart_error(
+        self,
+        parent_session_id: str,
+        child_session_id: str,
+        spawn_event: SpawnSessionStart,
+        event: RunErrorEvent,
+    ) -> None:
+        """Update parent ToolPart to Error when child subagent fails.
+
+        Args:
+            parent_session_id: The parent session ID.
+            child_session_id: The child session ID.
+            spawn_event: The spawn event containing subagent metadata.
+            event: The RunErrorEvent from the child.
+        """
+        messages = self.server_state.messages.get(parent_session_id, [])
+        assistant_msg = None
+        for msg in reversed(messages):
+            if msg.info.role == "assistant":
+                assistant_msg = msg
+                break
+
+        if assistant_msg is None:
+            return
+
+        # Find the ToolPart for this child session
+        tool_part = None
+        for part in assistant_msg.parts:
+            if (
+                isinstance(part, ToolPart)
+                and part.metadata is not None
+                and part.metadata.get("sessionId") == child_session_id
+            ):
+                tool_part = part
+                break
+
+        if tool_part is None:
+            return
+
+        source_name = spawn_event.source_name or "subagent"
+        tool_title = source_name
+        error_msg = event.message or "Unknown error"
+
+        start_time = (
+            tool_part.state.time.start
+            if isinstance(tool_part.state, ToolStateRunning)
+            else now_ms()
+        )
+        error_state = ToolStateError(
+            error=error_msg,
+            input={
+                "description": tool_title,
+                "subagent_type": tool_title,
+                "prompt": spawn_event.metadata.get("prompt", ""),
+            },
+            metadata={"sessionId": child_session_id, "title": tool_title},
+            time=TimeStartEnd(start=start_time, end=now_ms()),
+        )
+        updated = ToolPart(
+            id=tool_part.id,
+            message_id=tool_part.message_id,
+            session_id=tool_part.session_id,
+            tool=tool_part.tool,
+            call_id=tool_part.call_id,
+            state=error_state,
+        )
+
+        # Replace the old part in the message
+        for i, part in enumerate(assistant_msg.parts):
+            if part.id == tool_part.id:
+                assistant_msg.parts[i] = updated
+                break
+
+        await self.server_state.broadcast_event(PartUpdatedEvent.create(updated))
+        logger.debug(
+            "Updated ToolPart to Error for child session %s in parent %s",
+            child_session_id,
+            parent_session_id,
+        )

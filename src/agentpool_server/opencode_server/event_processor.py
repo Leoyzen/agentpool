@@ -180,9 +180,15 @@ class EventProcessor:
                 for e in self._process_tool_complete(ctx, tool_call_id, result, event_metadata):
                     yield e
 
-            case StreamCompleteEvent(message=msg) if msg:
-                for e in self._process_stream_complete(ctx, msg):
-                    yield e
+            case StreamCompleteEvent(session_id=event_session_id, message=msg) if msg:
+                # Check if this is a raw child-session completion event
+                # (TurnRunner no longer wraps child events in SubAgentEvent).
+                if event_session_id and event_session_id != ctx.session_id:
+                    async for e in self._handle_raw_child_stream_complete(ctx, event):
+                        yield e
+                else:
+                    for e in self._process_stream_complete(ctx, msg):
+                        yield e
 
             case SubAgentEvent() as subagent_event:
                 async for e in self._process_subagent_event(subagent_event, ctx):
@@ -965,6 +971,99 @@ class EventProcessor:
                 ctx.state.session_status[child_session_id] = SessionStatus(type="idle")
                 yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
                 yield SessionIdleEvent.create(child_session_id)
+
+    async def _handle_raw_child_stream_complete(
+        self,
+        ctx: EventProcessorContext,
+        event: StreamCompleteEvent[Any],
+    ) -> AsyncIterator[Event]:
+        """Handle a raw StreamCompleteEvent for a child session.
+
+        With TurnRunner no longer wrapping child events in SubAgentEvent,
+        child session StreamCompleteEvents arrive raw. This method finds
+        the child context (created by _process_spawn_start) and updates
+        the parent ToolPart to Completed.
+
+        Args:
+            ctx: The parent event processor context.
+            event: The raw StreamCompleteEvent from the child session.
+
+        Yields:
+            OpenCode Event objects for broadcasting.
+        """
+        child_session_id = event.session_id
+        child_ctx = self._child_contexts.get(child_session_id)
+
+        if child_ctx is None:
+            logger.warning(
+                "Received StreamCompleteEvent for unknown child session %s",
+                child_session_id,
+            )
+            return
+
+        msg = event.message
+        content = str(msg.content) if msg.content else "(no output)"
+
+        # Update child context with final content (mirror _process_subagent_event)
+        if not child_ctx.has_text_part:
+            text_part = TextPart(
+                id=identifier.ascending("part"),
+                message_id=child_ctx.assistant_msg_id,
+                session_id=child_ctx.session_id,
+                text=content,
+                time=TimeStartEndOptional(start=child_ctx.stream_start_ms, end=now_ms()),
+            )
+            child_ctx.assistant_msg.parts.append(text_part)
+            yield PartUpdatedEvent.create(text_part)
+
+        # Persist final child assistant message to storage
+        with contextlib.suppress(Exception):
+            chat_msg = opencode_to_chat_message(
+                child_ctx.assistant_msg, session_id=child_ctx.session_id
+            )
+            await ctx.state.storage.log_message(chat_msg)
+
+        # Update the ToolPart in parent to completed state
+        # Find the matching ToolPart by sessionId in state metadata
+        for part in ctx.assistant_msg.parts:
+            if isinstance(part, ToolPart):
+                state_metadata = getattr(part.state, "metadata", None)
+                if isinstance(state_metadata, dict) and state_metadata.get("sessionId") == child_session_id:
+                    start_time = (
+                        part.state.time.start
+                        if isinstance(part.state, ToolStateRunning)
+                        else now_ms()
+                    )
+                    completed_state = ToolStateCompleted(
+                        input=getattr(part.state, "input", {}),
+                        output=content,
+                        title=state_metadata.get("title", "subagent"),
+                        metadata=state_metadata,
+                        time=TimeStartEndCompacted(start=start_time, end=now_ms()),
+                    )
+                    updated = ToolPart(
+                        id=part.id,
+                        message_id=part.message_id,
+                        session_id=part.session_id,
+                        tool=part.tool,
+                        call_id=part.call_id,
+                        state=completed_state,
+                    )
+                    ctx.assistant_msg.update_part(updated)
+                    # Also update subagent_tool_parts dict so get_subagent_tool_part works
+                    for key, tracked_part in list(ctx.subagent_tool_parts.items()):
+                        if tracked_part.id == part.id:
+                            ctx.subagent_tool_parts[key] = updated
+                            break
+                    yield PartUpdatedEvent.create(updated)
+                    break
+
+        # Emit idle events for the child session
+        from agentpool_server.opencode_server.models import SessionStatus
+
+        ctx.state.session_status[child_session_id] = SessionStatus(type="idle")
+        yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
+        yield SessionIdleEvent.create(child_session_id)
 
     async def _process_spawn_start(
         self,
