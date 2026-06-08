@@ -209,7 +209,7 @@ async def test_connection_send_to_client_formats_message(
 ) -> None:
     """send_to_client wraps the message with connectionId and forwards it."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    message = {"jsonrpc": "2.0", "result": "ok", "id": 1}
+    message = {"jsonrpc": "2.0", "method": "test", "id": 1}
 
     await conn.send_to_client(message)
 

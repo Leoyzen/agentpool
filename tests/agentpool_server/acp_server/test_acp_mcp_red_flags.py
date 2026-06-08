@@ -15,6 +15,7 @@ from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
@@ -136,3 +137,121 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
     assert "connectionId" not in inner_message, (
         "inner_message contains 'connectionId' — double-wrapping bug!"
     )
+
+
+async def test_elicitation_passthrough_returns_correct_result() -> None:
+    """Regression test: response to pending request is returned directly.
+
+    When a client-initiated request is pending, the response should be
+    fulfilled via the correlation registry instead of being forwarded
+    through _send_to_client.
+    """
+    mock_send = AsyncMock()
+    server_cfg = AcpMcpServer(name="test", id="test-id")
+    conn = AcpMcpConnection("conn-passthrough", server_cfg, mock_send)
+    await conn.open()
+
+    future = await conn.register_pending_request(3)
+    response = {"jsonrpc": "2.0", "id": 3, "result": {"action": "accept"}}
+    result = await conn.send_to_client(response)
+
+    assert result == response
+    assert future.done()
+    assert future.result() == response
+    mock_send.assert_not_awaited()
+
+    await conn.close()
+
+
+async def test_late_response_after_timeout_is_dropped() -> None:
+    """Regression test: late response after timeout must be dropped.
+
+    If a pending request times out (future is cancelled), any late
+    response for that request should be dropped, not forwarded.
+    """
+    mock_send = AsyncMock()
+    server_cfg = AcpMcpServer(name="test", id="test-id")
+    conn = AcpMcpConnection("conn-timeout", server_cfg, mock_send)
+    await conn.open()
+
+    future = await conn.register_pending_request(1)
+    future.cancel()  # Simulate timeout cancellation
+
+    response = {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+    await conn.send_to_client(response)
+
+    mock_send.assert_not_awaited()
+
+    await conn.close()
+
+
+async def test_unmatched_response_is_dropped() -> None:
+    """Regression test: unmatched response must be dropped with a warning.
+
+    Responses for request IDs that were never registered should not
+    be forwarded to the client.
+    """
+    mock_send = AsyncMock()
+    server_cfg = AcpMcpServer(name="test", id="test-id")
+    conn = AcpMcpConnection("conn-unmatched", server_cfg, mock_send)
+    await conn.open()
+
+    response = {"jsonrpc": "2.0", "id": 99, "result": {}}
+
+    with patch("agentpool_server.acp_server.acp_mcp_manager.logger.warning") as mock_warn:
+        await conn.send_to_client(response)
+        mock_send.assert_not_awaited()
+        mock_warn.assert_called_once()
+
+    await conn.close()
+
+
+async def test_response_fulfillment_prevents_fake_response_injection() -> None:
+    """Regression test: fulfilled response must not reach _to_session_send.
+
+    When a response is consumed by the correlation registry, it should
+    NOT be injected back into the MCP session stream.
+    """
+    mock_send = AsyncMock()
+    server_cfg = AcpMcpServer(name="test", id="test-id")
+    conn = AcpMcpConnection("conn-no-inject", server_cfg, mock_send)
+    await conn.open()
+
+    await conn.register_pending_request(2)
+    response = {"jsonrpc": "2.0", "id": 2, "result": {"status": "ok"}}
+    await conn.send_to_client(response)
+
+    mock_send.assert_not_awaited()
+    # Verify _to_session_send received nothing
+    with pytest.raises(anyio.WouldBlock):
+        conn.to_session.receive_nowait()
+
+    await conn.close()
+
+
+async def test_duplicate_response_invalid_state_handled_gracefully() -> None:
+    """Regression test: duplicate response must not crash or leak.
+
+    If two responses arrive for the same request ID, the second must
+    be dropped without raising exceptions or calling _send_to_client.
+    """
+    mock_send = AsyncMock()
+    server_cfg = AcpMcpServer(name="test", id="test-id")
+    conn = AcpMcpConnection("conn-duplicate", server_cfg, mock_send)
+    await conn.open()
+
+    future = await conn.register_pending_request(5)
+    response1 = {"jsonrpc": "2.0", "id": 5, "result": {"first": True}}
+    response2 = {"jsonrpc": "2.0", "id": 5, "result": {"second": True}}
+
+    # First response fulfills the pending request
+    await conn.send_to_client(response1)
+    assert future.done()
+    assert future.result() == response1
+
+    # Second response should be dropped gracefully
+    await conn.send_to_client(response2)
+
+    mock_send.assert_not_awaited()
+
+    await conn.close()

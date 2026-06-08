@@ -23,7 +23,25 @@ if TYPE_CHECKING:
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
+
 logger = get_logger(__name__)
+
+
+def _sanitize_jsonrpc_error(response: dict[str, Any]) -> dict[str, Any]:
+    """Fix non-standard JSON-RPC error codes (e.g. string -> int)."""
+    error = response.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        if not isinstance(code, int):
+            code_map = {
+                "method_not_found": -32601,
+                "parse_error": -32700,
+                "invalid_request": -32600,
+                "invalid_params": -32602,
+                "internal_error": -32603,
+            }
+            error["code"] = code_map.get(str(code).lower(), -32603)
+    return response
 
 
 class AcpMcpConnection:
@@ -53,6 +71,8 @@ class AcpMcpConnection:
         self._to_session_receive: MemoryObjectReceiveStream[dict[str, Any]] | None = None
         self._from_session_send: MemoryObjectSendStream[dict[str, Any]] | None = None
         self._from_session_receive: MemoryObjectReceiveStream[dict[str, Any]] | None = None
+        self._pending_client_requests: dict[Any, asyncio.Future] = {}
+        self._pending_lock = asyncio.Lock()
         self._closed = False
 
     async def open(self) -> None:
@@ -70,6 +90,11 @@ class AcpMcpConnection:
         if self._closed:
             return
         self._closed = True
+        # Cancel any pending client-initiated requests
+        for future in list(self._pending_client_requests.values()):
+            if not future.done():
+                future.cancel()
+        self._pending_client_requests.clear()
         for stream in [
             self._to_session_send,
             self._to_session_receive,
@@ -79,6 +104,60 @@ class AcpMcpConnection:
             if stream is not None:
                 await stream.aclose()
         logger.info("MCP-over-ACP connection closed", connection_id=self.connection_id)
+
+    async def register_pending_request(self, request_id: Any) -> asyncio.Future:
+        """Register a pending client-initiated request.
+
+        Args:
+            request_id: The JSON-RPC id of the pending request.
+
+        Returns:
+            A Future that will be fulfilled when the response arrives.
+
+        Raises:
+            RuntimeError: If a pending request with the same ID already exists.
+        """
+        async with self._pending_lock:
+            if request_id in self._pending_client_requests:
+                raise RuntimeError(f"Duplicate pending request ID: {request_id}")
+            future = asyncio.get_event_loop().create_future()
+            self._pending_client_requests[request_id] = future
+            return future
+
+    def fulfill_pending_request(self, request_id: Any, response: dict[str, Any]) -> bool:
+        """Fulfill a pending request with its response.
+
+        Args:
+            request_id: The JSON-RPC id of the response.
+            response: The full JSON-RPC response dict.
+
+        Returns:
+            True if the response was consumed (fulfilled or already-done).
+            False if no matching pending request was found.
+        """
+        future = self._pending_client_requests.pop(request_id, None)
+        if future is None:
+            return False
+        if future.done():
+            logger.warning(
+                "Late response for already-completed request",
+                connection_id=self.connection_id,
+                request_id=request_id,
+            )
+            return True
+        try:
+            future.set_result(response)
+        except asyncio.InvalidStateError:
+            logger.warning(
+                "InvalidStateError fulfilling pending request",
+                connection_id=self.connection_id,
+                request_id=request_id,
+            )
+        return True
+
+    def unregister_pending_request(self, request_id: Any) -> None:
+        """Remove a pending request from the registry without fulfilling it."""
+        self._pending_client_requests.pop(request_id, None)
 
     async def handle_client_message(self, message: dict[str, Any]) -> None:
         """Handle an incoming mcp/message from the client.
@@ -117,24 +196,26 @@ class AcpMcpConnection:
                 by_alias=True, mode="json", exclude_none=True
             )
 
+        # NEW: Check if this is a response to a pending client-initiated request
+        if isinstance(message, dict) and ("result" in message or "error" in message) and message.get("id") is not None:
+            if self.fulfill_pending_request(message["id"], message):
+                return message  # Consumed, don't forward to ACP client
+            logger.warning(
+                "Dropping unmatched or duplicate JSON-RPC response",
+                connection_id=self.connection_id,
+                request_id=message.get("id"),
+            )
+            return message  # Dropped, don't forward to ACP client
+            # Response has an id but no pending request matched — drop it
+            logger.warning(
+                "Dropping unmatched MCP response: no pending request for id",
+                connection_id=self.connection_id,
+                request_id=message["id"],
+            )
+            return message
+
         wrapped = {"connectionId": self.connection_id, "message": message}
         result = await self._send_to_client(wrapped)
-
-        def _sanitize_error(response: dict[str, Any]) -> dict[str, Any]:
-            """Fix non-standard JSON-RPC error codes (e.g. string -> int)."""
-            error = response.get("error")
-            if isinstance(error, dict):
-                code = error.get("code")
-                if not isinstance(code, int):
-                    code_map = {
-                        "method_not_found": -32601,
-                        "parse_error": -32700,
-                        "invalid_request": -32600,
-                        "invalid_params": -32602,
-                        "internal_error": -32603,
-                    }
-                    error["code"] = code_map.get(str(code).lower(), -32603)
-            return response
 
         # Forward ACP mcp/message response back to the MCP session so
         # ClientSession._receive_loop can process it.
@@ -142,7 +223,7 @@ class AcpMcpConnection:
             if "jsonrpc" in result:
                 # Client returned standard JSON-RPC response
                 try:
-                    result = _sanitize_error(result)
+                    result = _sanitize_jsonrpc_error(result)
                     session_msg = SessionMessage(
                         message=JSONRPCMessage.model_validate(result)
                     )
