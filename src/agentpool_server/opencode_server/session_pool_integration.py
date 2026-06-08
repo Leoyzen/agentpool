@@ -35,6 +35,7 @@ from agentpool_server.opencode_server.models import (
     MessageWithParts,
     PartUpdatedEvent,
     SessionCreatedEvent,
+    SessionErrorEvent,
     SessionStatus,
     TimeCreated,
     TimeCreatedUpdated,
@@ -124,6 +125,8 @@ async def append_message_to_session(
     """Append a message to a session's history.
 
     Writes to SessionPool when the feature flag is enabled.
+    Also writes to the in-memory messages dict when present for
+    backward compatibility with tests and legacy code paths.
 
     Args:
         state: The OpenCode server state.
@@ -142,6 +145,12 @@ async def append_message_to_session(
                     session_id=session_id,
                     exc_info=True,
                 )
+
+    # Always mirror to the in-memory dict when present for backward compatibility
+    messages = getattr(state, "messages", None)
+    if messages is not None:
+        messages.setdefault(session_id, [])
+        messages[session_id].append(msg)
 
 
 async def set_messages_for_session(
@@ -171,6 +180,8 @@ async def set_session_status(
     """Set the status of a session.
 
     Uses SessionStatusBridge when the feature flag is enabled.
+    Falls back to the in-memory session_status dict for tests and
+    legacy code paths.
 
     Args:
         state: The OpenCode server state.
@@ -188,6 +199,11 @@ async def set_session_status(
                 if status.type == "idle":
                     await bridge._broadcast_idle()
                     return
+
+    # Fallback: write to the in-memory dict for backward compatibility
+    session_status = getattr(state, "session_status", None)
+    if session_status is not None:
+        session_status[session_id] = status
 
 
 async def get_session_status(
@@ -500,10 +516,18 @@ class OpenCodeSessionPoolIntegration:
         Returns:
             The child session state.
         """
+        parent_state = self.session_pool.sessions.get_session(parent_session_id)
+        metadata: dict[str, Any] = {}
+        if parent_state is not None:
+            # get_or_create_session may nest kwargs under a "metadata" key;
+            # unwrap one level so the child inherits the actual metadata dict.
+            raw = parent_state.metadata
+            metadata = dict(raw.get("metadata", raw))
         state, was_created = await self.session_pool.sessions.get_or_create_session(
             new_session_id,
             agent_name=agent_name,
             parent_session_id=parent_session_id,
+            **metadata,
         )
         if was_created:
             await self._start_status_bridge(new_session_id)
@@ -575,6 +599,13 @@ class OpenCodeSessionPoolIntegration:
             session_id: The session whose run should be cancelled.
         """
         self.session_pool.sessions.cancel_run_for_session(session_id)
+        await self.server_state.broadcast_event(
+            SessionErrorEvent.create(
+                session_id=session_id,
+                error_name="SessionAborted",
+                error_message="Session was aborted by the user",
+            )
+        )
 
     async def attach_input_provider(
         self,

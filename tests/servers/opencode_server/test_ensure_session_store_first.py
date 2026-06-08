@@ -14,6 +14,7 @@ import pytest
 
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.sessions.models import SessionData
+from agentpool_server.opencode_server.converters import session_data_to_opencode
 from agentpool_server.opencode_server.models import (
     Session,
     SessionCreatedEvent,
@@ -22,6 +23,7 @@ from agentpool_server.opencode_server.models import (
     SessionUpdatedEvent,
     TimeCreatedUpdated,
 )
+from agentpool_server.opencode_server.session_pool_integration import ensure_session
 from agentpool_server.opencode_server.state import ServerState
 
 
@@ -72,10 +74,18 @@ def _make_session_data(
 def mock_state() -> ServerState:
     """Create a ServerState with mocked dependencies."""
     agent = create_mock_agent()
-    return ServerState(
+    state = ServerState(
         working_dir="/test/working/dir",
         agent=agent,
     )
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    # so tests and helper fallbacks can access them.
+    state.messages = {}
+    state.session_status = {}
+    state.todos = {}
+    state.input_providers = {}
+    state.pending_questions = {}
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +115,7 @@ async def test_store_first_preserves_agent_type_and_pool_id(
     mock_store.save = AsyncMock()
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
-        session = await mock_state.ensure_session(session_id)
+        session = await ensure_session(mock_state, session_id)
 
     # The session should have the stored title/directory
     assert session.title == "Stored Session Title"
@@ -151,7 +161,7 @@ async def test_store_first_child_not_overwritten(mock_state: ServerState) -> Non
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
-        session = await mock_state.ensure_session(child_id, parent_id=parent_id)
+        session = await ensure_session(mock_state, child_id, parent_id=parent_id)
 
     # Child fields from store must be preserved
     assert session.id == child_id
@@ -195,9 +205,9 @@ async def test_concurrent_calls_produce_one_session(
         patch.object(mock_state, "broadcast_event", new=AsyncMock()),
     ):
         results = await asyncio.gather(
-            mock_state.ensure_session(session_id),
-            mock_state.ensure_session(session_id),
-            mock_state.ensure_session(session_id),
+            ensure_session(mock_state, session_id),
+            ensure_session(mock_state, session_id),
+            ensure_session(mock_state, session_id),
         )
 
     # All calls should return the same Session object
@@ -228,8 +238,8 @@ async def test_concurrent_store_first_produces_one_session(
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
         results = await asyncio.gather(
-            mock_state.ensure_session(session_id),
-            mock_state.ensure_session(session_id),
+            ensure_session(mock_state, session_id),
+            ensure_session(mock_state, session_id),
         )
 
     # Both should return the same Session object
@@ -272,7 +282,7 @@ async def test_in_memory_session_not_overwritten_by_store(
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
-        result = await mock_state.ensure_session(session_id)
+        result = await ensure_session(mock_state, session_id)
 
     # Must return the in-memory session, not the store version
     assert result is existing_session
@@ -315,7 +325,7 @@ async def test_store_first_child_skips_agent_binding(
     original_session_id = mock_state.agent.session_id
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
-        session = await mock_state.ensure_session(child_id)
+        session = await ensure_session(mock_state, child_id)
 
     assert session.id == child_id
 
@@ -356,7 +366,7 @@ async def test_store_miss_fallback_creates_and_persists(
     ):
         mock_conv.return_value = MagicMock()
         mock_prov_cls.return_value = MagicMock()
-        result = await mock_state.ensure_session(session_id)
+        result = await ensure_session(mock_state, session_id)
 
     assert result.id == session_id
     assert result.title == "New Session"
@@ -387,7 +397,7 @@ async def test_store_first_broadcasts_created_and_updated(
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
-        session = await mock_state.ensure_session(session_id)
+        session = await ensure_session(mock_state, session_id)
 
     broadcast_events = [call.args[0] for call in mock_broadcast.await_args_list]
 
@@ -417,7 +427,7 @@ async def test_store_first_marks_session_idle(mock_state: ServerState) -> None:
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
-        await mock_state.ensure_session(session_id)
+        await ensure_session(mock_state, session_id)
 
     # Status should be idle
     assert session_id in mock_state.session_status
@@ -432,46 +442,30 @@ async def test_store_first_marks_session_idle(mock_state: ServerState) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Additional: _session_from_session_data delegates correctly
+# Additional: session_data_to_opencode converter
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_session_from_session_data_uses_converter(
-    mock_state: ServerState,
-) -> None:
-    """_session_from_session_data delegates to session_data_to_opencode."""
+def test_session_from_session_data_uses_converter() -> None:
+    """session_data_to_opencode converts SessionData to OpenCode Session correctly."""
     sd = _make_session_data("converter-test")
 
-    with patch(
-        "agentpool_server.opencode_server.converters.session_data_to_opencode"
-    ) as mock_conv:
-        expected_session = Session(
-            id="converter-test",
-            project_id="p1",
-            directory="/d1",
-            title="Converted",
-            version="1",
-            time=TimeCreatedUpdated(created=1000, updated=2000),
-        )
-        mock_conv.return_value = expected_session
+    result = session_data_to_opencode(sd)
 
-        result = mock_state._session_from_session_data(sd)
-
-    mock_conv.assert_called_once_with(sd)
-    assert result is expected_session
+    assert result.id == "converter-test"
+    assert result.title == "Stored Session Title"
+    assert result.directory == "/stored/dir"
+    assert result.project_id == "stored-project"
 
 
 # ---------------------------------------------------------------------------
-# Additional: Store-first creates runtime state and input provider
+# Additional: Store-first creates runtime state
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_store_first_creates_runtime_state_and_input_provider(
-    mock_state: ServerState,
-) -> None:
-    """Store-first path creates runtime state (messages, todos) and input provider."""
+async def test_store_first_creates_runtime_state(mock_state: ServerState) -> None:
+    """Store-first path initializes runtime state for the session."""
     session_id = "runtime-state-session"
     sd = _make_session_data(session_id)
 
@@ -480,26 +474,29 @@ async def test_store_first_creates_runtime_state_and_input_provider(
     mock_state.pool.session_pool.sessions.store = mock_store
 
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
-        await mock_state.ensure_session(session_id)
+        await ensure_session(mock_state, session_id)
 
-    # Runtime state should be initialized
-    assert session_id in mock_state.messages
-    assert mock_state.messages[session_id] == []
+    # Session should be registered in memory
+    assert session_id in mock_state.sessions
+    # ensure_runtime_session_state initializes reverted_messages
     assert session_id in mock_state.reverted_messages
-    assert session_id in mock_state.todos
-    assert session_id in mock_state.input_providers
+    assert mock_state.reverted_messages[session_id] == []
 
 
 # ---------------------------------------------------------------------------
-# Additional: Store-first top-level session binds agent
+# Additional: Store-first top-level session does not bind agent
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_store_first_top_level_session_binds_agent(
+async def test_store_first_top_level_session_does_not_bind_agent(
     mock_state: ServerState,
 ) -> None:
-    """Store-first path binds agent for top-level sessions (no parent_id)."""
+    """Store-first path does not bind agent for top-level sessions.
+
+    Agent binding was removed from ensure_session; sessions are now
+    managed by the SessionPool orchestration layer.
+    """
     session_id = "top-level-session"
     sd = _make_session_data(session_id, parent_id=None)
 
@@ -507,8 +504,12 @@ async def test_store_first_top_level_session_binds_agent(
     mock_store.load = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
-    with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
-        await mock_state.ensure_session(session_id)
+    original_session_id = mock_state.agent.session_id
 
-    # Agent should be bound to this session
-    assert mock_state.agent.session_id == session_id
+    with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
+        await ensure_session(mock_state, session_id)
+
+    # Session should be created
+    assert session_id in mock_state.sessions
+    # Agent should NOT be bound to this session
+    assert mock_state.agent.session_id == original_session_id

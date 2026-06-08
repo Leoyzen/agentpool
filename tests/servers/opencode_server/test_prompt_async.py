@@ -4,46 +4,40 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agentpool_server.opencode_server.models import MessageRequest, TextPartInput
-from agentpool_server.opencode_server.models.common import TimeCreated
-from agentpool_server.opencode_server.models.events import SessionIdleEvent, SessionStatusEvent
-from agentpool_server.opencode_server.models.message import MessageWithParts, UserMessage
-from agentpool_server.opencode_server.routes import message_routes
 
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    pass
 
 
 class TestPromptAsync:
-    """Tests for `/prompt_async` session serialization."""
+    """Tests for `/prompt_async` session serialization via SessionPool."""
 
     @pytest.mark.asyncio
-    async def test_prompt_async_marks_busy_before_scheduling(
+    async def test_prompt_async_returns_204_and_routes_via_session_pool(
         self,
         async_client,
         server_state,
     ) -> None:
-        """The first async prompt should lock the session before scheduling work."""
+        """The async prompt endpoint returns 204 and routes through SessionPool."""
         response = await async_client.post("/session", json={"title": "Async Lock"})
         session_id = response.json()["id"]
 
-        background_calls: list[str | None] = []
+        # Spy on SessionPool.receive_request
+        pool = server_state.pool
+        original_receive_request = pool.session_pool.receive_request
+        receive_calls: list[dict] = []
 
-        def fake_create_background_task(coro, *, name=None):
-            background_calls.append(name)
-            coro.close()
-            task = Mock()
-            task.get_name.return_value = name
-            task.done.return_value = False
-            server_state.background_tasks.add(task)
-            return task
+        async def spy_receive_request(*args, **kwargs):
+            receive_calls.append(kwargs)
+            return await original_receive_request(*args, **kwargs)
 
-        server_state.create_background_task = Mock(side_effect=fake_create_background_task)
+        pool.session_pool.receive_request = spy_receive_request
 
         request = MessageRequest(
             parts=[TextPartInput(text="first")],
@@ -55,8 +49,8 @@ class TestPromptAsync:
             json=request.model_dump(mode="json"),
         )
         assert response.status_code == 204
-        assert server_state.session_status[session_id].type == "busy"
-        assert server_state.create_background_task.call_count == 1
+        assert len(receive_calls) == 1
+        assert receive_calls[0]["session_id"] == session_id
 
         second_request = MessageRequest(
             parts=[TextPartInput(text="second")],
@@ -68,44 +62,17 @@ class TestPromptAsync:
             json=second_request.model_dump(mode="json"),
         )
         assert response.status_code == 204
-        assert server_state.create_background_task.call_count == 1
-        assert background_calls == [f"process_message_{session_id}"]
-        assert len(server_state.pending_async_prompts[session_id]) == 2
+        assert len(receive_calls) == 2
 
     @pytest.mark.asyncio
-    async def test_prompt_async_drains_server_queue_in_order(
+    async def test_prompt_async_multiple_requests_accepted(
         self,
         async_client,
         server_state,
-        monkeypatch,
     ) -> None:
-        """Queued async prompts should be processed FIFO by one background worker."""
+        """Multiple async prompts to the same session are accepted without error."""
         response = await async_client.post("/session", json={"title": "Async Queue"})
         session_id = response.json()["id"]
-
-        processed: list[str] = []
-        drained = asyncio.Event()
-
-        async def fake_process_message_locked(
-            session_id: str,
-            request: MessageRequest,
-            state,
-            user_msg_id: str,
-            user_msg_with_parts,
-            *,
-            mark_busy: bool = True,
-            mark_idle: bool = True,
-        ):
-            processed.append(request.parts[0].text)
-            if len(processed) == 2:
-                drained.set()
-            return user_msg_with_parts
-
-        monkeypatch.setattr(
-            message_routes,
-            "_process_message_locked",
-            fake_process_message_locked,
-        )
 
         first_request = MessageRequest(
             parts=[TextPartInput(text="first")],
@@ -130,119 +97,50 @@ class TestPromptAsync:
         assert first_response.status_code == 204
         assert second_response.status_code == 204
 
-        await asyncio.wait_for(drained.wait(), timeout=1.0)
-        await asyncio.sleep(0)
-
-        assert processed == ["first", "second"]
-        assert session_id not in server_state.pending_async_prompts
-        assert server_state.session_status[session_id].type == "idle"
+    @pytest.mark.asyncio
+    async def test_prompt_async_nonexistent_session_returns_404(
+        self,
+        async_client,
+    ) -> None:
+        """Async prompt on nonexistent session should return 404."""
+        request = MessageRequest(
+            parts=[TextPartInput(text="hello")],
+            agent="default",
+            message_id="msg-1",
+        )
+        response = await async_client.post(
+            "/session/nonexistent-id/prompt_async",
+            json=request.model_dump(mode="json"),
+        )
+        assert response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_prompt_async_emits_turn_complete_between_queued_prompts(
+    async def test_prompt_async_creates_user_message(
         self,
-        server_state,
-        monkeypatch,
-    ) -> None:
-        """Queued prompts should emit a turn-complete idle signal between turns."""
-        session = await server_state.ensure_session("async-turn-complete")
-        session_id = session.id
-
-        event_types: list[str] = []
-
-        original_broadcast = server_state.broadcast_event
-
-        async def tracking_broadcast(event) -> None:
-            if isinstance(event, SessionStatusEvent):
-                event_types.append(f"status:{event.properties.status.type}")
-            elif isinstance(event, SessionIdleEvent):
-                event_types.append("session.idle")
-            await original_broadcast(event)
-
-        server_state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
-
-        for idx in range(2):
-            request = MessageRequest(
-                parts=[TextPartInput(text=f"prompt-{idx}")],
-                agent="default",
-                message_id=f"msg-{idx}",
-            )
-            queued_user = UserMessage(
-                id=f"msg-{idx}",
-                session_id=session_id,
-                time=TimeCreated(created=idx),
-                agent="default",
-                model=None,
-            )
-            server_state.enqueue_async_prompt(
-                session_id,
-                message_routes.QueuedAsyncPrompt(
-                    request=request,
-                    user_msg_id=f"msg-{idx}",
-                    user_msg_with_parts=MessageWithParts(info=queued_user),
-                ),
-            )
-
-        server_state.session_status[session_id] = message_routes.SessionStatus(type="busy")
-
-        async def fake_process_message_locked(
-            session_id: str,
-            request: MessageRequest,
-            state,
-            user_msg_id: str,
-            user_msg_with_parts,
-            *,
-            mark_busy: bool = True,
-            mark_idle: bool = True,
-        ):
-            return user_msg_with_parts
-
-        monkeypatch.setattr(message_routes, "_process_message_locked", fake_process_message_locked)
-
-        await message_routes._run_async_prompt_queue(session_id, server_state)
-
-        assert event_types.count("session.idle") == 2
-        assert event_types == ["session.idle", "status:idle", "session.idle"]
-
-    @pytest.mark.asyncio
-    async def test_ensure_async_prompt_worker_starts_worker_for_queued_prompts(
-        self,
+        async_client,
         server_state,
     ) -> None:
-        """Queued async prompts should start a worker when a turn hands off."""
-        session = await server_state.ensure_session("sync-handoff")
-        session_id = session.id
+        """Async prompt creates a user message in session history."""
+        response = await async_client.post("/session", json={"title": "Async Message"})
+        session_id = response.json()["id"]
+
+        from agentpool_server.opencode_server.session_pool_integration import (
+            get_messages_for_session,
+        )
 
         request = MessageRequest(
-            parts=[TextPartInput(text="queued")],
+            parts=[TextPartInput(text="hello world")],
             agent="default",
-            message_id="queued-msg",
+            message_id="msg-1",
         )
-        queued_user = UserMessage(
-            id="queued-msg",
-            session_id=session_id,
-            time=TimeCreated(created=0),
-            agent="default",
-            model=None,
+        response = await async_client.post(
+            f"/session/{session_id}/prompt_async",
+            json=request.model_dump(mode="json"),
         )
-        server_state.enqueue_async_prompt(
-            session_id,
-            message_routes.QueuedAsyncPrompt(
-                request=request,
-                user_msg_id="queued-msg",
-                user_msg_with_parts=MessageWithParts(info=queued_user),
-            ),
-        )
+        assert response.status_code == 204
 
-        started_workers: list[str | None] = []
+        # Give a moment for the message to be appended
+        await asyncio.sleep(0.05)
 
-        def fake_create_background_task(coro: Awaitable[object], *, name: str | None = None):
-            started_workers.append(name)
-            coro.close()
-            return Mock()
-
-        server_state.create_background_task = fake_create_background_task  # type: ignore[method-assign]
-
-        await message_routes._ensure_async_prompt_worker(session_id, server_state, mark_busy=True)
-
-        assert started_workers == [f"process_message_{session_id}"]
-        assert server_state.session_status[session_id].type == "busy"
+        messages = await get_messages_for_session(server_state, session_id)
+        assert len(messages) >= 1

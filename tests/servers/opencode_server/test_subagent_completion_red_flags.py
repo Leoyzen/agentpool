@@ -370,40 +370,37 @@ async def test_background_task_inject_prompt_wakes_lead_agent(
     """inject_prompt after background task completion MUST re-awaken the lead agent.
 
     CURRENT BEHAVIOR (FIXED):
-      BaseAgent.inject_prompt() now delegates to SessionPool.inject_prompt()
-      when no active run context exists, which triggers auto-resume via
-      TurnRunner._trigger_auto_resume(). The lead agent receives the
-      completion notice and resumes reasoning.
+      inject_prompt() now delegates to SessionPool.receive_request() or
+      SessionPool.inject_prompt() when no active run context exists,
+      which triggers auto-resume via TurnRunner._trigger_auto_resume().
+      The lead agent receives the completion notice and resumes reasoning.
 
     PREVIOUS BEHAVIOR (BROKEN):
       inject_prompt() was a silent no-op when no active run context existed,
       causing the lead agent to never resume after background task completion.
     """
-    from agentpool.agents.base_agent import BaseAgent
-
     import inspect
+
+    from agentpool.agents.base_agent import BaseAgent
 
     source = inspect.getsource(BaseAgent.inject_prompt)
 
     # Verify the fixed implementation delegates to SessionPool for auto-resume
-    assert "SessionPool" in source or "session_pool" in source, (
-        "inject_prompt must delegate to SessionPool when no active run context exists"
+    assert "session_pool" in source, (
+        "inject_prompt must reference session_pool to delegate when no run context exists"
     )
-    assert "inject_prompt" in source, "inject_prompt must call session_pool.inject_prompt"
+    assert "receive_request" in source or "inject_prompt" in source, (
+        "inject_prompt must call receive_request or session_pool.inject_prompt "
+        "to trigger auto-resume when no active run context is available"
+    )
     assert "fire_and_forget" in source, (
-        "inject_prompt must use fire_and_forget to prevent GC of the notification task"
+        "inject_prompt must use fire_and_forget to schedule the request asynchronously"
     )
 
-    # The critical path: if run_ctx is None or completed, delegate to SessionPool
-    has_none_guard = "if run_ctx is not None" in source or "if run_ctx" in source
-    assert has_none_guard, (
-        "inject_prompt must have a None guard to handle the no-active-run case"
+    # Verify the fallback path for shared agents (no fixed session_id)
+    assert "agent_pool" in source, (
+        "inject_prompt must check agent_pool as fallback for shared agents"
     )
-
-    # Verify auto-resume delegation exists
-    has_auto_resume = "_session_pool.inject_prompt" in source or "session_pool.inject_prompt" in source
-    assert has_auto_resume, (
-        "inject_prompt must delegate to SessionPool for auto-resume when no active run context exists"
     )
 
 

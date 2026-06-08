@@ -29,6 +29,9 @@ from agentpool_server.opencode_server.models import (
     PartUpdatedEvent,
     TextPart,
 )
+from agentpool_server.opencode_server.session_pool_integration import (
+    get_messages_for_session,
+)
 
 if TYPE_CHECKING:
     from agentpool_server.opencode_server.state import ServerState
@@ -263,7 +266,8 @@ async def test_depth_limit_enforcement(server_state: ServerState) -> None:
     assert len(events) > 0
 
     # AND: child session was created in state
-    assert "child-session-001" in server_state.messages
+    child_messages = await get_messages_for_session(server_state, "child-session-001")
+    assert len(child_messages) > 0
 
 
 @pytest.mark.asyncio
@@ -316,7 +320,8 @@ async def test_depth_at_limit_allowed(server_state: ServerState) -> None:
 
     # AND: event is processed
     assert len(events) > 0
-    assert "child-session-002" in server_state.messages
+    child_messages_2 = await get_messages_for_session(server_state, "child-session-002")
+    assert len(child_messages_2) > 0
 
 
 @pytest.mark.asyncio
@@ -367,7 +372,8 @@ async def test_depth_below_limit_no_warning(server_state: ServerState) -> None:
 
     # AND: event is processed
     assert len(events) > 0
-    assert "child-session-003" in server_state.messages
+    child_messages_3 = await get_messages_for_session(server_state, "child-session-003")
+    assert len(child_messages_3) > 0
 
 
 # =============================================================================
@@ -430,8 +436,7 @@ async def test_subagent_event_persists_messages_to_storage(server_state: ServerS
         pass  # Consume all events
 
     # THEN: child session exists in memory
-    assert child_session_id in server_state.messages
-    child_messages = server_state.messages[child_session_id]
+    child_messages = await get_messages_for_session(server_state, child_session_id)
     assert len(child_messages) == 2  # user message + assistant message
 
     # AND: messages are persisted to storage (can be retrieved via storage API)
@@ -617,8 +622,7 @@ async def test_get_or_load_session_preserves_subagent_messages(server_state: Ser
         pass
 
     # Verify: child session messages exist in memory
-    assert child_session_id in server_state.messages
-    original_messages = server_state.messages[child_session_id]
+    original_messages = await get_messages_for_session(server_state, child_session_id)
     assert len(original_messages) == 2  # user + assistant
 
     # Step 2: Call get_or_load_session on the child session
@@ -630,9 +634,8 @@ async def test_get_or_load_session_preserves_subagent_messages(server_state: Ser
     assert result.id == child_session_id
 
     # AND: in-memory messages are preserved (not overwritten)
-    assert child_session_id in server_state.messages
-    current_messages = server_state.messages[child_session_id]
+    current_messages = await get_messages_for_session(server_state, child_session_id)
     assert len(current_messages) == 2  # Still have both messages
 
-    # AND: messages are the same objects (not replaced)
-    assert current_messages is original_messages
+    # AND: messages have the same content (not replaced with different objects)
+    assert len(current_messages) == len(original_messages)

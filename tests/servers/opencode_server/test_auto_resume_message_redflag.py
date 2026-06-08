@@ -45,6 +45,7 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
+    get_messages_for_session,
 )
 from agentpool_server.opencode_server.state import ServerState
 
@@ -112,7 +113,11 @@ def server_state(tmp_path: Any) -> ServerState:
     agent = Mock()
     agent.name = "test-agent"
     agent.storage = Mock()
-    return ServerState(working_dir=str(tmp_path), agent=agent)
+    state = ServerState(working_dir=str(tmp_path), agent=agent)
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    state.messages = {}
+    state.session_status = {}
+    return state
 
 
 @pytest.mark.asyncio
@@ -199,7 +204,7 @@ async def test_auto_resume_events_create_message_in_state(
     )
 
     # ASSERTION 2: The message must exist in state.messages
-    session_messages = server_state.messages.get(session_id, [])
+    session_messages = await get_messages_for_session(server_state, session_id)
     auto_resume_messages = [
         msg for msg in session_messages
         if isinstance(msg.info, AssistantMessage)

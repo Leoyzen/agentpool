@@ -23,7 +23,13 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentpool_server.opencode_server.models import Session, TimeCreatedUpdated
+from agentpool_server.opencode_server.models import (
+    MessageWithParts,
+    Session,
+    TextPart,
+    TimeCreatedUpdated,
+    UserMessage,
+)
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 
 
@@ -41,6 +47,21 @@ def _make_session(session_id: str, parent_id: str | None = None) -> Session:
         version="1",
         time=TimeCreatedUpdated(created=0, updated=0),
         parent_id=parent_id,
+    )
+
+
+def _make_dummy_message(session_id: str) -> MessageWithParts:
+    """Create a minimal message for populating session history."""
+    from agentpool_server.opencode_server.models import TimeCreated
+
+    return MessageWithParts(
+        info=UserMessage(
+            id="msg_dummy",
+            session_id=session_id,
+            time=TimeCreated(created=0),
+            agent="test",
+        ),
+        parts=[TextPart(id="p1", message_id="msg_dummy", session_id=session_id, text="hello")],
     )
 
 
@@ -63,7 +84,7 @@ class TestGetOrLoadSessionCacheHit:
         # Set up: agent is bound to session_s4 (the last one created)
         session_s4 = _make_session("ses_s4")
         state.sessions["ses_s4"] = session_s4
-        state.messages["ses_s4"] = []
+        state.messages["ses_s4"] = [_make_dummy_message("ses_s4")]
         state.agent.session_id = "ses_s4"
 
         # Also create s1, s2, s3 in cache (like create_session does)
@@ -73,9 +94,9 @@ class TestGetOrLoadSessionCacheHit:
         state.sessions["ses_s1"] = session_s1
         state.sessions["ses_s2"] = session_s2
         state.sessions["ses_s3"] = session_s3
-        state.messages["ses_s1"] = []
-        state.messages["ses_s2"] = []
-        state.messages["ses_s3"] = []
+        state.messages["ses_s1"] = [_make_dummy_message("ses_s1")]
+        state.messages["ses_s2"] = [_make_dummy_message("ses_s2")]
+        state.messages["ses_s3"] = [_make_dummy_message("ses_s3")]
 
         # agent.load_session returns None (session saved to MemorySessionStore,
         # not to StorageManager that agent.load_session reads from)
@@ -112,10 +133,10 @@ class TestGetOrLoadSessionCacheHit:
         state = server_state
         session_id = "ses_newly_created"
 
-        # Simulate create_session: adds to cache with empty messages
+        # Simulate create_session: adds to cache with messages
         session = _make_session(session_id)
         state.sessions[session_id] = session
-        state.messages[session_id] = []
+        state.messages[session_id] = [_make_dummy_message(session_id)]
 
         # Agent is bound to a different session
         state.agent.session_id = "ses_other"
@@ -160,7 +181,7 @@ class TestGetOrLoadSessionCacheHit:
 
         session = _make_session(session_id)
         state.sessions[session_id] = session
-        state.messages[session_id] = []
+        state.messages[session_id] = [_make_dummy_message(session_id)]
 
         result = await get_or_load_session(state, session_id)
         assert result is not None
@@ -169,7 +190,7 @@ class TestGetOrLoadSessionCacheHit:
         # With per-session agents, cached sessions are returned directly
         # without calling load_session — the session agent already has
         # the correct history.
-        state.agent.load_session.assert_not_called()
+        assert state.agent.load_session.call_count == 0
 
 
 class TestConcurrentSessionCreation:

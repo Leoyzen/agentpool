@@ -218,8 +218,7 @@ class TestQuestionRoutesViaSessionController:
         mock_agent = Mock()
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
-        future = asyncio.get_event_loop().create_future()
-        state.pending_questions["q1"] = _make_pending_question("test_session", "q1", future)
+        # No session_controller set, so list_questions should return empty
 
         result = await list_questions(state)
 
@@ -240,7 +239,12 @@ class TestQuestionRoutesViaSessionController:
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
         session.input_provider = OpenCodeInputProvider(state, "test_session")
-        state.broadcast_event = AsyncMock()
+        broadcast_calls = []
+
+        async def _mock_broadcast(event):
+            broadcast_calls.append(event)
+
+        state.broadcast_event = _mock_broadcast
 
         reply = QuestionReply(answers=[["yes"]])
         result = await reply_to_question("q1", reply, state)
@@ -263,7 +267,12 @@ class TestQuestionRoutesViaSessionController:
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
-        state.broadcast_event = AsyncMock()
+        broadcast_calls = []
+
+        async def _mock_broadcast(event):
+            broadcast_calls.append(event)
+
+        state.broadcast_event = _mock_broadcast
 
         result = await reject_question("q1", state)
 
@@ -287,7 +296,12 @@ class TestInputProviderStoresQuestionsOnSessionState:
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
-        state.broadcast_event = AsyncMock()
+        broadcast_calls = []
+
+        async def _mock_broadcast(event):
+            broadcast_calls.append(event)
+
+        state.broadcast_event = _mock_broadcast
 
         provider = OpenCodeInputProvider(state, "test_session")
 
@@ -299,8 +313,7 @@ class TestInputProviderStoresQuestionsOnSessionState:
         task = asyncio.create_task(provider.get_elicitation(params))
         await asyncio.sleep(0.1)
 
-        # Question should be on SessionState, NOT on ServerState
-        assert len(state.pending_questions) == 0
+        # Question should be on SessionState
         session = session_controller.get_session("test_session")
         assert session is not None
         assert len(session.pending_questions) == 1
@@ -319,7 +332,12 @@ class TestInputProviderStoresQuestionsOnSessionState:
         mock_agent = Mock()
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
-        state.broadcast_event = AsyncMock()
+        broadcast_calls = []
+
+        async def _mock_broadcast(event):
+            broadcast_calls.append(event)
+
+        state.broadcast_event = _mock_broadcast
 
         provider = OpenCodeInputProvider(state, "test_session")
 
@@ -331,8 +349,8 @@ class TestInputProviderStoresQuestionsOnSessionState:
         task = asyncio.create_task(provider.get_elicitation(params))
         await asyncio.sleep(0.1)
 
-        # Question should NOT be on ServerState; provider uses empty dict fallback
-        assert len(state.pending_questions) == 0
+        # Question should NOT be visible via provider; provider uses empty dict fallback
+        assert len(provider.get_pending_questions()) == 0
 
         # Cancel the task since there's no question to resolve
         task.cancel()

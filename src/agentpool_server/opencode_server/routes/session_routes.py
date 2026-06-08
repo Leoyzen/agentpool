@@ -553,11 +553,9 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
 
     # If the session is cached in memory (regardless of subagent status),
     # we have it from create_session or a previous load. Since each session
-    # now has its own agent instance, we only need to reload history if the
-    # session is NOT in the messages cache at all (cold-start recovery after
-    # server restart). If messages are already present (even empty), the
-    # session agent already owns the correct conversation history.
-    if cached_session is not None and len(await get_messages_for_session(state, session_id)) > 0:
+    # now has its own agent instance, we only need to reload history on
+    # cold-start recovery after server restart (when cached_session is None).
+    if cached_session is not None:
         return cached_session
 
     # Load from SessionPool store when available
@@ -758,7 +756,7 @@ async def get_session_status(state: StateDep) -> dict[str, SessionStatus]:
     SessionPool integration is consulted when the feature flag is enabled.
     """
     result = {}
-    for session_id in list(state.session_status.keys()):
+    for session_id in list(state.sessions.keys()):
         status = await _get_single_session_status(state, session_id)
         if status is not None and status.type != "idle":
             result[session_id] = status

@@ -57,6 +57,7 @@ async def test_summarize_uses_session_pool_when_flag_enabled(
         path=MessagePath(cwd=server_state.working_dir, root=server_state.working_dir),
         time=MessageTime(created=0),
     )
+    # Use fallback dict for bulk message setup (no bulk-set helper exists)
     server_state.messages[session_id] = [
         MessageWithParts(
             info=user_msg,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -38,9 +38,6 @@ async def test_subagent_event_triggers_ensure_session(server_state: ServerState)
         path=MessagePath(cwd="/tmp", root="/tmp"),
     )
 
-    # Mock ensure_session
-    server_state.ensure_session = AsyncMock()  # type: ignore
-
     adapter = OpenCodeStreamAdapter(
         state=server_state,
         session_id=session_id,
@@ -62,15 +59,19 @@ async def test_subagent_event_triggers_ensure_session(server_state: ServerState)
             parent_session_id=session_id,
         )
 
-    # Run process_stream
-    async for _ in adapter.process_stream(event_stream()):
-        pass
+    # Run process_stream with ensure_session patched
+    with patch(
+        "agentpool_server.opencode_server.session_pool_integration.ensure_session"
+    ) as mock_ensure:
+        async for _ in adapter.process_stream(event_stream()):
+            pass
 
-    # Verify ensure_session was called
-    server_state.ensure_session.assert_awaited_once_with(  # type: ignore
-        child_session_id,
-        parent_id=session_id,
-    )
+        # Verify ensure_session was called
+        mock_ensure.assert_awaited_once_with(
+            server_state,
+            child_session_id,
+            parent_id=session_id,
+        )
 
 
 @pytest.mark.asyncio
@@ -92,9 +93,6 @@ async def test_subagent_event_without_child_session_id(server_state: ServerState
         path=MessagePath(cwd="/tmp", root="/tmp"),
     )
 
-    # Mock ensure_session
-    server_state.ensure_session = AsyncMock()  # type: ignore
-
     adapter = OpenCodeStreamAdapter(
         state=server_state,
         session_id=session_id,
@@ -114,9 +112,12 @@ async def test_subagent_event_without_child_session_id(server_state: ServerState
             child_session_id=None,  # No child session ID
         )
 
-    # Run process_stream
-    async for _ in adapter.process_stream(event_stream()):
-        pass
+    # Run process_stream with ensure_session patched
+    with patch(
+        "agentpool_server.opencode_server.session_pool_integration.ensure_session"
+    ) as mock_ensure:
+        async for _ in adapter.process_stream(event_stream()):
+            pass
 
-    # Verify ensure_session was NOT called
-    server_state.ensure_session.assert_not_called()  # type: ignore
+        # Verify ensure_session was NOT called
+        mock_ensure.assert_not_called()

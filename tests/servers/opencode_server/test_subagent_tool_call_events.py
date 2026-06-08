@@ -67,20 +67,24 @@ async def test_subagent_function_tool_call_creates_child_tool_part(server_state)
     
     # Should yield PartUpdatedEvent for the ToolPart
     assert len(events) > 0, "FunctionToolCallEvent wrapped in SubAgentEvent should yield events"
-    
-    # Check child session has ToolPart
-    child_messages = server_state.messages.get("child-session", [])
-    assert len(child_messages) >= 1, "Child session should have messages"
-    
-    assistant_msgs = [m for m in child_messages if getattr(m.info, 'role', None) == 'assistant']
-    assert len(assistant_msgs) >= 1, "Child session should have assistant message"
-    
-    tool_parts = [p for m in assistant_msgs for p in m.parts if isinstance(p, ToolPart)]
-    assert len(tool_parts) >= 1, f"Child assistant message should have ToolPart, got parts: {[type(p).__name__ for m in assistant_msgs for p in m.parts]}"
-    
-    tool_part = tool_parts[0]
+
+    # Check yielded events include a PartUpdatedEvent with a ToolPart.
+    # The EventProcessor adds the ToolPart to the child context's assistant_msg
+    # and yields a PartUpdatedEvent; we verify via the emitted events rather
+    # than reading back from session storage (which uses SessionPool helpers).
+    from agentpool_server.opencode_server.models import PartUpdatedEvent
+
+    tool_part_events = [
+        e for e in events
+        if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, ToolPart)
+    ]
+    assert len(tool_part_events) >= 1, (
+        f"Expected PartUpdatedEvent with ToolPart, got events: {events}"
+    )
+
+    tool_part = tool_part_events[0].properties.part
     assert tool_part.tool == "bash", f"Tool should be 'bash', got '{tool_part.tool}'"
-    
+
     print("SUCCESS: Subagent FunctionToolCallEvent creates ToolPart in child session")
 
 

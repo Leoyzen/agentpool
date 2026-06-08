@@ -35,6 +35,7 @@ from agentpool_server.opencode_server.models import (
 from agentpool_server.opencode_server.models.message import MessageWithParts
 from agentpool_server.opencode_server.models.parts import StepFinishPart
 from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
+from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
@@ -133,7 +134,11 @@ def mock_agent_with_event_bus(tmp_project_dir):
 def event_bus_test_state(tmp_project_dir, mock_agent_with_event_bus):
     """Create a server state with EventBus-backed agent."""
     agent, _run_handle, _event_bus = mock_agent_with_event_bus
-    return ServerState(working_dir=str(tmp_project_dir), agent=agent)
+    state = ServerState(working_dir=str(tmp_project_dir), agent=agent)
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    state.messages = {}
+    state.session_status = {}
+    return state
 
 
 @pytest.fixture
@@ -190,8 +195,9 @@ async def test_adapter_receives_events_before_finalize(
     await process_task
 
     # Find the assistant message
+    messages = await get_messages_for_session(state, session_id)
     assistant_msgs = [
-        msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+        msg for msg in messages if isinstance(msg.info, AssistantMessage)
     ]
     assert len(assistant_msgs) == 1
     assistant = assistant_msgs[0].info
@@ -243,8 +249,9 @@ async def test_adapter_response_text_populated_after_finalize(
     run_handle.complete_event.set()
     await process_task
 
+    messages = await get_messages_for_session(state, session_id)
     assistant_msgs = [
-        msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+        msg for msg in messages if isinstance(msg.info, AssistantMessage)
     ]
     assert len(assistant_msgs) == 1
     assistant = assistant_msgs[0].info

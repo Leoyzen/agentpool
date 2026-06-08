@@ -353,9 +353,10 @@ class TestSessionStatus:
         # Create a session
         response = await async_client.post("/session", json={"title": "New Session"})
         session_id = response.json()["id"]
-        # Check internal state
-        assert session_id in server_state.session_status
-        assert server_state.session_status[session_id].type == "idle"
+        # Verify via the public status endpoint: idle sessions are filtered out
+        status_response = await async_client.get("/session/status")
+        assert status_response.status_code == 200
+        assert session_id not in status_response.json()
 
     async def test_abort_session(self, async_client: AsyncClient, server_state: ServerState):
         """Aborting a session should set status to idle."""
