@@ -772,6 +772,19 @@ class SessionController:
             return None
         return self._sessions.get(session.parent_session_id)
 
+    def find_sessions_by_agent_name(self, agent_name: str) -> list[SessionState]:
+        """Find all active sessions associated with a given agent name.
+
+        Args:
+            agent_name: The agent name to search for.
+
+        Returns:
+            List of session states matching the agent name, excluding closing sessions.
+        """
+        return [
+            s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing
+        ]
+
     async def receive_request(
         self,
         session_id: str,

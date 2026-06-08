@@ -623,3 +623,88 @@ async def test_diagnostic_print_session_tree_state() -> None:
     # This assertion documents the bug:
     assert pool.sessions._children != {}, "SessionController knows about children"
     assert pool.event_bus._session_tree == {}, "BUG: EventBus._session_tree is empty"
+
+
+@pytest.mark.integration
+async def test_shared_agent_inject_prompt_fallback_triggers_auto_resume() -> None:
+    """Shared agent inject_prompt without session_id MUST fallback to SessionPool auto-resume.
+
+    Scenario (real-world from BackgroundTaskProvider):
+      1. A shared agent (no fixed session_id) runs a turn via SessionPool
+      2. The turn completes, session becomes idle
+      3. A background task completes and calls agent.inject_prompt("notice")
+         WITHOUT passing session_id
+      4. agent.inject_prompt has no active run_ctx and _events.session_id is None
+      5. Fallback: find the most recently active session for this agent in SessionPool
+      6. Trigger auto-resume via session_pool.receive_request
+
+    EXPECTED: Auto-resume triggers and processes the injected message.
+    """
+    agent_config = NativeAgentConfig(
+        name="test_agent",
+        model="test",
+        system_prompt="You are a test agent",
+    )
+    manifest = AgentsManifest(agents={"test_agent": agent_config})
+
+    async with AgentPool(manifest, enable_session_pool=True) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+
+        session_id = "test-session"
+        await session_pool.create_session(session_id, agent_name="test_agent")
+
+        # Subscribe to EventBus to consume events
+        event_queue = await session_pool.event_bus.subscribe(session_id)
+        events: list[Any] = []
+
+        async def _consume_events() -> None:
+            while True:
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                    if event is None:
+                        break
+                    events.append(event)
+                except asyncio.TimeoutError:
+                    break
+
+        consumer_task = asyncio.create_task(_consume_events())
+
+        # 1. Process initial prompt via run_loop
+        await session_pool.process_prompt(session_id, "hello")
+
+        # Wait for consumer to collect initial turn events
+        await asyncio.sleep(0.2)
+
+        # 2. Get the shared agent from pool (simulates ctx.agent in BackgroundTaskProvider)
+        shared_agent = pool.get_agent("test_agent")
+        # Verify shared agent has no fixed session_id
+        assert shared_agent._events.session_id is None, (
+            "Shared agent should not have a fixed session_id for this test"
+        )
+
+        # 3. Call inject_prompt WITHOUT session_id (simulates BackgroundTaskProvider)
+        shared_agent.inject_prompt("bg task completed")
+
+        # 4. Wait for auto-resume to process the injection
+        await asyncio.sleep(0.2)
+
+        # Cancel consumer
+        consumer_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await consumer_task
+
+        # Check that auto-resume was triggered: we should see events from
+        # the initial turn AND from the auto-resume turn.
+        run_started_events = [e for e in events if isinstance(e, RunStartedEvent)]
+        assert len(run_started_events) >= 2, (
+            f"Expected at least 2 RunStartedEvent (initial + auto-resume), got {len(run_started_events)}. "
+            f"Fallback auto-resume did not trigger after inject_prompt. "
+            f"Events: {[type(e).__name__ for e in events]}"
+        )
+
+        # Verify we got at least 2 StreamCompleteEvent (one per run)
+        stream_complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        assert len(stream_complete_events) >= 2, (
+            f"Expected at least 2 StreamCompleteEvent, got {len(stream_complete_events)}"
+        )
