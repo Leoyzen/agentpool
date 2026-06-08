@@ -42,9 +42,7 @@ async def test_ensure_input_provider_stores_on_session_state():
 
     provider = state.ensure_input_provider("test-session")
 
-    # Provider should be stored on ServerState for backward compat
-    assert state.input_providers["test-session"] is provider
-    # Provider should ALSO be stored on SessionState
+    # Provider should be stored on SessionState
     assert session.input_provider is provider
     assert isinstance(provider, OpenCodeInputProvider)
 
@@ -85,8 +83,6 @@ async def test_list_permissions_reads_from_session_controller():
     assert result[0].id == "perm-1"
     assert result[0].session_id == "sess-1"
     assert result[0].permission == "bash"
-    # Verify legacy input_providers was NOT used
-    assert len(state.input_providers) == 0
 
 
 async def test_reply_to_permission_resolves_via_session_controller():
@@ -238,7 +234,6 @@ async def test_legacy_fallback_without_session_controller():
 
     state = ServerState(working_dir="/tmp", agent=mock_agent)
     provider = OpenCodeInputProvider(state=state, session_id="sess-legacy")
-    state.input_providers["sess-legacy"] = provider
 
     future = asyncio.get_running_loop().create_future()
     provider._pending_permissions["perm-legacy"] = PendingPermission(
@@ -247,7 +242,12 @@ async def test_legacy_fallback_without_session_controller():
         args={"command": "echo legacy"},
         future=future,
     )
-    state.broadcast_event = AsyncMock()  # type: ignore[method-assign]
+    broadcast_calls = []
+
+    async def _mock_broadcast(event):
+        broadcast_calls.append(event)
+
+    state.broadcast_event = _mock_broadcast
 
     # list_permissions returns empty when no session_controller
     result = await list_permissions(state)

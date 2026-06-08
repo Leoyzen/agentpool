@@ -21,6 +21,17 @@ from agentpool_server.opencode_server.routes.question_routes import (
 from agentpool_server.opencode_server.state import ServerState
 
 
+def _make_mock_session_controller(session_id: str) -> Mock:
+    """Create a mock SessionController with a SessionState for the given session."""
+    from agentpool.orchestrator.core import SessionState
+
+    session = SessionState(session_id=session_id, agent_name="test-agent")
+    controller = Mock()
+    controller.get_session = Mock(return_value=session)
+    controller._sessions = {session_id: session}
+    return controller
+
+
 async def test_question_elicitation_single_select():
     """Test single-select question via elicitation."""
     # This is a basic unit test without full server
@@ -29,6 +40,7 @@ async def test_question_elicitation_single_select():
     mock_agent.agent_pool = None
     # Create minimal state
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     # Create provider
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
     # Create elicitation params with enum
@@ -43,9 +55,10 @@ async def test_question_elicitation_single_select():
     # Wait a bit for question to be created
     await asyncio.sleep(0.1)
     # Verify question was created
-    assert len(state.pending_questions) == 1
-    question_id = next(iter(state.pending_questions.keys()))
-    pending = state.pending_questions[question_id]
+    session = state.session_controller.get_session("test_session")
+    assert len(session.pending_questions) == 1
+    question_id = next(iter(session.pending_questions.keys()))
+    pending = session.pending_questions[question_id]
     # Verify question structure
     assert pending.session_id == "test_session"
     assert len(pending.questions) == 1
@@ -63,7 +76,7 @@ async def test_question_elicitation_single_select():
     assert result.action == "accept"
     assert result.content == {"value": "PostgreSQL"}
     # Verify cleanup
-    assert question_id not in state.pending_questions
+    assert question_id not in session.pending_questions
 
 
 async def test_question_elicitation_multi_select():
@@ -71,6 +84,7 @@ async def test_question_elicitation_multi_select():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
     # Multi-select schema
     schema = {"type": "array", "items": {"type": "string", "enum": ["Auth", "API", "Admin"]}}
@@ -78,8 +92,9 @@ async def test_question_elicitation_multi_select():
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
     # Get question
-    question_id = next(iter(state.pending_questions.keys()))
-    pending = state.pending_questions[question_id]
+    session = state.session_controller.get_session("test_session")
+    question_id = next(iter(session.pending_questions.keys()))
+    pending = session.pending_questions[question_id]
     question_info = pending.questions[0]
     # Verify multi-select flag
     assert question_info.multiple is True
@@ -97,14 +112,16 @@ async def test_question_cancellation():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
     schema = {"type": "string", "enum": ["PostgreSQL", "MySQL"]}
     params = types.ElicitRequestFormParams(message="Which database?", requestedSchema=schema)
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
     # Get question and cancel it
-    question_id = next(iter(state.pending_questions.keys()))
-    future = state.pending_questions[question_id].future
+    session = state.session_controller.get_session("test_session")
+    question_id = next(iter(session.pending_questions.keys()))
+    future = session.pending_questions[question_id].future
     future.cancel()
     result = await task
     # Should return cancel action
@@ -117,6 +134,7 @@ async def test_question_with_descriptions():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
     # Schema with custom descriptions
     schema = {
@@ -132,14 +150,15 @@ async def test_question_with_descriptions():
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
     # Verify descriptions were included
-    question_id = next(iter(state.pending_questions.keys()))
-    question_info = state.pending_questions[question_id].questions[0]
+    session = state.session_controller.get_session("test_session")
+    question_id = next(iter(session.pending_questions.keys()))
+    question_info = session.pending_questions[question_id].questions[0]
     options = question_info.options
     assert options[0].label == "PostgreSQL"
     assert options[0].description == "Best for production"
     assert options[1].description == "Compatible with many tools"
     # Clean up
-    future = state.pending_questions[question_id].future
+    future = session.pending_questions[question_id].future
     future.cancel()
     await task
 
@@ -159,6 +178,7 @@ async def test_multi_question_rfc0010_example():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
 
     # RFC-0010 example schema with q0, q1 format
@@ -188,9 +208,10 @@ async def test_multi_question_rfc0010_example():
     await asyncio.sleep(0.1)
 
     # Verify question was created with multiple questions
-    assert len(state.pending_questions) == 1
-    question_id = next(iter(state.pending_questions.keys()))
-    pending = state.pending_questions[question_id]
+    session = state.session_controller.get_session("test_session")
+    assert len(session.pending_questions) == 1
+    question_id = next(iter(session.pending_questions.keys()))
+    pending = session.pending_questions[question_id]
 
     # Verify 2 questions created
     assert len(pending.questions) == 2
@@ -225,7 +246,7 @@ async def test_multi_question_rfc0010_example():
     assert result.action == "accept"
     assert result.content == {"q0": "opt1", "q1": ["val1", "val2"]}
 
-    assert question_id not in state.pending_questions
+    assert question_id not in session.pending_questions
 
 
 async def test_multi_question_cancellation():
@@ -233,6 +254,7 @@ async def test_multi_question_cancellation():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
 
     # Multi-question schema with 3 questions
@@ -260,8 +282,9 @@ async def test_multi_question_cancellation():
     await asyncio.sleep(0.1)
 
     # Get question and cancel it
-    question_id = next(iter(state.pending_questions.keys()))
-    future = state.pending_questions[question_id].future
+    session = state.session_controller.get_session("test_session")
+    question_id = next(iter(session.pending_questions.keys()))
+    future = session.pending_questions[question_id].future
     future.cancel()
 
     result = await task
@@ -276,9 +299,16 @@ async def test_question_reply_can_resolve_permission_request():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
-    state.input_providers["test_session"] = provider
-    state.broadcast_event = AsyncMock()
+    session = state.session_controller.get_session("test_session")
+    session.input_provider = provider
+    broadcast_calls = []
+
+    async def _mock_broadcast(event):
+        broadcast_calls.append(event)
+
+    state.broadcast_event = _mock_broadcast
 
     permission_id = "perm_1_1776434635956"
     future = asyncio.get_running_loop().create_future()
@@ -298,8 +328,8 @@ async def test_question_reply_can_resolve_permission_request():
     assert result is True
     assert future.done()
     assert future.result() == "once"
-    assert state.broadcast_event.await_count == 1
-    event = state.broadcast_event.await_args.args[0]
+    assert len(broadcast_calls) == 1
+    event = broadcast_calls[0]
     assert isinstance(event, PermissionResolvedEvent)
     assert event.properties.request_id == permission_id
     assert event.properties.reply == "once"
@@ -310,9 +340,16 @@ async def test_question_reject_can_resolve_permission_request():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
-    state.input_providers["test_session"] = provider
-    state.broadcast_event = AsyncMock()
+    session = state.session_controller.get_session("test_session")
+    session.input_provider = provider
+    broadcast_calls = []
+
+    async def _mock_broadcast(event):
+        broadcast_calls.append(event)
+
+    state.broadcast_event = _mock_broadcast
 
     permission_id = "perm_2_1776434635957"
     future = asyncio.get_running_loop().create_future()
@@ -328,8 +365,8 @@ async def test_question_reject_can_resolve_permission_request():
     assert result is True
     assert future.done()
     assert future.result() == "reject"
-    assert state.broadcast_event.await_count == 1
-    event = state.broadcast_event.await_args.args[0]
+    assert len(broadcast_calls) == 1
+    event = broadcast_calls[0]
     assert isinstance(event, PermissionResolvedEvent)
     assert event.properties.request_id == permission_id
     assert event.properties.reply == "reject"
@@ -340,8 +377,14 @@ async def test_permission_request_uses_permission_prefix():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
-    state.broadcast_event = AsyncMock()
+    broadcast_calls = []
+
+    async def _mock_broadcast(event):
+        broadcast_calls.append(event)
+
+    state.broadcast_event = _mock_broadcast
 
     context = Mock()
     context.tool_name = "bash"
@@ -351,8 +394,8 @@ async def test_permission_request_uses_permission_prefix():
     task = asyncio.create_task(provider.get_tool_confirmation(context))
     await asyncio.sleep(0.1)
 
-    assert state.broadcast_event.await_count == 1
-    event = state.broadcast_event.await_args.args[0]
+    assert len(broadcast_calls) == 1
+    event = broadcast_calls[0]
     assert isinstance(event, PermissionRequestEvent)
     assert event.properties.id.startswith("perm_")
 
@@ -368,6 +411,7 @@ async def test_multi_question_partial_answers():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
 
     # Schema with 3 questions
@@ -384,7 +428,8 @@ async def test_multi_question_partial_answers():
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
 
-    question_id = next(iter(state.pending_questions.keys()))
+    session = state.session_controller.get_session("test_session")
+    question_id = next(iter(session.pending_questions.keys()))
 
     # Provide only 2 answers for 3 questions
     success = provider.resolve_question(question_id, [["x"], ["m"]])
@@ -396,7 +441,7 @@ async def test_multi_question_partial_answers():
     assert result.action == "accept"
     # Only first 2 properties should have answers
     assert result.content == {"a": "x", "b": "m"}
-    assert question_id not in state.pending_questions
+    assert question_id not in session.pending_questions
 
 
 async def test_multi_question_empty_object_declines():
@@ -423,6 +468,7 @@ async def test_multi_question_rfc0010_backward_compat():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
 
     # Single property schema (should still use multi-question handler per Task 4)
@@ -442,9 +488,10 @@ async def test_multi_question_rfc0010_backward_compat():
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
 
-    assert len(state.pending_questions) == 1
-    question_id = next(iter(state.pending_questions.keys()))
-    pending = state.pending_questions[question_id]
+    session = state.session_controller.get_session("test_session")
+    assert len(session.pending_questions) == 1
+    question_id = next(iter(session.pending_questions.keys()))
+    pending = session.pending_questions[question_id]
     assert question_id.startswith("que_")
 
     # Single question in multi-question format
@@ -526,6 +573,7 @@ async def test_multi_question_max_limit():
     mock_agent = Mock()
     mock_agent.agent_pool = None
     state = ServerState(working_dir="/tmp", agent=mock_agent)
+    state.session_controller = _make_mock_session_controller("test_session")
     provider = OpenCodeInputProvider(state=state, session_id="test_session")
 
     # Create schema with 12 properties (exceeds max)
@@ -538,8 +586,9 @@ async def test_multi_question_max_limit():
     task = asyncio.create_task(provider.get_elicitation(params))
     await asyncio.sleep(0.1)
 
-    question_id = next(iter(state.pending_questions.keys()))
-    pending = state.pending_questions[question_id]
+    session = state.session_controller.get_session("test_session")
+    question_id = next(iter(session.pending_questions.keys()))
+    pending = session.pending_questions[question_id]
 
     # Should be limited to 10 questions
     assert len(pending.questions) == 10

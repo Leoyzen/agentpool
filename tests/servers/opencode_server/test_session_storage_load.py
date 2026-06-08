@@ -61,6 +61,9 @@ def mock_state_and_broadcast(
     agent.conversation = conversation
 
     state = ServerState(working_dir=str(tmp_path), agent=agent)
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    # so tests and helper fallbacks can access them.
+    state.messages = {}  # type: ignore[attr-defined]
     # Override broadcast_event with an AsyncMock so we can assert calls
     broadcast_mock = AsyncMock()
     state.broadcast_event = broadcast_mock  # type: ignore[method-assign]
@@ -82,7 +85,7 @@ async def test_cold_load_broadcasts_session_updated_event(
 
     # Pre-condition: session is NOT in cache, so cold load path is taken
     assert session_id not in mock_state.sessions
-    assert session_id not in mock_state.messages
+    assert session_id not in mock_state.messages  # type: ignore[attr-defined]
 
     result = await get_or_load_session(mock_state, session_id)
 

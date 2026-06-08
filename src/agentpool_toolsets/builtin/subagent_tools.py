@@ -20,7 +20,6 @@ from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import (
     SpawnSessionStart,
     StreamCompleteEvent,
-    SubAgentEvent,
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
@@ -249,9 +248,8 @@ class SubagentTools(StaticResourceProvider):
                     async for event in session_pool.run_stream(
                         child_session_id, prompt, input_provider=input_provider
                     ):
-                        inner = event.event if isinstance(event, SubAgentEvent) else event
-                        if isinstance(inner, StreamCompleteEvent):
-                            content = inner.message.content
+                        if isinstance(event, StreamCompleteEvent):
+                            content = event.message.content
                             final_content = str(content) if content else ""
                 except Exception:
                     logger.exception("Async task failed", task_id=task_id, agent=agent_or_team)
@@ -291,9 +289,8 @@ class SubagentTools(StaticResourceProvider):
         async for event in session_pool.run_stream(
             child_session_id, prompt, input_provider=input_provider
         ):
-            inner = event.event if isinstance(event, SubAgentEvent) else event
-            if isinstance(inner, StreamCompleteEvent):
-                content = inner.message.content
+            if isinstance(event, StreamCompleteEvent):
+                content = event.message.content
                 final_content = str(content) if content else ""
 
         return {

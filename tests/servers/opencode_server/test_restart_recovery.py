@@ -41,30 +41,17 @@ class TestRestartRecovery:
             metadata={"title": "Recovered Session"},
         )
 
-        server_state.agent.session_id = None
-        server_state.agent._input_provider = None
-        server_state.agent.conversation = Mock()
-        server_state.agent.conversation.chat_messages = []
-
-        async def mock_load_session(sid: str) -> SessionData | None:
-            if sid == session_id:
-                return session_data
-            return None
-
-        server_state.agent.load_session = mock_load_session  # type: ignore[method-assign]
+        # Persist the session so the store-first path in get_or_load_session finds it.
+        await server_state.pool.storage.save_session(session_data)
 
         loaded_session = await get_or_load_session(server_state, session_id)
 
         assert loaded_session is not None
         assert loaded_session.id == session_id
         assert loaded_session.directory == str(tmp_project_dir)
-        assert server_state.agent.session_id == session_id
-        assert server_state.agent._input_provider is server_state.input_providers[session_id]
         assert session_id in server_state.sessions
-        assert server_state.messages[session_id] == []
         assert server_state.reverted_messages[session_id] == []
-        assert server_state.todos[session_id] == []
-        assert server_state.session_status[session_id].type == "idle"
+        assert server_state.session_status[session_id].type == "idle"  # type: ignore[attr-defined]
 
         status_events = [
             event

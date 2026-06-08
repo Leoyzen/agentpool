@@ -227,6 +227,7 @@ class TestShellSessionStatus:
         self,
         async_client,
         server_state,
+        event_capture,
     ):
         """Session should return to idle after command completes."""
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
@@ -241,8 +242,9 @@ class TestShellSessionStatus:
             json={"agent": "test", "command": "echo test"},
         )
 
-        # Check final session status
-        assert server_state.session_status[session_id].type == "idle"
+        # Check final session status via broadcast events
+        status_events = event_capture.get_events_by_type("session.status")
+        assert status_events[-1].properties.status.type == "idle"
 
     async def test_cancelled_shell_command_still_unlocks_session(
         self,
@@ -262,7 +264,6 @@ class TestShellSessionStatus:
                 server_state,
             )
 
-        assert server_state.session_status[session_id].type == "idle"
         status_events = event_capture.get_events_by_type("session.status")
         idle_events = event_capture.get_events_by_type("session.idle")
         assert status_events[-1].properties.status.type == "idle"

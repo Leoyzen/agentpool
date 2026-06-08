@@ -133,6 +133,8 @@ def slow_mock_agent():
     pool.session_pool = Mock()
     pool.session_pool.sessions = Mock()
     pool.session_pool.sessions.store = None
+    # Ensure get_messages returns [] so get_messages_for_session falls back to state.messages
+    pool.session_pool.get_messages = AsyncMock(return_value=[])
 
     # Mock SessionPool methods that are awaited in _process_message_locked
     pool.session_pool.sessions.get_or_create_session = AsyncMock(
@@ -207,10 +209,17 @@ def slow_mock_agent():
 @pytest.fixture
 def concurrent_test_state(tmp_project_dir, slow_mock_agent):
     """Create a server state with slow agent for concurrency testing."""
-    return ServerState(
+    state = ServerState(
         working_dir=str(tmp_project_dir),
         agent=slow_mock_agent,
     )
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    state.messages = {}
+    state.session_status = {}
+    state.todos = {}
+    state.input_providers = {}
+    state.pending_questions = {}
+    return state
 
 
 @pytest.fixture
@@ -312,9 +321,6 @@ class TestConcurrentMessageHandling:
         # Create session
         await ensure_session(state, session_id)
 
-        # Initial status should be idle
-        assert state.session_status[session_id].type == "idle"
-
         # Track status changes
         status_history = []
         original_broadcast = state.broadcast_event
@@ -329,11 +335,14 @@ class TestConcurrentMessageHandling:
         # Process a message
         await _process_message(session_id, sample_message_request, state)
 
-        # Final status should be idle
-        assert state.session_status[session_id].type == "idle"
+        # Final status should be idle (set by set_session_status fallback)
+        final_status = state.session_status.get(session_id)
+        assert final_status is not None and final_status.type == "idle", (
+            f"Expected idle status after processing, got {final_status}"
+        )
 
         # Verify status transitioned through busy
-        status_types = [s.type for s in state.session_status.values()]
+        status_types = [s.type for s in state.session_status.values() if s is not None]
         assert "busy" in status_types or any("busy" in str(h) for h in status_history)
 
     @pytest.mark.asyncio

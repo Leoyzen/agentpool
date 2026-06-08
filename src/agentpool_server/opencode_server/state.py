@@ -332,8 +332,10 @@ class ServerState:
     async def mark_session_idle(self, session_id: str) -> None:
         """Mark a session idle and broadcast the matching status events."""
         from agentpool_server.opencode_server.models import SessionIdleEvent, SessionStatusEvent
+        from agentpool_server.opencode_server.session_pool_integration import set_session_status
 
         status = SessionStatus(type="idle")
+        await set_session_status(self, session_id, status)
         await self.broadcast_event(SessionStatusEvent.create(session_id, status))
         await self.broadcast_event(SessionIdleEvent.create(session_id))
 

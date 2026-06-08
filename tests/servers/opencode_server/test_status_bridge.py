@@ -54,6 +54,15 @@ async def test_run_started_broadcasts_busy(
     server_state: ServerState,
 ) -> None:
     """RunStartedEvent triggers a busy status broadcast."""
+    broadcasted: list[Any] = []
+    original_broadcast = server_state.broadcast_event
+
+    async def _capture_broadcast(event: Any) -> None:
+        broadcasted.append(event)
+        await original_broadcast(event)
+
+    server_state.broadcast_event = _capture_broadcast  # type: ignore[method-assign]
+
     await bridge.start()
 
     await event_bus.publish(
@@ -64,9 +73,9 @@ async def test_run_started_broadcasts_busy(
     # Give the consumer task a chance to process
     await asyncio.sleep(0.05)
 
-    status = server_state.session_status.get("test-session")
-    assert status is not None
-    assert status.type == "busy"
+    status_events = [e for e in broadcasted if isinstance(e, SessionStatusEvent)]
+    assert len(status_events) == 1
+    assert status_events[0].properties.status.type == "busy"
 
     await bridge.stop()
 
@@ -78,10 +87,16 @@ async def test_stream_complete_broadcasts_idle(
     server_state: ServerState,
 ) -> None:
     """StreamCompleteEvent triggers an idle status broadcast."""
-    await bridge.start()
+    broadcasted: list[Any] = []
+    original_broadcast = server_state.broadcast_event
 
-    # Set initial busy state
-    server_state.session_status["test-session"] = SessionStatus(type="busy")
+    async def _capture_broadcast(event: Any) -> None:
+        broadcasted.append(event)
+        await original_broadcast(event)
+
+    server_state.broadcast_event = _capture_broadcast  # type: ignore[method-assign]
+
+    await bridge.start()
 
     msg = Mock()
     msg.content = "done"
@@ -92,9 +107,9 @@ async def test_stream_complete_broadcasts_idle(
 
     await asyncio.sleep(0.05)
 
-    status = server_state.session_status.get("test-session")
-    assert status is not None
-    assert status.type == "idle"
+    status_events = [e for e in broadcasted if isinstance(e, SessionStatusEvent)]
+    assert len(status_events) == 1
+    assert status_events[0].properties.status.type == "idle"
 
     await bridge.stop()
 
@@ -107,10 +122,16 @@ async def test_run_failed_broadcasts_idle_and_error(
     event_capture: Any,
 ) -> None:
     """RunFailedEvent triggers idle status and error event broadcast."""
-    await bridge.start()
+    broadcasted: list[Any] = []
+    original_broadcast = server_state.broadcast_event
 
-    # Set initial busy state
-    server_state.session_status["test-session"] = SessionStatus(type="busy")
+    async def _capture_broadcast(event: Any) -> None:
+        broadcasted.append(event)
+        await original_broadcast(event)
+
+    server_state.broadcast_event = _capture_broadcast  # type: ignore[method-assign]
+
+    await bridge.start()
 
     exc = RuntimeError("something went wrong")
     await event_bus.publish(
@@ -120,9 +141,9 @@ async def test_run_failed_broadcasts_idle_and_error(
 
     await asyncio.sleep(0.05)
 
-    status = server_state.session_status.get("test-session")
-    assert status is not None
-    assert status.type == "idle"
+    status_events = [e for e in broadcasted if isinstance(e, SessionStatusEvent)]
+    assert len(status_events) == 1
+    assert status_events[0].properties.status.type == "idle"
 
     # Verify error event was broadcast
     error_events = [e for e in event_capture.events if isinstance(e, SessionErrorEvent)]
@@ -140,9 +161,16 @@ async def test_unknown_event_ignored(
     server_state: ServerState,
 ) -> None:
     """Unknown events do not change session status."""
-    await bridge.start()
+    broadcasted: list[Any] = []
+    original_broadcast = server_state.broadcast_event
 
-    server_state.session_status["test-session"] = SessionStatus(type="idle")
+    async def _capture_broadcast(event: Any) -> None:
+        broadcasted.append(event)
+        await original_broadcast(event)
+
+    server_state.broadcast_event = _capture_broadcast  # type: ignore[method-assign]
+
+    await bridge.start()
 
     class UnknownEvent:
         pass
@@ -150,9 +178,8 @@ async def test_unknown_event_ignored(
     await event_bus.publish("test-session", UnknownEvent())
     await asyncio.sleep(0.05)
 
-    status = server_state.session_status.get("test-session")
-    assert status is not None
-    assert status.type == "idle"
+    status_events = [e for e in broadcasted if isinstance(e, SessionStatusEvent)]
+    assert len(status_events) == 0
 
     await bridge.stop()
 

@@ -523,6 +523,13 @@ def _make_mock_state_with_session_agent(
         agent=shared_agent,  # type: ignore[arg-type]
     )
 
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    # so tests and helper fallbacks can access them.
+    state.messages = {}  # type: ignore[attr-defined]
+    state.session_status = {}  # type: ignore[attr-defined]
+    state.todos = {}  # type: ignore[attr-defined]
+    state.input_providers = {}  # type: ignore[attr-defined]
+
     # Pre-populate sessions in state
     for session_id in session_agents:
         from agentpool_server.opencode_server.models import Session
@@ -538,8 +545,8 @@ def _make_mock_state_with_session_agent(
             time=TimeCreatedUpdated(created=now, updated=now),
         )
         state.sessions[session_id] = session
-        state.messages[session_id] = []
-        state.session_status[session_id] = SessionStatus(type="idle")
+        state.messages[session_id] = []  # type: ignore[attr-defined]
+        state.session_status[session_id] = SessionStatus(type="idle")  # type: ignore[attr-defined]
 
     return state, pool
 
