@@ -113,7 +113,7 @@ async def get_messages_for_session(
                     )
                     for chat_msg in sp_messages
                 ]
-    return state.messages.get(session_id, [])
+    return getattr(state, "messages", {}).get(session_id, [])
 
 
 async def append_message_to_session(
@@ -211,7 +211,7 @@ async def get_session_status(
         if integration is not None:
             return await integration.get_session_status(session_id)
 
-    return state.session_status.get(session_id)
+    return getattr(state, "session_status", {}).get(session_id)
 
 
 def _session_state_to_opencode(state: SessionState) -> Session:
@@ -651,10 +651,7 @@ class OpenCodeSessionPoolIntegration:
                 if run_handle is not None and run_handle.status.value in ("pending", "running"):
                     return SessionStatus(type="busy")
 
-        status = self.server_state.session_status.get(session_id)
-        if status is None:
-            status = SessionStatus(type="idle")
-        return status
+        return SessionStatus(type="idle")
 
     async def shutdown(self) -> None:
         """Shutdown the integration and stop all consumers and bridges."""
@@ -789,10 +786,10 @@ class OpenCodeSessionPoolIntegration:
                     # Record spawn info for later ToolPart updates
                     child_spawns[event.child_session_id] = event
                     # Ensure assistant message is registered before creating
-                    # ToolPart, since _create_subagent_tool_part looks it up in
-                    # server_state.messages.
+                    # ToolPart, since _create_subagent_tool_part looks it up via
+                    # get_messages_for_session.
                     if not message_registered:
-                        self.server_state.messages.setdefault(session_id, []).append(assistant_msg)
+                        await append_message_to_session(self.server_state, session_id, assistant_msg)
                         await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
                         message_registered = True
                     # Create ToolPart in parent session before spawning child
@@ -847,7 +844,7 @@ class OpenCodeSessionPoolIntegration:
                 # can render parts. Without this, PartUpdatedEvents are
                 # ignored because the message store lacks the entry.
                 if not message_registered:
-                    self.server_state.messages.setdefault(session_id, []).append(assistant_msg)
+                    await append_message_to_session(self.server_state, session_id, assistant_msg)
                     await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
                     message_registered = True
 
@@ -887,7 +884,7 @@ class OpenCodeSessionPoolIntegration:
             The created ToolPart, or None if one already exists for this child.
         """
         # Find the parent session's latest assistant message
-        messages = self.server_state.messages.get(parent_session_id, [])
+        messages = await get_messages_for_session(self.server_state, parent_session_id)
         assistant_msg = None
         for msg in reversed(messages):
             if msg.info.role == "assistant":
@@ -960,7 +957,7 @@ class OpenCodeSessionPoolIntegration:
             spawn_event: The spawn event containing subagent metadata.
             event: The StreamCompleteEvent from the child.
         """
-        messages = self.server_state.messages.get(parent_session_id, [])
+        messages = await get_messages_for_session(self.server_state, parent_session_id)
         assistant_msg = None
         for msg in reversed(messages):
             if msg.info.role == "assistant":
@@ -1048,7 +1045,7 @@ class OpenCodeSessionPoolIntegration:
             spawn_event: The spawn event containing subagent metadata.
             event: The RunErrorEvent from the child.
         """
-        messages = self.server_state.messages.get(parent_session_id, [])
+        messages = await get_messages_for_session(self.server_state, parent_session_id)
         assistant_msg = None
         for msg in reversed(messages):
             if msg.info.role == "assistant":

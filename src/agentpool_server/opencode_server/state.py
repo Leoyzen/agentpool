@@ -33,7 +33,6 @@ if TYPE_CHECKING:
         MessageWithParts,
         QuestionInfo,
         Session,
-        Todo,
     )
     from agentpool_server.opencode_server.models.question import QuestionToolInfo
     from agentpool_server.opencode_server.routes.global_routes import GlobalEventFactory
@@ -72,14 +71,9 @@ class ServerState:
     start_time: float = field(default_factory=time.time)
     config: Config | None = None
     sessions: dict[str, Session] = field(default_factory=dict)
-    session_status: dict[str, SessionStatus] = field(default_factory=dict)
     session_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     agent_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
     reverted_messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
-    todos: dict[str, list[Todo]] = field(default_factory=dict)
-    input_providers: dict[str, OpenCodeInputProvider] = field(default_factory=dict)
-    pending_questions: dict[str, PendingQuestion] = field(default_factory=dict)
     event_subscribers: list[asyncio.Queue[Event]] = field(default_factory=list)
     _event_factory: GlobalEventFactory | None = field(default=None, repr=False)
     on_first_subscriber: OnFirstSubscriberCallback | None = None
@@ -175,9 +169,7 @@ class ServerState:
         persisted storage after a server restart. Cold-start recovery should not
         depend on individual routes remembering to initialize each bucket.
         """
-        self.messages.setdefault(session_id, [])
         self.reverted_messages.setdefault(session_id, [])
-        self.todos.setdefault(session_id, [])
 
     @property
     def fs(self) -> AsyncFileSystem:
@@ -245,16 +237,18 @@ class ServerState:
     def ensure_input_provider(self, session_id: str) -> OpenCodeInputProvider:
         """Get or create the OpenCode input provider for a session.
 
-        Stores the provider on both ServerState (backward compat) and
-        SessionState (via SessionController) when available.
+        Stores the provider on SessionState (via SessionController) when available.
         """
         from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 
-        input_provider = self.input_providers.get(session_id)
+        input_provider = None
+        if self.session_controller is not None:
+            session = self.session_controller.get_session(session_id)
+            if session is not None:
+                input_provider = session.input_provider
+
         if input_provider is None:
             input_provider = OpenCodeInputProvider(self, session_id)
-            self.input_providers[session_id] = input_provider
-            # Also store on SessionState when session_controller is available
             if self.session_controller is not None:
                 session = self.session_controller.get_session(session_id)
                 if session is not None:
@@ -291,23 +285,13 @@ class ServerState:
         """Cancel pending questions for a specific session and return their IDs."""
         if self.session_controller is not None:
             return self.session_controller.cancel_session_pending_questions(session_id)
-        cancelled_ids: list[str] = []
-        for question_id, pending in list(self.pending_questions.items()):
-            if pending.session_id == session_id and not pending.future.done():
-                pending.future.cancel()
-                cancelled_ids.append(question_id)
-        return cancelled_ids
+        return []
 
     def cancel_all_pending_questions(self) -> list[str]:
         """Cancel all pending questions and return their IDs."""
         if self.session_controller is not None:
             return self.session_controller.cancel_all_pending_questions()
-        cancelled_ids: list[str] = []
-        for question_id, pending in self.pending_questions.items():
-            if not pending.future.done():
-                pending.future.cancel()
-                cancelled_ids.append(question_id)
-        return cancelled_ids
+        return []
 
     async def cleanup_tasks(self) -> None:
         """Cancel and wait for all background tasks."""
@@ -340,11 +324,6 @@ class ServerState:
         that events are also republished to the SessionPool EventBus.
         Otherwise falls back to the original SSE-only path.
         """
-        from agentpool_server.opencode_server.models.events import SessionStatusEvent
-
-        if isinstance(event, SessionStatusEvent):
-            self.session_status[event.properties.session_id] = event.properties.status
-
         if self.event_bridge is not None:
             await self.event_bridge.publish(event)
         else:
@@ -355,7 +334,6 @@ class ServerState:
         from agentpool_server.opencode_server.models import SessionIdleEvent, SessionStatusEvent
 
         status = SessionStatus(type="idle")
-        self.session_status[session_id] = status
         await self.broadcast_event(SessionStatusEvent.create(session_id, status))
         await self.broadcast_event(SessionIdleEvent.create(session_id))
 
