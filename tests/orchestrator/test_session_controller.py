@@ -80,8 +80,9 @@ async def test_get_or_create_session_creates_new(
     controller: SessionController,
 ) -> None:
     """A new session is created when the session_id is unknown."""
-    state = await controller.get_or_create_session("sess-1", agent_name="agent-a")
+    state, was_created = await controller.get_or_create_session("sess-1", agent_name="agent-a")
     assert isinstance(state, SessionState)
+    assert was_created is True
     assert state.session_id == "sess-1"
     assert state.agent_name == "agent-a"
     assert state.closed_at is None
@@ -93,9 +94,11 @@ async def test_get_or_create_session_returns_existing(
     controller: SessionController,
 ) -> None:
     """Calling get_or_create_session with the same ID returns the existing state."""
-    first = await controller.get_or_create_session("sess-1", agent_name="agent-a")
-    second = await controller.get_or_create_session("sess-1")
+    first, first_created = await controller.get_or_create_session("sess-1", agent_name="agent-a")
+    second, second_created = await controller.get_or_create_session("sess-1")
     assert first is second
+    assert first_created is True
+    assert second_created is False
 
 
 @pytest.mark.anyio
@@ -103,10 +106,10 @@ async def test_get_or_create_session_updates_last_active(
     controller: SessionController,
 ) -> None:
     """last_active_at is refreshed when an existing session is retrieved."""
-    state = await controller.get_or_create_session("sess-1")
+    state, _ = await controller.get_or_create_session("sess-1")
     old_ts = state.last_active_at
     await asyncio.sleep(0.01)
-    state2 = await controller.get_or_create_session("sess-1")
+    state2, _ = await controller.get_or_create_session("sess-1")
     assert state2.last_active_at > old_ts
 
 
@@ -117,7 +120,7 @@ async def test_get_or_create_session_defaults_to_main_agent(
 ) -> None:
     """When agent_name is omitted, the main agent name is used."""
     mock_pool.main_agent.name = "fallback"
-    state = await controller.get_or_create_session("sess-1")
+    state, _ = await controller.get_or_create_session("sess-1")
     assert state.agent_name == "fallback"
 
 
@@ -126,8 +129,55 @@ async def test_get_or_create_session_stores_metadata(
     controller: SessionController,
 ) -> None:
     """Arbitrary keyword metadata is stored on the session state."""
-    state = await controller.get_or_create_session("sess-1", user_id="u42")
+    state, _ = await controller.get_or_create_session("sess-1", user_id="u42")
     assert state.metadata == {"user_id": "u42"}
+
+
+# ---------------------------------------------------------------------------
+# list_sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_list_sessions_returns_session_info(
+    controller: SessionController,
+) -> None:
+    """list_sessions returns SessionInfo DTOs for all active sessions."""
+    from agentpool_server.opencode_server.models.session_info import SessionInfo
+
+    await controller.get_or_create_session("sess-1", agent_name="agent-a")
+    await controller.get_or_create_session("sess-2", agent_name="agent-b")
+
+    infos = controller.list_sessions()
+
+    assert len(infos) == 2
+    assert all(isinstance(info, SessionInfo) for info in infos)
+    assert {info.session_id for info in infos} == {"sess-1", "sess-2"}
+    assert {info.agent_name for info in infos} == {"agent-a", "agent-b"}
+    assert all(info.status == "idle" for info in infos)
+    assert all(not info.is_per_session_agent for info in infos)
+
+
+@pytest.mark.anyio
+async def test_list_sessions_reflects_busy_status(
+    controller: SessionController,
+) -> None:
+    """list_sessions marks sessions as busy when they have an active run."""
+    state, _ = await controller.get_or_create_session("sess-1", agent_name="agent-a")
+    handle = controller._create_run("sess-1", "hello")
+    controller._runs[handle.run_id] = handle
+    state.current_run_id = handle.run_id
+
+    infos = controller.list_sessions()
+
+    assert len(infos) == 1
+    assert infos[0].status == "busy"
+
+    # Simulate run cleanup which clears current_run_id in production
+    controller._cleanup_run(handle.run_id)
+    state.current_run_id = None
+    infos_after = controller.list_sessions()
+    assert infos_after[0].status == "idle"
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +373,7 @@ async def test_close_session_sets_closing_flag(
     controller: SessionController,
 ) -> None:
     """close_session marks the session as closing and records closed_at."""
-    state = await controller.get_or_create_session("sess-1")
+    state, _ = await controller.get_or_create_session("sess-1")
     await controller.close_session("sess-1")
     # closed_at is set inside close_session
     assert state.closed_at is not None

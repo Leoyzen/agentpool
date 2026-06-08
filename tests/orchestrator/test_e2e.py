@@ -114,7 +114,7 @@ async def _attach_agent(
     agent: MagicMock,
 ) -> None:
     """Attach a mock agent to an existing session."""
-    state = await pool.sessions.get_or_create_session(session_id)
+    state, _ = await pool.sessions.get_or_create_session(session_id)
     state.agent = agent
     pool.sessions._session_agents[session_id] = agent
     pool.pool.get_agent.return_value = agent  # type: ignore[attr-defined]

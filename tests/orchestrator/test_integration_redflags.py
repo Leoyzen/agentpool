@@ -37,7 +37,7 @@ async def _setup_session(
     mock_pool: Any,
 ) -> Any:
     """Create a session and attach the agent."""
-    state = await controller.get_or_create_session(session_id)
+    state, _ = await controller.get_or_create_session(session_id)
     state.agent = agent
     controller._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent
@@ -395,11 +395,11 @@ class TestSessionControllerChildrenVsEventBus:
         controller = SessionController(mock_pool)
 
         # Create parent session
-        parent = await controller.get_or_create_session("parent-sid")
+        parent, _ = await controller.get_or_create_session("parent-sid")
         assert parent.session_id == "parent-sid"
 
         # Create child session
-        child = await controller.get_or_create_session(
+        child, _ = await controller.get_or_create_session(
             "child-sid", parent_session_id="parent-sid"
         )
         assert child.parent_session_id == "parent-sid"

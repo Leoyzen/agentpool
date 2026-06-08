@@ -189,16 +189,10 @@ class TestRouteModuleImports:
 class TestConfigModelPropagation:
     """Verify model changes via PATCH /config propagate to per-session agents."""
 
-    def test_patch_config_model_propagates_to_session_agents(
+    def test_patch_config_model_propagates_to_shared_agent(
         self, _server_state: ServerState, client: TestClient
     ) -> None:
-        """PATCH /config with model should update shared AND session agents."""
-        # Register a mock per-session agent with an explicitly typed AsyncMock
-        session_agent = Mock()
-        session_set_model: AsyncMock = AsyncMock()
-        session_agent.set_model = session_set_model
-        _server_state._session_agents["test-session-001"] = session_agent
-
+        """PATCH /config with model should update the shared server agent."""
         # Keep a reference to the shared agent's set_model mock
         shared_set_model: AsyncMock = _server_state.agent.set_model  # type: ignore[assignment]
 
@@ -208,5 +202,3 @@ class TestConfigModelPropagation:
 
         # Shared agent should have set_model called
         shared_set_model.assert_awaited_once_with("openai/gpt-4o")
-        # Per-session agent should also have set_model called
-        session_set_model.assert_awaited_once_with("openai/gpt-4o")

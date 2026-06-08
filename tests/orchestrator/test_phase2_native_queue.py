@@ -548,7 +548,7 @@ async def test_non_native_agent_uses_turn_runner(
 ) -> None:
     """Non-native agents are processed by TurnRunner with manual queue."""
     session_id = "non-native-sess"
-    state = await controller.get_or_create_session(session_id)
+    state, _ = await controller.get_or_create_session(session_id)
 
     agent = _MockNonNativeAgent(name="non-native-test")
     state.agent = agent

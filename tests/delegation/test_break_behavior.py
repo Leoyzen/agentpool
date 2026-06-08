@@ -97,7 +97,7 @@ async def _setup_session_pool(agent: Agent[Any]) -> tuple[SessionPool, str]:
     await session_pool.create_session(session_id, agent_name=agent.name)
 
     # Attach agent to session
-    state = await session_pool.sessions.get_or_create_session(session_id)
+    state, _ = await session_pool.sessions.get_or_create_session(session_id)
     state.agent = agent
     session_pool.sessions._session_agents[session_id] = agent
     mock_pool.get_agent.return_value = agent

@@ -98,8 +98,9 @@ def _find_mcp_manager(state: Any, session_id: str | None = None) -> MCPManager |
     """
     agent = state.agent
     if session_id is not None:
-        # Use per-session agent if available
-        agent = state._session_agents.get(session_id) or agent
+        # SessionPool manages per-session agents; routes use the shared
+        # pool-level agent for MCP manager discovery.
+        agent = state.agent
 
     for provider in agent.tools.external_providers:
         match provider:

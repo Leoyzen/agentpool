@@ -231,6 +231,58 @@ def _make_pool_mock(agent: Any) -> Mock:
     pool.todos.on_change = None
     pool.skill_commands = None
     pool.all_agents = {agent.name: agent}
+
+    # Set up SessionPool mock for new architecture
+    session_pool = Mock()
+    session_pool.sessions = Mock()
+    session_pool.sessions.get_or_create_session = AsyncMock(
+        return_value=(Mock(), True)
+    )
+    session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
+    session_pool.sessions.store = None
+    sp_session = Mock()
+    sp_session.agent = agent
+    session_pool.sessions.get_session = Mock(return_value=sp_session)
+    session_pool.event_bus = Mock()
+    session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    session_pool.event_bus.unsubscribe = AsyncMock()
+
+    async def _mock_receive_request(
+        session_id: str,
+        content: str,
+        priority: str = "when_idle",
+        input_provider: Any = None,
+    ) -> Any:
+        from agentpool.orchestrator.run import RunStatus
+
+        complete_event = asyncio.Event()
+        run_handle = Mock()
+        run_handle.status = RunStatus.running
+        run_handle.complete_event = complete_event
+
+        async def _background_run():
+            print("BG RUN START")
+            try:
+                stream = agent.run_stream(content, session_id=session_id)
+                print(f"STREAM CREATED: {stream}")
+                async for _ in stream:
+                    pass
+                print("STREAM DONE")
+                run_handle.status = RunStatus.completed
+            except Exception as e:
+                print(f"BG EXCEPTION: {type(e).__name__}: {e}")
+                run_handle.status = RunStatus.failed
+            finally:
+                print("BG FINALLY, SETTING EVENT")
+                complete_event.set()
+
+        asyncio.create_task(_background_run())
+        print("RECEIVE_REQUEST RETURNING")
+        return run_handle
+
+    session_pool.receive_request = _mock_receive_request
+    pool.session_pool = session_pool
+
     return pool
 
 
@@ -759,14 +811,19 @@ class TestSSEDisconnectReleasesAgentLock:
         state.messages[session_id].append(user_msg_with_parts)
 
         # Start message processing in background (will create PendingQuestion)
+        print(f"SESSION_POOL: {state.pool.session_pool}")
+        print(f"RECEIVE_REQUEST: {state.pool.session_pool.receive_request}")
         process_task = asyncio.create_task(
             _process_message_locked(
                 session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
             )
         )
 
+        # Allow event loop to start process_task and background_run
+        await asyncio.sleep(0)
+
         # Wait for the question to be created in state.pending_questions
-        for _ in range(20):
+        for _ in range(40):
             if state.pending_questions:
                 break
             await asyncio.sleep(0.05)

@@ -16,10 +16,10 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 from agentpool.sessions.models import SessionData
-from agentpool_server.opencode_server.models import SessionStatus
+from agentpool_server.opencode_server.models import Session, SessionStatus
 from agentpool_server.opencode_server.models.events import (
     SessionCreatedEvent,
     SessionIdleEvent,
@@ -288,6 +288,48 @@ class TestSessionCRUD:
         returned_ids = {s["id"] for s in sessions}
         assert returned_ids == set(session_ids)
 
+    async def test_list_sessions_uses_session_controller_when_available(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ):
+        """list_sessions delegates to SessionController when session_controller is set."""
+        from unittest.mock import Mock
+
+        from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
+        from agentpool_server.opencode_server.models.session_info import SessionInfo
+
+        # Pre-populate the session cache so the route does not need storage
+        server_state.sessions["ses_ctrl_001"] = Session(
+            id="ses_ctrl_001",
+            project_id="default",
+            directory=server_state.base_path,
+            title="Controller Session",
+            version="1",
+            time=TimeCreatedUpdated(created=1234567890000, updated=1234567891000),
+        )
+
+        mock_controller = Mock()
+        mock_controller.list_sessions.return_value = [
+            SessionInfo(
+                session_id="ses_ctrl_001",
+                agent_name="test-agent",
+                created_at=1234567890.0,
+                last_active_at=1234567891.0,
+                is_per_session_agent=False,
+                status="idle",
+            )
+        ]
+        server_state.session_controller = mock_controller
+
+        response = await async_client.get("/session")
+        assert response.status_code == 200
+        sessions = response.json()
+        assert len(sessions) == 1
+        assert sessions[0]["id"] == "ses_ctrl_001"
+        assert sessions[0]["title"] == "Controller Session"
+        mock_controller.list_sessions.assert_called_once()
+
 
 class TestSessionStatus:
     """Tests for session status management."""
@@ -352,6 +394,85 @@ class TestSessionStatus:
         """Aborting a non-existent session should return 404."""
         response = await async_client.post("/session/nonexistent-id/abort")
         assert response.status_code == 404
+
+    async def test_abort_native_agent_calls_interrupt_and_cancel_run(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ):
+        """Aborting a native (per-session) agent should call interrupt() and cancel_run()."""
+        from agentpool.orchestrator.core import SessionState
+
+        response = await async_client.post("/session", json={"title": "Native Agent Session"})
+        session_id = response.json()["id"]
+
+        # Set up a mock per-session agent with interrupt
+        per_session_agent = Mock()
+        per_session_agent.interrupt = AsyncMock()
+        server_state.agent.interrupt = AsyncMock()
+
+        # Set up session controller with a native (per-session) session
+        session_state = SessionState(
+            session_id=session_id,
+            agent_name="test-agent",
+            is_per_session_agent=True,
+            current_run_id="run-native-123",
+        )
+        session_controller = MagicMock()
+        session_controller.get_session.return_value = session_state
+        session_controller.get_session_agent.return_value = per_session_agent
+        server_state.session_controller = session_controller
+
+        abort_response = await async_client.post(f"/session/{session_id}/abort")
+        assert abort_response.status_code == 200
+        assert abort_response.json() is True
+
+        # Per-session agent should be interrupted
+        per_session_agent.interrupt.assert_awaited_once()
+        # Shared agent should NOT be interrupted
+        server_state.agent.interrupt.assert_not_awaited()
+        # cancel_run should be called with the run_id
+        session_pool = server_state.agent.agent_pool.session_pool
+        session_pool.cancel_run.assert_called_once_with("run-native-123")
+
+    async def test_abort_non_native_shared_agent_skips_interrupt(
+        self,
+        async_client: AsyncClient,
+        server_state: ServerState,
+    ):
+        """Aborting a non-native shared agent should cancel run but NOT interrupt shared agent."""
+        from agentpool.orchestrator.core import SessionState
+
+        response = await async_client.post("/session", json={"title": "Shared Agent Session"})
+        session_id = response.json()["id"]
+
+        # Set up mock shared agent
+        shared_agent = Mock()
+        shared_agent.interrupt = AsyncMock()
+        server_state.agent.interrupt = AsyncMock()
+
+        # Set up session controller with a non-native (shared) session
+        session_state = SessionState(
+            session_id=session_id,
+            agent_name="test-agent",
+            is_per_session_agent=False,
+            current_run_id="run-shared-456",
+        )
+        session_controller = MagicMock()
+        session_controller.get_session.return_value = session_state
+        session_controller.get_session_agent.return_value = shared_agent
+        server_state.session_controller = session_controller
+
+        abort_response = await async_client.post(f"/session/{session_id}/abort")
+        assert abort_response.status_code == 200
+        assert abort_response.json() is True
+
+        # Shared agent should NOT be interrupted (would kill all sessions)
+        shared_agent.interrupt.assert_not_awaited()
+        server_state.agent.interrupt.assert_not_awaited()
+        # cancel_run should still be called with the run_id
+        session_pool = server_state.agent.agent_pool.session_pool
+        session_pool.cancel_run.assert_called_once_with("run-shared-456")
 
 
 class TestSessionFork:

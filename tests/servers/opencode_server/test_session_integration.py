@@ -799,6 +799,68 @@ class TestInputProviderFlow:
         assert session_state is not None
         assert session_state.input_provider is mock_input_provider
 
+    @pytest.mark.asyncio
+    async def test_concurrent_sessions_have_isolated_input_providers(
+        self,
+        session_pool: SessionPool,
+        server_state: ServerState,
+        mock_input_provider: OpenCodeInputProvider,
+    ) -> None:
+        """Concurrent sessions must NOT share input provider state.
+
+        Previously, the shared agent's ``_input_provider`` was mutated
+        directly, causing race conditions where concurrent sessions
+        overwrote each other's input provider. The fix stores input
+        providers on ``SessionState`` only and lets SessionController
+        pass the correct one at run time.
+        """
+        from agentpool_server.opencode_server.session_pool_integration import (
+            OpenCodeSessionPoolIntegration,
+        )
+
+        integration = OpenCodeSessionPoolIntegration(
+            session_pool=session_pool,
+            server_state=server_state,
+        )
+
+        # Create two sessions concurrently
+        await integration.create_session(
+            session_id="test-session-concurrent-a",
+            agent_name="test-agent",
+        )
+        await integration.create_session(
+            session_id="test-session-concurrent-b",
+            agent_name="test-agent",
+        )
+
+        # Create distinct input providers for each session
+        from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
+
+        provider_a = OpenCodeInputProvider(state=server_state, session_id="test-session-concurrent-a")
+        provider_b = OpenCodeInputProvider(state=server_state, session_id="test-session-concurrent-b")
+
+        await integration.attach_input_provider(
+            session_id="test-session-concurrent-a",
+            input_provider=provider_a,
+        )
+        await integration.attach_input_provider(
+            session_id="test-session-concurrent-b",
+            input_provider=provider_b,
+        )
+
+        # Each SessionState must hold its own input provider
+        state_a = session_pool.sessions.get_session("test-session-concurrent-a")
+        state_b = session_pool.sessions.get_session("test-session-concurrent-b")
+        assert state_a is not None
+        assert state_b is not None
+        assert state_a.input_provider is provider_a
+        assert state_b.input_provider is provider_b
+        assert state_a.input_provider is not state_b.input_provider
+
+        # The shared agent must NOT be mutated
+        shared_agent = session_pool.pool.get_agent("test-agent")
+        assert shared_agent._input_provider is None
+
 
 class TestEventSubscription:
     """Tests for subscribing to session events through the integration."""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import ConfigDict, Field
 from schemez import Schema
 
@@ -58,5 +60,53 @@ class OpenCodeConfig(Schema):
     Defaults to True as SessionPool is the mandatory execution entry point
     per the sessionpool-only-execution spec. Setting to False is deprecated.
     """
+
+    use_session_pool_for_commands: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_COMMANDS", "").lower() in ("1", "true", "yes"),
+        title="Use session pool for commands",
+    )
+    """Whether to route command execution through the SessionPool."""
+
+    use_session_pool_for_skills: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_SKILLS", "").lower() in ("1", "true", "yes"),
+        title="Use session pool for skills",
+    )
+    """Whether to route skill invocation through the SessionPool."""
+
+    use_session_pool_for_init: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_INIT", "").lower() in ("1", "true", "yes"),
+        title="Use session pool for init",
+    )
+    """Whether to use SessionPool during agent initialization."""
+
+    use_session_pool_for_summarize: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_SUMMARIZE", "").lower() in ("1", "true", "yes"),
+        title="Use session pool for summarize",
+    )
+    """Whether to route summarization through the SessionPool."""
+
+    use_session_pool_for_mcp: bool = Field(
+        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_MCP", "").lower() in ("1", "true", "yes"),
+        title="Use session pool for MCP",
+    )
+    """Whether to route MCP tool calls through the SessionPool."""
+
+    def should_use_session_pool_for(self, category: str) -> bool:
+        """Check if SessionPool should be used for a specific category.
+
+        The global `use_session_pool` master switch must be True for any
+        category flag to be evaluated. If the global switch is False,
+        this always returns False regardless of category settings.
+
+        Args:
+            category: The category to check. Supported values are
+                "commands", "skills", "init", "summarize", "mcp".
+
+        Returns:
+            True if SessionPool should be used for the given category.
+        """
+        if not self.use_session_pool:
+            return False
+        return getattr(self, f"use_session_pool_for_{category}", False)
 
     model_config = ConfigDict(frozen=True)

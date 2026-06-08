@@ -61,6 +61,19 @@ class OpenCodeInputProvider(InputProvider):
         self._tool_approvals: dict[str, str] = {}  # tool_name -> "always" | "reject"
         self._id_counter = 0
 
+    @property
+    def _pending_questions_dict(self) -> dict[str, Any]:
+        """Get the pending questions dict for this session.
+
+        When session_controller is available, stores questions on SessionState
+        for per-session isolation. Otherwise falls back to ServerState.
+        """
+        if self.state.session_controller is not None:
+            session = self.state.session_controller.get_session(self.session_id)
+            if session is not None:
+                return session.pending_questions
+        return self.state.pending_questions
+
     def _generate_permission_id(self) -> str:
         """Generate a unique permission ID."""
         self._id_counter += 1
@@ -321,7 +334,7 @@ class OpenCodeInputProvider(InputProvider):
         )
         # Create future to wait for answer
         future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
-        self.state.pending_questions[question_id] = PendingQuestion(
+        self._pending_questions_dict[question_id] = PendingQuestion(
             session_id=self.session_id,
             questions=[question_info],
             future=future,
@@ -359,7 +372,7 @@ class OpenCodeInputProvider(InputProvider):
             return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")  # Generic err code
         finally:
             # Clean up pending question
-            self.state.pending_questions.pop(question_id, None)
+            self._pending_questions_dict.pop(question_id, None)
 
     def _property_to_question(self, key: str, prop_schema: dict[str, Any]) -> QuestionInfo:
         """Convert JSON schema property definition to QuestionInfo.
@@ -498,7 +511,7 @@ class OpenCodeInputProvider(InputProvider):
 
         # Create future to wait for answers
         future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
-        self.state.pending_questions[question_id] = PendingQuestion(
+        self._pending_questions_dict[question_id] = PendingQuestion(
             session_id=self.session_id,
             questions=questions,
             future=future,
@@ -545,7 +558,7 @@ class OpenCodeInputProvider(InputProvider):
             return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")
         finally:
             # Clean up pending question
-            self.state.pending_questions.pop(question_id, None)
+            self._pending_questions_dict.pop(question_id, None)
 
     def clear_tool_approvals(self) -> None:
         """Clear all stored tool approval decisions."""
@@ -565,7 +578,7 @@ class OpenCodeInputProvider(InputProvider):
         Returns:
             True if the question was found and resolved, False otherwise
         """
-        pending = self.state.pending_questions.get(question_id)
+        pending = self._pending_questions_dict.get(question_id)
         if pending is None:
             logger.warning("Question not found", question_id=question_id)
             return False
