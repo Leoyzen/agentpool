@@ -635,6 +635,13 @@ class OpenCodeSessionPoolIntegration:
                 if isinstance(event, SpawnSessionStart):
                     # Record spawn info for later ToolPart updates
                     child_spawns[event.child_session_id] = event
+                    # Ensure assistant message is registered before creating
+                    # ToolPart, since _create_subagent_tool_part looks it up in
+                    # server_state.messages.
+                    if not message_registered:
+                        self.server_state.messages.setdefault(session_id, []).append(assistant_msg)
+                        await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
+                        message_registered = True
                     # Create ToolPart in parent session before spawning child
                     tool_part = await self._create_subagent_tool_part(session_id, event)
                     # Also register in EventProcessorContext so SubAgentEvent
