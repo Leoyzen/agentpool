@@ -308,6 +308,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """Get current run context (using ContextVar for concurrency safety)."""
         return _current_run_ctx_var.get()
 
+    @property
+    def session_id(self) -> str | None:
+        """Current conversation session bound to this agent, if any."""
+        return getattr(self._events, "session_id", None)
+
+    @session_id.setter
+    def session_id(self, value: str | None) -> None:
+        self._events.session_id = value
+
     def __repr__(self) -> str:
         typ = self.__class__.__name__
         desc = f", {self.description!r}" if self.description else ""

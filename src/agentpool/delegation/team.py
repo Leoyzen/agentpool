@@ -95,30 +95,30 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if self.shared_prompt:
             default_prompt.insert(0, self.shared_prompt)
 
-        template_vars: dict[str, Any] = kwargs.pop("template_vars", {})
+        template_vars = kwargs.pop("template_vars", {})
+        if not isinstance(template_vars, dict):
+            template_vars = {}
         timeout = self.member_timeout
 
         all_nodes = list(self.nodes)
         execution_talks: list[Talk[Any]] = []
+        member_prompts: dict[str, list[PromptCompatible | None]] = {}
         for node in all_nodes:
             talk = Talk[Any](node, [], connection_type="run", queued=True, queue_strategy="latest")
             execution_talks.append(talk)
             self._team_talk.append(talk)
-
-        member_prompts = {
-            node.name: self._resolve_member_prompt(
+            member_prompts[node.name] = self._resolve_member_prompt(
                 node.name,
                 default_prompt,
                 prompts,
                 template_vars,
             )
-            for node in all_nodes
-        }
+
         state = _TeamGraphState(
             prompts=prompts,
+            member_prompts=member_prompts,
             kwargs=kwargs,
             shared_prompt=self.shared_prompt,
-            member_prompts=member_prompts,
             member_timeout=timeout,
             execution_talks=execution_talks,
             error_mode=self._error_mode,
