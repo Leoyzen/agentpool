@@ -20,7 +20,7 @@ from agentpool_server.opencode_server.models import (
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
     from agentpool_server.opencode_server.models import PermissionReply
-    from agentpool_server.opencode_server.models.question import QuestionInfo
+    from agentpool_server.opencode_server.models.question import QuestionInfo, QuestionRequest
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)
@@ -242,6 +242,27 @@ class OpenCodeInputProvider(InputProvider):
                 tool=PermissionToolInfo(message_id="", call_id=None),
             )
             result.append(props)
+        return result
+
+    def get_pending_questions(self) -> list[QuestionRequest]:
+        """Get all pending question requests for this session.
+
+        Returns:
+            List of pending question requests.
+        """
+        from agentpool_server.opencode_server.models.question import QuestionRequest
+
+        result: list[QuestionRequest] = []
+        for question_id, pending in self._pending_questions_dict.items():
+            if pending.session_id == self.session_id:
+                result.append(
+                    QuestionRequest(
+                        id=question_id,
+                        session_id=pending.session_id,
+                        questions=pending.questions,
+                        tool=pending.tool,
+                    )
+                )
         return result
 
     async def get_elicitation(
@@ -605,4 +626,21 @@ class OpenCodeInputProvider(InputProvider):
                 count += 1
         self._pending_permissions.clear()
         logger.info("Cancelled all pending permissions", count=count)
+        return count
+
+    def cancel_pending_questions(self) -> int:
+        """Cancel all pending question requests for this session.
+
+        Returns:
+            Number of questions cancelled.
+        """
+        count = 0
+        for question_id, pending in list(self._pending_questions_dict.items()):
+            if pending.session_id == self.session_id:
+                future = getattr(pending, "future", None)
+                if future is not None and not future.done():
+                    future.cancel()
+                    count += 1
+                self._pending_questions_dict.pop(question_id, None)
+        logger.info("Cancelled all pending questions", count=count, session_id=self.session_id)
         return count

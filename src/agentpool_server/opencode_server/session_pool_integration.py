@@ -163,7 +163,43 @@ async def set_session_status(
         session_id: The session to update.
         status: The new session status.
     """
+    if _use_session_pool_for_status(state):
+        integration = getattr(state, "session_pool_integration", None)
+        if integration is not None:
+            bridge = integration._status_bridges.get(session_id)
+            if bridge is not None:
+                if status.type == "busy":
+                    await bridge._broadcast_busy()
+                    return
+                if status.type == "idle":
+                    await bridge._broadcast_idle()
+                    return
+
     state.session_status[session_id] = status
+
+
+async def get_session_status(
+    state: ServerState,
+    session_id: str,
+) -> SessionStatus | None:
+    """Get the current status of a session.
+
+    Delegates to OpenCodeSessionPoolIntegration when the feature flag is
+    enabled, otherwise falls back to the ServerState in-memory dictionary.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session to look up.
+
+    Returns:
+        The session status, or None if not found and the fallback is used.
+    """
+    if _use_session_pool_for_status(state):
+        integration = getattr(state, "session_pool_integration", None)
+        if integration is not None:
+            return await integration.get_session_status(session_id)
+
+    return state.session_status.get(session_id)
 
 
 def _session_state_to_opencode(state: SessionState) -> Session:
