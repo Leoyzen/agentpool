@@ -8,6 +8,8 @@ compatibility with legacy Team/TeamRun APIs.
 from __future__ import annotations
 
 from typing import Any, cast
+
+import anyio
 import pytest
 
 from agentpool import Agent, Team
@@ -51,6 +53,27 @@ class FailingAgent(MessageNode[Any, Any]):
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
         msg = self.exc_msg
         raise RuntimeError(msg)
+
+    async def get_stats(self) -> Any:
+        return None
+
+    def run_iter(self, *prompts: Any, **kwargs: Any) -> Any:
+        pass
+
+    def get_context(self, data: Any = None, input_provider: Any = None) -> Any:
+        return None
+
+
+class SlowAgent(MessageNode[Any, Any]):
+    """An agent that sleeps longer than a configured team timeout."""
+
+    def __init__(self, name: str, delay: float) -> None:
+        super().__init__(name=name)
+        self.delay = delay
+
+    async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
+        await anyio.sleep(self.delay)
+        return ChatMessage(content="late", role="assistant", name=self.name)
 
     async def get_stats(self) -> Any:
         return None
@@ -272,6 +295,21 @@ async def test_parallel_team_execute_with_error_mode() -> None:
     assert len(response) == 1
     assert len(response.errors) == 1
     assert "fail" in response.errors
+
+
+@pytest.mark.anyio
+async def test_parallel_team_execute_applies_member_timeout() -> None:
+    """Team.execute() should collect timed-out graph members as errors."""
+    agent_ok = SlowAgent("ok", delay=0)
+    agent_slow = SlowAgent("slow", delay=0.2)
+
+    team = Team([agent_ok, agent_slow], name="timeout_team", member_timeout=0.01)
+    response = await team.execute("prompt")
+
+    assert len(response) == 1
+    assert response[0].agent_name == "ok"
+    assert "slow" in response.errors
+    assert isinstance(response.errors["slow"], TimeoutError)
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +565,19 @@ async def test_run_team_graph_returns_team_response() -> None:
     assert len(response) == 2
     assert len(response.errors) == 0
     assert response.start_time is not None
+
+
+@pytest.mark.anyio
+async def test_run_team_graph_applies_member_timeout() -> None:
+    """run_team_graph should honor _TeamGraphState.member_timeout."""
+    agent_slow = SlowAgent("slow", delay=0.2)
+
+    state = _TeamGraphState(prompts=("prompt",), member_timeout=0.01)
+    response = await run_team_graph([agent_slow], state)
+
+    assert len(response) == 0
+    assert "slow" in response.errors
+    assert isinstance(response.errors["slow"], TimeoutError)
 
 
 @pytest.mark.anyio

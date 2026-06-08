@@ -116,7 +116,7 @@ def _make_member_step(
 
             return _MemberOutput(agent_name=node.name, response=response)
 
-        except TimeoutError:
+        except TimeoutError as exc:
             logger.warning(
                 "Team member timed out",
                 member=node.name,
@@ -124,12 +124,11 @@ def _make_member_step(
             )
             if state.error_mode == "fail_all":
                 raise
-            return _MemberOutput(
-                agent_name=node.name,
-                exception=TimeoutError(
-                    f"Member {node.name!r} exceeded {state.member_timeout}s deadline"
-                ),
-            )
+            timeout = state.member_timeout
+            error = TimeoutError(f"Member {node.name!r} exceeded {timeout}s deadline")
+            error.__cause__ = exc
+            return _MemberOutput(agent_name=node.name, exception=error)
+
         except Exception as exc:
             if state.error_mode == "fail_all":
                 raise
