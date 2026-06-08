@@ -204,6 +204,13 @@ class EventProcessor:
                     status_type="busy",
                 )
 
+            case RunErrorEvent() as run_error_event:
+                yield SessionErrorEvent.create(
+                    session_id=ctx.session_id,
+                    error_name=run_error_event.code or "RunError",
+                    error_message=run_error_event.message,
+                )
+
     def _process_text_start(
         self,
         ctx: EventProcessorContext,
