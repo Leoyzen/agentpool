@@ -210,6 +210,12 @@ def mock_pool(
     pool.session_pool.sessions.store.delete = storage_manager.delete_session
     pool.session_pool.sessions.store.load = storage_manager.load_session
     pool.session_pool.sessions.store.list_sessions = AsyncMock(return_value=[])
+
+    # Message history API mocks (used by share/revert/fork routes)
+    pool.session_pool.get_messages = AsyncMock(return_value=[])
+    pool.session_pool.truncate_messages = AsyncMock(return_value=0)
+    pool.session_pool.copy_messages = AsyncMock(return_value=None)
+    pool.session_pool.append_message = AsyncMock(return_value="msg-id")
     return pool
 
 
