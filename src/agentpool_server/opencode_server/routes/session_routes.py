@@ -65,6 +65,8 @@ from agentpool_server.opencode_server.session_pool_integration import (
     append_message_to_session,
     get_messages_for_session,
     get_session_status as _get_single_session_status,
+    set_messages_for_session,
+    set_session_status,
 )
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from agentpool_storage.opencode_provider import helpers
@@ -209,12 +211,12 @@ async def _execute_slashed_command(
     message_with_parts = MessageWithParts(info=assistant_message, parts=[])
 
     # Store message in state and broadcast
-    state.messages[session_id].append(message_with_parts)
+    await append_message_to_session(state, session_id, message_with_parts)
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
 
     try:
         # Mark session as busy
-        state.session_status[session_id] = SessionStatus(type="busy")
+        await set_session_status(state, session_id, SessionStatus(type="busy"))
         await state.broadcast_event(
             SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
         )
@@ -398,7 +400,7 @@ async def _execute_skill_command(
 
     try:
         # Mark session as busy
-        state.session_status[session_id] = SessionStatus(type="busy")
+        await set_session_status(state, session_id, SessionStatus(type="busy"))
         await state.broadcast_event(
             SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
         )
@@ -428,7 +430,7 @@ async def _execute_skill_command(
         )
 
         # Store and broadcast user message
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
         await state.broadcast_event(PartUpdatedEvent.create(user_msg_with_parts.parts[0]))
         await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
@@ -446,7 +448,7 @@ async def _execute_skill_command(
             time=MessageTime(created=now_ms()),
         )
         message_with_parts = MessageWithParts(info=assistant_message, parts=[])
-        state.messages[session_id].append(message_with_parts)
+        await append_message_to_session(state, session_id, message_with_parts)
         await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
 
         # Add step-start part
@@ -1301,12 +1303,12 @@ async def run_shell_command(
 
     # Initialize message with empty parts
     assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
-    state.messages[session_id].append(assistant_msg_with_parts)
+    await append_message_to_session(state, session_id, assistant_msg_with_parts)
     # Broadcast message created
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
     try:
         # Mark session as busy
-        state.session_status[session_id] = SessionStatus(type="busy")
+        await set_session_status(state, session_id, SessionStatus(type="busy"))
         await state.broadcast_event(
             SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
         )
@@ -1437,7 +1439,7 @@ async def summarize_session(  # noqa: PLR0915
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if not state.messages.get(session_id):
+    if not await get_messages_for_session(state, session_id):
         raise HTTPException(status_code=400, detail="No messages to summarize")
 
     # Check feature flag for SessionPool-based summarization
@@ -1473,12 +1475,12 @@ async def summarize_session(  # noqa: PLR0915
         )
 
         assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
-        state.messages[session_id].append(assistant_msg_with_parts)
+        await append_message_to_session(state, session_id, assistant_msg_with_parts)
         # Broadcast message created
         await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
         try:
             # Mark session as busy
-            state.session_status[session_id] = SessionStatus(type="busy")
+            await set_session_status(state, session_id, SessionStatus(type="busy"))
             await state.broadcast_event(
                 SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
             )
@@ -1575,7 +1577,9 @@ async def summarize_session(  # noqa: PLR0915
                             await state.storage.replace_conversation_messages(
                                 session_id, compacted_history
                             )
-                        state.messages[session_id] = [assistant_msg_with_parts]
+                        await set_messages_for_session(
+                            state, session_id, [assistant_msg_with_parts]
+                        )
                     except Exception:  # noqa: BLE001
                         # Compaction failure is not fatal - we still have the summary
                         pass
@@ -1609,7 +1613,9 @@ async def summarize_session(  # noqa: PLR0915
                     if state.storage is not None:
                         compacted_history = agent.conversation.get_history()
                         await state.storage.replace_conversation_messages(session_id, compacted_history)
-                    state.messages[session_id] = [assistant_msg_with_parts]
+                    await set_messages_for_session(
+                        state, session_id, [assistant_msg_with_parts]
+                    )
 
                 except Exception:  # noqa: BLE001
                     # Compaction failure is not fatal - we still have the summary
@@ -1658,7 +1664,7 @@ async def share_session(
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = await _get_session_messages_from_pool(state, session_id)
+    messages = await get_messages_for_session(state, session_id)
 
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to share")
@@ -1714,7 +1720,7 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get messages for this session
-    messages = state.messages.get(session_id, [])
+    messages = await get_messages_for_session(state, session_id)
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to revert")
 
@@ -1746,7 +1752,7 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
     # Store removed messages for unrevert
     state.reverted_messages[session_id] = messages_to_remove
     # Update message list - keep only messages before revert point
-    state.messages[session_id] = messages_to_keep
+    await set_messages_for_session(state, session_id, messages_to_keep)
     # Emit message.removed and part.removed events for all removed messages
     for msg in messages_to_remove:
         # Emit message.removed event

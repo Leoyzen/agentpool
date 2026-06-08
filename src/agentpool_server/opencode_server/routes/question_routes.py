@@ -24,9 +24,12 @@ def _find_permission_provider(
     state: StateDep,
     permission_id: str,
 ) -> tuple[str, OpenCodeInputProvider] | None:
-    for session_id, input_provider in state.input_providers.items():
-        if permission_id in input_provider._pending_permissions:
-            return session_id, input_provider
+    if state.session_controller is None:
+        return None
+    for session_id, session in state.session_controller._sessions.items():
+        provider = session.input_provider
+        if isinstance(provider, OpenCodeInputProvider) and permission_id in provider._pending_permissions:
+            return session_id, provider
     return None
 
 
@@ -46,34 +49,30 @@ def _extract_permission_reply(reply: QuestionReply) -> str | None:
 
 
 def _get_all_pending_questions(state: StateDep) -> dict[str, Any]:
-    """Get all pending questions from SessionController or ServerState."""
+    """Get all pending questions from SessionController."""
+    result: dict[str, Any] = {}
     if state.session_controller is not None:
-        result: dict[str, Any] = {}
         for session in state.session_controller._sessions.values():
             result.update(session.pending_questions)
-        return result
-    return state.pending_questions
+    return result
 
 
 def _get_pending_question(state: StateDep, question_id: str) -> Any | None:
-    """Look up a pending question across SessionController or ServerState."""
+    """Look up a pending question across SessionController."""
     if state.session_controller is not None:
         for session in state.session_controller._sessions.values():
             if question_id in session.pending_questions:
                 return session.pending_questions[question_id]
-    return state.pending_questions.get(question_id)
+    return None
 
 
 def _remove_pending_question(state: StateDep, question_id: str) -> bool:
-    """Remove a pending question from SessionController or ServerState."""
+    """Remove a pending question from SessionController."""
     if state.session_controller is not None:
         for session in state.session_controller._sessions.values():
             if question_id in session.pending_questions:
                 del session.pending_questions[question_id]
                 return True
-    if question_id in state.pending_questions:
-        del state.pending_questions[question_id]
-        return True
     return False
 
 
@@ -132,7 +131,8 @@ async def reply_to_question(requestID: str, reply: QuestionReply, state: StateDe
         return True
 
     session_id = pending.session_id
-    provider = state.input_providers.get(session_id)
+    session = state.session_controller.get_session(session_id) if state.session_controller is not None else None
+    provider = session.input_provider if session is not None else None
     if not isinstance(provider, OpenCodeInputProvider):
         raise HTTPException(status_code=500, detail="Invalid provider for session")
     # Resolve via provider
