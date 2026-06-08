@@ -572,17 +572,21 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
                 await state.mark_session_idle(session_id)
             # Load conversation history from agent via SessionController
             agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-            state.messages[session_id] = [
-                chat_message_to_opencode(
-                    chat_msg,
-                    session_id=session_id,
-                    working_dir=state.working_dir,
-                    agent_name=agent.name,
-                    model_id=chat_msg.model_name or "sonnet",
-                    provider_id=chat_msg.provider_name or "claude-code",
-                )
-                for chat_msg in agent.conversation.chat_messages
-            ]
+            await set_messages_for_session(
+                state,
+                session_id,
+                [
+                    chat_message_to_opencode(
+                        chat_msg,
+                        session_id=session_id,
+                        working_dir=state.working_dir,
+                        agent_name=agent.name,
+                        model_id=chat_msg.model_name or "sonnet",
+                        provider_id=chat_msg.provider_name or "claude-code",
+                    )
+                    for chat_msg in agent.conversation.chat_messages
+                ],
+            )
             state.ensure_input_provider(session_id)
             await state.broadcast_event(SessionUpdatedEvent.create(session))
             return session
@@ -604,17 +608,21 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         await state.mark_session_idle(session_id)
 
     if not (is_subagent_session and existing_messages):
-        state.messages[session_id] = [
-            chat_message_to_opencode(
-                chat_msg,
-                session_id=session_id,
-                working_dir=state.working_dir,
-                agent_name=agent.name,
-                model_id=chat_msg.model_name or "sonnet",
-                provider_id=chat_msg.provider_name or "claude-code",
-            )
-            for chat_msg in agent.conversation.chat_messages
-        ]
+        await set_messages_for_session(
+            state,
+            session_id,
+            [
+                chat_message_to_opencode(
+                    chat_msg,
+                    session_id=session_id,
+                    working_dir=state.working_dir,
+                    agent_name=agent.name,
+                    model_id=chat_msg.model_name or "sonnet",
+                    provider_id=chat_msg.provider_name or "claude-code",
+                )
+                for chat_msg in agent.conversation.chat_messages
+            ],
+        )
 
     state.ensure_input_provider(session_id)
     await state.broadcast_event(SessionUpdatedEvent.create(session))
@@ -1059,7 +1067,6 @@ async def fork_session(  # noqa: D417
     # Cache in memory
     state.sessions[new_session_id] = forked_session
     await state.mark_session_idle(new_session_id)
-    state.todos[new_session_id] = []
     # Copy messages to the new session (with updated session_id references)
     copied_messages: list[MessageWithParts] = []
     for msg_with_parts in messages_to_copy:
@@ -1814,9 +1821,7 @@ async def unrevert_session(session_id: str, state: StateDep) -> Session:
         raise HTTPException(status_code=400, detail="No reverted messages to restore")
 
     # Restore messages to conversation
-    if session_id not in state.messages:
-        state.messages[session_id] = []
-    state.messages[session_id].extend(reverted_messages)
+    await set_messages_for_session(state, session_id, reverted_messages)
 
     # Emit message.updated and part.updated events for restored messages
     for msg in reverted_messages:
@@ -1951,7 +1956,7 @@ async def execute_command(  # noqa: PLR0915
             time=MessageTime(created=now),
         )
         assistant_msg_with_parts = MessageWithParts(info=assistant_message, parts=[])
-        state.messages[session_id].append(assistant_msg_with_parts)
+        await append_message_to_session(state, session_id, assistant_msg_with_parts)
         await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
         try:
             # Mark session as busy

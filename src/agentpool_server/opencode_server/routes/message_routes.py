@@ -740,7 +740,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
             case _ as unreachable:
                 assert_never(unreachable)
         await state.broadcast_event(PartUpdatedEvent.create(created))
-    state.messages[session_id].append(user_msg_with_parts)
+    await append_message_to_session(state, session_id, user_msg_with_parts)
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
