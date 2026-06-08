@@ -17,6 +17,11 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
+from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
+    get_messages_for_session,
+    set_session_status,
+)
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
@@ -117,7 +122,7 @@ async def _maybe_generate_title(
         user_prompt: The user's prompt to use for title generation
     """
     # Check if this is the first user message by looking at existing messages
-    existing_messages = state.messages.get(session_id, [])
+    existing_messages = await get_messages_for_session(state, session_id)
 
     # Count user messages (not assistant, not system)
     user_message_count = sum(
@@ -193,25 +198,11 @@ async def list_messages(
     limit: int | None = Query(default=None),
 ) -> list[MessageWithParts]:
     """List messages in a session."""
-    # Fast path for subagent/child sessions already in memory:
-    # Skip get_or_load_session (which acquires agent_lock) because the
-    # parent agent holds agent_lock while streaming, so the lock would
-    # block until the parent finishes — making child messages invisible
-    # during subagent execution.
-    cached_session = state.sessions.get(session_id)
-    if (
-        cached_session is not None
-        and cached_session.parent_id is not None
-        and session_id in state.messages
-    ):
-        messages = state.messages[session_id]
-        return messages[-limit:] if limit else messages
-
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    messages = state.messages.get(session_id, [])
+    messages = await get_messages_for_session(state, session_id)
     return messages[-limit:] if limit else messages
 
 
@@ -271,7 +262,7 @@ async def _process_message(
             case _ as unreachable:
                 assert_never(unreachable)
         await state.broadcast_event(PartUpdatedEvent.create(created))
-    state.messages[session_id].append(user_msg_with_parts)
+    await append_message_to_session(state, session_id, user_msg_with_parts)
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
@@ -321,7 +312,7 @@ async def _process_message_locked(  # noqa: PLR0915
     # --- Mark session busy ---
     if mark_busy:
         busy = SessionStatus(type="busy")
-        state.session_status[session_id] = busy
+        await set_session_status(state, session_id, busy)
         await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
     # --- Extract user prompt ---
     user_prompt = await extract_user_prompt_from_parts(
@@ -354,7 +345,7 @@ async def _process_message_locked(  # noqa: PLR0915
         time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
-    state.messages[session_id].append(assistant_msg_with_parts)
+    await append_message_to_session(state, session_id, assistant_msg_with_parts)
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_msg))
     # Step-start part
     part_id = identifier.ascending("part")
