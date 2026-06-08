@@ -968,6 +968,20 @@ class AgentPoolACPAgent(ACPAgent):
         async def send_to_client(message: dict[str, Any]) -> Any:
             # message is already wrapped as {"connectionId": conn_id, "message": mcp_msg}
             # by AcpMcpConnection.send_to_client. Pass through directly.
+            inner = message.get("message", {})
+            if isinstance(inner, dict) and inner.get("method") == "elicitation/create":
+                # Handle MCP elicitation locally instead of forwarding to ACP client.
+                # The ACP client (Zed) doesn't handle MCP-encapsulated elicitation;
+                # it returns {} which the MCP server rejects as invalid.
+                # We call _handle_mcp_elicitation directly and return the result
+                # as a JSON-RPC response so send_to_client() forwards it back
+                # to the MCP session.
+                result = await self._handle_mcp_elicitation(inner, connection_id)
+                return {
+                    "jsonrpc": "2.0",
+                    "id": inner.get("id", f"elicit-{uuid.uuid4().hex[:8]}"),
+                    "result": result,
+                }
             with anyio.fail_after(30):
                 return await self.client.send_request("mcp/message", message)
 
