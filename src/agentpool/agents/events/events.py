@@ -47,6 +47,9 @@ if TYPE_CHECKING:
 class PartStartEvent(PyAIPartStartEvent):
     """Part start event."""
 
+    session_id: str = ""
+    """ID of the session that emitted this event."""
+
     @classmethod
     def thinking(cls, index: int, content: str) -> PartStartEvent:
         return cls(index=index, part=ThinkingPart(content=content))
@@ -58,6 +61,9 @@ class PartStartEvent(PyAIPartStartEvent):
 
 class PartDeltaEvent(PyAIPartDeltaEvent):
     """Part start event."""
+
+    session_id: str = ""
+    """ID of the session that emitted this event."""
 
     @classmethod
     def thinking(cls, index: int, content: str) -> PartDeltaEvent:
@@ -226,6 +232,8 @@ class StreamCompleteEvent[TContent]:
     """The final chat message with all metadata."""
     cancelled: bool = False
     """Whether the run was cancelled before completion."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
     event_kind: Literal["stream_complete"] = "stream_complete"
     """Event type identifier."""
 
@@ -248,6 +256,8 @@ class ToolCallStartEvent:
     """File locations affected by this tool call."""
     raw_input: dict[str, Any] = field(default_factory=dict)
     """The raw input parameters sent to the tool."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
 
     event_kind: Literal["tool_call_start"] = "tool_call_start"
     """Event type identifier."""
@@ -294,6 +304,8 @@ class ToolCallProgressEvent:
     """The name of the tool being called."""
     tool_input: dict[str, Any] | None = None
     """The input provided to the tool."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
 
     event_kind: Literal["tool_call_progress"] = "tool_call_progress"
     """Event type identifier."""
@@ -590,6 +602,8 @@ class ToolCallCompleteEvent:
     """The message ID associated with this tool call."""
     metadata: dict[str, Any] | None = None
     """Optional metadata for UI/client use (diffs, diagnostics, etc.)."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
     event_kind: Literal["tool_call_complete"] = "tool_call_complete"
     """Event type identifier."""
 

@@ -756,12 +756,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     # 2. Route through SessionPool instead of server-owned queue
     session_pool = state.pool.session_pool
     if session_pool is not None:
-        sp_state, _was_created = await session_pool.sessions.get_or_create_session(
-            session_id,
-            agent_name=request.agent or state.agent.name or "default",
-        )
         input_provider = state.ensure_input_provider(session_id)
-        sp_state.input_provider = input_provider
 
         user_prompt = await extract_user_prompt_from_parts(
             request.parts,
@@ -769,12 +764,28 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
             tools=state.agent.tools,
         )
 
-        await session_pool.receive_request(
-            session_id=session_id,
-            content=user_prompt,
-            priority="when_idle",
-            input_provider=input_provider,
-        )
+        # Use integration layer to ensure session creation and event consumer startup
+        integration = state.session_pool_integration
+        if integration is not None:
+            await integration.route_message(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
+        else:
+            sp_state, _was_created = await session_pool.sessions.get_or_create_session(
+                session_id,
+                agent_name=request.agent or state.agent.name or "default",
+            )
+            sp_state.input_provider = input_provider
+
+            await session_pool.receive_request(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
 
 
 

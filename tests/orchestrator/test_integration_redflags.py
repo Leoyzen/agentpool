@@ -8,16 +8,15 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import AsyncIterator
+import contextlib
 from typing import Any
 from unittest.mock import MagicMock
 
-from pydantic_ai.models.test import TestModel
 import pytest
 
 from acp.schema import TurnCompleteUpdate
-from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
+from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage
@@ -297,7 +296,7 @@ async def test_turn_complete_update_after_auto_resume() -> None:
             await consumer_task
 
         # Convert events to ACP updates using the same converter as the handler
-        converter = ACPEventConverter()
+        converter = ACPEventConverter(client_supports_turn_complete=True)
         acp_updates: list[Any] = []
         for event in events:
             async for update in converter.convert(event):
