@@ -20,6 +20,10 @@ from agentpool.agents.events.events import (
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
+from agentpool_server.opencode_server.converters import (
+    chat_message_to_opencode,
+    opencode_to_chat_message,
+)
 from agentpool_server.opencode_server.event_adapter import OpenCodeEventAdapter
 from agentpool_server.opencode_server.event_processor_context import (
     EventProcessorContext,
@@ -58,6 +62,108 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+
+def _use_session_pool_for_messages(state: ServerState) -> bool:
+    """Check if SessionPool should be used for messages."""
+    if state.config is None:
+        return True
+    return getattr(state.config, "use_session_pool_for_messages", True)
+
+
+def _use_session_pool_for_status(state: ServerState) -> bool:
+    """Check if SessionPool should be used for session status."""
+    if state.config is None:
+        return True
+    return getattr(state.config, "use_session_pool_for_status", True)
+
+
+async def get_messages_for_session(
+    state: ServerState,
+    session_id: str,
+) -> list[MessageWithParts]:
+    """Get messages for a session from SessionPool or fall back to ServerState.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session ID to get messages for.
+
+    Returns:
+        List of MessageWithParts for the session.
+    """
+    if _use_session_pool_for_messages(state):
+        session_pool = getattr(state.pool, "session_pool", None)
+        if session_pool is not None:
+            try:
+                sp_messages = await session_pool.get_messages(session_id)
+            except (KeyError, TypeError):
+                sp_messages = []
+            if sp_messages:
+                agent = state.agent
+                with contextlib.suppress(Exception):
+                    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+                return [
+                    chat_message_to_opencode(
+                        chat_msg,
+                        session_id=session_id,
+                        working_dir=state.working_dir,
+                        agent_name=agent.name,
+                        model_id=getattr(chat_msg, "model_name", None) or "sonnet",
+                        provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
+                    )
+                    for chat_msg in sp_messages
+                ]
+    return state.messages.get(session_id, [])
+
+
+async def append_message_to_session(
+    state: ServerState,
+    session_id: str,
+    msg: MessageWithParts,
+) -> None:
+    """Append a message to a session's history.
+
+    Writes to SessionPool when the feature flag is enabled, and also
+    appends to ``state.messages`` for backward compatibility during
+    the transition period.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session ID to append to.
+        msg: The OpenCode message to append.
+    """
+    if _use_session_pool_for_messages(state):
+        session_pool = getattr(state.pool, "session_pool", None)
+        if session_pool is not None:
+            chat_msg = opencode_to_chat_message(msg, session_id=session_id)
+            try:
+                await session_pool.append_message(session_id, chat_msg)
+            except (KeyError, TypeError):
+                logger.warning(
+                    "Failed to append message to SessionPool",
+                    session_id=session_id,
+                    exc_info=True,
+                )
+    # Always keep state.messages in sync during transition
+    state.messages.setdefault(session_id, []).append(msg)
+
+
+async def set_session_status(
+    state: ServerState,
+    session_id: str,
+    status: SessionStatus,
+) -> None:
+    """Set the status of a session.
+
+    Uses SessionStatusBridge when the feature flag is enabled, otherwise
+    falls back to the ServerState in-memory dictionary.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session to update.
+        status: The new session status.
+    """
+    state.session_status[session_id] = status
 
 
 def _session_state_to_opencode(state: SessionState) -> Session:

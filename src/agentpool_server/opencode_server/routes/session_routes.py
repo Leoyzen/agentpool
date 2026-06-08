@@ -61,6 +61,9 @@ from agentpool_server.opencode_server.models import (
     Tokens,
     UserMessage,
 )
+from agentpool_server.opencode_server.session_pool_integration import (
+    get_messages_for_session,
+)
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from agentpool_storage.opencode_provider import helpers
 
@@ -77,38 +80,10 @@ async def _get_session_messages_from_pool(
 ) -> list[MessageWithParts]:
     """Get messages for a session from SessionPool, falling back to state.messages.
 
-    Converts ChatMessage objects from SessionPool to MessageWithParts for
-    OpenCode server compatibility.
+    Delegates to :func:`get_messages_for_session` which handles feature-flag
+    routing and ChatMessage-to-MessageWithParts conversion.
     """
-    session_pool = getattr(state.pool, "session_pool", None)
-    if session_pool is None:
-        return state.messages.get(session_id, [])
-
-    try:
-        sp_messages = await session_pool.get_messages(session_id)
-    except (KeyError, TypeError):
-        return state.messages.get(session_id, [])
-
-    if not sp_messages:
-        return state.messages.get(session_id, [])
-
-    agent = state.agent
-    try:
-        agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-    except Exception:
-        pass
-
-    return [
-        chat_message_to_opencode(
-            chat_msg,
-            session_id=session_id,
-            working_dir=state.working_dir,
-            agent_name=agent.name,
-            model_id=getattr(chat_msg, "model_name", None) or "sonnet",
-            provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
-        )
-        for chat_msg in sp_messages
-    ]
+    return await get_messages_for_session(state, session_id)
 
 
 class _CommandOutputCapture:
