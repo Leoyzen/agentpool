@@ -115,6 +115,9 @@ class BaseAgentAGUIAdapter:
             # specialized event-handling path. BaseAgent._should_bypass_session_pool()
             # detects AG-UI callers via stack inspection and bypasses SessionPool
             # delegation, ensuring AG-UI events flow directly without interception.
+            # The AG-UI bypass is permanent — see docs/audit/agui-bypass-audit.md.
+            # AG-UI protocol requires direct agent access for protocol-specific
+            # event transformation (AGUIEventStream).
             # TODO: Properly handle agent statefulness with AG-UI protocol.
             # AG-UI is stateless - client sends full history with each request.
             # For now, we use store_history=False to avoid accumulating duplicate
