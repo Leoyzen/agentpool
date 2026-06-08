@@ -787,7 +787,7 @@ async def get_message(session_id: str, message_id: str, state: StateDep) -> Mess
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    for msg in state.messages.get(session_id, []):
+    for msg in await get_messages_for_session(state, session_id):
         if msg.info.id == message_id:
             return msg
 
@@ -802,7 +802,7 @@ async def delete_part(
     state: StateDep,
 ) -> bool:
     """Delete a part from a message."""
-    for msg in state.messages.get(session_id, []):
+    for msg in await get_messages_for_session(state, session_id):
         if msg.info.id != message_id:
             continue
         for i, part in enumerate(msg.parts):
@@ -833,7 +833,7 @@ async def update_part(
     Accepts the full part object and replaces the existing part.
     Returns the updated part.
     """
-    for msg in state.messages.get(session_id, []):
+    for msg in await get_messages_for_session(state, session_id):
         if msg.info.id != message_id:
             continue
         for i, part in enumerate(msg.parts):
