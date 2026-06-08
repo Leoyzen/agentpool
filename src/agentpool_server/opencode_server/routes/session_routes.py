@@ -1374,7 +1374,11 @@ async def get_pending_permissions(
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get the input provider for this session
-    input_provider = state.input_providers.get(session_id)
+    input_provider = None
+    if state.session_controller is not None:
+        sp_session = state.session_controller.get_session(session_id)
+        if sp_session is not None:
+            input_provider = sp_session.input_provider
     if input_provider is None:
         return []
 
@@ -1400,7 +1404,11 @@ async def respond_to_permission(
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get the input provider for this session
-    input_provider = state.input_providers.get(session_id)
+    input_provider = None
+    if state.session_controller is not None:
+        sp_session = state.session_controller.get_session(session_id)
+        if sp_session is not None:
+            input_provider = sp_session.input_provider
     if input_provider is None:
         raise HTTPException(status_code=404, detail="No input provider for session")
 

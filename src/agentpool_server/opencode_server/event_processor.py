@@ -760,6 +760,10 @@ class EventProcessor:
         Yields:
             OpenCode Event objects for broadcasting to appropriate sessions.
         """
+        from agentpool_server.opencode_server.session_pool_integration import (
+            append_message_to_session,
+        )
+
         # 1. Check and cap depth at 5
         if subagent_event.depth >= 5:
             logger.warning(
@@ -805,7 +809,7 @@ class EventProcessor:
                 agent_name=source_name,
             )
             user_msg.add_text_part(f"Task: {source_name}")
-            ctx.state.messages[child_session_id].append(user_msg)
+            await append_message_to_session(ctx.state, child_session_id, user_msg)
             yield MessageUpdatedEvent.create(user_msg.info)
             # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
             # text part.  Without this, the UserMessage component finds no text
@@ -842,7 +846,7 @@ class EventProcessor:
             self._child_contexts[child_session_id] = child_ctx
 
             # Create child session assistant message
-            ctx.state.messages[child_session_id].append(child_assistant_msg)
+            await append_message_to_session(ctx.state, child_session_id, child_assistant_msg)
             yield MessageUpdatedEvent.create(child_assistant_msg.info)
 
             # Persist assistant message to storage
@@ -1003,8 +1007,11 @@ class EventProcessor:
             # (broadcast is handled by the caller).
             if child_session_id:
                 from agentpool_server.opencode_server.models import SessionStatus
+                from agentpool_server.opencode_server.session_pool_integration import (
+                    set_session_status,
+                )
 
-                ctx.state.session_status[child_session_id] = SessionStatus(type="idle")
+                await set_session_status(ctx.state, child_session_id, SessionStatus(type="idle"))
                 yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
                 yield SessionIdleEvent.create(child_session_id)
 
@@ -1096,8 +1103,11 @@ class EventProcessor:
 
         # Emit idle events for the child session
         from agentpool_server.opencode_server.models import SessionStatus
+        from agentpool_server.opencode_server.session_pool_integration import (
+            set_session_status,
+        )
 
-        ctx.state.session_status[child_session_id] = SessionStatus(type="idle")
+        await set_session_status(ctx.state, child_session_id, SessionStatus(type="idle"))
         yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
         yield SessionIdleEvent.create(child_session_id)
 
@@ -1118,6 +1128,11 @@ class EventProcessor:
         Yields:
             OpenCode Event objects for broadcasting.
         """
+        from agentpool_server.opencode_server.session_pool_integration import (
+            append_message_to_session,
+            ensure_session,
+        )
+
         # Duplicate guard - skip if session already exists
         if event.child_session_id in self._child_contexts:
             logger.debug(
@@ -1127,8 +1142,6 @@ class EventProcessor:
             return
 
         # Ensure child session exists
-        from agentpool_server.opencode_server.session_pool_integration import ensure_session
-
         await ensure_session(ctx.state, event.child_session_id, parent_id=ctx.session_id)
 
         # Import identifiers
@@ -1144,7 +1157,7 @@ class EventProcessor:
         )
         # Use prompt from metadata if available, fall back to description
         text_part = user_msg.add_text_part(event.metadata.get("prompt") or event.description)
-        ctx.state.messages[event.child_session_id].append(user_msg)
+        await append_message_to_session(ctx.state, event.child_session_id, user_msg)
         yield MessageUpdatedEvent.create(user_msg.info)
         # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
         # text part.  Without this, the UserMessage component finds no text
@@ -1178,7 +1191,7 @@ class EventProcessor:
             working_dir=ctx.working_dir,
         )
         self._child_contexts[event.child_session_id] = child_ctx
-        ctx.state.messages[event.child_session_id].append(child_assistant_msg)
+        await append_message_to_session(ctx.state, event.child_session_id, child_assistant_msg)
         yield MessageUpdatedEvent.create(child_assistant_msg.info)
 
         # Persist assistant message to storage

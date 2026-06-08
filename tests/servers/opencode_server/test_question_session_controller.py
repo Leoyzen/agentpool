@@ -311,11 +311,11 @@ class TestInputProviderStoresQuestionsOnSessionState:
         await task
 
     @pytest.mark.asyncio
-    async def test_input_provider_fallback_to_server_state(
+    async def test_input_provider_no_fallback_to_server_state(
         self,
         session_controller: SessionController,
     ) -> None:
-        """When no session_controller, questions fall back to ServerState."""
+        """When no session_controller, questions are not stored on ServerState."""
         mock_agent = Mock()
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
@@ -331,13 +331,15 @@ class TestInputProviderStoresQuestionsOnSessionState:
         task = asyncio.create_task(provider.get_elicitation(params))
         await asyncio.sleep(0.1)
 
-        # Question should be on ServerState
-        assert len(state.pending_questions) == 1
+        # Question should NOT be on ServerState; provider uses empty dict fallback
+        assert len(state.pending_questions) == 0
 
-        # Clean up
-        question_id = next(iter(state.pending_questions.keys()))
-        provider.resolve_question(question_id, [["a"]])
-        await task
+        # Cancel the task since there's no question to resolve
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 class TestSSEDisconnectViaSessionController:
