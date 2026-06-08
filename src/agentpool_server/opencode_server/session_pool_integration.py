@@ -636,7 +636,12 @@ class OpenCodeSessionPoolIntegration:
                     # Record spawn info for later ToolPart updates
                     child_spawns[event.child_session_id] = event
                     # Create ToolPart in parent session before spawning child
-                    await self._create_subagent_tool_part(session_id, event)
+                    tool_part = await self._create_subagent_tool_part(session_id, event)
+                    # Also register in EventProcessorContext so SubAgentEvent
+                    # handling can find and update the ToolPart later.
+                    if tool_part is not None:
+                        subagent_key = f"{event.depth}:{event.source_name}:{event.child_session_id}"
+                        event_adapter.context.add_subagent_tool_part(subagent_key, tool_part)
                     child_task = asyncio.create_task(
                         self._event_consumer_loop(event.child_session_id),
                         name=f"event_consumer_{event.child_session_id}",
@@ -707,7 +712,7 @@ class OpenCodeSessionPoolIntegration:
         self,
         parent_session_id: str,
         spawn_event: SpawnSessionStart,
-    ) -> None:
+    ) -> ToolPart | None:
         """Create a ToolPart in the parent session representing a subagent.
 
         This replaces the ToolPart creation that previously happened inside
@@ -717,6 +722,9 @@ class OpenCodeSessionPoolIntegration:
         Args:
             parent_session_id: The parent session ID.
             spawn_event: The spawn event containing subagent metadata.
+
+        Returns:
+            The created ToolPart, or None if one already exists for this child.
         """
         # Find the parent session's latest assistant message
         messages = self.server_state.messages.get(parent_session_id, [])
@@ -745,7 +753,7 @@ class OpenCodeSessionPoolIntegration:
                 logger.debug(
                     "ToolPart already exists for child session %s", child_session_id
                 )
-                return
+                return None
 
         source_name = spawn_event.source_name or "subagent"
         tool_title = source_name
@@ -775,6 +783,7 @@ class OpenCodeSessionPoolIntegration:
             child_session_id,
             parent_session_id,
         )
+        return tool_part
 
     async def _update_parent_toolpart(
         self,
