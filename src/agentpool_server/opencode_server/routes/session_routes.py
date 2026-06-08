@@ -82,7 +82,7 @@ async def _get_session_messages_from_pool(
     state: ServerState,
     session_id: str,
 ) -> list[MessageWithParts]:
-    """Get messages for a session from SessionPool, falling back to state.messages.
+    """Get messages for a session from SessionPool via get_messages_for_session.
 
     Delegates to :func:`get_messages_for_session` which handles feature-flag
     routing and ChatMessage-to-MessageWithParts conversion.
@@ -548,7 +548,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     cached_session = state.sessions.get(session_id)
     is_subagent_session = cached_session is not None and cached_session.parent_id is not None
 
-    if is_subagent_session and session_id in state.messages:
+    if is_subagent_session and len(await get_messages_for_session(state, session_id)) > 0:
         return cached_session
 
     # If the session is cached in memory (regardless of subagent status),
@@ -557,7 +557,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     # session is NOT in the messages cache at all (cold-start recovery after
     # server restart). If messages are already present (even empty), the
     # session agent already owns the correct conversation history.
-    if cached_session is not None and session_id in state.messages:
+    if cached_session is not None and len(await get_messages_for_session(state, session_id)) > 0:
         return cached_session
 
     # Load from SessionPool store when available
@@ -568,7 +568,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             session = session_data_to_opencode(data)
             state.sessions[session_id] = session
             state.ensure_runtime_session_state(session_id)
-            if session_id not in state.session_status:
+            if await _get_single_session_status(state, session_id) is None:
                 await state.mark_session_idle(session_id)
             # Load conversation history from agent via SessionController
             agent = await session_pool.sessions.get_or_create_session_agent(session_id)
@@ -592,7 +592,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             return session
 
     # Fallback: load via agent.load_session()
-    existing_messages = state.messages.get(session_id) if is_subagent_session else None
+    existing_messages = await get_messages_for_session(state, session_id) if is_subagent_session else []
     if session_pool is not None:
         agent = await session_pool.sessions.get_or_create_session_agent(session_id)
     else:
@@ -604,7 +604,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
     session = session_data_to_opencode(data)
     state.sessions[session_id] = session
     state.ensure_runtime_session_state(session_id)
-    if session_id not in state.session_status:
+    if await _get_single_session_status(state, session_id) is None:
         await state.mark_session_idle(session_id)
 
     if not (is_subagent_session and existing_messages):
@@ -973,7 +973,7 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
     state.cancel_session_pending_questions(session_id)
 
     # Update and broadcast session status to notify clients
-    state.session_status[session_id] = SessionStatus(type="idle")
+    await set_session_status(state, session_id, SessionStatus(type="idle"))
     await state.broadcast_event(SessionStatusEvent.create(session_id, SessionStatus(type="idle")))
     await state.broadcast_event(SessionIdleEvent.create(session_id))
     return True
@@ -1960,7 +1960,7 @@ async def execute_command(  # noqa: PLR0915
         await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
         try:
             # Mark session as busy
-            state.session_status[session_id] = SessionStatus(type="busy")
+            await set_session_status(state, session_id, SessionStatus(type="busy"))
             await state.broadcast_event(
                 SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
             )
