@@ -70,7 +70,7 @@ async def test_list_permissions_reads_from_session_controller():
     session.input_provider = provider
 
     session_controller = Mock()
-    session_controller.list_sessions = Mock(return_value=[session])
+    session_controller._sessions = {"sess-1": session}
 
     state = ServerState(
         working_dir="/tmp",
@@ -109,7 +109,7 @@ async def test_reply_to_permission_resolves_via_session_controller():
     session.input_provider = provider
 
     session_controller = Mock()
-    session_controller.list_sessions = Mock(return_value=[session])
+    session_controller._sessions = {"sess-1": session}
 
     state = ServerState(
         working_dir="/tmp",
@@ -140,7 +140,7 @@ async def test_reply_to_permission_not_found_with_controller():
     session = SessionState(session_id="sess-1", agent_name="test-agent")
     # No input_provider set, so no permissions
     session_controller = Mock()
-    session_controller.list_sessions = Mock(return_value=[session])
+    session_controller._sessions = {"sess-1": session}
 
     state = ServerState(
         working_dir="/tmp",
@@ -232,7 +232,7 @@ async def test_fast_path_future_always_approval():
 
 
 async def test_legacy_fallback_without_session_controller():
-    """A5.1: Without session_controller, routes fall back to ServerState.input_providers."""
+    """A5.1: Without session_controller, routes return empty / 404 (no legacy fallback)."""
     mock_agent = Mock()
     mock_agent.agent_pool = None
 
@@ -249,14 +249,14 @@ async def test_legacy_fallback_without_session_controller():
     )
     state.broadcast_event = AsyncMock()  # type: ignore[method-assign]
 
-    # list_permissions should work via legacy path
+    # list_permissions returns empty when no session_controller
     result = await list_permissions(state)
-    assert len(result) == 1
-    assert result[0].id == "perm-legacy"
+    assert len(result) == 0
 
-    # reply_to_permission should work via legacy path
+    # reply_to_permission raises 404 when no session_controller
+    from fastapi import HTTPException
+
     body = PermissionReplyRequest(reply="once")
-    reply_result = await reply_to_permission("perm-legacy", body, state)
-    assert reply_result is True
-    assert future.done()
-    assert future.result() == "once"
+    with pytest.raises(HTTPException) as exc_info:
+        await reply_to_permission("perm-legacy", body, state)
+    assert exc_info.value.status_code == 404
