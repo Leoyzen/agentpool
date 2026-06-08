@@ -62,7 +62,9 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
     get_messages_for_session,
+    get_session_status as _get_single_session_status,
 )
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from agentpool_storage.opencode_provider import helpers
@@ -720,9 +722,8 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
             )
     # Cache in memory
     state.sessions[session_id] = session
-    state.messages[session_id] = []
+    state.ensure_runtime_session_state(session_id)
     await state.mark_session_idle(session_id)
-    state.todos[session_id] = []
     state.ensure_input_provider(session_id)
     agent = state.agent
     agent.session_id = session_id
@@ -743,8 +744,15 @@ async def get_session_status(state: StateDep) -> dict[str, SessionStatus]:
     """Get status for all sessions.
 
     Returns only non-idle sessions. If all sessions are idle, returns empty dict.
+    Delegates to :func:`_get_single_session_status` for each session so the
+    SessionPool integration is consulted when the feature flag is enabled.
     """
-    return {sid: status for sid, status in state.session_status.items() if status.type != "idle"}
+    result = {}
+    for session_id in list(state.session_status.keys()):
+        status = await _get_single_session_status(state, session_id)
+        if status is not None and status.type != "idle":
+            result[session_id] = status
+    return result
 
 
 @router.get("/{session_id}")
@@ -789,7 +797,7 @@ async def get_session_messages(
     # parent agent is streaming and subagent parts are in memory.
     cached_session = state.sessions.get(session_id)
     if cached_session is not None and cached_session.parent_id is not None:
-        messages = await _get_session_messages_from_pool(state, session_id)
+        messages = await get_messages_for_session(state, session_id)
         if limit is not None and limit > 0:
             messages = messages[-limit:]
         return messages
@@ -799,7 +807,7 @@ async def get_session_messages(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    messages = await _get_session_messages_from_pool(state, session_id)
+    messages = await get_messages_for_session(state, session_id)
     if limit is not None and limit > 0:
         messages = messages[-limit:]
     return messages
@@ -880,15 +888,8 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Cancel any pending permissions and clean up input provider
-    if input_provider := state.input_providers.pop(session_id, None):
-        input_provider.cancel_all_pending()
-
     # Remove from cache
     state.sessions.pop(session_id, None)
-    state.messages.pop(session_id, None)
-    state.session_status.pop(session_id, None)
-    state.todos.pop(session_id, None)
     state.reverted_messages.pop(session_id, None)
     # Delegate session cleanup to OpenCodeSessionPoolIntegration
     integration = state.session_pool_integration
@@ -1065,7 +1066,8 @@ async def fork_session(  # noqa: D417
             part.model_copy(update={"session_id": new_session_id}) for part in msg_with_parts.parts
         ]
         copied_messages.append(MessageWithParts(info=new_info, parts=new_parts))
-    state.messages[new_session_id] = copied_messages
+    for msg_with_parts in copied_messages:
+        await append_message_to_session(state, new_session_id, msg_with_parts)
     if session_pool is not None:
         fork_agent = await session_pool.sessions.get_or_create_session_agent(new_session_id)
         fork_agent.conversation.chat_messages.clear()
