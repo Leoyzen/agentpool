@@ -71,6 +71,46 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+async def _get_session_messages_from_pool(
+    state: ServerState,
+    session_id: str,
+) -> list[MessageWithParts]:
+    """Get messages for a session from SessionPool, falling back to state.messages.
+
+    Converts ChatMessage objects from SessionPool to MessageWithParts for
+    OpenCode server compatibility.
+    """
+    session_pool = getattr(state.pool, "session_pool", None)
+    if session_pool is None:
+        return state.messages.get(session_id, [])
+
+    try:
+        sp_messages = await session_pool.get_messages(session_id)
+    except (KeyError, TypeError):
+        return state.messages.get(session_id, [])
+
+    if not sp_messages:
+        return state.messages.get(session_id, [])
+
+    agent = state.agent
+    try:
+        agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+    except Exception:
+        pass
+
+    return [
+        chat_message_to_opencode(
+            chat_msg,
+            session_id=session_id,
+            working_dir=state.working_dir,
+            agent_name=agent.name,
+            model_id=getattr(chat_msg, "model_name", None) or "sonnet",
+            provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
+        )
+        for chat_msg in sp_messages
+    ]
+
+
 class _CommandOutputCapture:
     """Output writer that captures command output to a string buffer."""
 
@@ -773,12 +813,8 @@ async def get_session_messages(
     # Skip get_or_load_session (which may load from storage) because the
     # parent agent is streaming and subagent parts are in memory.
     cached_session = state.sessions.get(session_id)
-    if (
-        cached_session is not None
-        and cached_session.parent_id is not None
-        and session_id in state.messages
-    ):
-        messages = state.messages[session_id]
+    if cached_session is not None and cached_session.parent_id is not None:
+        messages = await _get_session_messages_from_pool(state, session_id)
         if limit is not None and limit > 0:
             messages = messages[-limit:]
         return messages
@@ -788,7 +824,7 @@ async def get_session_messages(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    messages = state.messages.get(session_id, [])
+    messages = await _get_session_messages_from_pool(state, session_id)
     if limit is not None and limit > 0:
         messages = messages[-limit:]
     return messages
@@ -985,7 +1021,7 @@ async def fork_session(  # noqa: D417
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get messages from the original session
-    original_messages = state.messages.get(session_id, [])
+    original_messages = await _get_session_messages_from_pool(state, session_id)
     messages_to_copy: list[MessageWithParts] = []
     if request and request.message_id:
         for msg in original_messages:
@@ -1030,6 +1066,17 @@ async def fork_session(  # noqa: D417
                 "SessionPool forked session creation failed, falling back to in-memory",
                 session_id=new_session_id,
             )
+
+    # Copy messages in storage via SessionPool
+    if session_pool is not None:
+        try:
+            await session_pool.copy_messages(
+                session_id,
+                new_session_id,
+                up_to_message_id=request.message_id if request else None,
+            )
+        except (KeyError, TypeError):
+            pass  # Session not in SessionPool or mock, use in-memory only
 
     # Cache in memory
     state.sessions[new_session_id] = forked_session
@@ -1634,7 +1681,7 @@ async def share_session(
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = state.messages.get(session_id, [])
+    messages = await _get_session_messages_from_pool(state, session_id)
 
     if not messages:
         raise HTTPException(status_code=400, detail="No messages to share")
@@ -1710,6 +1757,14 @@ async def revert_session(session_id: str, request: RevertRequest, state: StateDe
 
     if not messages_to_remove:
         raise HTTPException(status_code=400, detail="No messages to revert")
+
+    # Persist truncation via SessionPool
+    session_pool = getattr(state.pool, "session_pool", None)
+    if session_pool is not None:
+        try:
+            await session_pool.truncate_messages(session_id, request.message_id)
+        except (KeyError, TypeError):
+            pass  # Session not in SessionPool or mock, use in-memory only
 
     # Store removed messages for unrevert
     state.reverted_messages[session_id] = messages_to_remove
