@@ -91,6 +91,11 @@ class OpenCodeConfig(Schema):
     )
     """Whether to route MCP tool calls through the SessionPool."""
 
+    eventbus_replay_buffer_size: int = Field(
+        default=100, ge=1, title="EventBus replay buffer size"
+    )
+    """Maximum number of events retained per session for EventBus replay."""
+
     def should_use_session_pool_for(self, category: str) -> bool:
         """Check if SessionPool should be used for a specific category.
 

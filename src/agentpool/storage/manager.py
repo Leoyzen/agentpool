@@ -628,6 +628,27 @@ class StorageManager:
         )
 
     @method_spawner
+    async def truncate_messages(
+        self,
+        session_id: str,
+        up_to_message_id: str,
+    ) -> int:
+        """Remove all messages after the given message ID.
+
+        Keeps messages up to and including up_to_message_id,
+        removes everything after it.
+
+        Args:
+            session_id: ID of the conversation to truncate
+            up_to_message_id: Keep messages up to and including this ID
+
+        Returns:
+            The count of removed messages
+        """
+        provider = self.get_history_provider()
+        return await provider.truncate_messages(session_id, up_to_message_id)
+
+    @method_spawner
     async def delete_session_messages(
         self,
         session_id: str,
