@@ -210,11 +210,11 @@ class TestQuestionRoutesViaSessionController:
         assert result[0].session_id == "test_session"
 
     @pytest.mark.asyncio
-    async def test_list_questions_fallback_to_server_state(
+    async def test_list_questions_no_session_controller_returns_empty(
         self,
         session_controller: SessionController,
     ) -> None:
-        """list_questions should fall back to ServerState when no session_controller."""
+        """list_questions should return empty list when no session_controller."""
         mock_agent = Mock()
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
@@ -223,8 +223,7 @@ class TestQuestionRoutesViaSessionController:
 
         result = await list_questions(state)
 
-        assert len(result) == 1
-        assert result[0].id == "q1"
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_reply_to_question_via_session_controller(
@@ -240,7 +239,7 @@ class TestQuestionRoutesViaSessionController:
         mock_agent.agent_pool = None
         state = ServerState(working_dir="/tmp", agent=mock_agent)
         state.session_controller = session_controller
-        state.input_providers["test_session"] = OpenCodeInputProvider(state, "test_session")
+        session.input_provider = OpenCodeInputProvider(state, "test_session")
         state.broadcast_event = AsyncMock()
 
         reply = QuestionReply(answers=[["yes"]])

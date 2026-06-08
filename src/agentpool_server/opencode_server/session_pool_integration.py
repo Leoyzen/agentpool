@@ -148,6 +148,25 @@ async def append_message_to_session(
     state.messages.setdefault(session_id, []).append(msg)
 
 
+async def set_messages_for_session(
+    state: ServerState,
+    session_id: str,
+    messages: list[MessageWithParts],
+) -> None:
+    """Replace all in-memory messages for a session.
+
+    This is a bulk operation used after compaction/summarization when
+    the UI-visible message list should be reset to a specific set.
+    SessionPool storage is managed separately via storage.replace_conversation_messages.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session ID to update.
+        messages: The new message list.
+    """
+    state.messages[session_id] = list(messages)
+
+
 async def set_session_status(
     state: ServerState,
     session_id: str,
