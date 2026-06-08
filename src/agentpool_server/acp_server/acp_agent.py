@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
+import uuid
 
 import anyio
 
@@ -801,6 +802,52 @@ class AgentPoolACPAgent(ACPAgent):
             raise RequestError.invalid_params({"id": params.id}) from e
         return DisableProvidersResponse()
 
+    async def _handle_mcp_elicitation(
+        self, message: dict[str, Any], connection_id: str
+    ) -> dict[str, Any]:
+        """Handle server-initiated elicitation/create via input provider.
+
+        Called when an MCP server sends elicitation/create without an inner id.
+        The correlation registry can't match responses without an id, so we
+        handle it directly via the input provider.
+        """
+        msg_params = message.get("params", {})
+        mode = msg_params.get("mode", "form")
+        input_provider = getattr(self.default_agent, "_input_provider", None)
+        if input_provider is None:
+            logger.warning(
+                "No input provider available for elicitation; declining",
+                connection_id=connection_id,
+            )
+            return {"action": "decline"}
+        try:
+            from mcp import types as mcp_types
+
+            if mode == "url":
+                elicit_params: (
+                    mcp_types.ElicitRequestURLParams | mcp_types.ElicitRequestFormParams
+                ) = mcp_types.ElicitRequestURLParams(
+                    mode="url",
+                    message=msg_params.get("message", ""),
+                    url=msg_params.get("url", ""),
+                    elicitationId=msg_params.get("elicitationId", "")
+                    or str(uuid.uuid4()),
+                )
+            else:
+                elicit_params = mcp_types.ElicitRequestFormParams(
+                    mode="form",
+                    message=msg_params.get("message", ""),
+                    requestedSchema=msg_params.get("requestedSchema"),
+                )
+            result = await input_provider.get_elicitation(elicit_params)
+            if isinstance(result, mcp_types.ElicitResult):
+                return result.model_dump()
+            if isinstance(result, mcp_types.ErrorData):
+                return result.model_dump()
+        except Exception:
+            logger.exception("Failed to handle elicitation")
+        return {"action": "decline"}
+
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods.
 
@@ -825,7 +872,11 @@ class AgentPoolACPAgent(ACPAgent):
                     )
                     return {}
 
-                if isinstance(message, dict) and "method" in message and message.get("id") is not None:
+                if (
+                    isinstance(message, dict)
+                    and "method" in message
+                    and message.get("id") is not None
+                ):
                     # Client-initiated REQUEST: correlate and await response
                     future = await conn.register_pending_request(message["id"])
                     try:
@@ -845,7 +896,8 @@ class AgentPoolACPAgent(ACPAgent):
                                 error.get("message", "Unknown MCP error"),
                                 error.get("data"),
                             )
-                        return response.get("result", {})
+                        result = response.get("result", {})
+                        return result if isinstance(result, dict) else {}
                     except TimeoutError:
                         raise RequestError(
                             -32000,
@@ -858,6 +910,9 @@ class AgentPoolACPAgent(ACPAgent):
                         ) from None
                     finally:
                         conn.unregister_pending_request(message["id"])
+                elif isinstance(message, dict) and message.get("method") == "elicitation/create":
+                    # Server-initiated elicitation request (no inner id)
+                    return await self._handle_mcp_elicitation(message, connection_id)
                 else:
                     # NOTIFICATION (no id, or id is null, or no method): fire-and-forget
                     self.tasks.create_task(conn.handle_client_message(message))

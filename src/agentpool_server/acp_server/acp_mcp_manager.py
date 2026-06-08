@@ -197,7 +197,11 @@ class AcpMcpConnection:
             )
 
         # NEW: Check if this is a response to a pending client-initiated request
-        if isinstance(message, dict) and ("result" in message or "error" in message) and message.get("id") is not None:
+        if (
+            isinstance(message, dict)
+            and ("result" in message or "error" in message)
+            and message.get("id") is not None
+        ):
             if self.fulfill_pending_request(message["id"], message):
                 return message  # Consumed, don't forward to ACP client
             logger.warning(
