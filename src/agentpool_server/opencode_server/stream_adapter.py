@@ -257,6 +257,7 @@ class OpenCodeStreamAdapter:
                 time=TimeStartEndOptional(start=start, end=response_time),
             )
             self.assistant_msg.update_part(final_text_part)
+            yield PartUpdatedEvent.create(final_text_part)
 
         # Step finish — skip if already emitted by _process_stream_complete
         # (StreamCompleteEvent handler in EventProcessor also emits StepFinishPart)
