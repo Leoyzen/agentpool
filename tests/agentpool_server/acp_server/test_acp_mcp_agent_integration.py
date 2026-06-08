@@ -164,8 +164,12 @@ async def test_ext_method_routes_message(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
     await acp_agent.connect_acp_mcp_server(server_config)
 
-    msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    await acp_agent.ext_method("mcp/message", {"connectionId": "conn-789", "message": msg})
+    # Use a notification (no id) to avoid blocking on correlation registry
+    msg = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}}
+    result = await acp_agent.ext_method("mcp/message", {"connectionId": "conn-789", "message": msg})
+
+    # Notifications return {} immediately
+    assert result == {}
 
     # Give the async task a chance to run, then receive with timeout
     conn = acp_agent._mcp_manager.get_connection("conn-789")
@@ -176,7 +180,7 @@ async def test_ext_method_routes_message(
     from mcp.shared.message import SessionMessage
 
     assert isinstance(received, SessionMessage)
-    assert received.message.root.method == "tools/list"
+    assert received.message.root.method == "notifications/progress"
 
 
 # Test 5: ext_method with unknown connectionId logs warning and does not crash
@@ -186,7 +190,8 @@ async def test_ext_method_unknown_connection_id(
     acp_agent: AgentPoolACPAgent,
 ) -> None:
     """Verify ext_method handles unknown connectionId gracefully without crashing."""
-    msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    # Use a notification (no id) to avoid blocking on correlation registry
+    msg = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}}
 
     result = await acp_agent.ext_method(
         "mcp/message", {"connectionId": "unknown-conn", "message": msg}
@@ -216,8 +221,9 @@ async def test_ext_method_concurrent_messages(
         AcpMcpServer(name="test-server-2", id="test-id-2")
     )
 
-    msg_a = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    msg_b = {"jsonrpc": "2.0", "id": 2, "method": "tools/call"}
+    # Use notifications (no id) to avoid blocking on correlation registry
+    msg_a = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 25}}
+    msg_b = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 75}}
 
     await asyncio.gather(
         acp_agent.ext_method("mcp/message", {"connectionId": "conn-a", "message": msg_a}),
@@ -237,8 +243,8 @@ async def test_ext_method_concurrent_messages(
 
     assert isinstance(received_a, SessionMessage)
     assert isinstance(received_b, SessionMessage)
-    assert received_a.message.root.method == "tools/list"
-    assert received_b.message.root.method == "tools/call"
+    assert received_a.message.root.method == "notifications/progress"
+    assert received_b.message.root.method == "notifications/progress"
 
 
 # Test 7: close disconnects all ACP MCP servers and cleans up

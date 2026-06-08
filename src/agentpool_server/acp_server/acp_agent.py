@@ -815,17 +815,55 @@ class AgentPoolACPAgent(ACPAgent):
         """
         match method:
             case "mcp/message":
+                from acp.exceptions import RequestError
+
                 connection_id = params.get("connectionId", "")
                 message = params.get("message", {})
                 conn = self._mcp_manager.get_connection(connection_id)
-                if conn is not None:
-                    self.tasks.create_task(conn.handle_client_message(message))
-                else:
+                if conn is None:
                     logger.warning(
                         "Received MCP message for unknown connection",
                         connection_id=connection_id,
                     )
-                return {}
+                    return {}
+
+                if isinstance(message, dict) and "method" in message and message.get("id") is not None:
+                    # Client-initiated REQUEST: correlate and await response
+                    future = await conn.register_pending_request(message["id"])
+                    try:
+                        with anyio.fail_after(30):
+                            await conn.handle_client_message(message)
+                        response = await asyncio.wait_for(future, timeout=30)
+                        if "error" in response:
+                            error = response["error"]
+                            from agentpool_server.acp_server.acp_mcp_manager import (
+                                _sanitize_jsonrpc_error,
+                            )
+
+                            sanitized = _sanitize_jsonrpc_error({"error": error})
+                            error = sanitized["error"]
+                            raise RequestError(
+                                error.get("code", -32603),
+                                error.get("message", "Unknown MCP error"),
+                                error.get("data"),
+                            )
+                        return response.get("result", {})
+                    except asyncio.TimeoutError:
+                        raise RequestError(
+                            -32000,
+                            "MCP request timed out",
+                        ) from None
+                    except asyncio.CancelledError:
+                        raise RequestError(
+                            -32001,
+                            "Connection closed while awaiting MCP response",
+                        ) from None
+                    finally:
+                        conn.unregister_pending_request(message["id"])
+                else:
+                    # NOTIFICATION (no id, or id is null, or no method): fire-and-forget
+                    self.tasks.create_task(conn.handle_client_message(message))
+                    return {}
             case _:
                 return {}
 

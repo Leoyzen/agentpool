@@ -50,7 +50,7 @@ class TestAcpMcpTransportMessageForwarding:
     async def test_message_forwarding_from_session_to_client(self, connection):
         """Messages from MCP server should be forwarded to the client."""
         transport = AcpMcpTransport(connection)
-        msg = {"jsonrpc": "2.0", "id": 1, "result": {"status": "ok"}}
+        msg = {"jsonrpc": "2.0", "id": 1, "method": "test", "params": {}}
 
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
@@ -68,7 +68,7 @@ class TestAcpMcpTransportMessageForwarding:
         """Multiple messages should be forwarded in order."""
         transport = AcpMcpTransport(connection)
         messages = [
-            {"jsonrpc": "2.0", "id": i, "result": {"data": i}}
+            {"jsonrpc": "2.0", "id": i, "method": "test", "params": {"data": i}}
             for i in range(3)
         ]
 
@@ -96,7 +96,29 @@ class TestAcpMcpTransportMessageForwarding:
         # Sending a message should block because nobody is reading from the stream
         with pytest.raises(TimeoutError):
             with anyio.fail_after(0.1):
-                await connection.from_session.send({"jsonrpc": "2.0", "id": 99, "result": {}})
+                await connection.from_session.send({"jsonrpc": "2.0", "id": 99, "method": "test"})
+
+
+    @pytest.mark.anyio
+    async def test_response_message_consumed_not_forwarded(self, connection):
+        """Response messages fulfilling a pending request should not be forwarded."""
+        transport = AcpMcpTransport(connection)
+
+        # Register a pending request so the response is consumed
+        future = await connection.register_pending_request(1)
+
+        msg = {"jsonrpc": "2.0", "id": 1, "result": {"status": "ok"}}
+
+        with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
+            async with transport.connect_session():
+                await connection.from_session.send(msg)
+
+                # Should NOT be forwarded to client because it fulfills pending request
+                connection._send_to_client.assert_not_awaited()
+
+                # Future should be fulfilled with the response
+                assert future.done()
+                assert future.result() == msg
 
 
 class TestAcpMcpTransportReusability:
@@ -107,7 +129,7 @@ class TestAcpMcpTransportReusability:
         """Transport should support multiple connect_session calls."""
         transport = AcpMcpTransport(connection)
 
-        msg1 = {"jsonrpc": "2.0", "id": 1, "result": {"a": 1}}
+        msg1 = {"jsonrpc": "2.0", "id": 1, "method": "test", "params": {"a": 1}}
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
                 await connection.from_session.send(msg1)
@@ -116,7 +138,7 @@ class TestAcpMcpTransportReusability:
                 assert call_args["message"] == msg1
 
         # Connection streams remain open, transport is reusable
-        msg2 = {"jsonrpc": "2.0", "id": 2, "result": {"b": 2}}
+        msg2 = {"jsonrpc": "2.0", "id": 2, "method": "test", "params": {"b": 2}}
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
                 await connection.from_session.send(msg2)
@@ -129,7 +151,7 @@ class TestAcpMcpTransportReusability:
         """Each session should get its own forwarder task."""
         transport = AcpMcpTransport(connection)
 
-        msg1 = {"jsonrpc": "2.0", "id": 1, "result": {"session": 1}}
+        msg1 = {"jsonrpc": "2.0", "id": 1, "method": "test", "params": {"session": 1}}
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
                 await connection.from_session.send(msg1)
@@ -137,7 +159,7 @@ class TestAcpMcpTransportReusability:
                 assert call_args["connectionId"] == connection.connection_id
                 assert call_args["message"] == msg1
 
-        msg2 = {"jsonrpc": "2.0", "id": 2, "result": {"session": 2}}
+        msg2 = {"jsonrpc": "2.0", "id": 2, "method": "test", "params": {"session": 2}}
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
                 await connection.from_session.send(msg2)
@@ -157,14 +179,14 @@ class TestAcpMcpTransportErrorHandling:
         with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
             async with transport.connect_session():
                 # Send one message during active session
-                msg = {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}
+                msg = {"jsonrpc": "2.0", "id": 1, "method": "test", "params": {"ok": True}}
                 await connection.from_session.send(msg)
                 call_args = connection._send_to_client.call_args[0][0]
                 assert call_args["message"]["id"] == 1
 
         # After session close, forwarder is cancelled
         # Sending a message should block because nobody is reading from the stream
-        msg = {"jsonrpc": "2.0", "id": 2, "result": {"ok": False}}
+        msg = {"jsonrpc": "2.0", "id": 2, "method": "test", "params": {"ok": False}}
         with pytest.raises(TimeoutError):
             with anyio.fail_after(0.1):
                 await connection.from_session.send(msg)
