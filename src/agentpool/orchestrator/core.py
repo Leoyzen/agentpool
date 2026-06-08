@@ -1026,55 +1026,14 @@ class TurnRunner:
                 self._injection_locks[session_id] = lock
             return lock
 
-    def _maybe_wrap_event(self, session_id: str, event: Any) -> Any:
-        """Wrap event in SubAgentEvent if session is a child session.
-
-        Child sessions created by the business layer store SubAgentEvent
-        metadata in their SessionState.metadata. When TurnRunner publishes
-        events for a child session, it wraps them so the protocol layer
-        can route them to the correct child session UI.
-
-        Args:
-            session_id: The session ID the event belongs to.
-            event: The event to potentially wrap.
-
-        Returns:
-            The original event, or a SubAgentEvent wrapping it.
-        """
-        from agentpool.agents.events import SubAgentEvent
-
-        session = self.sessions.get_session(session_id)
-        if session is None or session.parent_session_id is None:
-            return event
-
-        # Already wrapped — don't double-wrap
-        if isinstance(event, SubAgentEvent):
-            return event
-
-        metadata = session.metadata
-        source_name = metadata.get("source_name") or session.agent_name or "unknown"
-        source_type = metadata.get("source_type", "agent")
-        depth = metadata.get("depth", 1)
-        tool_call_id = metadata.get("tool_call_id")
-        model_id = metadata.get("model_id")
-        mode = metadata.get("mode")
-
-        return SubAgentEvent(
-            source_name=source_name,
-            source_type=source_type,
-            event=event,
-            depth=depth,
-            child_session_id=session_id,
-            parent_session_id=session.parent_session_id,
-            tool_call_id=tool_call_id,
-            model_id=model_id,
-            mode=mode,
-        )
-
     async def _publish_event(self, session_id: str, event: Any) -> None:
-        """Publish event to EventBus, wrapping for child sessions if needed."""
-        wrapped = self._maybe_wrap_event(session_id, event)
-        await self.event_bus.publish(session_id, wrapped)
+        """Publish event to EventBus.
+
+        Events are published raw without wrapping. Protocol layers subscribe
+        with scope="descendants" to receive child session events and route
+        them using event.session_id.
+        """
+        await self.event_bus.publish(session_id, event)
 
     async def _run_turn_unlocked(
         self,

@@ -380,6 +380,12 @@ class OpenCodeSessionPoolIntegration:
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is None:
             await self.create_session(session_id)
+        else:
+            # Ensure event consumer is running even for pre-existing sessions.
+            # Sessions created via other paths (e.g. get_or_load_session) don't
+            # have the consumer started, which would leave EventBus events
+            # unconsumed and the frontend blank.
+            await self._start_event_consumer(session_id)
 
         if input_provider is not None:
             session_state = self.session_pool.sessions.get_session(session_id)
@@ -529,11 +535,18 @@ class OpenCodeSessionPoolIntegration:
         The consumer runs for the entire session lifecycle, converting
         AgentPool events to OpenCode SSE events via EventBus subscription.
 
+        If a previous consumer task exists but is done (e.g. crashed), it is
+        cleaned up and a new consumer is started.
+
         Args:
             session_id: The session to start consuming events for.
         """
-        if session_id in self._event_consumers:
-            return
+        existing = self._event_consumers.get(session_id)
+        if existing is not None:
+            if not existing.done():
+                return
+            # Clean up finished/crashed task before starting a new one
+            self._event_consumers.pop(session_id, None)
         task = asyncio.create_task(
             self._event_consumer_loop(session_id),
             name=f"event_consumer_{session_id}",
@@ -605,6 +618,13 @@ class OpenCodeSessionPoolIntegration:
                         name=f"event_consumer_{event.child_session_id}",
                     )
                     child_tasks[event.child_session_id] = child_task
+                    continue
+
+                # Skip events that belong to child sessions — child consumers
+                # handle them.  With TurnRunner._maybe_wrap_event removed,
+                # child events arrive raw via scope="descendants".
+                event_session_id = getattr(event, "session_id", None)
+                if event_session_id is not None and event_session_id != session_id:
                     continue
 
                 # Register message on first non-spawn event so the TUI
