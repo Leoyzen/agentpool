@@ -123,9 +123,7 @@ async def append_message_to_session(
 ) -> None:
     """Append a message to a session's history.
 
-    Writes to SessionPool when the feature flag is enabled, and also
-    appends to ``state.messages`` for backward compatibility during
-    the transition period.
+    Writes to SessionPool when the feature flag is enabled.
 
     Args:
         state: The OpenCode server state.
@@ -144,8 +142,6 @@ async def append_message_to_session(
                     session_id=session_id,
                     exc_info=True,
                 )
-    # Always keep state.messages in sync during transition
-    state.messages.setdefault(session_id, []).append(msg)
 
 
 async def set_messages_for_session(
@@ -164,7 +160,7 @@ async def set_messages_for_session(
         session_id: The session ID to update.
         messages: The new message list.
     """
-    state.messages[session_id] = list(messages)
+    pass
 
 
 async def set_session_status(
@@ -174,8 +170,7 @@ async def set_session_status(
 ) -> None:
     """Set the status of a session.
 
-    Uses SessionStatusBridge when the feature flag is enabled, otherwise
-    falls back to the ServerState in-memory dictionary.
+    Uses SessionStatusBridge when the feature flag is enabled.
 
     Args:
         state: The OpenCode server state.
@@ -193,8 +188,6 @@ async def set_session_status(
                 if status.type == "idle":
                     await bridge._broadcast_idle()
                     return
-
-    state.session_status[session_id] = status
 
 
 async def get_session_status(
@@ -661,7 +654,6 @@ class OpenCodeSessionPoolIntegration:
         status = self.server_state.session_status.get(session_id)
         if status is None:
             status = SessionStatus(type="idle")
-            self.server_state.session_status[session_id] = status
         return status
 
     async def shutdown(self) -> None:

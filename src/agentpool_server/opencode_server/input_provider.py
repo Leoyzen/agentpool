@@ -65,14 +65,14 @@ class OpenCodeInputProvider(InputProvider):
     def _pending_questions_dict(self) -> dict[str, Any]:
         """Get the pending questions dict for this session.
 
-        When session_controller is available, stores questions on SessionState
-        for per-session isolation. Otherwise falls back to ServerState.
+        Returns SessionState.pending_questions for per-session isolation.
+        Returns empty dict if no session_controller or session not found.
         """
         if self.state.session_controller is not None:
             session = self.state.session_controller.get_session(self.session_id)
             if session is not None:
                 return session.pending_questions
-        return self.state.pending_questions
+        return {}
 
     def _generate_permission_id(self) -> str:
         """Generate a unique permission ID."""

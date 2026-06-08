@@ -118,7 +118,6 @@ class SessionStatusBridge:
     async def _broadcast_busy(self) -> None:
         """Broadcast ``session.status`` event with type ``busy``."""
         status = SessionStatus(type="busy")
-        self._server_state.session_status[self._session_id] = status
         await self._server_state.broadcast_event(
             SessionStatusEvent.create(self._session_id, status)
         )
@@ -126,7 +125,6 @@ class SessionStatusBridge:
     async def _broadcast_idle(self) -> None:
         """Broadcast ``session.status`` event with type ``idle``."""
         status = SessionStatus(type="idle")
-        self._server_state.session_status[self._session_id] = status
         await self._server_state.broadcast_event(
             SessionStatusEvent.create(self._session_id, status)
         )

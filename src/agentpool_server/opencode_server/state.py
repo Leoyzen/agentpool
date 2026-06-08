@@ -340,6 +340,11 @@ class ServerState:
         that events are also republished to the SessionPool EventBus.
         Otherwise falls back to the original SSE-only path.
         """
+        from agentpool_server.opencode_server.models.events import SessionStatusEvent
+
+        if isinstance(event, SessionStatusEvent):
+            self.session_status[event.properties.session_id] = event.properties.status
+
         if self.event_bridge is not None:
             await self.event_bridge.publish(event)
         else:
