@@ -137,16 +137,6 @@ class NodeConfig(Schema):
     - MCPServerConfig for full server configuration
     """
 
-    inherit_pool_mcp_servers: bool = Field(
-        default=True,
-        title="Inherit pool-level MCP servers",
-    )
-    """Whether this node should automatically inherit MCP tools from the pool-level
-    ``mcp_servers`` configuration.
-
-    Set to ``false`` when a node should only see explicitly configured tools and
-    node/team-level MCP servers.
-    """
     # Any should be InputProvider, but this leads to circular import
     input_provider: ImportString[Any] | None = Field(default=None, title="Input provider")
     """Provider for human-input-handling."""
