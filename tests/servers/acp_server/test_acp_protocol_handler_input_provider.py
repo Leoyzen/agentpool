@@ -247,7 +247,7 @@ class TestACPSessionProxy:
 
 
 class TestEventConsumerConverterFlag:
-    """Tests that _event_consumer_loop passes client_supports_turn_complete to ACPEventConverter."""
+    """Tests that _handle_event passes client_supports_turn_complete to ACPEventConverter."""
 
     @pytest.mark.anyio
     async def test_event_consumer_passes_turn_complete_true(
@@ -267,10 +267,13 @@ class TestEventConsumerConverterFlag:
             client_capabilities=ClientCapabilities(turn_complete=True),
         )
 
+        mock_event = MagicMock()
+        mock_event.session_id = None
+
         with patch.object(
             ACPEventConverter, "__init__", return_value=None
         ) as mock_init:
-            await handler._event_consumer_loop("sess-1")
+            await handler._handle_event("sess-1", mock_event)
 
         mock_init.assert_called_once()
         call_kwargs = mock_init.call_args.kwargs
@@ -431,10 +434,13 @@ class TestHandlePromptBlockingBehavior:
             client_capabilities=None,
         )
 
+        mock_event = MagicMock()
+        mock_event.session_id = None
+
         with patch.object(
             ACPEventConverter, "__init__", return_value=None
         ) as mock_init:
-            await handler._event_consumer_loop("sess-1")
+            await handler._handle_event("sess-1", mock_event)
 
         mock_init.assert_called_once()
         call_kwargs = mock_init.call_args.kwargs
