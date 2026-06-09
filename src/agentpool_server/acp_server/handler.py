@@ -14,11 +14,14 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+import anyio
+
 from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
 from agentpool.log import get_logger
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
+from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
 
 
 if TYPE_CHECKING:
@@ -28,12 +31,13 @@ if TYPE_CHECKING:
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
     from agentpool.agents.events import RichAgentStreamEvent
+    from agentpool.orchestrator.core import EventBus
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
 
 
-class ACPProtocolHandler:
+class ACPProtocolHandler(ProtocolEventConsumerMixin):
     """ACP protocol handler backed by SessionPool.
 
     Manages per-session event consumers that subscribe to the SessionPool's
@@ -58,13 +62,21 @@ class ACPProtocolHandler:
         client_capabilities: ClientCapabilities | None = None,
     ) -> None:
         """Initialize the protocol handler."""
+        super().__init__()
         self.agent_pool = agent_pool
         self.session_manager = session_manager
         self._event_converter_template = event_converter
         self.client = client
         self.client_capabilities = client_capabilities
-        self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
-        self._consumer_queues: dict[str, asyncio.Queue[RichAgentStreamEvent[Any] | None]] = {}
+        self._converters: dict[str, ACPEventConverter] = {}
+
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the EventBus instance to subscribe to."""
+        session_pool = self.agent_pool.session_pool
+        if session_pool is None:
+            raise RuntimeError("SessionPool not available")
+        return session_pool.event_bus
 
     def _should_use_session_pool(self) -> bool:
         """Check whether the current main agent has the per-agent canary flag.
@@ -79,7 +91,106 @@ class ACPProtocolHandler:
             return False
         return bool(agent.metadata.get("use_session_pool", False))
 
-    def _ensure_event_consumer(self, session_id: str) -> None:
+    async def _before_consumer_loop(self, session_id: str) -> None:
+        """Create per-session ACPEventConverter before loop starts.
+
+        Args:
+            session_id: The session whose consumer is starting.
+        """
+        client_supports_turn_complete = (
+            self.client_capabilities is not None
+            and self.client_capabilities.turn_complete is True
+        )
+        converter = ACPEventConverter(
+            subagent_display_mode=self._event_converter_template.subagent_display_mode,
+            client_supports_turn_complete=client_supports_turn_complete,
+        )
+        self._converters[session_id] = converter
+
+    async def _handle_event(self, session_id: str, event: RichAgentStreamEvent[Any]) -> None:
+        """Handle a single event from the EventBus.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            event: The event to handle.
+
+        Raises:
+            ConsumerShutdown: When the ACP client connection is closed.
+        """
+        converter = self._converters.get(session_id)
+        if converter is None:
+            return
+
+        try:
+            async for update in converter.convert(event):
+                from acp.schema import SessionNotification
+
+                notification = SessionNotification(
+                    session_id=session_id,
+                    update=update,
+                )
+                await self.client.session_update(notification)
+        except (ConnectionResetError, BrokenPipeError) as e:
+            logger.debug(
+                "Client connection closed gracefully",
+                session_id=session_id,
+                error=str(e),
+            )
+            raise ConsumerShutdown from e
+        except anyio.ClosedResourceError as e:
+            logger.debug(
+                "Stream closed gracefully",
+                session_id=session_id,
+                error=str(e),
+            )
+            raise ConsumerShutdown from e
+        except anyio.EndOfStream as e:
+            logger.debug(
+                "Stream closed gracefully",
+                session_id=session_id,
+                error=str(e),
+            )
+            raise ConsumerShutdown from e
+        except Exception:
+            logger.exception(
+                "Failed to convert or send event",
+                session_id=session_id,
+                event_type=type(event).__name__,
+            )
+
+    async def _on_spawn_session_start(self, session_id: str, event: Any) -> None:
+        """No-op — ACP does not create child consumers.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            event: The spawn session start event.
+        """
+
+    async def _after_consumer_loop(self, session_id: str) -> None:
+        """Clean up per-session converter.
+
+        Args:
+            session_id: The session whose consumer has stopped.
+        """
+        self._converters.pop(session_id, None)
+
+    async def _event_consumer_loop(self, session_id: str) -> None:
+        """Backward-compatible wrapper for mixin's consumer loop.
+
+        Supports direct invocation (e.g., from tests) by lazily subscribing
+        when no queue has been set up via ``start_event_consumer()``.
+
+        Args:
+            session_id: The session whose events to consume.
+        """
+        if self._consumer_queues.get(session_id) is None:
+            queue = await self.event_bus.subscribe(
+                session_id, scope=self._get_subscription_scope()
+            )
+            self._consumer_queues[session_id] = queue
+        await super()._event_consumer_loop(session_id)
+
+    async def _ensure_event_consumer(self, session_id: str) -> None:
         """Subscribe to EventBus once per session and start consumer loop.
 
         If a consumer task already exists and has not finished, this is a
@@ -91,96 +202,8 @@ class ACPProtocolHandler:
         if not self._should_use_session_pool():
             return
 
-        task = self._consumer_tasks.get(session_id)
-        if task is not None and not task.done():
-            return
-
-        task = asyncio.create_task(
-            self._event_consumer_loop(session_id),
-            name=f"acp_event_consumer_{session_id}",
-        )
-        self._consumer_tasks[session_id] = task
+        await self.start_event_consumer(session_id)
         logger.debug("Started event consumer", session_id=session_id)
-
-    async def _event_consumer_loop(self, session_id: str) -> None:
-        """Forward events from EventBus to ACP protocol.
-
-        Subscribes to the SessionPool EventBus for the given session,
-        converts each event through ``ACPEventConverter``, and emits ACP
-        ``session/update`` notifications.
-
-        The loop exits when a ``None`` sentinel is received (sent by
-        ``EventBus.close_session``) or when the task is cancelled.
-
-        Args:
-            session_id: The session whose events to consume.
-        """
-        session_pool = self.agent_pool.session_pool
-        if session_pool is None:
-            logger.warning(
-                "SessionPool not available, cannot start event consumer",
-                session_id=session_id,
-            )
-            return
-
-        queue = await session_pool.event_bus.subscribe(session_id, scope="descendants")
-        self._consumer_queues[session_id] = queue
-
-        # Derive turn_complete support from stored client capabilities
-        client_supports_turn_complete = (
-            self.client_capabilities is not None
-            and self.client_capabilities.turn_complete is True
-        )
-
-        # Create a per-session converter so tool-call state is isolated
-        converter = ACPEventConverter(
-            subagent_display_mode=self._event_converter_template.subagent_display_mode,
-            client_supports_turn_complete=client_supports_turn_complete,
-        )
-
-        try:
-            while True:
-                event = await queue.get()
-                if event is None:
-                    break
-
-                try:
-                    async for update in converter.convert(event):
-                        from acp.schema import SessionNotification
-
-                        notification = SessionNotification(
-                            session_id=session_id,
-                            update=update,
-                        )
-                        await self.client.session_update(notification)
-                except (ConnectionResetError, BrokenPipeError) as e:
-                    logger.debug(
-                        "Client connection closed gracefully",
-                        session_id=session_id,
-                        error=str(e),
-                    )
-                    break
-                except Exception as e:
-                    import anyio
-                    if isinstance(e, (anyio.ClosedResourceError, anyio.EndOfStream)):
-                        logger.debug(
-                            "Stream closed gracefully",
-                            session_id=session_id,
-                            error=str(e),
-                        )
-                        break
-                    logger.exception(
-                        "Failed to convert or send event",
-                        session_id=session_id,
-                        event_type=type(event).__name__,
-                    )
-        except asyncio.CancelledError:
-            logger.debug("Event consumer cancelled", session_id=session_id)
-            raise
-        finally:
-            await session_pool.event_bus.unsubscribe(session_id, queue)
-            self._consumer_queues.pop(session_id, None)
-            logger.debug("Event consumer stopped", session_id=session_id)
 
     async def handle_prompt(
         self,
@@ -246,7 +269,7 @@ class ACPProtocolHandler:
                 )
 
         # Start event consumer before processing so no events are dropped
-        self._ensure_event_consumer(session_id)
+        await self._ensure_event_consumer(session_id)
 
         # Convert ACP content blocks to agent prompts
         contents = [from_acp_content(block, fs=None) for block in prompt]
@@ -302,35 +325,12 @@ class ACPProtocolHandler:
 
         session_pool = self.agent_pool.session_pool
 
-        # Signal the consumer loop to exit via EventBus sentinel
+        # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
+        await self.stop_event_consumer(session_id)
+
+        # Signal EventBus to close session
         if session_pool is not None:
             await session_pool.event_bus.close_session(session_id)
-
-        # Wait for the consumer task to finish (or cancel it)
-        task = self._consumer_tasks.pop(session_id, None)
-        if task is not None and not task.done():
-            try:
-                await asyncio.wait_for(task, timeout=5.0)
-            except TimeoutError:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    logger.exception(
-                        "Unexpected exception during consumer task cancellation",
-                        session_id=session_id,
-                    )
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception(
-                    "Unexpected exception in consumer task during graceful shutdown",
-                    session_id=session_id,
-                )
-
-        self._consumer_queues.pop(session_id, None)
 
         # Delegate to SessionPool for final cleanup
         if session_pool is not None:
