@@ -1554,16 +1554,16 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     while not process_task.done():
                         try:
                             event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                            if isinstance(event, StreamCompleteEvent):
-                                final_message = event.message
+                            if isinstance(event.event, StreamCompleteEvent):
+                                final_message = event.event.message
                         except TimeoutError:
                             continue
 
                     # Drain remaining events
                     while not queue.empty():
                         event = queue.get_nowait()
-                        if isinstance(event, StreamCompleteEvent):
-                            final_message = event.message
+                        if isinstance(event.event, StreamCompleteEvent):
+                            final_message = event.event.message
 
                     if (exc := process_task.exception()) is not None:
                         raise exc

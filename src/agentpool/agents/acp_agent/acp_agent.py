@@ -506,13 +506,15 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                             enriched_event = replace(
                                 enriched_event, metadata=tool_metadata[enriched_event.tool_call_id]
                             )
-                        event = enriched_event  # noqa: PLW2901
-                    part = event_to_part(event)
+                        output_event = enriched_event
+                    else:
+                        output_event = event
+                    part = event_to_part(output_event)
                     if isinstance(part, TextPart):
                         text_chunks.append(part.content)
                     if part:
                         current_response_parts.append(part)
-                    yield event
+                    yield output_event
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True

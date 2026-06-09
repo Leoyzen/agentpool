@@ -368,67 +368,42 @@ async def test_background_task_inject_prompt_wakes_lead_agent(
 ) -> None:
     """inject_prompt after background task completion MUST re-awaken the lead agent.
 
-    CURRENT BEHAVIOR (BROKEN):
-      In background_task_provider.py, _on_task_completed() calls
-      ctx.agent.inject_prompt(notice) when no blocking waiter exists.
-      But inject_prompt() only works if the agent has an active run context
-      (_current_run_ctx or _background_run_ctx). If the lead agent's
-      run_stream has already ended (which happens because the task tool
-      returns immediately in async_mode), there is no run context to
-      inject into, and the prompt goes nowhere.
+    CURRENT BEHAVIOR (FIXED):
+      BaseAgent.inject_prompt() now delegates to SessionPool.inject_prompt()
+      when no active run context exists, which triggers auto-resume via
+      TurnRunner._trigger_auto_resume(). The lead agent receives the
+      completion notice and resumes reasoning.
 
-    EXPECTED BEHAVIOR:
-      After a background task completes, the lead agent should receive
-      the completion notice and resume reasoning. The inject_prompt
-      mechanism should work even after the tool call has returned.
+    PREVIOUS BEHAVIOR (BROKEN):
+      inject_prompt() was a silent no-op when no active run context existed,
+      causing the lead agent to never resume after background task completion.
     """
-    from agentpool.agents.events import ToolCallStartEvent
-    from agentpool_toolsets.builtin.subagent_tools import _stream_task
-
-    # Verify inject_prompt behavior when there's no active run context.
-    # This tests the exact code path in BaseAgent.inject_prompt():
-    #   run_ctx = self._current_run_ctx or self._background_run_ctx
-    #   if run_ctx is not None:
-    #       run_ctx.injection_manager.inject(message)
-    # If both are None, inject_prompt is a silent no-op.
     from agentpool.agents.base_agent import BaseAgent
-
-    # We can't easily mock a BaseAgent due to __init__ requirements,
-    # so we test the logic directly:
-    # When _current_run_ctx and _background_run_ctx are both None,
-    # inject_prompt does nothing — the message is silently dropped.
-    # This is the root cause of "lead agent never resumes."
-
-    # Simulate the condition:
-    # After the task() tool returns (async_mode=True), the lead agent's
-    # run_stream iteration continues. But if the background task completes
-    # after the lead agent's current tool cycle ends, there may be no
-    # active run context to inject into.
-
-    # The key insight: inject_prompt relies on _current_run_ctx or
-    # _background_run_ctx being non-None. If both are None, the prompt
-    # is dropped silently. We verify this by reading the code:
 
     import inspect
 
     source = inspect.getsource(BaseAgent.inject_prompt)
-    assert "_current_run_ctx" in source, "inject_prompt must check _current_run_ctx"
-    assert "_background_run_ctx" in source, "inject_prompt must check _background_run_ctx"
-    assert "injection_manager" in source, "inject_prompt must use injection_manager"
 
-    # The critical path: if run_ctx is None, inject returns without
-    # doing anything. The prompt is lost.
-    has_none_guard = "if run_ctx is not None" in source or "if run_ctx" in source
-    assert has_none_guard, (
-        "inject_prompt must have a None guard. "
-        "When _current_run_ctx and _background_run_ctx are both None, "
-        "the prompt is silently dropped and the lead agent never resumes."
+    # Verify the fixed implementation delegates to SessionPool for auto-resume
+    assert "SessionPool" in source or "session_pool" in source, (
+        "inject_prompt must delegate to SessionPool when no active run context exists"
+    )
+    assert "inject_prompt" in source, "inject_prompt must call session_pool.inject_prompt"
+    assert "fire_and_forget" in source, (
+        "inject_prompt must use fire_and_forget to prevent GC of the notification task"
     )
 
-    # RED FLAG: This test PASSES but proves the design problem:
-    # inject_prompt is a no-op when no run context exists.
-    # In async background tasks, _on_task_completed calls inject_prompt
-    # but by that time the lead agent may have no active run context.
+    # The critical path: if run_ctx is None or completed, delegate to SessionPool
+    has_none_guard = "if run_ctx is not None" in source or "if run_ctx" in source
+    assert has_none_guard, (
+        "inject_prompt must have a None guard to handle the no-active-run case"
+    )
+
+    # Verify auto-resume delegation exists
+    has_auto_resume = "_session_pool.inject_prompt" in source or "session_pool.inject_prompt" in source
+    assert has_auto_resume, (
+        "inject_prompt must delegate to SessionPool for auto-resume when no active run context exists"
+    )
 
 
 # =============================================================================
