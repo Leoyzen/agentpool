@@ -11,7 +11,7 @@ This separation enables easy testing without mocks.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Any, Literal
 import uuid
 
 from pydantic_ai import (
@@ -182,6 +182,9 @@ class ACPEventConverter:
     _subagent_content: dict[str, list[str]] = field(default_factory=dict)
     """Accumulated content per subagent (for tool_box mode)."""
 
+    _child_sessions: set[str] = field(default_factory=set)
+    """Track child session IDs that have been spawned."""
+
     _current_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     """Message ID for the current agent response."""
 
@@ -196,6 +199,7 @@ class ACPEventConverter:
         self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
         self._subagent_content.clear()
+        self._child_sessions.clear()
         self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
 
@@ -578,14 +582,15 @@ class ACPEventConverter:
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case SpawnSessionStart(
-                # source_name=source_name,
-                # description=description,
-                # spawn_mechanism=spawn_mechanism,
+                child_session_id=child_session_id,
+                source_name=source_name,
+                description=description,
+                spawn_mechanism=spawn_mechanism,
             ):
-                # icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
-                # text = f"\n{icon} **`{source_name}`**: {description}\n"
-                # yield AgentMessageChunk.text(text)
-                ...
+                icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
+                text = f"\n{icon} **`{source_name}`**: {description}\n"
+                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
+                self._child_sessions.add(child_session_id)
 
             case SubAgentEvent(
                 source_name=source_name,
