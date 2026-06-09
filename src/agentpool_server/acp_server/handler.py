@@ -19,6 +19,7 @@ import anyio
 from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
 from agentpool.log import get_logger
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
     from acp import Client
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
-    from agentpool.agents.events import RichAgentStreamEvent
     from agentpool.orchestrator.core import EventBus
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
@@ -107,26 +107,31 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         )
         self._converters[session_id] = converter
 
-    async def _handle_event(self, session_id: str, event: RichAgentStreamEvent[Any]) -> None:
+    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
         """Handle a single event from the EventBus.
 
         Args:
             session_id: The session whose consumer received the event.
-            event: The event to handle.
+            envelope: The event envelope to handle.
 
         Raises:
             ConsumerShutdown: When the ACP client connection is closed.
         """
-        converter = self._converters.get(session_id)
+        # Use envelope's source_session_id for routing (for child session routing)
+        event_sid = envelope.source_session_id
+        effective_sid = event_sid if event_sid else session_id
+
+        # Look up converter: try event's session first, fall back to consumer's session
+        converter = self._converters.get(effective_sid) or self._converters.get(session_id)
         if converter is None:
             return
 
         try:
-            async for update in converter.convert(event):
+            async for update in converter.convert(envelope.event):
                 from acp.schema import SessionNotification
 
                 notification = SessionNotification(
-                    session_id=session_id,
+                    session_id=effective_sid,
                     update=update,
                 )
                 await self.client.session_update(notification)
@@ -155,15 +160,15 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             logger.exception(
                 "Failed to convert or send event",
                 session_id=session_id,
-                event_type=type(event).__name__,
+                event_type=type(envelope.event).__name__,
             )
 
-    async def _on_spawn_session_start(self, session_id: str, event: Any) -> None:
+    async def _on_spawn_session_start(self, session_id: str, envelope: EventEnvelope) -> None:
         """No-op — ACP does not create child consumers.
 
         Args:
             session_id: The session whose consumer received the event.
-            event: The spawn session start event.
+            envelope: The event envelope containing the spawn session start event.
         """
 
     async def _after_consumer_loop(self, session_id: str) -> None:
@@ -286,7 +291,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         stop_reason: StopReason = "end_turn"
         try:
             run_handle = await session_pool.receive_request(
-                session_id, *contents, input_provider=input_provider
+                session_id, contents, input_provider=input_provider
             )
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.

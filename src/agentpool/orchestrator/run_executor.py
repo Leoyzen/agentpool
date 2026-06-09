@@ -111,7 +111,6 @@ class RunExecutor:
         start_time = time.perf_counter()
 
         yield RunStartedEvent(
-            session_id=session_id,
             run_id=run_id,
             agent_name=self._agent.name,
         )

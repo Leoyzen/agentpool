@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pydantic_ai.tools import ToolDefinition
-
-from agentpool.agents.native_agent.agent import Agent
 from agentpool.tools.base import Tool
 
 if TYPE_CHECKING:
-    from pydantic_ai import Agent as PydanticAgent
     from schemez import OpenAIFunctionDefinition
 
 
@@ -18,7 +14,7 @@ def my_tool(arg1: str):
 
 
 async def test_schema_override_propagation():
-    """Test that schema overrides are propagated to the PydanticAI agent via prepare."""
+    """Test that schema overrides are merged into the PydanticAI tool's function_schema."""
     # Define a schema override
     override: OpenAIFunctionDefinition = {
         "name": "my_tool",
@@ -34,45 +30,14 @@ async def test_schema_override_propagation():
 
     tool = Tool.from_callable(my_tool, schema_override=override)
 
-    agent = Agent(name="test-agent", model="openai:gpt-4o", tools=[tool])
-
-    pydantic_agent: PydanticAgent[Any, Any] = await agent.get_agentlet(None, None)
-
-    found_tool_def = None
-
-    # Inspect _function_toolset or _user_toolsets to find the tool
-    # Note: This relies on pydantic-ai internals, which might change.
-    # But it's the only way to inspect without running the agent against an LLM.
-
-    toolsets: list[Any] = []
-    if hasattr(pydantic_agent, "_function_toolset"):
-        toolsets.append(pydantic_agent._function_toolset)
-    if hasattr(pydantic_agent, "_user_toolsets"):
-        toolsets.extend(pydantic_agent._user_toolsets)  # type: ignore
-
-    for ts in toolsets:
-        tools = getattr(ts, "tools", {})
-        if isinstance(tools, dict):
-            if "my_tool" in tools:
-                found_tool_def = tools["my_tool"]
-                break
-        elif isinstance(tools, list):
-            for t in tools:
-                if getattr(t, "name", "") == "my_tool":
-                    found_tool_def = t
-                    break
-        if found_tool_def:
-            break
-
-    assert found_tool_def is not None, "Tool not found in pydantic agent"
-
-    # Verify that schema_override is baked into function_schema
     # In RFC-0002, schema_override is handled in Tool.to_pydantic_ai()
-    # and merged into function_schema, not applied via prepare()
-    assert found_tool_def.function_schema is not None, "function_schema was not set on the tool"
+    # and merged into function_schema.
+    pydantic_tool = tool.to_pydantic_ai()
+
+    assert pydantic_tool.function_schema is not None, "function_schema was not set on the tool"
 
     # Check that description and parameter descriptions from override are in the schema
-    json_schema = found_tool_def.function_schema.json_schema
+    json_schema = pydantic_tool.function_schema.json_schema
     assert json_schema is not None
     # The tool description itself is NOT overridden (stays as docstring)
     # But the json_schema's description IS overridden

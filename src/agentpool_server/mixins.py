@@ -11,6 +11,7 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.events.events import RichAgentStreamEvent, SpawnSessionStart
+from agentpool.orchestrator.core import EventEnvelope
 
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class ProtocolEventConsumerMixin(ABC):
         """
         super().__init__()
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
-        self._consumer_queues: dict[str, asyncio.Queue[Any]] = {}
+        self._consumer_queues: dict[str, asyncio.Queue[EventEnvelope | None]] = {}
         self._consumer_locks: dict[str, asyncio.Lock] = {}
         self._consumer_lock_creation_lock: asyncio.Lock = asyncio.Lock()
 
@@ -88,7 +89,7 @@ class ProtocolEventConsumerMixin(ABC):
         """
 
     async def _on_spawn_session_start(  # noqa: B027
-        self, session_id: str, event: SpawnSessionStart
+        self, session_id: str, envelope: EventEnvelope
     ) -> None:
         """Hook called when a SpawnSessionStart event is received.
 
@@ -104,12 +105,12 @@ class ProtocolEventConsumerMixin(ABC):
 
         Args:
             session_id: The session whose consumer received the event.
-            event: The spawn session start event.
+            envelope: The event envelope containing the spawn session start event.
         """
 
     @abstractmethod
     async def _handle_event(
-        self, session_id: str, event: RichAgentStreamEvent[Any]
+        self, session_id: str, envelope: EventEnvelope
     ) -> None:
         """Handle a single event from the EventBus.
 
@@ -118,7 +119,7 @@ class ProtocolEventConsumerMixin(ABC):
 
         Args:
             session_id: The session whose consumer received the event.
-            event: The event to handle.
+            envelope: The event envelope to handle.
 
         Raises:
             ConsumerShutdown: To request graceful loop shutdown.
@@ -204,15 +205,15 @@ class ProtocolEventConsumerMixin(ABC):
             started = True
 
             while True:
-                event = await queue.get()
-                if event is None:
+                envelope = await queue.get()
+                if envelope is None:
                     break
 
-                if isinstance(event, SpawnSessionStart):
-                    await self._on_spawn_session_start(session_id, event)
+                if isinstance(envelope.event, SpawnSessionStart):
+                    await self._on_spawn_session_start(session_id, envelope)
 
                 try:
-                    await self._handle_event(session_id, event)
+                    await self._handle_event(session_id, envelope)
                 except ConsumerShutdown:
                     break
         finally:

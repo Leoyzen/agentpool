@@ -171,7 +171,6 @@ async def test_subagent_stream_complete_emits_child_session_idle(
         e
         for e in events
         if isinstance(e, (SessionIdleEvent, SessionStatusEvent))
-        and hasattr(e.properties, "session_id")
         and e.properties.session_id == child_session_id
     ]
     # Also check SessionStatusEvent with idle status
@@ -262,7 +261,6 @@ async def test_subagent_stream_complete_no_nameerror_when_toolpart_missing(
         e
         for e in emitted
         if isinstance(e, (SessionIdleEvent, SessionStatusEvent))
-        and hasattr(e.properties, "session_id")
         and e.properties.session_id == child_session_id
         and (isinstance(e, SessionIdleEvent) or e.properties.status.type == "idle")
     ]

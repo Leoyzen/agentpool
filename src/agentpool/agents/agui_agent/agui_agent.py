@@ -218,6 +218,11 @@ class AGUIAgent[TDeps = None](BaseAgent[TDeps, str]):
             hooks=config.hooks.get_agent_hooks() if config.hooks else None,
         )
 
+    @property
+    def session_id(self) -> str | None:
+        """Return the AG-UI SDK session ID (thread ID), if any."""
+        return self._sdk_session_id
+
     async def __aenter__(self) -> Self:
         """Enter async context - initialize client and base resources."""
         await super().__aenter__()

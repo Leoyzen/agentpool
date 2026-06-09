@@ -394,7 +394,8 @@ async def _process_message_locked(  # noqa: PLR0915
         # names the same agent as the session's default, the per-session
         # instance is already the right one.
         if request.agent in all_agents and all_agents[request.agent] is not agent:
-            if state._agent_config is not None and request.agent == state._agent_config.name:
+            agent_config = getattr(state, "_agent_config", None)
+            if agent_config is not None and request.agent == getattr(agent_config, "name", None):
                 pass  # Use per-session agent, don't replace with pool singleton
             else:
                 agent = all_agents[request.agent]
@@ -537,7 +538,7 @@ async def _process_message_locked(  # noqa: PLR0915
                         event = await event_queue.get()
                         if event is None:
                             break
-                        async for _ in adapter.convert_event(event):
+                        async for _ in adapter.convert_event(event.event):
                             pass  # Context updated; broadcast by session consumer
                 except asyncio.CancelledError:
                     raise

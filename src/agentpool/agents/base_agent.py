@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import inspect
 import os
 import sys
+import types
 from pathlib import Path
 import re
 import warnings
@@ -146,7 +147,7 @@ def _should_bypass_session_pool() -> bool:
         return True
 
     # Cases 2 & 3: AG-UI stack inspection (permanent — see docs/audit/agui-bypass-audit.md)
-    frame = sys._getframe(1)
+    frame: types.FrameType | None = sys._getframe(1)
     while frame:
         module_name = frame.f_globals.get("__name__", "")
         if "agui" in module_name:
@@ -633,9 +634,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         turn is active and access the run context without relying on
         private attributes.
 
-        Uses two-level fallback:
-        1. SessionPool lookup when pooled (via session_id or agent_pool)
-        2. ContextVar (_current_run_ctx_var) for standalone execution
+        Uses three-level fallback:
+        1. ContextVar (_current_run_ctx_var) for the current task
+        2. SessionPool lookup when pooled (via session_id or agent_pool)
+        3. _background_run_ctx for background task state
 
         Args:
             session_id: Optional session ID for SessionPool lookup.
@@ -645,7 +647,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Returns:
             The active run context, or None if no turn is running.
         """
-        # Level 1: SessionPool lookup when pooled and session has active run
+        # Level 1: ContextVar for the current task (highest precedence)
+        run_ctx = _current_run_ctx_var.get()
+        if run_ctx is not None and not run_ctx.completed:
+            return run_ctx
+
+        # Level 2: SessionPool lookup when pooled and session has active run
         if self.agent_pool is not None:
             session_pool = self.agent_pool.session_pool
             if session_pool is not None:
@@ -656,11 +663,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                         run_handle = session_pool.get_run(session.current_run_id)
                         if run_handle is not None and not run_handle.run_ctx.completed:
                             return run_handle.run_ctx
-                # No active run in SessionPool for this session — fall through to ContextVar
-        # Level 2: ContextVar for standalone execution
-        run_ctx = _current_run_ctx_var.get()
-        if run_ctx is not None and not run_ctx.completed:
-            return run_ctx
+
+        # Level 3: Background run context (lowest precedence)
+        if self._background_run_ctx is not None and not self._background_run_ctx.completed:
+            return self._background_run_ctx
+
         return None
 
     def is_turn_active(self) -> bool:
@@ -1249,7 +1256,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 )
 
             # Emit signal (always - for event handlers)
-            await self.message_sent.emit(final_message)
+            # Skip when running through session pool; run()/run_stream() will emit
+            if not _should_bypass_session_pool():
+                await self.message_sent.emit(final_message)
+            # Route to connected agents (always - they decide what to do with it)
+            await self.connections.route_message(final_message, wait=wait_for_connections)
             # Conditional persistence based on store_history
             # TODO: Verify store_history semantics across all use cases:
             #   - Should subagent tool calls set store_history=False?
@@ -1262,8 +1273,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # Use extend_last=True to include both user_msg and final_message in _last_messages
                 await self.log_message(final_message)
                 conversation.add_chat_messages([final_message], extend_last=True)
-            # Route to connected agents (always - they decide what to do with it)
-            await self.connections.route_message(final_message, wait=wait_for_connections)
 
     async def _execute_slash_command_streaming(
         self, command_text: str
@@ -1635,17 +1644,21 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 try:
                     while not process_task.done():
                         try:
-                            event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                            if isinstance(event.event, StreamCompleteEvent):
-                                final_message = event.event.message
+                            envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+                            if envelope is not None and isinstance(
+                                envelope.event, StreamCompleteEvent
+                            ):
+                                final_message = envelope.event.message
                         except TimeoutError:
                             continue
 
                     # Drain remaining events
                     while not queue.empty():
-                        event = queue.get_nowait()
-                        if isinstance(event.event, StreamCompleteEvent):
-                            final_message = event.event.message
+                        envelope = queue.get_nowait()
+                        if envelope is not None and isinstance(
+                            envelope.event, StreamCompleteEvent
+                        ):
+                            final_message = envelope.event.message
 
                     if (exc := process_task.exception()) is not None:
                         raise exc

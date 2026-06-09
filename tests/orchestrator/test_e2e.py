@@ -22,11 +22,16 @@ from agentpool.agents.events import (
     ToolCallStartEvent,
 )
 from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionPool
+from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool
 from pydantic_ai import TextPartDelta
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
+
+
+def _unwrap_event(event: Any) -> Any:
+    """Unwrap EventEnvelope if present, otherwise return the event as-is."""
+    return event.event if isinstance(event, EventEnvelope) else event
 
 
 # ---------------------------------------------------------------------------
@@ -166,15 +171,15 @@ async def test_full_session_lifecycle_create_prompt_events_close(
 
     # Verify event ordering and types
     assert len(events) == 5
-    assert isinstance(events[0], RunStartedEvent)
-    assert events[0].session_id == "sess-lifecycle"
-    assert isinstance(events[1], PartDeltaEvent)
-    assert isinstance(events[2], ToolCallStartEvent)
-    assert events[2].tool_name == "bash"
-    assert isinstance(events[3], ToolCallCompleteEvent)
-    assert events[3].tool_result == "hi"
-    assert isinstance(events[4], StreamCompleteEvent)
-    assert events[4].message.content == "Done"
+    assert isinstance(_unwrap_event(events[0]), RunStartedEvent)
+    assert _unwrap_event(events[0]).session_id == "sess-lifecycle"
+    assert isinstance(_unwrap_event(events[1]), PartDeltaEvent)
+    assert isinstance(_unwrap_event(events[2]), ToolCallStartEvent)
+    assert _unwrap_event(events[2]).tool_name == "bash"
+    assert isinstance(_unwrap_event(events[3]), ToolCallCompleteEvent)
+    assert _unwrap_event(events[3]).tool_result == "hi"
+    assert isinstance(_unwrap_event(events[4]), StreamCompleteEvent)
+    assert _unwrap_event(events[4]).message.content == "Done"
 
     # Close session
     await session_pool.close_session("sess-lifecycle")
@@ -314,10 +319,10 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     # Verify session A only has agent-a events
     assert len(events_a) == 3
     assert all(
-        isinstance(e, (RunStartedEvent, PartDeltaEvent, StreamCompleteEvent))
+        isinstance(_unwrap_event(e), (RunStartedEvent, PartDeltaEvent, StreamCompleteEvent))
         for e in events_a
     )
-    part_delta_a = events_a[1]
+    part_delta_a = _unwrap_event(events_a[1])
     assert isinstance(part_delta_a, PartDeltaEvent)
     assert isinstance(part_delta_a.delta, TextPartDelta)
     assert part_delta_a.delta.content_delta == "response-from-agent-a"
@@ -325,10 +330,10 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
     # Verify session B only has agent-b events
     assert len(events_b) == 3
     assert all(
-        isinstance(e, (RunStartedEvent, PartDeltaEvent, StreamCompleteEvent))
+        isinstance(_unwrap_event(e), (RunStartedEvent, PartDeltaEvent, StreamCompleteEvent))
         for e in events_b
     )
-    part_delta_b = events_b[1]
+    part_delta_b = _unwrap_event(events_b[1])
     assert isinstance(part_delta_b, PartDeltaEvent)
     assert isinstance(part_delta_b.delta, TextPartDelta)
     assert part_delta_b.delta.content_delta == "response-from-agent-b"
@@ -451,16 +456,18 @@ async def test_concurrent_sessions_event_bus_isolation(
     for q in (qx1, qx2):
         ev = await asyncio.wait_for(q.get(), timeout=0.5)
         assert ev is not None
-        assert isinstance(ev, RunStartedEvent)
-        assert ev.session_id == "sess-x"
+        actual_ev = _unwrap_event(ev)
+        assert isinstance(actual_ev, RunStartedEvent)
+        assert actual_ev.session_id == "sess-x"
         assert q.empty()
 
     # All subscribers for sess-y should have exactly 1 event
     for q in (qy1, qy2):
         ev = await asyncio.wait_for(q.get(), timeout=0.5)
         assert ev is not None
-        assert isinstance(ev, RunStartedEvent)
-        assert ev.session_id == "sess-y"
+        actual_ev = _unwrap_event(ev)
+        assert isinstance(actual_ev, RunStartedEvent)
+        assert actual_ev.session_id == "sess-y"
         assert q.empty()
 
     await session_pool.close_session("sess-x")
@@ -527,12 +534,12 @@ async def test_cross_protocol_event_publishing_and_subscribing() -> None:
 
     # Verify event ordering is preserved for both subscribers
     for i, expected in enumerate(events_to_publish):
-        assert type(acp_received[i]) is type(expected)
-        assert type(opencode_received[i]) is type(expected)
+        assert type(_unwrap_event(acp_received[i])) is type(expected)
+        assert type(_unwrap_event(opencode_received[i])) is type(expected)
 
-    # Verify shallow copy independence (events are distinct objects)
+    # Verify events are shared objects across subscribers (EventBus behavior)
     for i in range(len(acp_received)):
-        assert acp_received[i] is not opencode_received[i]
+        assert acp_received[i] is opencode_received[i]
 
     await event_bus.close_session("sess-cross")
 
@@ -581,15 +588,14 @@ async def test_cross_protocol_multiple_subscribers_different_protocols() -> None
 
     # Verify all subscribers see the same event types in order
     for i, expected in enumerate(events_to_publish):
-        assert type(acp_received[i]) is type(expected)
-        assert type(opencode_received[i]) is type(expected)
-        assert type(agui_received[i]) is type(expected)
+        assert type(_unwrap_event(acp_received[i])) is type(expected)
+        assert type(_unwrap_event(opencode_received[i])) is type(expected)
+        assert type(_unwrap_event(agui_received[i])) is type(expected)
 
-    # All received events should be independent shallow copies
-    all_events = acp_received + opencode_received + agui_received
-    for i in range(len(all_events)):
-        for j in range(i + 1, len(all_events)):
-            assert all_events[i] is not all_events[j]
+    # All received events are shared across subscribers (EventBus behavior)
+    for i in range(len(events_to_publish)):
+        assert acp_received[i] is opencode_received[i]
+        assert acp_received[i] is agui_received[i]
 
     await event_bus.close_session("sess-multi")
 
@@ -627,8 +633,8 @@ async def test_cross_protocol_event_ordering_preserved_under_load() -> None:
 
     # Verify strict ordering
     for i in range(event_count):
-        ev_a = received_a[i]
-        ev_b = received_b[i]
+        ev_a = _unwrap_event(received_a[i])
+        ev_b = _unwrap_event(received_b[i])
         assert isinstance(ev_a, PartDeltaEvent)
         assert isinstance(ev_b, PartDeltaEvent)
         assert isinstance(ev_a.delta, TextPartDelta)
@@ -689,14 +695,18 @@ async def test_cross_protocol_with_session_pool_integration(
     assert len(opencode_events) == len(expected_types)
 
     for i, expected_type in enumerate(expected_types):
-        assert type(acp_events[i]) is expected_type
-        assert type(opencode_events[i]) is expected_type
+        assert type(_unwrap_event(acp_events[i])) is expected_type
+        assert type(_unwrap_event(opencode_events[i])) is expected_type
 
     # Verify specific event data
-    assert acp_events[2].tool_name == "bash"
-    assert opencode_events[2].tool_name == "bash"
-    assert acp_events[3].tool_result == "hi"
-    assert opencode_events[3].tool_result == "hi"
+    acp_ev_2 = _unwrap_event(acp_events[2])
+    opencode_ev_2 = _unwrap_event(opencode_events[2])
+    acp_ev_3 = _unwrap_event(acp_events[3])
+    opencode_ev_3 = _unwrap_event(opencode_events[3])
+    assert acp_ev_2.tool_name == "bash"
+    assert opencode_ev_2.tool_name == "bash"
+    assert acp_ev_3.tool_result == "hi"
+    assert opencode_ev_3.tool_result == "hi"
 
     # Cleanup
     await session_pool.close_session("sess-integrated")

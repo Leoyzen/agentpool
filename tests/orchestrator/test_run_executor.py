@@ -479,7 +479,7 @@ async def test_run_started_event_always_first(
 
     assert len(events) > 0
     assert isinstance(events[0], RunStartedEvent)
-    assert events[0].session_id == "test-session"
+    assert events[0].session_id == ""
     assert events[0].agent_name == test_agent.name
 
 
@@ -583,3 +583,88 @@ async def test_multiple_tool_calls_ordering(
             f"Tool name mismatch: start={matching_starts[0].tool_name}, "
             f"complete={complete.tool_name}"
         )
+
+
+# ---------------------------------------------------------------------------
+# session_id is not set by RunExecutor (producers don't set it)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_tool_call_start_event_lacks_session_id(
+    tool_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """ToolCallStartEvent does not have session_id set by RunExecutor."""
+    executor = RunExecutor(tool_agent)
+    user_msg = ChatMessage.user_prompt("Call the tool")
+
+    events = await _collect_events(
+        executor,
+        prompts=["Call the tool"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+    )
+
+    tool_starts = [e for e in events if isinstance(e, ToolCallStartEvent)]
+    assert len(tool_starts) >= 1, "Expected at least 1 ToolCallStartEvent"
+    for start in tool_starts:
+        assert start.session_id == "", (
+            f"Expected empty session_id, got '{start.session_id}'"
+        )
+
+
+@pytest.mark.anyio
+async def test_stream_complete_event_lacks_session_id(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """StreamCompleteEvent does not have session_id set by RunExecutor."""
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    events = await _collect_events(
+        executor,
+        prompts=["Say hello"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+    )
+
+    complete_event = events[-1]
+    assert isinstance(complete_event, StreamCompleteEvent)
+    assert complete_event.session_id == "", (
+        f"Expected empty session_id, got '{complete_event.session_id}'"
+    )
+
+
+@pytest.mark.anyio
+async def test_tool_call_complete_event_lacks_session_id(
+    tool_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """ToolCallCompleteEvent does not have session_id set by RunExecutor."""
+    executor = RunExecutor(tool_agent)
+    user_msg = ChatMessage.user_prompt("Call the tool")
+
+    events = await _collect_events(
+        executor,
+        prompts=["Call the tool"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+    )
+
+    tool_completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
+    assert len(tool_completes) >= 1, "Expected at least 1 ToolCallCompleteEvent"
+    for complete in tool_completes:
+        assert complete.session_id == "", (
+            f"Expected empty session_id, got '{complete.session_id}'"
+        )
+
+
+

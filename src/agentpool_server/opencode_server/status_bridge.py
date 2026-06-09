@@ -16,6 +16,9 @@ from agentpool_server.opencode_server.models import SessionStatus, SessionStatus
 from agentpool_server.opencode_server.models.events import SessionErrorEvent
 
 
+from agentpool.orchestrator.core import EventEnvelope
+
+
 if TYPE_CHECKING:
     from agentpool.orchestrator.core import EventBus
     from agentpool_server.opencode_server.state import ServerState
@@ -52,7 +55,7 @@ class SessionStatusBridge:
         self._server_state = server_state
         self._session_id = session_id
         self._event_bus = event_bus
-        self._queue: asyncio.Queue[Any] | None = None
+        self._queue: asyncio.Queue[EventEnvelope | None] | None = None
         self._task: asyncio.Task[Any] | None = None
 
     async def start(self) -> None:
@@ -88,29 +91,29 @@ class SessionStatusBridge:
 
         try:
             while True:
-                event = await self._queue.get()
-                if event is None:
+                envelope = await self._queue.get()
+                if envelope is None:
                     break
-                await self._handle_event(event)
+                await self._handle_event(envelope)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Status bridge consumer failed", session_id=self._session_id)
 
-    async def _handle_event(self, event: Any) -> None:
+    async def _handle_event(self, envelope: EventEnvelope) -> None:
         """Handle a single event and broadcast status if applicable.
 
         Args:
-            event: The event from the EventBus.
+            envelope: The EventEnvelope from the EventBus.
         """
-        match event:
+        match envelope.event:
             case RunStartedEvent():
                 await self._broadcast_busy()
             case StreamCompleteEvent():
                 await self._broadcast_idle()
             case RunFailedEvent(exception=exc):
                 await self._broadcast_idle()
-                if not isinstance(exc, asyncio.CancelledError):
+                if isinstance(exc, Exception) and not isinstance(exc, asyncio.CancelledError):
                     await self._broadcast_error(exc)
             case _:
                 pass
@@ -129,7 +132,7 @@ class SessionStatusBridge:
             SessionStatusEvent.create(self._session_id, status)
         )
 
-    async def _broadcast_error(self, exception: BaseException) -> None:
+    async def _broadcast_error(self, exception: Exception) -> None:
         """Broadcast ``session.error`` event for a failed run.
 
         Args:

@@ -59,6 +59,7 @@ from agentpool.agents.exceptions import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool.utils.streams import merge_queue_into_iterator
 from agentpool.utils.subprocess_utils import SubprocessError, run_with_process_monitor
 from agentpool.utils.token_breakdown import calculate_usage_from_parts
@@ -489,6 +490,9 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                 merge_queue_into_iterator(poll_acp_events(), event_source) as merged_events,
             ):
                 async for event in merged_events:
+                    # Unwrap EventEnvelope from event bus before type checks
+                    if isinstance(event, EventEnvelope):
+                        event = event.event
                     if isinstance(event, ToolResultMetadataEvent):
                         tool_metadata[event.tool_call_id] = event.metadata
                         continue

@@ -27,6 +27,7 @@ from agentpool.agents.events import (
     SubAgentEvent,
 )
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
@@ -64,7 +65,8 @@ agents:
     async with AgentPool(manifest) as pool:
         orchestrator = pool.get_agent("orchestrator")
 
-        async for event in orchestrator.run_stream("Delegate", session_id="ses_test"):
+        async for envelope in orchestrator.run_stream("Delegate", session_id="ses_test"):
+            event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
             if isinstance(event, SpawnSessionStart):
                 spawn_count += 1
 
@@ -111,16 +113,21 @@ agents:
         # Subscribe to parent with descendants scope to catch child events
         queue = await pool.session_pool.event_bus.subscribe("ses_test", scope="descendants")
 
-        async for event in orchestrator.run_stream("Delegate", session_id="ses_test"):
+        async for envelope in orchestrator.run_stream("Delegate", session_id="ses_test"):
+            event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
 
         # Drain remaining events from the queue
         while not queue.empty():
-            event = queue.get_nowait()
-            if event is None:
+            envelope = queue.get_nowait()
+            if envelope is None:
                 break
-            if isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
+            # Events are now wrapped in EventEnvelope by the EventBus
+            event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
+            if isinstance(event, RunStartedEvent):
+                child_session_ids_from_run_started.append(event.session_id)
+            elif isinstance(event, SubAgentEvent) and isinstance(event.event, RunStartedEvent):
                 child_session_ids_from_run_started.append(event.event.session_id)
 
         await pool.session_pool.event_bus.unsubscribe("ses_test", queue)
@@ -171,21 +178,22 @@ agents:
 
         child_session_id_from_spawn: str | None = None
 
-        async for event in orch.run_stream("Delegate", session_id="ses_test"):
+        async for envelope in orch.run_stream("Delegate", session_id="ses_test"):
+            event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
             if isinstance(event, SpawnSessionStart):
                 child_session_id_from_spawn = event.child_session_id
 
         assert child_session_id_from_spawn is not None, "SpawnSessionStart not emitted"
 
-    # Verify child session was persisted
-    child_data = await store.load(child_session_id_from_spawn)
-    assert child_data is not None, (
-        f"Child session {child_session_id_from_spawn} was not persisted in store"
-    )
-    assert child_data.parent_id == "ses_test", (
-        f"Child parent_id={child_data.parent_id}, expected=ses_test"
-    )
-    assert child_data.agent_name == "worker"
+        # Verify child session was persisted (must check before pool shutdown)
+        child_data = await store.load(child_session_id_from_spawn)
+        assert child_data is not None, (
+            f"Child session {child_session_id_from_spawn} was not persisted in store"
+        )
+        assert child_data.parent_id == "ses_test", (
+            f"Child parent_id={child_data.parent_id}, expected=ses_test"
+        )
+        assert child_data.agent_name == "worker"
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +327,8 @@ agents:
         orch = pool.get_agent("orchestrator")
 
         # With depth=0 (default top-level), child should be depth=1
-        async for event in orch.run_stream("Delegate", session_id="ses_test"):
+        async for envelope in orch.run_stream("Delegate", session_id="ses_test"):
+            event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
             if isinstance(event, SpawnSessionStart):
                 spawn_depth = event.depth
 

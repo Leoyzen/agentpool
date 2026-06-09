@@ -358,9 +358,6 @@ class StreamEventEmitter:
             if not session_id and self._context.run_ctx is not None:
                 session_id = self._context.run_ctx.session_id
             if session_id:
-                # Attach session_id to events that support it for protocol-layer routing
-                if hasattr(event, "session_id"):
-                    event.session_id = session_id  # type: ignore[union-attr]
                 try:
                     await self._event_bus.publish(session_id, event)
                     return

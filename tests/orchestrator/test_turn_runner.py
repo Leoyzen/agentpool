@@ -16,6 +16,7 @@ import pytest
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import (
+    EventEnvelope,
     SessionController,
     SessionState,
     TurnRunner,
@@ -248,7 +249,13 @@ async def test_run_turn_fails_run_handle_on_exception(
     await consumer
 
     from agentpool.agents.events import RunFailedEvent
-    failed_events = [e for e in events if isinstance(e, RunFailedEvent)]
+    from agentpool.orchestrator.core import EventEnvelope
+
+    # Unwrap EventEnvelope before type checking
+    unwrapped_events = [
+        e.event if isinstance(e, EventEnvelope) else e for e in events
+    ]
+    failed_events = [e for e in unwrapped_events if isinstance(e, RunFailedEvent)]
     assert len(failed_events) == 1
     assert failed_events[0].session_id == "sess-1"
     assert isinstance(failed_events[0].exception, RuntimeError)
@@ -426,6 +433,10 @@ async def test_run_turn_publishes_events(
     await turn_runner.run_turn("sess-1", "hello")
     event = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert event is not None
+    # EventBus now wraps events in EventEnvelope
+    from agentpool.orchestrator.core import EventEnvelope
+    if isinstance(event, EventEnvelope):
+        event = event.event
     assert isinstance(event, RunStartedEvent)
 
 
@@ -959,4 +970,151 @@ def test_bypass_session_pool_agui_stack_inspection() -> None:
     result = check_fn()
     assert result is True, (
         "AG-UI stack inspection should bypass SessionPool (permanent — see docs/audit/agui-bypass-audit.md)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _publish_event – EventEnvelope wrapping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_publish_event_wraps_in_event_envelope(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+) -> None:
+    """_publish_event wraps the event in an EventEnvelope with source_session_id."""
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    event = StreamCompleteEvent(message=ChatMessage(content="test", role="assistant"))
+
+    queue = await turn_runner.event_bus.subscribe("sess-pub")
+    await turn_runner._publish_event("sess-pub", event)
+
+    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    assert isinstance(published, EventEnvelope), (
+        "Expected event to be wrapped in EventEnvelope"
+    )
+    assert published.source_session_id == "sess-pub", (
+        "Expected source_session_id to be set by _publish_event"
+    )
+    assert published.event is event, (
+        "Expected original event to be preserved unmodified"
+    )
+
+
+@pytest.mark.anyio
+async def test_publish_event_preserves_original_event_unmodified(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+) -> None:
+    """_publish_event does NOT mutate the original event."""
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="test", role="assistant"),
+        session_id="existing-sid",
+    )
+
+    queue = await turn_runner.event_bus.subscribe("sess-pub")
+    await turn_runner._publish_event("sess-pub", event)
+
+    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    assert isinstance(published, EventEnvelope), (
+        "Expected event to be wrapped in EventEnvelope"
+    )
+    assert published.source_session_id == "sess-pub", (
+        "Expected source_session_id to reflect publishing session"
+    )
+    assert published.event is event, (
+        "Expected original event object to be preserved, not mutated"
+    )
+    assert event.session_id == "existing-sid", (
+        "Original event should remain unmodified"
+    )
+
+
+@pytest.mark.anyio
+async def test_publish_event_wraps_objects_without_session_id(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+) -> None:
+    """_publish_event wraps arbitrary objects in EventEnvelope."""
+
+    class NoSessionId:
+        pass
+
+    event = NoSessionId()
+    queue = await turn_runner.event_bus.subscribe("sess-pub")
+    await turn_runner._publish_event("sess-pub", event)
+
+    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    assert isinstance(published, EventEnvelope), (
+        "Event without session_id should be wrapped in EventEnvelope"
+    )
+    assert published.source_session_id == "sess-pub"
+    assert published.event is event
+
+
+@pytest.mark.anyio
+async def test_publish_event_wraps_pydantic_ai_events(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+) -> None:
+    """_publish_event wraps PydanticAI events in EventEnvelope."""
+    from pydantic_ai import PartStartEvent, TextPart
+
+    event = PartStartEvent(index=0, part=TextPart(content="hello"))
+
+    queue = await turn_runner.event_bus.subscribe("sess-pub")
+    await turn_runner._publish_event("sess-pub", event)
+
+    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    assert isinstance(published, EventEnvelope), (
+        "PydanticAI event should be wrapped in EventEnvelope"
+    )
+    assert published.source_session_id == "sess-pub"
+    assert published.event is event, (
+        "Original PydanticAI event should be preserved unmodified"
+    )
+
+
+@pytest.mark.anyio
+async def test_stream_event_emitter_wraps_subagent_event_in_envelope(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+) -> None:
+    """StreamEventEmitter._emit publishes SubAgentEvent wrapped in EventEnvelope."""
+    from agentpool.agents.events import SubAgentEvent
+    from agentpool.agents.events.event_emitter import StreamEventEmitter
+
+    # Create a mock context with session_id
+    mock_ctx = MagicMock()
+    mock_ctx.agent.session_id = "parent-sid"
+    mock_ctx.run_ctx = None
+
+    emitter = StreamEventEmitter(mock_ctx, event_bus=turn_runner.event_bus)
+
+    event = SubAgentEvent(
+        source_name="worker",
+        source_type="agent",
+        event=MagicMock(),
+        depth=1,
+        child_session_id="child-sid",
+    )
+
+    queue = await turn_runner.event_bus.subscribe("parent-sid")
+    await emitter._emit(event)
+
+    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    assert isinstance(published, EventEnvelope), (
+        "SubAgentEvent should be wrapped in EventEnvelope"
+    )
+    assert published.source_session_id == "parent-sid", (
+        "Expected source_session_id to reflect parent session"
+    )
+    assert published.event is event, (
+        "Original SubAgentEvent should be preserved unmodified"
     )

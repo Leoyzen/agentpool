@@ -115,6 +115,7 @@ from agentpool.common_types import MCPServerStatus
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.messaging.messages import TokenCost
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool.sessions.models import SessionData
 from agentpool.utils.streams import merge_queue_into_iterator
 from agentpool.utils.time_utils import get_now, parse_iso_timestamp
@@ -997,18 +998,24 @@ class ClaudeCodeAgent[TDeps = None, TResult = str](BaseAgent[TDeps, TResult]):
                 merge_queue_into_iterator(stream, event_source) as events,
             ):
                 async for event_or_message in events:
+                    # Unwrap EventEnvelope if present (EventBus wraps events in envelopes)
+                    if isinstance(event_or_message, EventEnvelope):
+                        unwrapped_event = event_or_message.event
+                    else:
+                        unwrapped_event = event_or_message
+
                     # Check if it's a queued event (from tools via EventEmitter)
-                    if not isinstance(event_or_message, BaseModel):
+                    if not isinstance(unwrapped_event, BaseModel):
                         # Capture metadata events for correlation with tool results
-                        if isinstance(event_or_message, ToolResultMetadataEvent):
-                            tool_metadata[event_or_message.tool_call_id] = event_or_message.metadata
+                        if isinstance(unwrapped_event, ToolResultMetadataEvent):
+                            tool_metadata[unwrapped_event.tool_call_id] = unwrapped_event.metadata
                             # Don't yield metadata events - they're internal correlation only
                             continue
                         # It's an event from the queue - yield it immediately
-                        yield event_or_message
+                        yield unwrapped_event
                         continue
 
-                    message = event_or_message
+                    message = unwrapped_event
                     # Process assistant messages - extract parts incrementally
                     if isinstance(message, AssistantMessage):
                         # Track resolved model from provider response

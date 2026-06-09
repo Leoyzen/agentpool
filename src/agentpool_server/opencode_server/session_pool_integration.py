@@ -17,6 +17,7 @@ from agentpool.agents.events.events import (
     SpawnSessionStart,
     StreamCompleteEvent,
 )
+from agentpool.orchestrator.run import RunStatus
 from agentpool.log import get_logger
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -114,7 +115,8 @@ async def get_messages_for_session(
                     )
                     for chat_msg in sp_messages
                 ]
-    return getattr(state, "messages", {}).get(session_id, [])
+    messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
+    return messages
 
 
 async def append_message_to_session(
@@ -223,7 +225,9 @@ async def get_session_status(
         The session status, or None if not found and the fallback is used.
     """
     if _use_session_pool_for_status(state):
-        integration = getattr(state, "session_pool_integration", None)
+        integration: OpenCodeSessionPoolIntegration | None = getattr(
+            state, "session_pool_integration", None
+        )
         if integration is not None:
             return await integration.get_session_status(session_id)
 
@@ -657,7 +661,7 @@ class OpenCodeSessionPoolIntegration:
                 event = await event_queue.get()
                 if event is None:
                     break
-                async for oc_event in event_adapter.convert_event(event):
+                async for oc_event in event_adapter.convert_event(event.event):
                     yield oc_event
         finally:
             await self.session_pool.event_bus.unsubscribe(session_id, event_queue)
@@ -679,7 +683,10 @@ class OpenCodeSessionPoolIntegration:
             run_id = session.current_run_id
             if run_id is not None:
                 run_handle = self.session_pool.sessions._runs.get(run_id)
-                if run_handle is not None and run_handle.status.value in ("pending", "running"):
+                if run_handle is not None and run_handle.status in (
+                    RunStatus.pending,
+                    RunStatus.running,
+                ):
                     return SessionStatus(type="busy")
 
         return SessionStatus(type="idle")
@@ -808,14 +815,14 @@ class OpenCodeSessionPoolIntegration:
 
         try:
             while True:
-                event = await queue.get()
-                if event is None:
+                envelope = await queue.get()
+                if envelope is None:
                     break
 
                 # Spawn child-session consumers for nested subagents
-                if isinstance(event, SpawnSessionStart):
+                if isinstance(envelope.event, SpawnSessionStart):
                     # Record spawn info for later ToolPart updates
-                    child_spawns[event.child_session_id] = event
+                    child_spawns[envelope.event.child_session_id] = envelope.event
                     # Ensure assistant message is registered before creating
                     # ToolPart, since _create_subagent_tool_part looks it up via
                     # get_messages_for_session.
@@ -824,23 +831,23 @@ class OpenCodeSessionPoolIntegration:
                         await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
                         message_registered = True
                     # Create ToolPart in parent session before spawning child
-                    tool_part = await self._create_subagent_tool_part(session_id, event)
+                    tool_part = await self._create_subagent_tool_part(session_id, envelope.event)
                     # Also register in EventProcessorContext so SubAgentEvent
                     # handling can find and update the ToolPart later.
                     if tool_part is not None:
-                        subagent_key = f"{event.depth}:{event.source_name}:{event.child_session_id}"
+                        subagent_key = f"{envelope.event.depth}:{envelope.event.source_name}:{envelope.event.child_session_id}"
                         event_adapter.context.add_subagent_tool_part(subagent_key, tool_part)
                     child_task = asyncio.create_task(
-                        self._event_consumer_loop(event.child_session_id),
-                        name=f"event_consumer_{event.child_session_id}",
+                        self._event_consumer_loop(envelope.event.child_session_id),
+                        name=f"event_consumer_{envelope.event.child_session_id}",
                     )
-                    child_tasks[event.child_session_id] = child_task
+                    child_tasks[envelope.event.child_session_id] = child_task
                     continue
 
                 # Distinguish parent vs child events.  With
                 # TurnRunner._maybe_wrap_event removed, child events arrive
                 # raw via scope="descendants".
-                event_session_id = getattr(event, "session_id", None)
+                event_session_id = getattr(envelope.event, "session_id", None)
                 is_child_event = (
                     event_session_id is not None and event_session_id != session_id
                 )
@@ -849,23 +856,23 @@ class OpenCodeSessionPoolIntegration:
                     # For child completion events, update the parent ToolPart
                     # before letting the child consumer handle them.
                     child_id: str = event_session_id  # type: ignore[assignment]
-                    if isinstance(event, StreamCompleteEvent):
+                    if isinstance(envelope.event, StreamCompleteEvent):
                         spawn = child_spawns.get(child_id)
                         if spawn is not None:
                             await self._update_parent_toolpart(
                                 parent_session_id=session_id,
                                 child_session_id=child_id,
                                 spawn_event=spawn,
-                                event=event,
+                                event=envelope.event,
                             )
-                    elif isinstance(event, RunErrorEvent):
+                    elif isinstance(envelope.event, RunErrorEvent):
                         spawn = child_spawns.get(child_id)
                         if spawn is not None:
                             await self._update_parent_toolpart_error(
                                 parent_session_id=session_id,
                                 child_session_id=child_id,
                                 spawn_event=spawn,
-                                event=event,
+                                event=envelope.event,
                             )
                     # Child consumer (subscribed to the child session)
                     # will render the child UI, so parent skips the rest.
@@ -879,7 +886,7 @@ class OpenCodeSessionPoolIntegration:
                     await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
                     message_registered = True
 
-                async for oc_event in event_adapter.convert_event(event):
+                async for oc_event in event_adapter.convert_event(envelope.event):
                     await self.server_state.broadcast_event(oc_event)
         except asyncio.CancelledError:
             logger.debug("Event consumer cancelled", session_id=session_id)
@@ -928,7 +935,7 @@ class OpenCodeSessionPoolIntegration:
                 "skipping ToolPart creation",
                 parent_session_id,
             )
-            return
+            return None
 
         # Check if ToolPart already exists for this child session
         child_session_id = spawn_event.child_session_id
@@ -1020,8 +1027,8 @@ class OpenCodeSessionPoolIntegration:
 
         source_name = spawn_event.source_name or "subagent"
         tool_title = source_name
-        msg = event.message
-        content = str(msg.content) if msg.content else "(no output)"
+        complete_msg = event.message
+        content = str(complete_msg.content) if complete_msg.content else "(no output)"
 
         start_time = (
             tool_part.state.time.start

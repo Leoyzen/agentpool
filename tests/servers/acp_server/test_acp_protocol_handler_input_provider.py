@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from acp.schema import TextContentBlock
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool.orchestrator.run import RunHandle
 from agentpool_server.acp_server.handler import ACPProtocolHandler, _ACPSessionProxy
 from agentpool_server.acp_server.input_provider import ACPInputProvider
@@ -454,3 +455,96 @@ class TestHandlePromptBlockingBehavior:
         mock_init.assert_called_once()
         call_kwargs = mock_init.call_args.kwargs
         assert call_kwargs.get("client_supports_turn_complete") is False
+
+
+# ---------------------------------------------------------------------------
+# Child session event routing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handle_event_uses_event_session_id_for_child(
+    mock_pool: MagicMock,
+    mock_event_converter: MagicMock,
+) -> None:
+    """Child session events use event.session_id instead of consumer session_id."""
+    mock_client = AsyncMock()
+    handler = ACPProtocolHandler(
+        agent_pool=mock_pool,
+        session_manager=MagicMock(),
+        event_converter=mock_event_converter,
+        client=mock_client,
+        client_capabilities=None,
+    )
+
+    # Set up parent converter with async generator
+    from acp.schema.session_updates import AgentMessageChunk
+
+    async def mock_convert(event):
+        yield AgentMessageChunk.text("test")
+
+    mock_converter = MagicMock()
+    mock_converter.convert = mock_convert
+    handler._converters["parent-sid"] = mock_converter
+
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    # Child event wrapped in EventEnvelope with source_session_id
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="hello", role="assistant"),
+    )
+    envelope = EventEnvelope(source_session_id="child-sid", event=event)
+
+    await handler._handle_event("parent-sid", envelope)
+
+    # Verify notification uses child session_id from envelope
+    mock_client.session_update.assert_called_once()
+    notification = mock_client.session_update.call_args[0][0]
+    assert notification.session_id == "child-sid", (
+        f"Expected child-sid, got {notification.session_id}"
+    )
+
+
+@pytest.mark.anyio
+async def test_handle_event_falls_back_to_consumer_session_id(
+    mock_pool: MagicMock,
+    mock_event_converter: MagicMock,
+) -> None:
+    """When event has no session_id, fall back to consumer session_id."""
+    mock_client = AsyncMock()
+    handler = ACPProtocolHandler(
+        agent_pool=mock_pool,
+        session_manager=MagicMock(),
+        event_converter=mock_event_converter,
+        client=mock_client,
+        client_capabilities=None,
+    )
+
+    # Set up converter with async generator
+    from acp.schema.session_updates import AgentMessageChunk
+
+    async def mock_convert(event):
+        yield AgentMessageChunk.text("test")
+
+    mock_converter = MagicMock()
+    mock_converter.convert = mock_convert
+    handler._converters["parent-sid"] = mock_converter
+
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    # Event without session_id wrapped in EventEnvelope with empty source_session_id
+    event = StreamCompleteEvent(
+        message=ChatMessage(content="hello", role="assistant"),
+    )
+    envelope = EventEnvelope(source_session_id="", event=event)
+
+    await handler._handle_event("parent-sid", envelope)
+
+    # Verify notification falls back to consumer session_id
+    mock_client.session_update.assert_called_once()
+    notification = mock_client.session_update.call_args[0][0]
+    assert notification.session_id == "parent-sid", (
+        f"Expected parent-sid, got {notification.session_id}"
+    )

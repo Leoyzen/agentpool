@@ -83,7 +83,7 @@ class PartDeltaEvent(PyAIPartDeltaEvent):
 class RunStartedEvent:
     """Signals the start of an agent run."""
 
-    session_id: str
+    session_id: str = ""
     """ID of the session."""
     run_id: str
     """ID of the agent run (unique per request/response cycle)."""

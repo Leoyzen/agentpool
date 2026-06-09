@@ -134,7 +134,7 @@ class OpenCodeStreamAdapter:
 
         # Use main_context's cost tracking
         class SimpleCostInfo:
-            def __init__(self, total):
+            def __init__(self, total: float) -> None:
                 self.total_cost = total
 
         return (

@@ -34,6 +34,35 @@ if TYPE_CHECKING:
     from agentpool.sessions.store import SessionStore
 
 
+@dataclass(frozen=True)
+class EventEnvelope:
+    """Wrapper for events published through EventBus.
+
+    Carries routing metadata (source_session_id) separately from the event
+    payload so consumers can determine the event's origin without mutating
+    the event object.
+
+    Attribute access is transparently forwarded to the wrapped event,
+    so consumers can use ``envelope.delta`` or ``envelope.event_kind``
+    without unwrapping.
+    """
+
+    source_session_id: str
+    """The session that produced this event."""
+    event: Any
+    """The original event payload (unmodified)."""
+
+    def __getattr__(self, name: str) -> Any:
+        """Forward attribute access to the wrapped event."""
+        return getattr(self.event, name)
+
+    def __repr__(self) -> str:
+        return (
+            f"EventEnvelope(source_session_id={self.source_session_id!r}, "
+            f"event={self.event!r})"
+        )
+
+
 logger = get_logger(__name__)
 
 # Constants
@@ -126,15 +155,19 @@ class EventBus:
             replay_buffer_size: Maximum number of events retained per session for replay.
             session_controller: Optional session controller for hierarchy queries.
         """
-        self._subscribers: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
+        self._subscribers: dict[
+            str, list[tuple[asyncio.Queue[EventEnvelope | None], str]]
+        ] = {}
         self._session_tree: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
         self._max_queue_size = max_queue_size
         self._replay_buffer_size = replay_buffer_size
         self._session_controller = session_controller
-        self._replay_buffers: dict[str, deque[Any]] = {}
+        self._replay_buffers: dict[str, deque[EventEnvelope]] = {}
 
-    async def subscribe(self, session_id: str, scope: str = "session") -> asyncio.Queue[Any]:
+    async def subscribe(
+        self, session_id: str, scope: str = "session"
+    ) -> asyncio.Queue[EventEnvelope | None]:
         """Subscribe to events for a session.
 
         New subscribers receive replayed historical events from the replay
@@ -150,7 +183,9 @@ class EventBus:
         Returns:
             A queue to consume events from.
         """
-        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=self._max_queue_size)
+        queue: asyncio.Queue[EventEnvelope | None] = asyncio.Queue(
+            maxsize=self._max_queue_size
+        )
 
         # 1. Register subscriber FIRST (before replay to avoid missing live events)
         async with self._lock:
@@ -159,7 +194,7 @@ class EventBus:
         # 2. Get replay buffer snapshot
         if scope == "all":
             # Global subscriptions collect from all session buffers
-            historical_events: list[Any] = []
+            historical_events: list[EventEnvelope] = []
             for buffer in self._replay_buffers.values():
                 historical_events.extend(buffer)
         else:
@@ -168,17 +203,17 @@ class EventBus:
 
         # 3. Drain any live events that arrived during replay
         # (these are already in the queue from publish())
-        live_events_during_replay: list[Any] = []
+        live_events_during_replay: list[EventEnvelope | None] = []
         while not queue.empty():
             try:
                 live_events_during_replay.append(queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
 
-        # 4. Replay historical events first (copy before modifying)
-        for event in historical_events:
+        # 4. Replay historical events first (EventEnvelope is immutable, no copy needed)
+        for envelope in historical_events:
             try:
-                queue.put_nowait(copy.copy(event))
+                queue.put_nowait(envelope)
             except asyncio.QueueFull:
                 break  # Skip remaining if queue full
 
@@ -194,7 +229,7 @@ class EventBus:
     async def unsubscribe(
         self,
         session_id: str,
-        queue: asyncio.Queue[Any],
+        queue: asyncio.Queue[EventEnvelope | None],
     ) -> None:
         """Unsubscribe from events.
 
@@ -260,40 +295,42 @@ class EventBus:
     async def publish(self, session_id: str, event: Any) -> None:
         """Publish an event to all subscribers for a session.
 
+        The event is wrapped in an EventEnvelope with the source_session_id
+        before storage and distribution.
+
         If a subscriber's queue is full, drops the oldest event.
         If put fails, removes the dead subscriber.
 
-        Creates a shallow copy of the event for each subscriber to prevent
-        one consumer's mutation from affecting others.
-
         Args:
-            session_id: The session to publish to.
+            session_id: The session that produced the event.
             event: The event to broadcast.
         """
+        # Wrap event in envelope with routing metadata
+        envelope = EventEnvelope(source_session_id=session_id, event=event)
+
         # Store in replay buffer
         if session_id not in self._replay_buffers:
             self._replay_buffers[session_id] = deque(maxlen=self._replay_buffer_size)
-        self._replay_buffers[session_id].append(copy.copy(event))
+        self._replay_buffers[session_id].append(envelope)
 
         async with self._lock:
-            queues: list[tuple[asyncio.Queue[Any], str]] = []
+            queues: list[tuple[asyncio.Queue[EventEnvelope | None], str]] = []
             for subscriber_sid, subscribers in self._subscribers.items():
                 for queue, scope in subscribers:
                     if self._should_receive(session_id, subscriber_sid, scope):
                         queues.append((queue, scope))
 
-        dead_queues: list[asyncio.Queue[Any]] = []
+        dead_queues: list[asyncio.Queue[EventEnvelope | None]] = []
         for queue, _scope in queues:
-            copied_event = copy.copy(event)
             try:
-                queue.put_nowait(copied_event)
+                queue.put_nowait(envelope)
             except asyncio.QueueFull:
                 try:
                     queue.get_nowait()
-                    queue.put_nowait(copied_event)
+                    queue.put_nowait(envelope)
                 except asyncio.QueueEmpty:
                     try:
-                        queue.put_nowait(copied_event)
+                        queue.put_nowait(envelope)
                     except asyncio.QueueFull:
                         dead_queues.append(queue)
                 except asyncio.QueueFull:
@@ -1105,9 +1142,8 @@ class TurnRunner:
     async def _publish_event(self, session_id: str, event: Any) -> None:
         """Publish event to EventBus.
 
-        Events are published raw without wrapping. Protocol layers subscribe
-        with scope="descendants" to receive child session events and route
-        them using event.session_id.
+        Events are wrapped in EventEnvelope by the EventBus with the
+        source_session_id set to the publishing session.
         """
         await self.event_bus.publish(session_id, event)
 
@@ -1841,7 +1877,7 @@ class SessionPool:
                     event = get_task.result()
                     get_task = None
                     if event is not None:
-                        yield event
+                        yield event.event
             if get_task is not None and not get_task.done():
                 get_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -1850,7 +1886,7 @@ class SessionPool:
             while not queue.empty():
                 event = queue.get_nowait()
                 if event is not None:
-                    yield event
+                    yield event.event
             if (exc := process_task.exception()) is not None:
                 raise exc
         finally:

@@ -107,8 +107,8 @@ async def test_publish_single_subscriber(
     await event_bus.publish("sess-1", sample_event)
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-1"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-1"
 
 
 @pytest.mark.anyio
@@ -124,10 +124,11 @@ async def test_publish_multiple_subscribers(
     ev2 = await asyncio.wait_for(q2.get(), timeout=0.5)
     assert ev1 is not None
     assert ev2 is not None
-    assert ev1 is not ev2  # shallow copy
-    assert isinstance(ev1, RunStartedEvent)
-    assert isinstance(ev2, RunStartedEvent)
-    assert ev1.run_id == ev2.run_id
+    # EventEnvelope is frozen/immutable, so the same object can be shared
+    assert ev1 == ev2
+    assert isinstance(ev1.event, RunStartedEvent)
+    assert isinstance(ev2.event, RunStartedEvent)
+    assert ev1.event.run_id == ev2.event.run_id
 
 
 @pytest.mark.anyio
@@ -183,8 +184,8 @@ async def test_publish_drops_oldest_when_queue_full(
         items.append(await queue.get())
     run_ids = []
     for e in items:
-        if isinstance(e, RunStartedEvent):
-            run_ids.append(e.run_id)
+        if isinstance(e.event, RunStartedEvent):
+            run_ids.append(e.event.run_id)
     assert "old" not in run_ids
     assert run_ids == ["mid", "run-1", "new"]
 
@@ -320,7 +321,7 @@ async def test_replay_buffer_bounds(event_bus: EventBus) -> None:
         await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
     buffer = event_bus._replay_buffers["sess-1"]
     assert len(buffer) == 100
-    run_ids = [e.run_id for e in buffer]
+    run_ids = [e.event.run_id for e in buffer]
     assert run_ids[0] == "ev50"
     assert run_ids[-1] == "ev149"
 
@@ -341,7 +342,7 @@ async def test_replay_buffer_events_in_order(event_bus: EventBus) -> None:
         await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
     buffer = event_bus._replay_buffers["sess-1"]
     assert len(buffer) == 5
-    run_ids = [e.run_id for e in buffer]
+    run_ids = [e.event.run_id for e in buffer]
     assert run_ids == ["ev0", "ev1", "ev2", "ev3", "ev4"]
 
 
@@ -387,7 +388,7 @@ async def test_replay_protocol_new_subscriber_gets_historical() -> None:
         received.append(queue.get_nowait())
 
     assert len(received) == 5
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert run_ids == ["ev0", "ev1", "ev2", "ev3", "ev4"]
 
 
@@ -413,7 +414,7 @@ async def test_replay_protocol_ordering() -> None:
     while not queue.empty():
         received.append(queue.get_nowait())
 
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert run_ids == ["hist-0", "hist-1", "hist-2", "live-0", "live-1"]
 
 
@@ -433,7 +434,7 @@ async def test_replay_protocol_no_duplicates() -> None:
     while not queue.empty():
         received.append(queue.get_nowait())
 
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert len(run_ids) == len(set(run_ids)), f"Duplicate run_ids found: {run_ids}"
 
 
@@ -473,7 +474,7 @@ async def test_replay_protocol_race_condition() -> None:
     while not queue.empty():
         received.append(queue.get_nowait())
 
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
 
     # All 8 events should be present
     assert len(run_ids) == 8, f"Expected 8 events, got {len(run_ids)}: {run_ids}"
@@ -534,19 +535,19 @@ async def test_event_ordering_replay_then_live() -> None:
     assert len(received) == 6
 
     # Verify replayed events come first, then live events
-    assert isinstance(received[0], PartStartEvent)
-    assert received[0].index == 0
-    assert isinstance(received[1], PartDeltaEvent)
-    assert received[1].index == 0
-    assert isinstance(received[2], PartEndEvent)
-    assert received[2].index == 0
+    assert isinstance(received[0].event, PartStartEvent)
+    assert received[0].event.index == 0
+    assert isinstance(received[1].event, PartDeltaEvent)
+    assert received[1].event.index == 0
+    assert isinstance(received[2].event, PartEndEvent)
+    assert received[2].event.index == 0
 
-    assert isinstance(received[3], PartStartEvent)
-    assert received[3].index == 1
-    assert isinstance(received[4], PartDeltaEvent)
-    assert received[4].index == 1
-    assert isinstance(received[5], PartEndEvent)
-    assert received[5].index == 1
+    assert isinstance(received[3].event, PartStartEvent)
+    assert received[3].event.index == 1
+    assert isinstance(received[4].event, PartDeltaEvent)
+    assert received[4].event.index == 1
+    assert isinstance(received[5].event, PartEndEvent)
+    assert received[5].event.index == 1
 
 
 @pytest.mark.anyio
@@ -572,7 +573,7 @@ async def test_event_ordering_no_gaps_in_replay() -> None:
     # Should receive exactly 100 events (ev50-ev149)
     assert len(received) == 100
 
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     expected = [f"ev{i}" for i in range(50, 150)]
     assert run_ids == expected
 
@@ -607,7 +608,7 @@ async def test_event_ordering_concurrent_publish() -> None:
     # All 100 events should be present
     assert len(received) == 100
 
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert len(run_ids) == 100
     assert len(run_ids) == len(set(run_ids)), f"Duplicate run_ids found: {run_ids}"
 
@@ -641,13 +642,13 @@ async def test_event_ordering_mixed_sessions() -> None:
     # Should receive only sess-1 events
     assert len(received) == 5
 
-    run_ids = [e.run_id for e in received if isinstance(e, RunStartedEvent)]
+    run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert run_ids == ["s1-ev0", "s1-ev1", "s1-ev2", "s1-ev3", "s1-ev4"]
 
     # Verify no cross-session leakage
     for e in received:
-        if isinstance(e, RunStartedEvent):
-            assert e.session_id == "sess-1"
+        if isinstance(e.event, RunStartedEvent):
+            assert e.source_session_id == "sess-1"
 
 
 # ---------------------------------------------------------------------------
@@ -664,8 +665,8 @@ async def test_child_events_visible_with_descendants_scope(event_bus: EventBus) 
     await event_bus.publish("child", child_event)
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-child"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-child"
 
 
 @pytest.mark.anyio
@@ -698,8 +699,8 @@ async def test_event_ordering_parent_and_child() -> None:
     received: list[str] = []
     for _ in events:
         ev = await asyncio.wait_for(queue.get(), timeout=0.5)
-        assert isinstance(ev, RunStartedEvent)
-        received.append(ev.run_id)
+        assert isinstance(ev.event, RunStartedEvent)
+        received.append(ev.event.run_id)
     assert received == ["run-1", "run-2", "run-3", "run-4", "run-5"]
 
 
@@ -717,5 +718,5 @@ async def test_grandchild_events_visible_with_descendants_scope(
     await event_bus.publish("grandchild", grandchild_event)
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-grandchild"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-grandchild"

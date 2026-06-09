@@ -166,7 +166,7 @@ async def test_before_run_publishes_run_started_event(
     await capability.before_run(mock_run_context)
 
     event = queue.get_nowait()
-    assert isinstance(event, RunStartedEvent)
+    assert isinstance(event.event, RunStartedEvent)
     assert event.session_id == session_id
     assert event.agent_name == "test-agent"
     assert event.event_kind == "run_started"
@@ -323,7 +323,7 @@ async def test_multiple_hooks_combined(
 
     assert call_order == ["hook1", "hook2"]
     event = queue.get_nowait()
-    assert isinstance(event, RunStartedEvent)
+    assert isinstance(event.event, RunStartedEvent)
 
 
 # ---------------------------------------------------------------------------
@@ -1013,11 +1013,11 @@ async def test_concurrent_sessions_dont_interfere(
     event_1 = queue_1.get_nowait()
     event_2 = queue_2.get_nowait()
 
-    assert isinstance(event_1, RunStartedEvent)
+    assert isinstance(event_1.event, RunStartedEvent)
     assert event_1.session_id == session_id
     assert event_1.agent_name == "test-agent"
 
-    assert isinstance(event_2, RunStartedEvent)
+    assert isinstance(event_2.event, RunStartedEvent)
     assert event_2.session_id == session_id_2
     assert event_2.agent_name == "test-agent-2"
 
@@ -1087,11 +1087,11 @@ async def test_adapter_with_actual_pydantic_ai_agent(event_bus: EventBus, sessio
     assert result.output == "Hello from test"
 
     event = queue.get_nowait()
-    assert isinstance(event, RunStartedEvent)
+    assert isinstance(event.event, RunStartedEvent)
     assert event.session_id == session_id
     assert event.agent_name == "test-agent"
     assert event.event_kind == "run_started"
-    assert event.run_id  # should be a non-empty UUID string
+    assert event.event.run_id  # should be a non-empty UUID string
 
 
 async def test_adapter_run_and_tool_events_with_actual_agent(
@@ -1140,13 +1140,13 @@ async def test_adapter_run_and_tool_events_with_actual_agent(
     assert len(events) >= 1, f"Expected at least 1 event, got {len(events)}: {[type(e).__name__ for e in events]}"
 
     # First event should be RunStartedEvent
-    assert isinstance(events[0], RunStartedEvent)
+    assert isinstance(events[0].event, RunStartedEvent)
     assert events[0].session_id == session_id
 
     # Should NOT have ToolCallStartEvent or ToolCallCompleteEvent from hooks adapter
-    start_events = [e for e in events if isinstance(e, ToolCallStartEvent)]
+    start_events = [e for e in events if isinstance(e.event, ToolCallStartEvent)]
     assert len(start_events) == 0, "ToolCallStartEvent should not come from hooks adapter"
-    complete_events = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
+    complete_events = [e for e in events if isinstance(e.event, ToolCallCompleteEvent)]
     assert len(complete_events) == 0, "ToolCallCompleteEvent should not come from hooks adapter"
 
 
@@ -1203,4 +1203,4 @@ async def test_original_hooks_called_before_eventbus_publish(
 
     assert "original_hook" in call_order
     event = queue.get_nowait()
-    assert isinstance(event, RunStartedEvent)
+    assert isinstance(event.event, RunStartedEvent)

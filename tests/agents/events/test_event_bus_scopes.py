@@ -46,8 +46,8 @@ async def test_descendant_scope_receives_child_event() -> None:
     # Subscriber should receive the event
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-child-1"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-child-1"
 
 
 @pytest.mark.anyio
@@ -67,8 +67,8 @@ async def test_descendant_scope_receives_own_event() -> None:
 
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-parent-1"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-parent-1"
 
 
 @pytest.mark.anyio
@@ -111,8 +111,8 @@ async def test_descendant_scope_receives_grandchild_event() -> None:
 
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-grandchild-1"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-grandchild-1"
 
 
 @pytest.mark.anyio
@@ -166,8 +166,8 @@ async def test_descendant_scope_with_session_controller() -> None:
 
         received = await asyncio.wait_for(queue.get(), timeout=0.5)
         assert received is not None
-        assert isinstance(received, RunStartedEvent)
-        assert received.run_id == "run-child-1"
+        assert isinstance(received.event, RunStartedEvent)
+        assert received.event.run_id == "run-child-1"
 
 
 # ============================================================================
@@ -201,8 +201,8 @@ async def test_emit_publishes_exactly_once_to_event_bus() -> None:
     # EventBus subscriber should receive exactly one event
     received = await asyncio.wait_for(queue.get(), timeout=0.5)
     assert received is not None
-    assert isinstance(received, RunStartedEvent)
-    assert received.run_id == "run-1"
+    assert isinstance(received.event, RunStartedEvent)
+    assert received.event.run_id == "run-1"
 
     # No additional events should be on the EventBus queue
     assert queue.empty()
