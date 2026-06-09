@@ -132,19 +132,26 @@ async def test_subagent_events_reach_client(handler, mock_pool, mock_client):
 
 @pytest.mark.anyio
 async def test_nested_subagent_events(handler, mock_pool, mock_client):
-    """SpawnSessionStart starts a child consumer; child events are routed.
+    """SpawnSessionStart starts child and grandchild consumers recursively.
 
     When a SpawnSessionStart event is received, the mixin automatically
-    starts a consumer for the child session. Events placed on the child
-    queue are then processed and sent with the child's session_id.
+    starts a consumer for the child session. When the child session
+    spawns a grandchild, that consumer is also started. Events on each
+    queue are processed and routed with the correct session_id.
     """
     parent_id = "sess-parent"
     child_id = "sess-child"
+    grandchild_id = "sess-grandchild"
     parent_queue = asyncio.Queue()
     child_queue = asyncio.Queue()
+    grandchild_queue = asyncio.Queue()
 
     async def _subscribe_side_effect(session_id: str, scope: str = "descendants"):
-        return parent_queue if session_id == parent_id else child_queue
+        if session_id == parent_id:
+            return parent_queue
+        if session_id == child_id:
+            return child_queue
+        return grandchild_queue
 
     mock_pool.session_pool.event_bus.subscribe = AsyncMock(
         side_effect=_subscribe_side_effect
@@ -152,37 +159,60 @@ async def test_nested_subagent_events(handler, mock_pool, mock_client):
 
     await handler.start_event_consumer(parent_id)
 
-    spawn = SpawnSessionStart(
+    # Spawn child from parent
+    spawn_child = SpawnSessionStart(
         child_session_id=child_id,
         parent_session_id=parent_id,
-        source_name="test-agent",
+        source_name="child-agent",
         source_type="agent",
         spawn_mechanism="spawn",
-        description="test spawn",
+        description="child spawn",
     )
-    await _put_event_and_wait(parent_queue, spawn)
+    await _put_event_and_wait(parent_queue, spawn_child)
 
     # Child consumer should be registered
     assert child_id in handler._consumer_tasks
     assert isinstance(handler._consumer_tasks[child_id], asyncio.Task)
 
-    # Replace the real child converter with a mock
-    mock_update = AgentMessageChunk.text("child-test")
-    mock_converter = MagicMock()
-    mock_converter.convert = lambda _event: _async_iter([mock_update])
-    handler._session_converters[child_id] = mock_converter
+    # Spawn grandchild from child
+    spawn_grandchild = SpawnSessionStart(
+        child_session_id=grandchild_id,
+        parent_session_id=child_id,
+        source_name="grandchild-agent",
+        source_type="agent",
+        spawn_mechanism="spawn",
+        description="grandchild spawn",
+    )
+    await _put_event_and_wait(child_queue, spawn_grandchild)
 
-    # Put a completion event on the child queue
-    await _put_event_and_wait(child_queue, _stream_complete_event())
+    # Grandchild consumer should be registered
+    assert grandchild_id in handler._consumer_tasks
+    assert isinstance(handler._consumer_tasks[grandchild_id], asyncio.Task)
 
-    # Verify the child event was sent with child's session_id
-    mock_client.session_update.assert_awaited()
-    notification = mock_client.session_update.await_args[0][0]
-    assert notification.session_id == child_id
-    assert notification.update is mock_update
+    # Set up converters for child and grandchild
+    mock_update_child = AgentMessageChunk.text("child-test")
+    mock_converter_child = MagicMock()
+    mock_converter_child.convert = lambda _event: _async_iter([mock_update_child])
+    handler._session_converters[child_id] = mock_converter_child
+
+    mock_update_grandchild = AgentMessageChunk.text("grandchild-test")
+    mock_converter_grandchild = MagicMock()
+    mock_converter_grandchild.convert = lambda _event: _async_iter([mock_update_grandchild])
+    handler._session_converters[grandchild_id] = mock_converter_grandchild
+
+    # Put completion events on child and grandchild queues
+    await _put_event_and_wait(child_queue, _stream_complete_event("child-done"))
+    await _put_event_and_wait(grandchild_queue, _stream_complete_event("grandchild-done"))
+
+    # Both child and grandchild events should have been sent
+    assert mock_client.session_update.await_count == 2
+    calls = mock_client.session_update.await_args_list
+    session_ids = {calls[0][0][0].session_id, calls[1][0][0].session_id}
+    assert session_ids == {child_id, grandchild_id}
 
     await handler.stop_event_consumer(parent_id)
     await handler.stop_event_consumer(child_id)
+    await handler.stop_event_consumer(grandchild_id)
 
 
 @pytest.mark.anyio

@@ -132,19 +132,26 @@ async def test_unconverted_events_not_broadcast(handler, mock_agent_pool, mock_s
 
 @pytest.mark.asyncio
 async def test_nested_subagent_events(handler, mock_agent_pool, mock_state):
-    """SpawnSessionStart starts a child consumer; child events are handled.
+    """SpawnSessionStart starts child and grandchild consumers recursively.
 
     When a SpawnSessionStart event is received, the mixin automatically
-    starts a consumer for the child session. Events placed on the child
-    queue are then processed independently.
+    starts a consumer for the child session. When the child session
+    spawns a grandchild, that consumer is also started. Events on each
+    queue are processed independently with the correct session_id.
     """
     parent_id = "sess-parent"
     child_id = "sess-child"
+    grandchild_id = "sess-grandchild"
     parent_queue = asyncio.Queue()
     child_queue = asyncio.Queue()
+    grandchild_queue = asyncio.Queue()
 
     async def _subscribe_side_effect(session_id: str, scope: str = "descendants"):
-        return parent_queue if session_id == parent_id else child_queue
+        if session_id == parent_id:
+            return parent_queue
+        if session_id == child_id:
+            return child_queue
+        return grandchild_queue
 
     mock_agent_pool.session_pool.event_bus.subscribe = AsyncMock(
         side_effect=_subscribe_side_effect
@@ -152,31 +159,49 @@ async def test_nested_subagent_events(handler, mock_agent_pool, mock_state):
 
     await handler.start_event_consumer(parent_id)
 
-    spawn = SpawnSessionStart(
+    # Spawn child from parent
+    spawn_child = SpawnSessionStart(
         child_session_id=child_id,
         parent_session_id=parent_id,
-        source_name="test-agent",
+        source_name="child-agent",
         source_type="agent",
         spawn_mechanism="spawn",
-        description="test spawn",
+        description="child spawn",
     )
-    await _put_event_and_wait(parent_queue, spawn)
+    await _put_event_and_wait(parent_queue, spawn_child)
 
     # Child consumer should be registered
     assert child_id in handler._consumer_tasks
     assert isinstance(handler._consumer_tasks[child_id], asyncio.Task)
 
-    # Put a completion event on the child queue
-    await _put_event_and_wait(child_queue, _stream_complete_event())
+    # Spawn grandchild from child
+    spawn_grandchild = SpawnSessionStart(
+        child_session_id=grandchild_id,
+        parent_session_id=child_id,
+        source_name="grandchild-agent",
+        source_type="agent",
+        spawn_mechanism="spawn",
+        description="grandchild spawn",
+    )
+    await _put_event_and_wait(child_queue, spawn_grandchild)
 
-    # Both parent and child broadcasts should have occurred
-    assert mock_state.broadcast_event.await_count == 1
-    broadcasted = mock_state.broadcast_event.await_args[0][0]
-    assert isinstance(broadcasted, SessionIdleEvent)
-    assert broadcasted.properties.session_id == child_id
+    # Grandchild consumer should be registered
+    assert grandchild_id in handler._consumer_tasks
+    assert isinstance(handler._consumer_tasks[grandchild_id], asyncio.Task)
+
+    # Put completion events on child and grandchild queues
+    await _put_event_and_wait(child_queue, _stream_complete_event("child-done"))
+    await _put_event_and_wait(grandchild_queue, _stream_complete_event("grandchild-done"))
+
+    # Both child and grandchild events should have been broadcast
+    assert mock_state.broadcast_event.await_count == 2
+    calls = mock_state.broadcast_event.await_args_list
+    session_ids = {calls[0][0][0].properties.session_id, calls[1][0][0].properties.session_id}
+    assert session_ids == {child_id, grandchild_id}
 
     await handler.stop_event_consumer(parent_id)
     await handler.stop_event_consumer(child_id)
+    await handler.stop_event_consumer(grandchild_id)
 
 
 @pytest.mark.asyncio
