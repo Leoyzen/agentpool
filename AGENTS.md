@@ -143,6 +143,25 @@ The codebase is organized into focused packages under `src/`:
 
 ### Key Architectural Patterns
 
+#### ProtocolEventConsumerMixin
+
+`ProtocolEventConsumerMixin` (in `src/agentpool_server/mixins.py`) provides a reusable event consumer lifecycle for protocol servers. It extracts the common pattern of subscribing to the `EventBus`, running an async consumer loop, and cleaning up on shutdown.
+
+**Why it exists**: Before this mixin, OpenCode and ACP each implemented their own event consumer loop independently. The code was duplicated, and ACP's implementation was missing features like `SpawnSessionStart` handling and recursive child subscription. The mixin centralizes the loop mechanics while letting each protocol define its own event conversion.
+
+**Which protocols use it**:
+- **ACP** (`acp_server/handler.py`): Adopted in Phase 1. Uses `scope="descendants"` to receive child events through the parent consumer. `_on_spawn_session_start` is a no-op because ACP does not create child consumers.
+- **OpenCode** (`opencode_server/session_pool_integration.py`): NOT yet adopted (Phase 2, future change). The mixin interface was designed to be compatible with OpenCode's needs (ToolPart registration, child consumer creation, `OpenCodeEventAdapter`).
+- **AG-UI / OpenAI API**: NOT yet adopted. Can adopt the mixin when subagent event forwarding is needed.
+
+**Key hooks**:
+- `_before_consumer_loop(session_id)`: Set up per-session context (e.g. create an event converter).
+- `_handle_event(session_id, event)`: Convert and deliver the event. May raise `ConsumerShutdown` to stop the loop.
+- `_on_spawn_session_start(session_id, event)`: React to subagent spawning. Default is no-op.
+- `_after_consumer_loop(session_id)`: Clean up per-session context. Only called if the consumer actually started.
+
+**Thread safety**: `start_event_consumer` is idempotent and serializes concurrent calls for the same session via per-session locks.
+
 #### MessageNode Abstraction
 All processing units (Agents, Teams) inherit from `MessageNode[TInputType, TOutput]`. This provides:
 - Unified interface for message processing via `process()`
