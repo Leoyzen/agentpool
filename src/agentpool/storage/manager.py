@@ -20,7 +20,7 @@ from agentpool_config.storage import StorageConfig
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
     from datetime import datetime
     from types import TracebackType
 
@@ -246,7 +246,6 @@ class StorageManager:
         model: str | None = None,
         initial_prompt: str | None = None,
         parent_session_id: str | None = None,
-        on_title_generated: Callable[[str], None] | None = None,
     ) -> None:
         """Log session to all providers (idempotent).
 
@@ -260,7 +259,6 @@ class StorageManager:
             model: Requested model identifier for this session
             initial_prompt: Optional initial prompt to trigger title generation
             parent_session_id: Optional parent session ID
-            on_title_generated: Optional callback invoked when title is generated
         """
         if not self.config.log_sessions:
             return
@@ -289,7 +287,6 @@ class StorageManager:
         await self._generate_title_from_prompt(
             session_id=session_id,
             prompt=initial_prompt,
-            on_title_generated=on_title_generated,
         )
 
     @method_spawner
@@ -631,6 +628,27 @@ class StorageManager:
         )
 
     @method_spawner
+    async def truncate_messages(
+        self,
+        session_id: str,
+        up_to_message_id: str,
+    ) -> int:
+        """Remove all messages after the given message ID.
+
+        Keeps messages up to and including up_to_message_id,
+        removes everything after it.
+
+        Args:
+            session_id: ID of the conversation to truncate
+            up_to_message_id: Keep messages up to and including this ID
+
+        Returns:
+            The count of removed messages
+        """
+        provider = self.get_history_provider()
+        return await provider.truncate_messages(session_id, up_to_message_id)
+
+    @method_spawner
     async def delete_session_messages(
         self,
         session_id: str,
@@ -774,7 +792,6 @@ class StorageManager:
         self,
         session_id: str,
         prompt: str,
-        on_title_generated: Callable[[str], None] | None = None,
     ) -> str | None:
         """Generate title from initial prompt (internal, fire-and-forget).
 
@@ -785,7 +802,6 @@ class StorageManager:
         Args:
             session_id: ID of the conversation to title
             prompt: The initial user prompt
-            on_title_generated: Optional callback invoked with the generated title
 
         Returns:
             The generated title, or None if generation fails/disabled.
@@ -793,8 +809,6 @@ class StorageManager:
         # Check if title already exists and is not the default placeholder
         existing = await self.get_session_title(session_id)
         if existing and existing != "New Session":
-            if on_title_generated:
-                on_title_generated(existing)
             return existing
         # Generate using core logic, with timeout to prevent zombie tasks.
         # 15 seconds is generous for a short title-generation prompt.
@@ -803,7 +817,7 @@ class StorageManager:
                 self._generate_title_core(session_id, f"user: {prompt[:500]}"),
                 timeout=15.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Title generation timed out (15s)",
                 session_id=session_id,
@@ -816,8 +830,6 @@ class StorageManager:
             # the core method is mocked in tests (where the side-effect is lost).
             # The duplicate call is harmless: update_session_title is idempotent.
             await self.update_session_title(session_id, title)
-            if on_title_generated:
-                on_title_generated(title)
             return title
         return None
 

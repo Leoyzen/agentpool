@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic_ai import UserContent
 
-from agentpool.common_types import PathReference
 from agentpool.log import get_logger
-from agentpool.tasks.exceptions import RunAbortedError
+from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.converters import (
@@ -20,6 +17,11 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
+from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
+    get_messages_for_session,
+    set_session_status,
+)
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
@@ -46,11 +48,18 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
-from agentpool_server.opencode_server.state import QueuedAsyncPrompt
+from agentpool_server.opencode_server.session_pool_integration import (
+    get_messages_for_session,
+)
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pydantic_ai import UserContent
+
+    from agentpool.common_types import PathReference
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -97,7 +106,7 @@ def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
             logger.exception("LSP warmup failed")
 
     # Fire and forget - don't block message processing
-    asyncio.create_task(warmup())
+    state.create_background_task(warmup(), name="warmup_lsp")
 
 
 async def _maybe_generate_title(
@@ -116,7 +125,7 @@ async def _maybe_generate_title(
         user_prompt: The user's prompt to use for title generation
     """
     # Check if this is the first user message by looking at existing messages
-    existing_messages = state.messages.get(session_id, [])
+    existing_messages = await get_messages_for_session(state, session_id)
 
     # Count user messages (not assistant, not system)
     user_message_count = sum(
@@ -153,47 +162,14 @@ async def _maybe_generate_title(
 
         # Trigger title generation via log_session with initial_prompt
         # Use the session agent's name if available, fallback to template agent name
-        session_agent = state._session_agents.get(session_id)
-        node_name = session_agent.name if session_agent else state.agent.name
+        node_name = state.agent.name
         await storage.log_session(
             session_id=session_id,
             node_name=node_name,
             initial_prompt=prompt_text,
-            on_title_generated=lambda title: _update_session_title(state, session_id, title),
         )
     except Exception:
         logger.exception("Failed to generate title", session_id=session_id)
-
-
-def _update_session_title(state: StateDep, session_id: str, title: str) -> None:
-    """Update session title in state and storage.
-
-    Args:
-        state: Server state
-        session_id: The session ID to update
-        title: The new title
-    """
-    import asyncio
-
-    # Update in-memory session
-    session = state.sessions.get(session_id)
-    if session:
-        session.title = title
-
-    # Update in storage (fire and forget)
-    async def _update() -> None:
-        try:
-            await state.pool.storage.update_session_title(session_id, title)
-        except Exception:
-            logger.exception("Failed to update session title", session_id=session_id)
-
-    # Schedule the async update
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(_update())
-    except RuntimeError:
-        # No event loop running, ignore
-        pass
 
 
 async def persist_message_to_storage(
@@ -225,25 +201,11 @@ async def list_messages(
     limit: int | None = Query(default=None),
 ) -> list[MessageWithParts]:
     """List messages in a session."""
-    # Fast path for subagent/child sessions already in memory:
-    # Skip get_or_load_session (which acquires agent_lock) because the
-    # parent agent holds agent_lock while streaming, so the lock would
-    # block until the parent finishes — making child messages invisible
-    # during subagent execution.
-    cached_session = state.sessions.get(session_id)
-    if (
-        cached_session is not None
-        and cached_session.parent_id is not None
-        and session_id in state.messages
-    ):
-        messages = state.messages[session_id]
-        return messages[-limit:] if limit else messages
-
     session = await get_or_load_session(state, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    messages = state.messages.get(session_id, [])
+    messages = await get_messages_for_session(state, session_id)
     return messages[-limit:] if limit else messages
 
 
@@ -303,7 +265,7 @@ async def _process_message(
             case _ as unreachable:
                 assert_never(unreachable)
         await state.broadcast_event(PartUpdatedEvent.create(created))
-    state.messages[session_id].append(user_msg_with_parts)
+    await append_message_to_session(state, session_id, user_msg_with_parts)
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
@@ -336,11 +298,6 @@ async def _process_message_locked(  # noqa: PLR0915
         mark_busy: Whether to emit a busy transition before processing.
         mark_idle: Whether to emit an idle transition when processing completes.
     """
-    # --- Register active message task so abort_session can cancel it ---
-    current_task = asyncio.current_task()
-    if current_task is not None:
-        state.register_active_message_task(session_id, current_task)
-
     # --- Clear revert marker (mirrors opencode-native's revert.cleanup()) ---
     # When a user does /undo then sends a new message, the session.revert
     # marker must be cleared so the frontend stops filtering messages with
@@ -358,7 +315,7 @@ async def _process_message_locked(  # noqa: PLR0915
     # --- Mark session busy ---
     if mark_busy:
         busy = SessionStatus(type="busy")
-        state.session_status[session_id] = busy
+        await set_session_status(state, session_id, busy)
         await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
     # --- Extract user prompt ---
     user_prompt = await extract_user_prompt_from_parts(
@@ -391,7 +348,7 @@ async def _process_message_locked(  # noqa: PLR0915
         time=MessageTime(created=now),
     )
     assistant_msg_with_parts = MessageWithParts(info=assistant_msg, parts=[])
-    state.messages[session_id].append(assistant_msg_with_parts)
+    await append_message_to_session(state, session_id, assistant_msg_with_parts)
     await state.broadcast_event(MessageUpdatedEvent.create(assistant_msg))
     # Step-start part
     part_id = identifier.ascending("part")
@@ -409,11 +366,15 @@ async def _process_message_locked(  # noqa: PLR0915
         on_file_paths=lambda paths: _warmup_lsp_for_files(state, paths),
     )
 
+    # The stream adapter will be fed events directly from the EventBus
+    # subscriber loop below so that its mutable context (text, tokens,
+    # step-finish tracking) is updated before finalize() is called.
+
     response_time: int | None = None
     # Per-session agent: each session has its own agent instance,
     # so no global agent_lock is needed. Same-session serialization
     # is handled by get_session_lock() in _process_message().
-    agent = await state.get_or_create_agent(session_id)
+    agent = state.agent
     # Delegate agent resolution (for subagent requests).
     # Only resolve a delegate when the request names a *different* agent
     # from the default session agent.  A request.agent value of "default"
@@ -421,9 +382,9 @@ async def _process_message_locked(  # noqa: PLR0915
     # agent" — no delegation needed.
     #
     # NOTE: Subagents from state.pool.all_agents are shared singleton
-    # instances.  Mutating session_id/_input_provider on them is safe ONLY
-    # because same-session serialization (via get_session_lock) prevents
-    # concurrent access.  Per-session subagent instances are NOT feasible
+    # instances.  Input providers are stored on SessionState and passed
+    # to agents at run time via SessionController — never mutated on the
+    # shared agent itself.  Per-session subagent instances are NOT feasible
     # due to MCP subprocess overhead.  If OpenCode ever supports direct
     # multi-agent selection, this must be redesigned via AgentPool's
     # delegation/team mechanism instead.
@@ -437,8 +398,37 @@ async def _process_message_locked(  # noqa: PLR0915
                 pass  # Use per-session agent, don't replace with pool singleton
             else:
                 agent = all_agents[request.agent]
-    # Ensure agent is bound to this session
-    agent._input_provider = state.ensure_input_provider(session_id)
+    # Get input provider for this session — stored on SessionState, NOT on agent.
+    # SessionController passes input_provider to the agent via kwargs at run time.
+    input_provider = state.ensure_input_provider(session_id)
+
+    # --- SessionPool integration ---
+    integration = state.session_pool_integration
+    session_pool = state.pool.session_pool
+    if session_pool is None:
+        msg = "SessionPool not available"
+        raise RuntimeError(msg)
+
+    # Ensure session exists in SessionPool before routing
+    if integration is not None:
+        sp_state = await integration.create_session(
+            session_id,
+            agent_name=request.agent or state.agent.name or "default",
+        )
+    else:
+        sp_state, _was_created = await session_pool.sessions.get_or_create_session(
+            session_id,
+            agent_name=request.agent or state.agent.name or "default",
+        )
+    sp_state.input_provider = input_provider
+
+    # Obtain per-session agent for model switching so each session
+    # gets its own isolated model configuration.
+    session_agent = await session_pool.sessions.get_or_create_session_agent(
+        session_id,
+        agent_name=request.agent or state.agent.name or "default",
+        input_provider=input_provider,
+    )
 
     try:
         request_variant = request.model.variant if request.model else None
@@ -446,7 +436,7 @@ async def _process_message_locked(  # noqa: PLR0915
             # set_mode raises ValueError (or its subclasses UnknownModeError/
             # UnknownCategoryError) for invalid/unsupported modes — safe to ignore.
             try:
-                await agent.set_mode(request_variant, category_id="thought_level")
+                await session_agent.set_mode(request_variant, category_id="thought_level")
             except ValueError:
                 logger.debug("Variant mode not applicable", variant=request_variant)
 
@@ -464,7 +454,7 @@ async def _process_message_locked(  # noqa: PLR0915
             logger.info("Model selection requested", provider=provider_id, model_id=model_id)
 
             try:
-                available_models = await agent.get_available_models()
+                available_models = await session_agent.get_available_models()
                 is_valid = False
 
                 # Check 1: Is model_id a variant name in manifest?
@@ -489,7 +479,7 @@ async def _process_message_locked(  # noqa: PLR0915
                         "Switching model for session",
                         requested_model=requested_model,
                     )
-                    await agent.set_model(requested_model)
+                    await session_agent.set_model(requested_model)
                     logger.info("Switched to requested model", model=requested_model)
                 else:
                     logger.warning(
@@ -508,48 +498,118 @@ async def _process_message_locked(  # noqa: PLR0915
                 # Keep behavior stable for OpenCode (see PR #10 review iterations).
                 logger.warning("Failed to switch model", error=str(e))
 
-        iterator = agent.run_stream(*user_prompt, session_id=session_id)
-        async for oc_event in adapter.process_stream(iterator):
-            await state.broadcast_event(oc_event)
-
-        for oc_event in adapter.finalize():
-            await state.broadcast_event(oc_event)
-
-        # --- Finalize assistant message ---
-        response_time = now_ms()
-        preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
-        logger.info("Response text", text_preview=preview)
-        tokens = Tokens.from_pydantic_ai(adapter.usage)
-        cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
-        msg_time = MessageTime(created=now, completed=response_time)
-        update = {"time": msg_time, "tokens": tokens, "cost": cost}
-        updated_assistant = assistant_msg.model_copy(update=update)
-        assistant_msg_with_parts.info = updated_assistant
-        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
-        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
-    except (asyncio.CancelledError, TimeoutError, RunAbortedError) as exc:
-        # User cancelled the request (e.g., pressed ESC), or an external
-        # timeout (e.g. anyio.fail_after in a tool call) propagated as
-        # TimeoutError instead of CancelledError on Python 3.12+, or the
-        # agent aborted the run (e.g. question_for_user raised RunAbortedError
-        # when the user cancelled the questionnaire).
-        # All three cases require the same cleanup: finalize the assistant
-        # message with an aborted state so the TUI doesn't get stuck.
-        if isinstance(exc, asyncio.CancelledError):
-            reason = "Request cancelled by user"
-        elif isinstance(exc, RunAbortedError):
-            reason = str(exc) or "Run aborted by agent"
+        # Route through SessionPool instead of calling agent.run_stream() directly.
+        # Events will be delivered via the EventBus subscription below.
+        #
+        # Architecture note (auto-subscribe-subagent-events change):
+        # When SessionPool is enabled, the protocol layer auto-subscribes
+        # to the EventBus with scope="descendants". This means child session
+        # events are automatically received and forwarded to the frontend
+        # via SubAgentEvent without any manual subscription in message_routes.
+        # The _consume_events loop below only handles the parent session's
+        # direct agent events; child events flow through the EventBus
+        # independently via _consume_child_events.
+        if integration is not None:
+            run_handle = await integration.route_message(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
         else:
-            reason = "Request timed out"
-        logger.info(reason, session_id=session_id)
+            run_handle = await session_pool.receive_request(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
 
-        # Finalize the assistant message with aborted state.
-        # This mirrors upstream OpenCode's cleanup() in processor.ts:518
-        # and prompt.ts:637-638, 853-854. Without setting time.completed
-        # and error, the TUI's `pending` memo permanently finds this
-        # stale assistant message, causing all subsequent user messages
-        # to display as "QUEUED".
+        if run_handle is not None:
+            # Subscribe to EventBus locally so the adapter receives events
+            # and accumulates response_text / tokens for finalize().
+            # The session-scoped consumer (_event_consumer_loop) already
+            # broadcasts SSE events; we only feed the adapter context here.
+            event_queue = await session_pool.event_bus.subscribe(session_id)
+
+            async def _feed_adapter() -> None:
+                try:
+                    while True:
+                        event = await event_queue.get()
+                        if event is None:
+                            break
+                        async for _ in adapter.convert_event(event):
+                            pass  # Context updated; broadcast by session consumer
+                except asyncio.CancelledError:
+                    raise
+
+            adapter_task = asyncio.create_task(
+                _feed_adapter(), name=f"adapter_feed_{session_id}"
+            )
+
+            # Wait for the full run loop (including auto-resume) to complete.
+            # The session-scoped EventBus consumer (started in create_session)
+            # handles all event streaming; this handler only synchronises on
+            # completion and finalises the assistant message.
+            try:
+                await run_handle.complete_event.wait()
+            except asyncio.CancelledError:
+                run_handle.cancel()
+                raise
+            finally:
+                adapter_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await adapter_task
+                await session_pool.event_bus.unsubscribe(session_id, event_queue)
+
+            # Finalize based on run outcome
+            if run_handle.status != RunStatus.failed:
+                for oc_event in adapter.finalize():
+                    await state.broadcast_event(oc_event)
+
+                # --- Finalize assistant message ---
+                response_time = now_ms()
+                preview = adapter.response_text[:100] if adapter.response_text else "EMPTY"
+                logger.info("Response text", text_preview=preview)
+                tokens = Tokens.from_pydantic_ai(adapter.usage)
+                cost = float(adapter.cost_info.total_cost) if adapter.cost_info else 0.0
+                msg_time = MessageTime(created=now, completed=response_time)
+                update = {"time": msg_time, "tokens": tokens, "cost": cost}
+                updated_assistant = assistant_msg.model_copy(update=update)
+                assistant_msg_with_parts.info = updated_assistant
+                await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+                await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+            else:
+                # Run failed — finalize assistant message with aborted state
+                response_time = now_ms()
+                reason = "Run failed"
+                aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
+                msg_time = MessageTime(created=now, completed=response_time)
+                update = {"time": msg_time, "error": aborted_error}
+                updated_assistant = assistant_msg.model_copy(update=update)
+                assistant_msg_with_parts.info = updated_assistant
+                await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+                await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+
+                # Add the aborted assistant message to the SessionPool agent's
+                # in-memory conversation so history remains consistent.
+                sp_session_pool = integration.session_pool if integration is not None else session_pool
+                sp_session = sp_session_pool.sessions.get_session(session_id)
+                if sp_session is not None and sp_session.agent is not None:
+                    chat_msg = opencode_to_chat_message(
+                        assistant_msg_with_parts, session_id=session_id
+                    )
+                    sp_session.agent.conversation.add_chat_messages(
+                        [chat_msg], extend_last=True
+                    )
+        else:
+            # Message was queued for later processing (session busy)
+            logger.info(
+                "Message queued in SessionPool for later processing",
+                session_id=session_id,
+            )
+    except asyncio.CancelledError:
         response_time = now_ms()
+        reason = "Request cancelled by user"
         aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
         msg_time = MessageTime(created=now, completed=response_time)
         update = {"time": msg_time, "error": aborted_error}
@@ -558,26 +618,51 @@ async def _process_message_locked(  # noqa: PLR0915
         await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
         await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
 
-        # Add the aborted assistant message to the agent's in-memory conversation.
-        # Without this, the agent's conversation.chat_messages only has the user
-        # message (added by _run_stream_once at base_agent.py:784) but not the
-        # assistant response. On the next message, get_or_load_session() skips
-        # reloading because agent.session_id matches, so the LLM receives
-        # incomplete history — it doesn't know it already (partially) responded.
-        #
-        # This is safe because the agent is a per-session instance — concurrent
-        # sessions each have their own agent, so there is no history contamination
-        # between sessions.
-        chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
-        agent.conversation.add_chat_messages([chat_msg], extend_last=True)
+        # Add the aborted assistant message to the SessionPool agent's
+        # in-memory conversation so history remains consistent.
+        sp_session_pool = integration.session_pool if integration is not None else session_pool
+        sp_session = sp_session_pool.sessions.get_session(session_id)
+        if sp_session is not None and sp_session.agent is not None:
+            chat_msg = opencode_to_chat_message(
+                assistant_msg_with_parts, session_id=session_id
+            )
+            sp_session.agent.conversation.add_chat_messages(
+                [chat_msg], extend_last=True
+            )
+    except Exception as exc:
+        # Any unexpected error during SessionPool routing
+        logger.exception("SessionPool routing failed", session_id=session_id, error=str(exc))
+        response_time = now_ms()
+        reason = f"Error: {exc}"
+        aborted_error = MessageAbortedError(data=MessageAbortedErrorData(message=reason))
+        msg_time = MessageTime(created=now, completed=response_time)
+        update = {"time": msg_time, "error": aborted_error}
+        updated_assistant = assistant_msg.model_copy(update=update)
+        assistant_msg_with_parts.info = updated_assistant
+        await state.broadcast_event(MessageUpdatedEvent.create(updated_assistant))
+        await persist_message_to_storage(state, assistant_msg_with_parts, session_id)
+
+        # Add the aborted assistant message to the SessionPool agent's
+        # in-memory conversation so history remains consistent.
+        sp_session_pool = integration.session_pool if integration is not None else session_pool
+        sp_session = sp_session_pool.sessions.get_session(session_id)
+        if sp_session is not None and sp_session.agent is not None:
+            chat_msg = opencode_to_chat_message(
+                assistant_msg_with_parts, session_id=session_id
+            )
+            sp_session.agent.conversation.add_chat_messages(
+                [chat_msg], extend_last=True
+            )
     finally:
-        # --- Unregister active message task ---
-        state.unregister_active_message_task(session_id)
+        # Session-scoped resources (EventBus consumer, SessionStatusBridge)
+        # are managed by OpenCodeSessionPoolIntegration and are NOT torn
+        # down here.  They outlive individual HTTP requests so that auto-
+        # resume events are still streamed to the frontend.
+        #
         # --- Mark session idle ---
         # The async prompt worker owns session idling while it drains queued work.
         if mark_idle:
             await state.mark_session_idle(session_id)
-            await _ensure_async_prompt_worker(session_id, state, mark_busy=True)
         # --- Update session timestamp ---
         if response_time is not None:
             session = state.sessions[session_id]
@@ -587,65 +672,6 @@ async def _process_message_locked(  # noqa: PLR0915
                 }
             )
     return assistant_msg_with_parts
-
-
-async def _ensure_async_prompt_worker(
-    session_id: str,
-    state: StateDep,
-    *,
-    mark_busy: bool,
-) -> None:
-    """Start the per-session async prompt worker when queued work exists."""
-    if not state.has_pending_async_prompts(session_id):
-        return
-    if state.has_session_background_task(session_id):
-        return
-
-    if mark_busy:
-        busy = SessionStatus(type="busy")
-        state.session_status[session_id] = busy
-        await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
-
-    state.create_background_task(
-        _run_async_prompt_queue(session_id, state),
-        name=f"process_message_{session_id}",
-    )
-
-
-async def _run_async_prompt_queue(session_id: str, state: StateDep) -> None:
-    """Drain queued async prompts for a session in FIFO order."""
-    lock = state.get_session_lock(session_id)
-    try:
-        while True:
-            async with lock:
-                queued_prompt = state.pop_next_async_prompt(session_id)
-                if queued_prompt is None:
-                    await state.mark_session_idle(session_id)
-                    return
-
-                await _process_message_locked(
-                    session_id,
-                    queued_prompt.request,
-                    state,
-                    queued_prompt.user_msg_id,
-                    queued_prompt.user_msg_with_parts,
-                    mark_busy=False,
-                    mark_idle=False,
-                )
-
-                if state.has_pending_async_prompts(session_id):
-                    await state.emit_session_turn_complete(session_id)
-                    continue
-
-                await state.mark_session_idle(session_id)
-                return
-    except asyncio.CancelledError:
-        logger.info("Async prompt worker cancelled", session_id=session_id)
-        raise
-    except Exception:
-        logger.exception("Async prompt worker failed", session_id=session_id)
-        await state.mark_session_idle(session_id)
-        raise
 
 
 @router.post("/message")
@@ -669,8 +695,8 @@ async def send_message(
 async def send_message_async(session_id: str, request: MessageRequest, state: StateDep) -> None:
     """Send a message asynchronously without waiting for response.
 
-    Starts the agent processing in the background and returns immediately.
-    If the session is busy, the message is queued in server state and
+    Routes the prompt through the SessionPool and returns immediately.
+    If the session is busy, the message is queued by the SessionPool and
     processed after the current run completes.
 
     Client should listen to SSE events to get updates.
@@ -717,33 +743,44 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
             case _ as unreachable:
                 assert_never(unreachable)
         await state.broadcast_event(PartUpdatedEvent.create(created))
-    state.messages[session_id].append(user_msg_with_parts)
+    await append_message_to_session(state, session_id, user_msg_with_parts)
     await persist_message_to_storage(state, user_msg_with_parts, session_id)
     await state.broadcast_event(MessageUpdatedEvent.create(user_message))
 
-    # 2. Atomically queue work, then start a single per-session worker if needed.
-    lock = state.get_session_lock(session_id)
-    async with lock:
-        state.enqueue_async_prompt(
-            session_id,
-            QueuedAsyncPrompt(
-                request=request,
-                user_msg_id=user_msg_id,
-                user_msg_with_parts=user_msg_with_parts,
-            ),
+    # 2. Route through SessionPool instead of server-owned queue
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        input_provider = state.ensure_input_provider(session_id)
+
+        user_prompt = await extract_user_prompt_from_parts(
+            request.parts,
+            fs=state.fs,
+            tools=state.agent.tools,
         )
 
-        current_status = state.session_status.get(session_id)
-        mark_busy = current_status is None or current_status.type != "busy"
-        if not mark_busy:
-            logger.info(
-                "Session became busy before async dispatch, keeping prompt in server queue",
+        # Use integration layer to ensure session creation and event consumer startup
+        integration = state.session_pool_integration
+        if integration is not None:
+            await integration.route_message(
                 session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
             )
         else:
-            logger.info("Session idle, starting background task", session_id=session_id)
+            sp_state, _was_created = await session_pool.sessions.get_or_create_session(
+                session_id,
+                agent_name=request.agent or state.agent.name or "default",
+            )
+            sp_state.input_provider = input_provider
 
-        await _ensure_async_prompt_worker(session_id, state, mark_busy=mark_busy)
+            await session_pool.receive_request(
+                session_id=session_id,
+                content=user_prompt,
+                priority="when_idle",
+                input_provider=input_provider,
+            )
+
 
 
 @router.get("/message/{message_id}")
@@ -753,7 +790,7 @@ async def get_message(session_id: str, message_id: str, state: StateDep) -> Mess
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    for msg in state.messages.get(session_id, []):
+    for msg in await get_messages_for_session(state, session_id):
         if msg.info.id == message_id:
             return msg
 
@@ -768,7 +805,7 @@ async def delete_part(
     state: StateDep,
 ) -> bool:
     """Delete a part from a message."""
-    for msg in state.messages.get(session_id, []):
+    for msg in await get_messages_for_session(state, session_id):
         if msg.info.id != message_id:
             continue
         for i, part in enumerate(msg.parts):
@@ -799,7 +836,7 @@ async def update_part(
     Accepts the full part object and replaces the existing part.
     Returns the updated part.
     """
-    for msg in state.messages.get(session_id, []):
+    for msg in await get_messages_for_session(state, session_id):
         if msg.info.id != message_id:
             continue
         for i, part in enumerate(msg.parts):

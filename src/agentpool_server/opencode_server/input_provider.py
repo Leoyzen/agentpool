@@ -20,7 +20,7 @@ from agentpool_server.opencode_server.models import (
 if TYPE_CHECKING:
     from agentpool.agents.context import AgentContext, ConfirmationResult
     from agentpool_server.opencode_server.models import PermissionReply
-    from agentpool_server.opencode_server.models.question import QuestionInfo
+    from agentpool_server.opencode_server.models.question import QuestionInfo, QuestionRequest
     from agentpool_server.opencode_server.state import ServerState
 
 logger = get_logger(__name__)
@@ -60,6 +60,19 @@ class OpenCodeInputProvider(InputProvider):
         self._pending_permissions: dict[str, PendingPermission] = {}
         self._tool_approvals: dict[str, str] = {}  # tool_name -> "always" | "reject"
         self._id_counter = 0
+
+    @property
+    def _pending_questions_dict(self) -> dict[str, Any]:
+        """Get the pending questions dict for this session.
+
+        Returns SessionState.pending_questions for per-session isolation.
+        Returns empty dict if no session_controller or session not found.
+        """
+        if self.state.session_controller is not None:
+            session = self.state.session_controller.get_session(self.session_id)
+            if session is not None:
+                return session.pending_questions
+        return {}
 
     def _generate_permission_id(self) -> str:
         """Generate a unique permission ID."""
@@ -231,6 +244,27 @@ class OpenCodeInputProvider(InputProvider):
             result.append(props)
         return result
 
+    def get_pending_questions(self) -> list[QuestionRequest]:
+        """Get all pending question requests for this session.
+
+        Returns:
+            List of pending question requests.
+        """
+        from agentpool_server.opencode_server.models.question import QuestionRequest
+
+        result: list[QuestionRequest] = []
+        for question_id, pending in self._pending_questions_dict.items():
+            if pending.session_id == self.session_id:
+                result.append(
+                    QuestionRequest(
+                        id=question_id,
+                        session_id=pending.session_id,
+                        questions=pending.questions,
+                        tool=pending.tool,
+                    )
+                )
+        return result
+
     async def get_elicitation(
         self,
         params: types.ElicitRequestParams,
@@ -321,7 +355,7 @@ class OpenCodeInputProvider(InputProvider):
         )
         # Create future to wait for answer
         future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
-        self.state.pending_questions[question_id] = PendingQuestion(
+        self._pending_questions_dict[question_id] = PendingQuestion(
             session_id=self.session_id,
             questions=[question_info],
             future=future,
@@ -359,7 +393,7 @@ class OpenCodeInputProvider(InputProvider):
             return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")  # Generic err code
         finally:
             # Clean up pending question
-            self.state.pending_questions.pop(question_id, None)
+            self._pending_questions_dict.pop(question_id, None)
 
     def _property_to_question(self, key: str, prop_schema: dict[str, Any]) -> QuestionInfo:
         """Convert JSON schema property definition to QuestionInfo.
@@ -498,7 +532,7 @@ class OpenCodeInputProvider(InputProvider):
 
         # Create future to wait for answers
         future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
-        self.state.pending_questions[question_id] = PendingQuestion(
+        self._pending_questions_dict[question_id] = PendingQuestion(
             session_id=self.session_id,
             questions=questions,
             future=future,
@@ -545,7 +579,7 @@ class OpenCodeInputProvider(InputProvider):
             return types.ErrorData(code=-1, message=f"Elicitation failed: {e}")
         finally:
             # Clean up pending question
-            self.state.pending_questions.pop(question_id, None)
+            self._pending_questions_dict.pop(question_id, None)
 
     def clear_tool_approvals(self) -> None:
         """Clear all stored tool approval decisions."""
@@ -565,7 +599,7 @@ class OpenCodeInputProvider(InputProvider):
         Returns:
             True if the question was found and resolved, False otherwise
         """
-        pending = self.state.pending_questions.get(question_id)
+        pending = self._pending_questions_dict.get(question_id)
         if pending is None:
             logger.warning("Question not found", question_id=question_id)
             return False
@@ -592,4 +626,21 @@ class OpenCodeInputProvider(InputProvider):
                 count += 1
         self._pending_permissions.clear()
         logger.info("Cancelled all pending permissions", count=count)
+        return count
+
+    def cancel_pending_questions(self) -> int:
+        """Cancel all pending question requests for this session.
+
+        Returns:
+            Number of questions cancelled.
+        """
+        count = 0
+        for question_id, pending in list(self._pending_questions_dict.items()):
+            if pending.session_id == self.session_id:
+                future = getattr(pending, "future", None)
+                if future is not None and not future.done():
+                    future.cancel()
+                    count += 1
+                self._pending_questions_dict.pop(question_id, None)
+        logger.info("Cancelled all pending questions", count=count, session_id=self.session_id)
         return count

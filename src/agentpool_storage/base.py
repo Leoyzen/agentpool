@@ -372,6 +372,26 @@ class StorageProvider:
         msg = f"{self.__class__.__name__} does not support deleting messages"
         raise NotImplementedError(msg)
 
+    async def truncate_messages(
+        self,
+        session_id: str,
+        up_to_message_id: str,
+    ) -> int:
+        """Remove all messages after the given message ID.
+
+        Keeps messages up to and including up_to_message_id,
+        removes everything after it. Used by revert_session.
+
+        Args:
+            session_id: ID of the conversation to truncate
+            up_to_message_id: Keep messages up to and including this ID
+
+        Returns:
+            The count of removed messages
+        """
+        msg = f"{self.__class__.__name__} does not support truncating messages"
+        raise NotImplementedError(msg)
+
     # Project methods
 
     async def save_project(self, project: ProjectData) -> None:

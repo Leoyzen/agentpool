@@ -206,6 +206,7 @@ class _MockState:
         self._event_factory: GlobalEventFactory | None = None
         self._first_subscriber_triggered = False
         self.on_first_subscriber: Any = None
+        self.session_controller: Any = None
 
     def get_event_factory(self) -> GlobalEventFactory:
         if self._event_factory is None:
@@ -223,6 +224,9 @@ class _MockState:
     def cancel_all_pending_questions(self) -> list[str]:
         """No-op mock for SSE disconnect handler."""
         return []
+
+    def get_next_event_id(self) -> int:
+        return 1
 
 
 async def _collect_events(

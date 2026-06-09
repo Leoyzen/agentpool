@@ -69,6 +69,8 @@ async def test_task_tool_return_format():
 
     # Mock node (agent) using a class to satisfy runtime_checkable Protocol
     class MockStreamingAgent:
+        agent_type = "agent"
+
         def __init__(self):
             self.run_stream = MagicMock()
 
@@ -83,6 +85,13 @@ async def test_task_tool_return_format():
     ctx.node.session_id = "parent_session"
     ctx.events.emit_event = AsyncMock()
     ctx.create_child_session = AsyncMock(return_value="child_session_123")
+
+    # Mock pool.session_pool.run_stream to yield the same events as the agent
+    async def mock_session_run_stream(*args, **kwargs):
+        async for event in mock_stream():
+            yield event
+
+    ctx.pool.session_pool.run_stream = mock_session_run_stream
 
     # Execute task
     result = await tools.task(
@@ -111,6 +120,8 @@ async def test_task_tool_async_mode_return_format():
 
     # Mock node
     class MockStreamingAgent:
+        agent_type = "agent"
+
         def __init__(self):
             self.run_stream = MagicMock()
 

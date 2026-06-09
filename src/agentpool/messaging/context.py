@@ -48,13 +48,26 @@ class NodeContext[TDeps = object]:
         return self.node  # ty: ignore[invalid-return-type]
 
     def get_input_provider(self) -> InputProvider:
-        from agentpool.ui.stdlib_provider import StdlibInputProvider
-
+        # 1. Direct context provider (highest priority)
         if self.input_provider:
             return self.input_provider
+        # 2. Session-bound provider (authoritative for pooled sessions)
+        from agentpool.agents.context import AgentContext
+
+        if isinstance(self, AgentContext):
+            session_state = self.get_session_state()
+            if session_state is not None:
+                session_provider = getattr(session_state, "input_provider", None)
+                if session_provider is not None:
+                    return session_provider  # type: ignore[no-any-return]
+        # 3. Pool-level fallback
         if self.pool and self.pool._input_provider:
             return self.pool._input_provider
-        return StdlibInputProvider()
+        raise RuntimeError(
+            f"No InputProvider configured for node {self.node_name!r}. "
+            f"When running under ACP/OpenCode protocols, an input provider must be "
+            f"explicitly set via session configuration or agent initialization."
+        )
 
     @property
     def prompt_manager(self) -> PromptManager:

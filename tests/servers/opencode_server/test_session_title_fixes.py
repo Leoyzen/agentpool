@@ -16,7 +16,7 @@ import anyio
 import pytest
 
 from agentpool.sessions.models import SessionData
-from agentpool.storage.manager import SessionMetadata, StorageManager
+from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
 from agentpool_server.opencode_server.converters import (
     opencode_to_session_data,
     session_data_to_opencode,
@@ -212,7 +212,6 @@ class TestStorageManagerTitleGenerationFix:
                 title = await manager._generate_title_from_prompt(
                     session_id=session_id,
                     prompt="Test prompt",
-                    on_title_generated=None,
                 )
 
                 # Should return the title
@@ -222,8 +221,8 @@ class TestStorageManagerTitleGenerationFix:
                 stored = await manager.get_session_title(session_id)
                 assert stored == "Generated Title"
 
-    async def test_generate_title_from_prompt_calls_callback(self) -> None:
-        """Verify _generate_title_from_prompt calls callback with title."""
+    async def test_generate_title_from_prompt_emits_signal(self) -> None:
+        """Verify _generate_title_from_prompt emits metadata_generated signal."""
         config = StorageConfig(
             providers=[MemoryStorageConfig()],
             title_generation_model="test",
@@ -233,33 +232,36 @@ class TestStorageManagerTitleGenerationFix:
             session_id = "gen_test_002"
             await manager.log_session(session_id=session_id, node_name="test_agent")
 
-            callback_called = False
-            received_title = None
+            signal_titles: list[str] = []
 
-            def callback(title: str) -> None:
-                nonlocal callback_called, received_title
-                callback_called = True
-                received_title = title
+            def on_signal(event):
+                signal_titles.append(event.metadata.title)
+
+            manager.metadata_generated.connect(on_signal)
 
             mock_metadata = SessionMetadata(
-                title="Callback Title",
-                emoji="📞",
-                icon="mdi:phone",
+                title="Signal Title",
+                emoji="\ud83d\udce1",
+                icon="mdi:antenna",
             )
+
+            async def mock_core_with_signal(self_, sid, prompt):
+                event = SessionMetadataGeneratedEvent(session_id=sid, metadata=mock_metadata)
+                await self_.metadata_generated.emit(event)
+                return mock_metadata
 
             with patch.object(
                 StorageManager,
                 "_generate_title_core",
-                return_value=mock_metadata,
+                mock_core_with_signal,
             ):
                 await manager._generate_title_from_prompt(
                     session_id=session_id,
                     prompt="Another prompt",
-                    on_title_generated=callback,
                 )
 
-                assert callback_called
-                assert received_title == "Callback Title"
+                assert len(signal_titles) > 0
+                assert signal_titles[0] == "Signal Title"
 
     async def test_generate_title_from_prompt_skips_if_exists(self) -> None:
         """Verify _generate_title_from_prompt skips generation if title exists."""
@@ -283,7 +285,6 @@ class TestStorageManagerTitleGenerationFix:
                 title = await manager._generate_title_from_prompt(
                     session_id=session_id,
                     prompt="New prompt",
-                    on_title_generated=None,
                 )
 
                 assert title == "Existing Title"
@@ -322,7 +323,6 @@ class TestStorageManagerTitleGenerationFix:
                 title = await manager._generate_title_from_prompt(
                     session_id=session_id,
                     prompt="Test prompt",
-                    on_title_generated=None,
                 )
 
                 # Should have called _generate_title_core (not skipped)
@@ -342,22 +342,28 @@ class TestStorageManagerTitleGenerationFix:
 
         async with StorageManager(config) as manager:
             session_id = "log_test_001"
-            callback_called = False
+            signal_titles: list[str] = []
 
-            def callback(title: str) -> None:
-                nonlocal callback_called
-                callback_called = True
+            def on_signal(event):
+                signal_titles.append(event.metadata.title)
+
+            manager.metadata_generated.connect(on_signal)
 
             mock_metadata = SessionMetadata(
                 title="Auto Title",
-                emoji="🤖",
+                emoji="\ud83e\udd16",
                 icon="mdi:robot",
             )
+
+            async def mock_core_with_signal(self_, sid, prompt):
+                event = SessionMetadataGeneratedEvent(session_id=sid, metadata=mock_metadata)
+                await self_.metadata_generated.emit(event)
+                return mock_metadata
 
             with patch.object(
                 StorageManager,
                 "_generate_title_core",
-                return_value=mock_metadata,
+                mock_core_with_signal,
             ):
                 # Remove pytest env to trigger generation
                 with patch.dict(os.environ, {}, clear=False):
@@ -367,7 +373,6 @@ class TestStorageManagerTitleGenerationFix:
                         session_id=session_id,
                         node_name="test_agent",
                         initial_prompt="Generate a title for this",
-                        on_title_generated=callback,
                     )
 
                     # Wait for async processing
@@ -376,7 +381,7 @@ class TestStorageManagerTitleGenerationFix:
             # Title should be generated and stored
             stored = await manager.get_session_title(session_id)
             assert stored == "Auto Title"
-            assert callback_called
+            assert len(signal_titles) > 0
 
 
 class TestMemoryProviderTitleOperations:

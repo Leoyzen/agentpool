@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
 
 from agentpool import log
+from agentpool.agents.events.events import CustomEvent
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.models import GlobalEvent, HealthResponse
+from agentpool_server.opencode_server.models import Event, GlobalEvent, HealthResponse
 from agentpool_server.opencode_server.models.app import (
     DiagnosticResponse,
     DisposeResponse,
@@ -37,7 +38,6 @@ from agentpool_server.opencode_server.routes.routing import (
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from agentpool_server.opencode_server.models import Event
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -205,25 +205,34 @@ def _serialize_event(event: Event, wrap_payload: bool = False) -> str:
 
 
 async def _event_generator(
-    state: ServerState, *, wrap_payload: bool = False
+    state: ServerState, *, wrap_payload: bool = False, last_event_id: str | None = None
 ) -> AsyncGenerator[dict[str, Any]]:
     """Generate SSE events for connected clients.
 
     Registers a subscriber queue, sends an initial connected event,
     then streams subsequent events from the broadcast system.
 
-    When wrap_payload is True, session-scoped events are wrapped in a
-    GlobalEvent envelope via the factory. Global server lifecycle events
-    still use a top-level ``payload`` wrapper, but omit directory/project
-    metadata to match OpenCode's `/global/event` contract.
+    **Dual-path event delivery (Migration B)**
 
-    Subscriber lifecycle:
-    1. Queue appended to state.event_subscribers
-    2. If this is the first subscriber, triggers on_first_subscriber
-       callback (e.g., for update check)
-    3. Streams events until client disconnects
-    4. Finally block removes queue from subscribers (suppresses
-       ValueError if already removed by broadcast_event error handler)
+    During the transition from legacy SSE-only broadcasting to
+    EventBus-based routing, this generator consumes events from
+    BOTH paths:
+
+    1. **Legacy path** – ``state.event_subscribers`` queues.  Events
+       broadcast via :meth:`ServerState.broadcast_event` are placed
+       here.  This preserves backward compatibility with all existing
+       consumers.
+
+    2. **EventBus path** – ``EventBus.subscribe("__global_sse__",
+       scope="all")``.  Events published to any session are picked
+       up here via the global subscription.
+
+    **CustomEvent unwrapping**
+
+    Non-bridge :class:`CustomEvent` instances from the EventBus are
+    unwrapped (``event_data``) before serialization.  Bridge-wrapped
+    events are skipped since they are already visible on the legacy
+    path.
 
     Args:
         state: The server state holding subscribers and event factory
@@ -235,12 +244,10 @@ async def _event_generator(
     subscriber_count = len(state.event_subscribers)
     logger.info("SSE: New client connected (total subscribers: %s)", subscriber_count)
 
+    # Parse last_event_id for deduplication.
+    last_id = int(last_event_id) if last_event_id is not None else 0
+
     # Trigger first subscriber callback if this is the first connection.
-    # Race condition analysis: This is safe because:
-    # 1. The append (line above) and len check happen in the same async frame
-    #    (no await between them), so no other coroutine can interleave.
-    # 2. The _first_subscriber_triggered flag prevents double-firing even if
-    #    a subscriber disconnects and reconnects rapidly.
     if (
         subscriber_count == 1
         and not state._first_subscriber_triggered
@@ -249,22 +256,76 @@ async def _event_generator(
         state._first_subscriber_triggered = True
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
+    # ------------------------------------------------------------------
+    # EventBus integration (Migration B)
+    # ------------------------------------------------------------------
+    event_bus_queue: asyncio.Queue[Any] | None = None
+    session_controller = getattr(state, "session_controller", None)
+    if session_controller is not None:
+        session_pool = getattr(state.pool, "session_pool", None)
+        if session_pool is not None:
+            event_bus = session_pool.event_bus
+            event_bus_queue = await event_bus.subscribe("__global_sse__", scope="all")
+
+    # Merged queue fed by background forwarders so either source can
+    # unblock us immediately.
+    merged_queue: asyncio.Queue[tuple[str, Event]] = asyncio.Queue()
+    forwarder_tasks: list[asyncio.Task[Any]] = []
+
+    async def _forward_legacy() -> None:
+        while True:
+            evt = await queue.get()
+            await merged_queue.put(("legacy", evt))
+
+    async def _forward_eventbus(eb_queue: asyncio.Queue[Any]) -> None:
+        while True:
+            evt = await eb_queue.get()
+            await merged_queue.put(("eventbus", evt))
+
+    forwarder_tasks.append(
+        asyncio.create_task(_forward_legacy(), name="sse_legacy_forwarder")
+    )
+    if event_bus_queue is not None:
+        forwarder_tasks.append(
+            asyncio.create_task(
+                _forward_eventbus(event_bus_queue), name="sse_eventbus_forwarder"
+            )
+        )
+
     try:
         # Send initial connected event with payload wrapper on /global/event,
         # but without directory/project metadata.
         connected = ServerConnectedEvent()
         data = _serialize_event(connected, wrap_payload=wrap_payload)
         logger.info("SSE: Sending connected event", data=data)
-        yield {"data": data}
-        # Stream events
+        event_id = state.get_next_event_id()
+        if event_id > last_id:
+            yield {"data": data, "id": str(event_id)}
+
         while True:
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=10.0)
+                source, raw_event = await asyncio.wait_for(
+                    merged_queue.get(), timeout=10.0
+                )
             except TimeoutError:
-                # No events for 10s — send heartbeat to keep connection alive
                 heartbeat = ServerHeartbeatEvent()
                 data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
                 yield {"data": data}
+                continue
+
+            # Unwrap / deduplicate CustomEvent from EventBus
+            if source == "eventbus" and isinstance(raw_event, CustomEvent):
+                if raw_event.source == "opencode_event_bridge":
+                    # Already on legacy path — skip
+                    continue
+                event = cast(Event, raw_event.event_data)
+            else:
+                event = raw_event
+
+            # Skip non-OpenCode events (RichAgentStreamEvent, etc.).
+            # The legacy path already provides properly formatted OpenCode events
+            # during the transition period.
+            if not hasattr(event, "type"):
                 continue
             if factory is not None and not isinstance(
                 event, ServerHeartbeatEvent | ServerConnectedEvent
@@ -274,35 +335,47 @@ async def _event_generator(
                 data = _serialize_event(event, wrap_payload=True)
             else:
                 data = _serialize_event(event)
-            logger.info("SSE: Sending event", event_type=event.type)
-            yield {"data": data}
+            logger.info("SSE: Sending event", event_type=getattr(event, "type", "unknown"))
+            event_id = state.get_next_event_id()
+            if event_id > last_id:
+                yield {"data": data, "id": str(event_id)}
     finally:
-        # Use safe removal: broadcast_event may have already removed this queue
-        # due to error handling. Using discard-style pattern to avoid ValueError.
+        # Cancel background forwarders.
+        for task in forwarder_tasks:
+            task.cancel()
+        # Unsubscribe from EventBus.
+        if event_bus_queue is not None:
+            session_pool = getattr(state.pool, "session_pool", None)
+            if session_pool is not None:
+                with contextlib.suppress(Exception):
+                    await session_pool.event_bus.unsubscribe("__global_sse__", event_bus_queue)
+        # Legacy cleanup: safe removal from event_subscribers.
         with contextlib.suppress(ValueError):
             state.event_subscribers.remove(queue)
         # Cancel any pending questions when the SSE client disconnects.
-        # This prevents agent_lock deadlock: when the agent is blocked waiting
-        # for a question answer (Future.await) and the TUI disconnects, the
-        # Future would never resolve, leaving agent_lock permanently held.
-        # Cancelling the Future causes CancelledError in input_provider, which
-        # returns ElicitResult(action="cancel"), leading to RunAbortedError,
-        # which propagates through _process_message_locked's except handler
-        # and releases agent_lock.
-        cancelled = state.cancel_all_pending_questions()
+        if session_controller is not None:
+            cancelled = session_controller.cancel_all_pending_questions()
+        else:
+            cancelled = state.cancel_all_pending_questions()
         if cancelled:
             logger.info(
                 "SSE: Cancelled pending questions on disconnect",
                 question_ids=cancelled,
             )
-        logger.info("SSE: Client disconnected", remaining_subscribers=len(state.event_subscribers))
+        logger.info(
+            "SSE: Client disconnected",
+            remaining_subscribers=len(state.event_subscribers),
+        )
 
 
 @router.get("/global/event")
-async def get_global_events(state: StateDep) -> EventSourceResponse:
+async def get_global_events(
+    state: StateDep,
+    last_event_id: str | None = Query(None),
+) -> EventSourceResponse:
     """Get global events as SSE stream (uses payload wrapper)."""
     return EventSourceResponse(
-        _event_generator(state, wrap_payload=True),
+        _event_generator(state, wrap_payload=True, last_event_id=last_event_id),
         sep="\n",
         headers={
             "Cache-Control": "no-cache",
@@ -313,10 +386,13 @@ async def get_global_events(state: StateDep) -> EventSourceResponse:
 
 
 @router.get("/event")
-async def get_events(state: StateDep) -> EventSourceResponse:
+async def get_events(
+    state: StateDep,
+    last_event_id: str | None = Query(None),
+) -> EventSourceResponse:
     """Get events as SSE stream (no payload wrapper)."""
     return EventSourceResponse(
-        _event_generator(state, wrap_payload=False),
+        _event_generator(state, wrap_payload=False, last_event_id=last_event_id),
         sep="\n",
         headers={
             "Cache-Control": "no-cache",

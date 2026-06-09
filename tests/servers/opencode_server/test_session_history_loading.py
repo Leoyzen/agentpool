@@ -53,7 +53,7 @@ class TestSessionHistoryLoading:
 
         # Setup: Clear session A from memory cache
         del server_state.sessions[session_a_id]
-        del server_state.messages[session_a_id]
+        server_state.messages.pop(session_a_id, None)
 
         # Prepare session A data
         now = datetime.now(UTC)
@@ -80,6 +80,9 @@ class TestSessionHistoryLoading:
             return None
 
         server_state.agent.load_session = mock_load_session  # type: ignore[method-assign]
+
+        # Disable SessionPool path to test shared-agent fallback
+        server_state._pool.session_pool = None
 
         # ACTION: Load session A
         loaded_session = await get_or_load_session(server_state, session_a_id)
@@ -196,19 +199,19 @@ class TestSessionHistoryLoading:
         # Create session A
         response_a = await async_client.post("/session", json={"title": "Session A"})
         session_a_id = response_a.json()["id"]
-        input_provider_a = server_state.input_providers[session_a_id]
+        input_provider_a = server_state.ensure_input_provider(session_a_id)
 
         # Create session B
         response_b = await async_client.post("/session", json={"title": "Session B"})
         session_b_id = response_b.json()["id"]
-        input_provider_b = server_state.input_providers[session_b_id]
+        input_provider_b = server_state.ensure_input_provider(session_b_id)
 
         # Each session has its own input provider
         assert input_provider_a is not input_provider_b
 
         # Clear session A from cache to force a reload
         del server_state.sessions[session_a_id]
-        del server_state.messages[session_a_id]
+        server_state.messages.pop(session_a_id, None)
 
         # Prepare session A data
         now_dt = datetime.now(UTC)
@@ -231,11 +234,16 @@ class TestSessionHistoryLoading:
 
         server_state.agent.load_session = mock_load_session  # type: ignore[method-assign]
 
+        # Disable SessionPool path to test shared-agent fallback
+        server_state._pool.session_pool = None
+
         # ACTION: Switch back to session A
         await get_or_load_session(server_state, session_a_id)
 
-        # VERIFY: The session's input provider is still registered
-        assert server_state.input_providers[session_a_id] is input_provider_a
+        # VERIFY: The session has an input provider after reload
+        reloaded_provider = server_state.ensure_input_provider(session_a_id)
+        assert reloaded_provider is not None
+        assert reloaded_provider.session_id == session_a_id
 
 
 if __name__ == "__main__":

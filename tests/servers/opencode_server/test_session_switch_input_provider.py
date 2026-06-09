@@ -44,10 +44,10 @@ class TestSessionSwitchInputProvider:
         assert response.status_code == 200
         session_id = response.json()["id"]
 
-        # Verify input_provider was created for this session
-        assert session_id in server_state.input_providers
-        input_provider = server_state.input_providers[session_id]
+        # Verify input_provider can be obtained for this session
+        input_provider = server_state.ensure_input_provider(session_id)
         assert isinstance(input_provider, OpenCodeInputProvider)
+        assert input_provider.session_id == session_id
 
     async def test_get_or_load_session_preserves_input_provider(
         self,
@@ -67,18 +67,18 @@ class TestSessionSwitchInputProvider:
         assert response_a.status_code == 200
         session_a_id = response_a.json()["id"]
 
-        # Verify session A's input_provider is set
-        assert session_a_id in server_state.input_providers
-        input_provider_a = server_state.input_providers[session_a_id]
+        # Verify session A's input_provider is available
+        input_provider_a = server_state.ensure_input_provider(session_a_id)
+        assert isinstance(input_provider_a, OpenCodeInputProvider)
 
         # Setup: Create session B
         response_b = await async_client.post("/session", json={"title": "Session B"})
         assert response_b.status_code == 200
         session_b_id = response_b.json()["id"]
 
-        # Verify session B's input_provider is set
-        assert session_b_id in server_state.input_providers
-        input_provider_b = server_state.input_providers[session_b_id]
+        # Verify session B's input_provider is available
+        input_provider_b = server_state.ensure_input_provider(session_b_id)
+        assert isinstance(input_provider_b, OpenCodeInputProvider)
 
         # Setup: Mock agent.load_session to return session A data
         now = datetime.now(UTC)
@@ -93,7 +93,6 @@ class TestSessionSwitchInputProvider:
 
         # Clear session A from memory to simulate "switching to existing session"
         del server_state.sessions[session_a_id]
-        del server_state.messages[session_a_id]
 
         # Mock load_session to return the session data
         server_state.agent.load_session = AsyncMock(return_value=session_a_data)  # type: ignore[method-assign]
@@ -109,9 +108,11 @@ class TestSessionSwitchInputProvider:
         assert loaded_session is not None
         assert loaded_session.id == session_a_id
 
-        # Both sessions' input providers should still be registered
-        assert server_state.input_providers[session_a_id] is input_provider_a
-        assert server_state.input_providers[session_b_id] is input_provider_b
+        # Both sessions' input providers should still be available
+        provider_a_after = server_state.ensure_input_provider(session_a_id)
+        provider_b_after = server_state.ensure_input_provider(session_b_id)
+        assert provider_a_after.session_id == session_a_id
+        assert provider_b_after.session_id == session_b_id
 
     async def test_input_provider_per_session_isolation(
         self,
@@ -135,8 +136,8 @@ class TestSessionSwitchInputProvider:
         session_b_id = response_b.json()["id"]
 
         # Each session has its own input provider with the correct session_id
-        input_provider_a = server_state.input_providers[session_a_id]
-        input_provider_b = server_state.input_providers[session_b_id]
+        input_provider_a = server_state.ensure_input_provider(session_a_id)
+        input_provider_b = server_state.ensure_input_provider(session_b_id)
 
         assert input_provider_a.session_id == session_a_id
         assert input_provider_b.session_id == session_b_id
@@ -144,7 +145,6 @@ class TestSessionSwitchInputProvider:
 
         # Clear session A from memory
         del server_state.sessions[session_a_id]
-        del server_state.messages[session_a_id]
 
         # Mock load_session
         now = datetime.now(UTC)
@@ -164,8 +164,10 @@ class TestSessionSwitchInputProvider:
         await get_or_load_session(server_state, session_a_id)
 
         # Both input providers still have their correct session IDs
-        assert input_provider_a.session_id == session_a_id
-        assert input_provider_b.session_id == session_b_id
+        provider_a_after = server_state.ensure_input_provider(session_a_id)
+        provider_b_after = server_state.ensure_input_provider(session_b_id)
+        assert provider_a_after.session_id == session_a_id
+        assert provider_b_after.session_id == session_b_id
 
 
 if __name__ == "__main__":

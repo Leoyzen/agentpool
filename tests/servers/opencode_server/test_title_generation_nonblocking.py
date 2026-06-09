@@ -36,8 +36,9 @@ from agentpool_server.opencode_server.routes.message_routes import (
     _maybe_generate_title,
     _process_message_locked,
 )
+from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
 from agentpool_server.opencode_server.state import ServerState
-from agentpool.storage.manager import SessionMetadata, StorageManager
+from agentpool.storage.manager import SessionMetadata, SessionMetadataGeneratedEvent, StorageManager
 from agentpool.utils.time_utils import now_ms
 
 
@@ -70,7 +71,27 @@ def _make_state(tmp_path: Any) -> ServerState:
     env.cwd = str(tmp_path)
     agent.env = env
 
+    # Set up session pool mocks for _process_message_locked
+    pool.session_pool = Mock()
+    pool.session_pool.sessions = Mock()
+    pool.session_pool.sessions.get_or_create_session = AsyncMock(
+        return_value=(Mock(), True)
+    )
+    pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
+        return_value=Mock()
+    )
+    _run_handle = Mock()
+    _run_handle.complete_event = Mock()
+    _run_handle.complete_event.wait = AsyncMock()
+    pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
+    pool.session_pool.event_bus = Mock()
+    pool.session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    pool.session_pool.event_bus.unsubscribe = AsyncMock()
+
     state = ServerState(working_dir=str(tmp_path), agent=agent)
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    state.messages = {}
+    state.session_status = {}
     return state
 
 
@@ -188,6 +209,8 @@ class TestTitleGenerationDoesNotBlockAgent:
             mock_adapter_instance.usage = _make_mock_usage()
             mock_adapter_instance.cost_info = None
 
+            messages = await get_messages_for_session(state, session_id)
+            user_msg = messages[0]
             await _process_message_locked(session_id, request, state, user_msg_id, user_msg)
 
         elapsed = time.monotonic() - start
@@ -224,7 +247,6 @@ class TestTitleGenerationDoesNotBlockAgent:
 
         request = MessageRequest(parts=[TextPartInput(text="hello")])
         user_msg_id = "msg_user_001"
-        user_msg = state.messages[session_id][0]
 
         start = time.monotonic()
 
@@ -250,6 +272,8 @@ class TestTitleGenerationDoesNotBlockAgent:
                 mock_adapter_instance.usage = _make_mock_usage()
                 mock_adapter_instance.cost_info = None
 
+                messages = await get_messages_for_session(state, session_id)
+                user_msg = messages[0]
                 await _process_message_locked(session_id, request, state, user_msg_id, user_msg)
 
         elapsed = time.monotonic() - start
@@ -294,15 +318,24 @@ class TestTitleStillGeneratedAsynchronously:
             f"Background title generation may not be working."
         )
 
-    async def test_on_title_generated_callback_still_called(self, tmp_path: Any) -> None:
-        """The on_title_generated callback must still fire after generation."""
+    async def test_metadata_generated_signal_still_fires(self, tmp_path: Any) -> None:
+        """The metadata_generated signal must still fire after generation."""
         state = _make_state(tmp_path)
-        session_id = "ses_title_callback"
+        session_id = "ses_title_signal"
         _seed_session(state, session_id)
 
-        mock_metadata = SessionMetadata(title="Callback Title", emoji="📞", icon="mdi:phone")
+        mock_metadata = SessionMetadata(title="Signal Title", emoji="\ud83d\udce1", icon="mdi:antenna")
+        signal_titles: list[str] = []
 
-        callback_titles: list[str] = []
+        def on_signal(event):
+            signal_titles.append(event.metadata.title)
+
+        state.pool.storage.metadata_generated.connect(on_signal)
+
+        async def mock_core_with_signal(self_, sid, prompt):
+            event = SessionMetadataGeneratedEvent(session_id=sid, metadata=mock_metadata)
+            await self_.metadata_generated.emit(event)
+            return mock_metadata
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PYTEST_CURRENT_TEST", None)
@@ -310,18 +343,17 @@ class TestTitleStillGeneratedAsynchronously:
             with patch.object(
                 StorageManager,
                 "_generate_title_core",
-                return_value=mock_metadata,
+                mock_core_with_signal,
             ):
                 await state.pool.storage.log_session(
                     session_id=session_id,
                     node_name="test-agent",
                     initial_prompt="hello",
-                    on_title_generated=lambda t: callback_titles.append(t),
                 )
                 await asyncio.sleep(0.5)
 
-        assert "Callback Title" in callback_titles, (
-            f"on_title_generated callback was not called. Collected: {callback_titles}"
+        assert "Signal Title" in signal_titles, (
+            f"metadata_generated signal was not fired. Collected: {signal_titles}"
         )
 
 

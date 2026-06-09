@@ -21,8 +21,10 @@ logger = log.get_logger(__name__)
 async def list_permissions(state: StateDep) -> list[PermissionAskedProperties]:
     """List all pending permission requests across all sessions."""
     result: list[PermissionAskedProperties] = []
-    for input_provider in state.input_providers.values():
-        result.extend(input_provider.get_pending_permissions())
+    if state.session_controller is not None:
+        for session in state.session_controller._sessions.values():
+            if session.input_provider is not None:
+                result.extend(session.input_provider.get_pending_permissions())
     return result
 
 
@@ -43,24 +45,25 @@ async def reply_to_permission(
     - "reject": Reject this tool execution
     """
     logger.info("received reply", reply=body.reply, permission_id=permission_id)
-    # Find which session has this permission request
-    for session_id, input_provider in state.input_providers.items():
-        # Check if this permission belongs to this session
-        if not input_provider.has_pending_permission(permission_id):
-            continue
-        # Resolve the permission
-        resolved = input_provider.resolve_permission(permission_id, body.reply)
-        logger.info("Resolved permission", resolved=resolved)
-        if not resolved:
-            detail = "Permission not found or already resolved"
-            raise HTTPException(status_code=404, detail=detail)
-        event = PermissionResolvedEvent.create(
-            session_id=session_id,
-            request_id=permission_id,
-            reply=body.reply,
-        )
-        await state.broadcast_event(event)
-        return True
 
-    # Permission not found in any session
+    if state.session_controller is not None:
+        for session_id, session in state.session_controller._sessions.items():
+            input_provider = session.input_provider
+            if input_provider is None:
+                continue
+            if not input_provider.has_pending_permission(permission_id):
+                continue
+            resolved = input_provider.resolve_permission(permission_id, body.reply)
+            logger.info("Resolved permission", resolved=resolved)
+            if not resolved:
+                detail = "Permission not found or already resolved"
+                raise HTTPException(status_code=404, detail=detail)
+            event = PermissionResolvedEvent.create(
+                session_id=session_id,
+                request_id=permission_id,
+                reply=body.reply,
+            )
+            await state.broadcast_event(event)
+            return True
+
     raise HTTPException(status_code=404, detail="Permission not found")

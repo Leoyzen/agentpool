@@ -337,17 +337,6 @@ async def update_config(state: StateDep, config_update: Config) -> Config:
                 # per-session agents: each session has its own agent instance.
                 logger.info("Calling agent.set_model", model=new_model)
                 await state.agent.set_model(new_model)
-                # Also propagate the model change to all active per-session
-                # agents so they stay in sync with the global config.
-                for _sid, session_agent in list(state._session_agents.items()):
-                    try:
-                        await session_agent.set_model(new_model)
-                    except Exception as sa_err:  # noqa: BLE001
-                        logger.warning(
-                            "Failed to update session agent model",
-                            session_id=_sid,
-                            error=str(sa_err),
-                        )
                 logger.info("Agent model successfully updated", model=new_model)
             except Exception as e:
                 logger.warning("Failed to update agent model", error=str(e))

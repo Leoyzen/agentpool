@@ -24,11 +24,10 @@ from acp.agent.notifications import ACPNotifications
 from acp.filesystem import ACPFileSystem
 from acp.schema import AvailableCommand, ClientCapabilities
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent, AgentPool  # noqa: TC001
+from agentpool import Agent, AgentPool
 from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
-from agentpool_config.commands import CommandConfig
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
@@ -327,7 +326,6 @@ class ACPSession:
 
         cmd_count = 0
         for cmd_name, cmd_config in commands.items():
-
             try:
                 # Convert CommandConfig to slashed Command
                 slashed_cmd = cmd_config.get_slashed_command(category="manifest")
@@ -427,9 +425,7 @@ class ACPSession:
                         connection_id = await self.acp_agent.connect_acp_mcp_server(server)
                         conn = self.acp_agent._mcp_manager.get_connection(connection_id)
                         if conn is None:
-                            raise RuntimeError(
-                                f"AcpMcpConnection not found for {connection_id}"
-                            )
+                            raise RuntimeError(f"AcpMcpConnection not found for {connection_id}")
                         from agentpool_server.acp_server.acp_mcp_transport import (
                             AcpMcpTransport,
                         )
@@ -620,8 +616,37 @@ class ACPSession:
 
             try:  # Use the session's persistent input provider
                 # Staged content is automatically injected by run_stream
-                # Inject session-level MCP providers for this run
-                async with self.agent.tools.with_session_providers(self.session_mcp_providers):
+                # Inject session-level MCP providers for this run.
+                # We use add_provider/remove_provider instead of with_session_providers
+                # because NativeAgent.run_stream() may delegate to SessionPool, which
+                # re-enters agent.run_stream() in a different async context where
+                # with_session_providers() is no longer active.
+                #
+                # CRITICAL: SessionPool creates per-session agents via
+                # get_or_create_session_agent() which returns a fresh agent instance.
+                # We must add providers to BOTH the local agent and the SessionPool
+                # session agent to ensure tools are available regardless of which
+                # execution path is taken.
+                for provider in self.session_mcp_providers:
+                    self.agent.tools.add_provider(provider)
+
+                # Also add to SessionPool's per-session agent if SessionPool is active
+                session_pool_agent = None
+                agent_pool = getattr(self.agent, "agent_pool", None)
+                if agent_pool is not None and agent_pool.session_pool is not None:
+                    try:
+                        sp = agent_pool.session_pool.sessions
+                        session_pool_agent = await sp.get_or_create_session_agent(
+                            self.session_id
+                        )
+                        for provider in self.session_mcp_providers:
+                            session_pool_agent.tools.add_provider(provider)
+                    except Exception:
+                        self.log.exception(
+                            "Failed to add MCP providers to SessionPool agent"
+                        )
+
+                try:
                     async for event in self.agent.run_stream(
                         *non_command_content,
                         input_provider=self.input_provider,
@@ -650,6 +675,20 @@ class ACPSession:
                         # Yield control to allow notifications to be sent immediately
                         await anyio.sleep(0.01)
                     self.log.info("Streaming finished", events_processed=event_count)
+                finally:
+                    from contextlib import suppress
+
+                    # Remove session-level MCP providers so they don't leak into other sessions
+                    # or persist after this run.
+                    for provider in self.session_mcp_providers:
+                        with suppress(ValueError):
+                            self.agent.tools.remove_provider(provider)
+
+                    # Also remove from SessionPool's per-session agent
+                    if session_pool_agent is not None:
+                        for provider in self.session_mcp_providers:
+                            with suppress(ValueError):
+                                session_pool_agent.tools.remove_provider(provider)
 
             except asyncio.CancelledError:
                 # Task was cancelled (e.g., via interrupt()) - return proper stop reason
@@ -729,9 +768,14 @@ class ACPSession:
                         try:
                             transport = provider.client._external_transport
                             if transport is not None:
-                                await self.acp_agent.disconnect_acp_mcp_server(
-                                    transport.connection_id
+                                from agentpool_server.acp_server.acp_mcp_transport import (
+                                    AcpMcpTransport,
                                 )
+
+                                if isinstance(transport, AcpMcpTransport):
+                                    await self.acp_agent.disconnect_acp_mcp_server(
+                                        transport.connection_id
+                                    )
                         except Exception:
                             self.log.exception(
                                 "Error disconnecting ACP MCP server",

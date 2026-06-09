@@ -33,8 +33,8 @@ class TestShellBasic:
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        # Mock successful command execution
-        server_state.agent.env.execute_command = AsyncMock(
+        # Mock successful command execution on standalone shell_env
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="test output", error=None)
         )
 
@@ -46,8 +46,8 @@ class TestShellBasic:
         assert response.status_code == 200
         result = response.json()
 
-        # Verify the command was executed
-        server_state.agent.env.execute_command.assert_called_once_with("echo 'test'")
+        # Verify the command was executed via standalone shell_env
+        server_state.shell_env.execute_command.assert_called_once_with("echo 'test'")
 
         # Verify response structure
         assert "info" in result
@@ -62,8 +62,8 @@ class TestShellBasic:
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        # Mock failed command
-        server_state.agent.env.execute_command = AsyncMock(
+        # Mock failed command on standalone shell_env
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=False, result=None, error="command not found")
         )
 
@@ -202,8 +202,8 @@ class TestShellSessionStatus:
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        # Mock slow command
-        server_state.agent.env.execute_command = AsyncMock(
+        # Mock slow command on standalone shell_env
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="done", error=None)
         )
 
@@ -227,12 +227,13 @@ class TestShellSessionStatus:
         self,
         async_client,
         server_state,
+        event_capture,
     ):
         """Session should return to idle after command completes."""
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        server_state.agent.env.execute_command = AsyncMock(
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="done", error=None)
         )
 
@@ -241,8 +242,9 @@ class TestShellSessionStatus:
             json={"agent": "test", "command": "echo test"},
         )
 
-        # Check final session status
-        assert server_state.session_status[session_id].type == "idle"
+        # Check final session status via broadcast events
+        status_events = event_capture.get_events_by_type("session.status")
+        assert status_events[-1].properties.status.type == "idle"
 
     async def test_cancelled_shell_command_still_unlocks_session(
         self,
@@ -253,7 +255,7 @@ class TestShellSessionStatus:
         """A cancelled shell command should still broadcast idle state."""
         response = await async_client.post("/session", json={"title": "Cancel Shell"})
         session_id = response.json()["id"]
-        server_state.agent.env.execute_command = AsyncMock(side_effect=asyncio.CancelledError)
+        server_state.shell_env.execute_command = AsyncMock(side_effect=asyncio.CancelledError)
 
         with pytest.raises(asyncio.CancelledError):
             await run_shell_command(
@@ -262,7 +264,6 @@ class TestShellSessionStatus:
                 server_state,
             )
 
-        assert server_state.session_status[session_id].type == "idle"
         status_events = event_capture.get_events_by_type("session.status")
         idle_events = event_capture.get_events_by_type("session.idle")
         assert status_events[-1].properties.status.type == "idle"
@@ -281,7 +282,7 @@ class TestShellMessageStructure:
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        server_state.agent.env.execute_command = AsyncMock(
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="hello world", error=None)
         )
 
@@ -318,7 +319,7 @@ class TestShellMessageStructure:
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        server_state.agent.env.execute_command = AsyncMock(
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="output123", error=None)
         )
 
@@ -344,7 +345,7 @@ class TestShellMessageStructure:
         session_response = await async_client.post("/session", json={"title": "Shell Test"})
         session_id = session_response.json()["id"]
 
-        server_state.agent.env.execute_command = AsyncMock(
+        server_state.shell_env.execute_command = AsyncMock(
             return_value=Mock(success=True, result="done", error=None)
         )
 
@@ -358,3 +359,93 @@ class TestShellMessageStructure:
 
         assert info["time"]["completed"] is not None
         assert info["time"]["completed"] >= info["time"]["created"]
+
+
+class TestShellSessionPoolIsolation:
+    """Tests that shell execution stays direct and does NOT create SessionPool turns."""
+
+    async def test_shell_uses_standalone_shell_env_not_agent_env(
+        self,
+        async_client,
+        server_state,
+    ):
+        """Shell route must use state.shell_env, not state.agent.env."""
+        session_response = await async_client.post("/session", json={"title": "Shell Test"})
+        session_id = session_response.json()["id"]
+
+        # Mock standalone shell_env
+        server_state.shell_env.execute_command = AsyncMock(
+            return_value=Mock(success=True, result="standalone output", error=None)
+        )
+        # Ensure agent.env returns something different (would fail assertion)
+        server_state.agent.env.execute_command = AsyncMock(
+            return_value=Mock(success=True, result="agent output", error=None)
+        )
+
+        response = await async_client.post(
+            f"/session/{session_id}/shell",
+            json={"agent": "test", "command": "echo test"},
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        text_parts = [p for p in result["parts"] if p.get("type") == "text"]
+        assert len(text_parts) >= 1
+        assert "standalone output" in text_parts[0]["text"]
+
+        # shell_env should be called; agent.env should NOT be called
+        server_state.shell_env.execute_command.assert_called_once()
+        server_state.agent.env.execute_command.assert_not_called()
+
+    async def test_shell_does_not_route_through_session_pool(
+        self,
+        async_client,
+        server_state,
+    ):
+        """Shell execution must NOT call SessionPool.receive_request()."""
+        session_response = await async_client.post("/session", json={"title": "Shell Test"})
+        session_id = session_response.json()["id"]
+
+        # Set up a session_pool receive_request spy
+        pool = server_state.agent.agent_pool
+        receive_request_mock = AsyncMock()
+        pool.session_pool.receive_request = receive_request_mock
+
+        server_state.shell_env.execute_command = AsyncMock(
+            return_value=Mock(success=True, result="done", error=None)
+        )
+
+        response = await async_client.post(
+            f"/session/{session_id}/shell",
+            json={"agent": "test", "command": "echo test"},
+        )
+
+        assert response.status_code == 200
+        # SessionPool.receive_request should NEVER be called for shell
+        receive_request_mock.assert_not_called()
+
+    async def test_shell_does_not_create_run_handle(
+        self,
+        async_client,
+        server_state,
+    ):
+        """Shell execution must NOT create a RunHandle in SessionController."""
+        session_response = await async_client.post("/session", json={"title": "Shell Test"})
+        session_id = session_response.json()["id"]
+
+        # Track RunHandle creation via session_controller._runs
+        server_state.session_controller = Mock()
+        server_state.session_controller._runs = {}
+
+        server_state.shell_env.execute_command = AsyncMock(
+            return_value=Mock(success=True, result="done", error=None)
+        )
+
+        response = await async_client.post(
+            f"/session/{session_id}/shell",
+            json={"agent": "test", "command": "echo test"},
+        )
+
+        assert response.status_code == 200
+        # No RunHandle should be registered
+        assert len(server_state.session_controller._runs) == 0

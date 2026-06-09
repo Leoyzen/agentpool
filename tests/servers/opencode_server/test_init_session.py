@@ -1,0 +1,102 @@
+"""Tests for init_session endpoint with SessionPool migration."""
+
+from __future__ import annotations
+
+import asyncio
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from agentpool_config.session_pool import OpenCodeConfig
+
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
+
+    from agentpool_server.opencode_server.state import ServerState
+
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_init_session_routes_through_session_pool_when_flag_enabled(
+    async_client: AsyncClient,
+    server_state: ServerState,
+    mock_agent: Mock,
+    mock_pool: Mock,
+):
+    """When use_session_pool_for_init is True, endpoint uses SessionPool.receive_request."""
+    # Create session
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Enable the feature flag
+    mock_pool.manifest.opencode = OpenCodeConfig(
+        use_session_pool=True,
+        use_session_pool_for_init=True,
+    )
+
+    # Track receive_request calls and capture arguments
+    receive_request_called = False
+    captured_args: tuple[object, ...] = ()
+    captured_kwargs: dict[str, object] = {}
+
+    async def mock_receive_request(*args: object, **kwargs: object) -> Mock:
+        nonlocal receive_request_called, captured_args, captured_kwargs
+        receive_request_called = True
+        captured_args = args
+        captured_kwargs = kwargs
+        run_handle_mock = Mock()
+        run_handle_mock.run_id = "test-run-id"
+        return run_handle_mock
+
+    mock_pool.session_pool.receive_request = AsyncMock(side_effect=mock_receive_request)
+
+    response = await async_client.post(f"/session/{session_id}/init")
+
+    assert response.status_code == 200
+    assert response.json() is True
+    assert receive_request_called is True
+
+    # Verify correct session_id and prompt were passed
+    assert captured_args[0] == session_id
+    assert isinstance(captured_args[1], str)
+    assert "Please analyze this codebase" in captured_args[1]
+
+
+async def test_init_session_uses_direct_agent_when_flag_disabled(
+    async_client: AsyncClient,
+    server_state: ServerState,
+    mock_agent: Mock,
+    mock_pool: Mock,
+):
+    """When use_session_pool_for_init is False, endpoint uses agent.run directly."""
+    # Create session
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Ensure flag is disabled
+    mock_pool.manifest.opencode = OpenCodeConfig(
+        use_session_pool=True,
+        use_session_pool_for_init=False,
+    )
+
+    response = await async_client.post(f"/session/{session_id}/init")
+
+    assert response.status_code == 200
+    assert response.json() is True
+
+    # Verify session_pool.receive_request was NOT called
+    assert (
+        not hasattr(mock_pool.session_pool.receive_request, "call_count")
+        or mock_pool.session_pool.receive_request.call_count == 0
+    )
+
+    # Give the background task time to execute
+    await asyncio.sleep(0.1)
+
+    # Verify direct agent.run was invoked
+    mock_agent.run.assert_called()

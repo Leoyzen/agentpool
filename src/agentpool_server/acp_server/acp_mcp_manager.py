@@ -120,14 +120,51 @@ class AcpMcpConnection:
         wrapped = {"connectionId": self.connection_id, "message": message}
         result = await self._send_to_client(wrapped)
 
+        def _sanitize_error(response: dict[str, Any]) -> dict[str, Any]:
+            """Fix non-standard JSON-RPC error codes (e.g. string -> int)."""
+            error = response.get("error")
+            if isinstance(error, dict):
+                code = error.get("code")
+                if not isinstance(code, int):
+                    code_map = {
+                        "method_not_found": -32601,
+                        "parse_error": -32700,
+                        "invalid_request": -32600,
+                        "invalid_params": -32602,
+                        "internal_error": -32603,
+                    }
+                    error["code"] = code_map.get(str(code).lower(), -32603)
+            return response
+
         # Forward ACP mcp/message response back to the MCP session so
         # ClientSession._receive_loop can process it.
         if isinstance(result, dict) and self._to_session_send is not None:
             if "jsonrpc" in result:
                 # Client returned standard JSON-RPC response
-                session_msg = SessionMessage(
-                    message=JSONRPCMessage.model_validate(result)
-                )
+                try:
+                    result = _sanitize_error(result)
+                    session_msg = SessionMessage(
+                        message=JSONRPCMessage.model_validate(result)
+                    )
+                except Exception:
+                    logger.exception(
+                        "Invalid JSON-RPC response from mcp/message",
+                        connection_id=self.connection_id,
+                        response=result,
+                    )
+                    # Build a fallback error response so the session doesn't hang
+                    request_id = result.get("id", 0)
+                    fallback = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32603,
+                            "message": "Invalid JSON-RPC response from ACP client",
+                        },
+                    }
+                    session_msg = SessionMessage(
+                        message=JSONRPCMessage.model_validate(fallback)
+                    )
                 try:
                     await self._to_session_send.send(session_msg)
                 except anyio.BrokenResourceError:
@@ -142,9 +179,27 @@ class AcpMcpConnection:
                     "id": message["id"],
                     "result": result,
                 }
-                session_msg = SessionMessage(
-                    message=JSONRPCMessage.model_validate(wrapped_response)
-                )
+                try:
+                    session_msg = SessionMessage(
+                        message=JSONRPCMessage.model_validate(wrapped_response)
+                    )
+                except Exception:
+                    logger.exception(
+                        "Invalid JSON-RPC response from mcp/message",
+                        connection_id=self.connection_id,
+                        response=wrapped_response,
+                    )
+                    fallback = {
+                        "jsonrpc": "2.0",
+                        "id": message["id"],
+                        "error": {
+                            "code": -32603,
+                            "message": "Invalid JSON-RPC response from ACP client",
+                        },
+                    }
+                    session_msg = SessionMessage(
+                        message=JSONRPCMessage.model_validate(fallback)
+                    )
                 try:
                     await self._to_session_send.send(session_msg)
                 except anyio.BrokenResourceError:

@@ -71,7 +71,7 @@ class TestStorageManagerTitleGeneration:
             await manager.log_session(session_id=conv_id, node_name="test_agent")
             # Directly call the title generation method (bypasses PYTEST check)
             title = await manager._generate_title_from_prompt(
-                conv_id, "What is the weather today?", None
+                conv_id, "What is the weather today?"
             )
 
             # Title should be generated
@@ -89,7 +89,7 @@ class TestStorageManagerTitleGeneration:
             # Create conversation
             await manager.log_session(session_id=conv_id, node_name="test_agent")
             # Direct call should return None when model is not configured
-            title = await manager._generate_title_from_prompt(conv_id, "Hello", None)
+            title = await manager._generate_title_from_prompt(conv_id, "Hello")
             assert title is None
 
     async def test_generate_title_already_exists(self) -> None:
@@ -103,7 +103,7 @@ class TestStorageManagerTitleGeneration:
             existing_title = "Existing Title"
             await manager.update_session_title(conv_id, existing_title)
             # Direct call should return existing title without calling model
-            title = await manager._generate_title_from_prompt(conv_id, "New message", None)
+            title = await manager._generate_title_from_prompt(conv_id, "New message")
             assert title == existing_title
 
     async def test_generate_title_overrides_default_new_session(self) -> None:
@@ -121,7 +121,7 @@ class TestStorageManagerTitleGeneration:
             # Set the default placeholder title
             await manager.update_session_title(conv_id, "New Session")
             # Direct call should still generate a title (not return "New Session")
-            title = await manager._generate_title_from_prompt(conv_id, "Hello world", None)
+            title = await manager._generate_title_from_prompt(conv_id, "Hello world")
             # Title should be generated (not "New Session")
             assert title is not None
             assert title != "New Session"
@@ -164,11 +164,12 @@ class TestStorageManagerTitleGeneration:
         config = StorageConfig(providers=[MemoryStorageConfig()], title_generation_model="test")
         async with StorageManager(config) as manager:
             conv_id = "test_trigger_123"
-            title_result: str | None = None
+            signal_titles: list[str] = []
 
-            def on_title(title: str) -> None:
-                nonlocal title_result
-                title_result = title
+            def on_metadata(event):
+                signal_titles.append(event.metadata.title)
+
+            manager.metadata_generated.connect(on_metadata)
 
             # Temporarily remove PYTEST env var to test the trigger
             with patch.dict(os.environ, {}, clear=False):
@@ -179,13 +180,14 @@ class TestStorageManagerTitleGeneration:
                     session_id=conv_id,
                     node_name="test_agent",
                     initial_prompt="What is the weather?",
-                    on_title_generated=on_title,
                 )
                 await anyio.sleep(0.3)
 
             # Title should have been generated
             stored_title = await manager.get_session_title(conv_id)
             assert stored_title is not None
+            # Signal should have been emitted
+            assert len(signal_titles) > 0
 
 
 class TestMemoryProviderTitleSupport:

@@ -14,14 +14,19 @@ from acp.exceptions import RequestError
 from acp.schema import (
     AuthenticateRequest,
     CancelNotification,
+    CloseSessionRequest,
     CreateTerminalRequest,
     CreateTerminalResponse,
+    DisableProvidersRequest,
+    DisableProvidersResponse,
     ElicitationCreateResponse,
     ForkSessionRequest,
     ForkSessionResponse,
     InitializeRequest,
     KillTerminalCommandRequest,
     KillTerminalCommandResponse,
+    ListProvidersRequest,
+    ListProvidersResponse,
     ListSessionsRequest,
     LoadSessionRequest,
     NewSessionRequest,
@@ -35,22 +40,17 @@ from acp.schema import (
     ResumeSessionRequest,
     ResumeSessionResponse,
     SessionNotification,
+    SetProvidersRequest,
+    SetProvidersResponse,
     SetSessionConfigOptionRequest,
     SetSessionModelRequest,
     SetSessionModeRequest,
-    CloseSessionRequest,
     TerminalOutputRequest,
     TerminalOutputResponse,
     WaitForTerminalExitRequest,
     WaitForTerminalExitResponse,
     WriteTextFileRequest,
     WriteTextFileResponse,
-    ListProvidersRequest,
-    ListProvidersResponse,
-    SetProvidersRequest,
-    SetProvidersResponse,
-    DisableProvidersRequest,
-    DisableProvidersResponse,
 )
 from acp.task import DebuggingMessageStateStore
 
@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from acp.connection import StreamObserver
     from acp.schema import (
         AgentMethod,
+        CloseSessionResponse,
         CreateTerminalRequest,
         ElicitationCompleteNotification,
         ElicitationCreateRequest,
@@ -79,7 +80,6 @@ if TYPE_CHECKING:
         RequestPermissionRequest,
         ResumeSessionResponse,
         SessionNotification,
-        CloseSessionResponse,
         TerminalOutputRequest,
         WaitForTerminalExitRequest,
         WriteTextFileRequest,
@@ -353,6 +353,8 @@ async def _agent_handler(  # noqa: PLR0911
         case "providers/disable":
             disable_providers_request = DisableProvidersRequest.model_validate(params)
             return await agent.disable_provider(disable_providers_request)
+        case "mcp/message":
+            return await agent.ext_method("mcp/message", params or {})
         case str() if method.startswith("_") and is_notification:
             await agent.ext_notification(method[1:], params or {})
             return None

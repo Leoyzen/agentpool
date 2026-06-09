@@ -185,11 +185,36 @@ class OpenCodeStreamAdapter:
             self.main_context.response_text = f"Error calling agent: {e}"
             yield SessionErrorEvent.from_exception(session_id=self.session_id, exception=e)
 
+    async def convert_event(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[Event]:
+        """Convert a single agent event into OpenCode SSE events.
+
+        Processes the event through the adapter's own processor so that
+        mutable state (text accumulation, token counters, step-finish
+        tracking) is updated on *this* adapter instance.  This is the
+        preferred entry point when feeding events one-at-a-time from an
+        external consumer (e.g. the EventBus subscriber in
+        ``message_routes.py``).
+
+        Args:
+            event: The agent stream event to process.
+
+        Yields:
+            OpenCode Event objects for broadcasting.
+        """
+        async for oc_event in self.processor.process(event, self.main_context):
+            if (
+                isinstance(oc_event, PartUpdatedEvent)
+                and isinstance(oc_event.properties.part, StepFinishPart)
+                and oc_event.properties.part.session_id == self.session_id
+            ):
+                self._step_finish_emitted = True
+            yield oc_event
+
     async def _handle_event(self, event: RichAgentStreamEvent[Any]) -> AsyncIterator[Event]:
         """Backward-compatible event handler that delegates to EventProcessor.
 
         This method is deprecated but kept for tests that directly call it.
-        Use process_stream instead for new code.
+        Use :meth:`convert_event` or :meth:`process_stream` instead for new code.
 
         Args:
             event: The agent stream event to process.
@@ -232,6 +257,7 @@ class OpenCodeStreamAdapter:
                 time=TimeStartEndOptional(start=start, end=response_time),
             )
             self.assistant_msg.update_part(final_text_part)
+            yield PartUpdatedEvent.create(final_text_part)
 
         # Step finish — skip if already emitted by _process_stream_complete
         # (StreamCompleteEvent handler in EventProcessor also emits StepFinishPart)

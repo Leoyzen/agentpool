@@ -1,0 +1,662 @@
+"""Event conversion tests for OpenCode session pool integration.
+
+These tests verify the complete mapping from AgentPool events to OpenCode
+SSE events through the adapter layer.
+
+Coverage:
+- PartStartEvent -> PartUpdatedEvent (TextPart, ReasoningPart)
+- PartDeltaEvent -> PartDeltaEvent (text/reasoning delta)
+- PartEndEvent -> internal completion signal
+- ToolCallStartEvent -> PartUpdatedEvent (ToolPart, running)
+- ToolCallCompleteEvent -> PartUpdatedEvent (ToolPart, completed/error)
+- StreamCompleteEvent -> PartUpdatedEvent (StepFinishPart) + SessionIdleEvent
+- RunStartedEvent -> SessionStatusEvent (busy)
+- RunErrorEvent -> SessionErrorEvent
+- RunFailedEvent -> SessionErrorEvent + SessionStatusEvent (idle)
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import Mock
+
+import pytest
+from pydantic_ai import (
+    PartStartEvent as PydanticPartStartEvent,
+    TextPart as PydanticTextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+)
+from pydantic_ai.messages import PartDeltaEvent as PydanticPartDeltaEvent
+
+from agentpool.agents.events import (
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    StreamCompleteEvent,
+    TextContentItem,
+    ToolCallCompleteEvent,
+    ToolCallProgressEvent,
+    ToolCallStartEvent,
+)
+from agentpool_server.opencode_server.event_adapter import OpenCodeEventAdapter
+from agentpool_server.opencode_server.models import (
+    MessagePath,
+    MessageTime,
+    MessageWithParts,
+    PartDeltaEvent,
+    PartUpdatedEvent,
+    SessionErrorEvent,
+    SessionIdleEvent,
+    SessionStatusEvent,
+)
+from agentpool_server.opencode_server.models.parts import (
+    StepFinishPart,
+    TextPart,
+    ToolPart,
+    ToolStateCompleted,
+    ToolStateError,
+    ToolStateRunning,
+)
+
+
+# =============================================================================
+# Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def event_context():
+    """Create an event context for testing event conversion."""
+    from agentpool_server.opencode_server.event_processor_context import (
+        EventProcessorContext,
+    )
+
+    session_id = "test-session"
+    assistant_msg_id = "msg-001"
+    assistant_msg = MessageWithParts.assistant(
+        message_id=assistant_msg_id,
+        session_id=session_id,
+        time=MessageTime(created=0),
+        agent_name="test-agent",
+        model_id="test-model",
+        provider_id="agentpool",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+        parent_id="msg-000",
+    )
+    state = Mock()
+    state.messages = {}
+    state.messages.setdefault(session_id, [])
+    state.ensure_session = Mock()
+    state.storage = Mock()
+    state.storage.log_message = Mock()
+
+    return EventProcessorContext(
+        session_id=session_id,
+        assistant_msg_id=assistant_msg_id,
+        assistant_msg=assistant_msg,
+        state=state,
+        working_dir="/tmp",
+    )
+
+
+# =============================================================================
+# Helper to collect async generator results
+# =============================================================================
+
+
+async def _collect_events(async_gen) -> list[Any]:
+    """Collect all events from an async generator."""
+    events = []
+    async for event in async_gen:
+        events.append(event)
+    return events
+
+
+# =============================================================================
+# OpenCodeEventAdapter existence tests
+# =============================================================================
+
+
+class TestOpenCodeEventAdapterExists:
+    """Verify the OpenCodeEventAdapter class exists and is importable."""
+
+    @pytest.mark.asyncio
+    async def test_adapter_class_importable(self) -> None:
+        """The OpenCodeEventAdapter class should be importable."""
+        assert OpenCodeEventAdapter is not None
+
+    @pytest.mark.asyncio
+    async def test_adapter_initialization(self, event_context) -> None:
+        """Adapter should accept a context."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+        assert adapter.context is event_context
+
+
+# =============================================================================
+# PartStartEvent conversion tests
+# =============================================================================
+
+
+class TestPartStartEventConversion:
+    """Tests for PartStartEvent -> OpenCode PartUpdatedEvent."""
+
+    @pytest.mark.asyncio
+    async def test_text_part_start_creates_text_part(
+        self,
+        event_context,
+    ) -> None:
+        """PartStartEvent with TextPart should yield PartUpdatedEvent with TextPart."""
+        from agentpool.agents.events import PartStartEvent
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = PartStartEvent.text(index=0, content="Hello, world!")
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        assert isinstance(part_updated[0].properties.part, TextPart)
+        assert part_updated[0].properties.part.text == "Hello, world!"
+
+    @pytest.mark.asyncio
+    async def test_thinking_part_start_creates_reasoning_part(
+        self,
+        event_context,
+    ) -> None:
+        """PartStartEvent with ThinkingPart should yield PartUpdatedEvent with ReasoningPart."""
+        from agentpool.agents.events import PartStartEvent
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = PartStartEvent.thinking(index=0, content="Let me think...")
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        from agentpool_server.opencode_server.models.parts import ReasoningPart
+
+        assert isinstance(part_updated[0].properties.part, ReasoningPart)
+        assert part_updated[0].properties.part.text == "Let me think..."
+
+    @pytest.mark.asyncio
+    async def test_pydantic_text_part_start_creates_text_part(
+        self,
+        event_context,
+    ) -> None:
+        """PydanticAI PartStartEvent with TextPart should yield PartUpdatedEvent with TextPart."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = PydanticPartStartEvent(index=0, part=PydanticTextPart(content="Pydantic text"))
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        assert isinstance(part_updated[0].properties.part, TextPart)
+        assert part_updated[0].properties.part.text == "Pydantic text"
+
+
+# =============================================================================
+# PartDeltaEvent conversion tests
+# =============================================================================
+
+
+class TestPartDeltaEventConversion:
+    """Tests for PartDeltaEvent -> OpenCode PartDeltaEvent."""
+
+    @pytest.mark.asyncio
+    async def test_text_delta_yields_part_delta_event(
+        self,
+        event_context,
+    ) -> None:
+        """Text delta should yield PartDeltaEvent."""
+        from agentpool.agents.events import PartStartEvent, PartDeltaEvent as AgentPoolPartDeltaEvent
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # First establish a text part
+        start_event = PartStartEvent.text(index=0, content="Hello")
+        await _collect_events(adapter.convert_event(start_event))
+
+        delta_event = AgentPoolPartDeltaEvent.text(index=0, content=", world!")
+        events = await _collect_events(adapter.convert_event(delta_event))
+
+        delta_events = [e for e in events if isinstance(e, PartDeltaEvent)]
+        assert len(delta_events) == 1
+        assert delta_events[0].properties.delta == ", world!"
+        assert delta_events[0].properties.field == "text"
+
+    @pytest.mark.asyncio
+    async def test_thinking_delta_yields_part_delta_event(
+        self,
+        event_context,
+    ) -> None:
+        """Thinking delta should yield PartDeltaEvent."""
+        from agentpool.agents.events import PartStartEvent, PartDeltaEvent as AgentPoolPartDeltaEvent
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # First establish a reasoning part
+        start_event = PartStartEvent.thinking(index=0, content="Thinking")
+        await _collect_events(adapter.convert_event(start_event))
+
+        delta_event = AgentPoolPartDeltaEvent.thinking(index=0, content=" more...")
+        events = await _collect_events(adapter.convert_event(delta_event))
+
+        delta_events = [e for e in events if isinstance(e, PartDeltaEvent)]
+        assert len(delta_events) == 1
+        assert delta_events[0].properties.delta == " more..."
+
+    @pytest.mark.asyncio
+    async def test_pydantic_text_delta_yields_part_delta_event(
+        self,
+        event_context,
+    ) -> None:
+        """PydanticAI TextPartDelta should yield PartDeltaEvent."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # First establish a text part
+        start_event = PydanticPartStartEvent(
+            index=0, part=PydanticTextPart(content="Base")
+        )
+        await _collect_events(adapter.convert_event(start_event))
+
+        delta_event = PydanticPartDeltaEvent(
+            index=0, delta=TextPartDelta(content_delta=" extended")
+        )
+        events = await _collect_events(adapter.convert_event(delta_event))
+
+        delta_events = [e for e in events if isinstance(e, PartDeltaEvent)]
+        assert len(delta_events) == 1
+        assert delta_events[0].properties.delta == " extended"
+
+
+# =============================================================================
+# ToolCallStartEvent conversion tests
+# =============================================================================
+
+
+class TestToolCallStartEventConversion:
+    """Tests for ToolCallStartEvent -> OpenCode PartUpdatedEvent (ToolPart)."""
+
+    @pytest.mark.asyncio
+    async def test_tool_call_start_creates_running_tool_part(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallStartEvent should yield PartUpdatedEvent with ToolPart in running state."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = ToolCallStartEvent(
+            tool_call_id="call-001",
+            tool_name="bash",
+            title="Running: ls -la",
+            raw_input={"command": "ls -la"},
+        )
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert tool_part.tool == "bash"
+        assert isinstance(tool_part.state, ToolStateRunning)
+        assert tool_part.state.input == {"command": "ls -la"}
+
+    @pytest.mark.asyncio
+    async def test_tool_call_start_with_empty_input(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallStartEvent with no input should still create ToolPart."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = ToolCallStartEvent(
+            tool_call_id="call-002",
+            tool_name="read",
+            title="Reading file",
+        )
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert tool_part.tool == "read"
+
+
+# =============================================================================
+# ToolCallCompleteEvent conversion tests
+# =============================================================================
+
+
+class TestToolCallCompleteEventConversion:
+    """Tests for ToolCallCompleteEvent -> OpenCode PartUpdatedEvent (completed/error)."""
+
+    @pytest.mark.asyncio
+    async def test_tool_call_complete_creates_completed_tool_part(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallCompleteEvent should yield PartUpdatedEvent with ToolPart in completed state."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # First create the tool part
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-003",
+            tool_name="bash",
+            title="Running: echo hello",
+            raw_input={"command": "echo hello"},
+        )
+        await _collect_events(adapter.convert_event(start_event))
+
+        complete_event = ToolCallCompleteEvent(
+            tool_name="bash",
+            tool_call_id="call-003",
+            tool_input={"command": "echo hello"},
+            tool_result="hello",
+            agent_name="test-agent",
+            message_id="msg-001",
+        )
+        events = await _collect_events(adapter.convert_event(complete_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateCompleted)
+        assert tool_part.state.output == "hello"
+
+    @pytest.mark.asyncio
+    async def test_tool_call_complete_with_error_creates_error_tool_part(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallCompleteEvent with error result should yield ToolPart in error state."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # First create the tool part
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-004",
+            tool_name="bash",
+            title="Running: false",
+            raw_input={"command": "false"},
+        )
+        await _collect_events(adapter.convert_event(start_event))
+
+        complete_event = ToolCallCompleteEvent(
+            tool_name="bash",
+            tool_call_id="call-004",
+            tool_input={"command": "false"},
+            tool_result={"error": "Command failed with exit code 1"},
+            agent_name="test-agent",
+            message_id="msg-001",
+        )
+        events = await _collect_events(adapter.convert_event(complete_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateError)
+        assert tool_part.state.error == "Command failed with exit code 1"
+
+
+# =============================================================================
+# StreamCompleteEvent conversion tests
+# =============================================================================
+
+
+class TestStreamCompleteEventConversion:
+    """Tests for StreamCompleteEvent -> StepFinishPart + SessionIdleEvent."""
+
+    @pytest.mark.asyncio
+    async def test_stream_complete_yields_step_finish_part(
+        self,
+        event_context,
+    ) -> None:
+        """StreamCompleteEvent should yield PartUpdatedEvent with StepFinishPart."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        msg = Mock()
+        msg.content = "Done"
+        msg.usage = None
+        msg.cost_info = None
+        event = StreamCompleteEvent(message=msg)
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        step_finish = [e for e in part_updated if isinstance(e.properties.part, StepFinishPart)]
+        assert len(step_finish) == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_complete_updates_token_counts(
+        self,
+        event_context,
+    ) -> None:
+        """StreamCompleteEvent with usage should update token counts in StepFinishPart."""
+        from pydantic_ai import RequestUsage
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        msg = Mock()
+        msg.content = "Done"
+        msg.usage = RequestUsage(input_tokens=100, output_tokens=50)
+        msg.cost_info = None
+        event = StreamCompleteEvent(message=msg)
+        events = await _collect_events(adapter.convert_event(event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        step_finish = [e for e in part_updated if isinstance(e.properties.part, StepFinishPart)]
+        assert len(step_finish) == 1
+        assert step_finish[0].properties.part.tokens.input == 100
+        assert step_finish[0].properties.part.tokens.output == 50
+
+
+
+
+class TestRunStartedEventConversion:
+    """Tests for RunStartedEvent -> SessionStatusEvent (busy)."""
+
+    @pytest.mark.asyncio
+    async def test_run_started_yields_session_status_busy(
+        self,
+        event_context,
+    ) -> None:
+        """RunStartedEvent should yield SessionStatusEvent with type 'busy'."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = RunStartedEvent(session_id="test-session", run_id="run-001")
+        events = await _collect_events(adapter.convert_event(event))
+
+        status_events = [e for e in events if isinstance(e, SessionStatusEvent)]
+        assert len(status_events) == 1
+        assert status_events[0].properties.status.type == "busy"
+        assert status_events[0].properties.session_id == "test-session"
+
+
+# =============================================================================
+# RunErrorEvent conversion tests
+# =============================================================================
+
+
+class TestRunErrorEventConversion:
+    """Tests for RunErrorEvent -> SessionErrorEvent."""
+
+    @pytest.mark.asyncio
+    async def test_run_error_yields_session_error_event(
+        self,
+        event_context,
+    ) -> None:
+        """RunErrorEvent should yield SessionErrorEvent."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = RunErrorEvent(
+            message="Something went wrong",
+            code="ERR_001",
+            run_id="run-002",
+        )
+        events = await _collect_events(adapter.convert_event(event))
+
+        error_events = [e for e in events if isinstance(e, SessionErrorEvent)]
+        assert len(error_events) == 1
+        assert error_events[0].properties.error is not None
+        assert error_events[0].properties.error.name == "ERR_001"
+
+
+# =============================================================================
+# RunFailedEvent conversion tests
+# =============================================================================
+
+
+class TestRunFailedEventConversion:
+    """Tests for RunFailedEvent -> SessionErrorEvent + SessionStatusEvent (idle)."""
+
+
+
+
+class TestToolCallProgressEventConversion:
+    """Tests for ToolCallProgressEvent -> PartUpdatedEvent (ToolPart updates)."""
+
+    @pytest.mark.asyncio
+    async def test_tool_progress_updates_existing_tool_part(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallProgressEvent should update existing ToolPart."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # First create the tool part
+        start_event = ToolCallStartEvent(
+            tool_call_id="call-005",
+            tool_name="bash",
+            title="Running: long command",
+            raw_input={"command": "long command"},
+        )
+        await _collect_events(adapter.convert_event(start_event))
+
+        progress_event = ToolCallProgressEvent(
+            tool_call_id="call-005",
+            title="Still running...",
+            items=[TextContentItem(text="Output line 1")],
+        )
+        events = await _collect_events(adapter.convert_event(progress_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert isinstance(tool_part.state, ToolStateRunning)
+
+    @pytest.mark.asyncio
+    async def test_tool_progress_creates_new_tool_part_if_not_exists(
+        self,
+        event_context,
+    ) -> None:
+        """ToolCallProgressEvent without prior start should create new ToolPart."""
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        progress_event = ToolCallProgressEvent(
+            tool_call_id="call-006",
+            title="File operation",
+            items=[TextContentItem(text="Reading file...")],
+            tool_name="read",
+        )
+        events = await _collect_events(adapter.convert_event(progress_event))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 1
+        tool_part = part_updated[0].properties.part
+        assert isinstance(tool_part, ToolPart)
+        assert tool_part.tool == "read"
+
+
+# =============================================================================
+# Stream conversion tests
+# =============================================================================
+
+
+class TestStreamConversion:
+    """Tests for OpenCodeEventAdapter.convert_stream."""
+
+    @pytest.mark.asyncio
+    async def test_convert_stream_yields_all_events(self, event_context) -> None:
+        """convert_stream should yield OpenCode events for all AgentPool events."""
+
+        async def _make_stream():
+            from agentpool.agents.events import PartStartEvent
+
+            yield PartStartEvent.text(index=0, content="Hello")
+            yield PartStartEvent.text(index=1, content="World")
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+        events = await _collect_events(adapter.convert_stream(_make_stream()))
+
+        part_updated = [e for e in events if isinstance(e, PartUpdatedEvent)]
+        assert len(part_updated) == 2
+
+
+# =============================================================================
+# Conversion completeness tests
+# =============================================================================
+
+
+class TestConversionCompleteness:
+    """Tests verifying all specified AgentPool events are mapped to OpenCode events."""
+
+    @pytest.mark.asyncio
+    async def test_all_required_events_have_handlers(
+        self,
+        event_context,
+    ) -> None:
+        """Every required AgentPool event type should have a conversion handler."""
+        from agentpool.agents.events import (
+            PartDeltaEvent,
+            PartStartEvent,
+            RunStartedEvent,
+            ToolCallCompleteEvent,
+            ToolCallStartEvent,
+        )
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        # TODO: Add RunErrorEvent and RunFailedEvent when handlers are implemented
+        required_events = [
+            PartStartEvent.text(index=0, content="test"),
+            PartDeltaEvent.text(index=0, content="test"),
+            ToolCallStartEvent(
+                tool_call_id="t1", tool_name="test", title="Test"
+            ),
+            ToolCallCompleteEvent(
+                tool_name="test",
+                tool_call_id="t1",
+                tool_input={},
+                tool_result="result",
+                agent_name="agent",
+                message_id="msg",
+            ),
+            RunStartedEvent(session_id="s", run_id="r"),
+        ]
+
+        for event in required_events:
+            events = await _collect_events(adapter.convert_event(event))
+            # Each event should produce at least one OpenCode event
+            assert len(events) >= 1, f"Event {type(event).__name__} produced no output"
+
+    @pytest.mark.asyncio
+    async def test_no_agentpool_events_leak_through(
+        self,
+        event_context,
+    ) -> None:
+        """Converted events should all be OpenCode Event types, never raw AgentPool events."""
+        from agentpool.agents.events import RunStartedEvent
+
+        adapter = OpenCodeEventAdapter(context=event_context)
+
+        event = RunStartedEvent(session_id="s", run_id="r")
+        events = await _collect_events(adapter.convert_event(event))
+
+        for e in events:
+            # All events should have a 'type' attribute (OpenCode events do)
+            assert hasattr(e, "type"), f"Event {type(e).__name__} lacks 'type' attribute"

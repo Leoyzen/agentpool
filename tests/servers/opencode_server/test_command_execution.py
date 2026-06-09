@@ -5,20 +5,22 @@ Tests slashed command execution, MCP prompt fallback, and precedence handling.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock, MagicMock, Mock
 
-from agentpool_server.opencode_server.models import CommandRequest
+from agentpool.skills.command import SkillCommand
+from agentpool.skills.skill import Skill
+from agentpool_server.opencode_server.state import ServerState
+from upathtools import UPath
 
 
 if TYPE_CHECKING:
-    from unittest.mock import Mock
-
     from httpx import AsyncClient
-
-    from agentpool_server.opencode_server.state import ServerState
 
 
 pytestmark = pytest.mark.asyncio
@@ -302,3 +304,467 @@ async def test_collision_warning_logged(
     assert "Both slashed command and prompt exist" in caplog.text
     assert "collision-cmd" in caplog.text
     assert "slashed command" in caplog.text
+
+
+async def test_concurrent_slash_commands_same_session_are_serialized(
+    async_client: AsyncClient,
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that concurrent slash commands to the same session are serialized.
+
+    The route-level lock in ``execute_command`` ensures that multiple commands
+    sent to the same session concurrently are processed sequentially, not in
+    parallel. This prevents race conditions during command execution.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Track concurrent execution
+    active_executions = 0
+    max_concurrent = 0
+    execution_lock = asyncio.Lock()
+
+    async def tracked_execute(*args, **kwargs):
+        nonlocal active_executions, max_concurrent
+        async with execution_lock:
+            active_executions += 1
+            max_concurrent = max(max_concurrent, active_executions)
+        # Simulate some work
+        await asyncio.sleep(0.1)
+        async with execution_lock:
+            active_executions -= 1
+
+    # Mock CommandStore with tracked command
+    mock_command = MagicMock()
+    mock_command.execute = AsyncMock(side_effect=tracked_execute)
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=mock_command)
+    server_state.command_store = mock_command_store
+
+    # Mock empty MCP prompts
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+
+    # Send two commands concurrently to the same session
+    async def send_command(cmd: str):
+        return await async_client.post(
+            f"/session/{session_id}/command",
+            json={"command": cmd},
+        )
+
+    results = await asyncio.gather(
+        send_command("cmd-a"),
+        send_command("cmd-b"),
+    )
+
+    # Both should succeed
+    assert all(r.status_code == 200 for r in results)
+
+    # Verify commands were executed sequentially (never concurrently)
+    assert max_concurrent == 1, (
+        f"Expected sequential execution (max_concurrent=1), "
+        f"but got max_concurrent={max_concurrent}. "
+        f"Route-level lock is not serializing commands."
+    )
+
+
+async def test_skill_command_routes_through_session_pool_when_flag_enabled(
+    async_client: "AsyncClient",
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that skill command routes through SessionPool.run_stream() when flag enabled.
+
+    When ``use_session_pool_for_skills`` is True, skill commands should use
+    ``session_pool.run_stream(session_id, user_prompt, scope='descendants')``
+    instead of calling ``agent.run_stream()`` directly.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # CommandStore doesn't have it
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=None)
+    server_state.command_store = mock_command_store
+
+    # Add skill to pool.skill_commands
+    skill = Skill(
+        name="test-skill",
+        description="Test skill",
+        skill_path=UPath("/tmp/test"),
+        instructions="Test skill instructions",
+    )
+    skill_cmd = SkillCommand(name="test-skill", description="Test skill", skill=skill)
+    mock_agent.agent_pool.skill_commands = {"test-skill": skill_cmd}  # type: ignore[attr-defined]
+    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+
+    # Enable session pool for skills by replacing opencode config with a mock
+    mock_opencode = MagicMock()
+    mock_opencode.should_use_session_pool_for.return_value = True
+    mock_agent.agent_pool.manifest.opencode = mock_opencode  # type: ignore[attr-defined]
+
+    # Track session_pool.run_stream calls
+    session_pool_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_run_stream(*args: Any, **kwargs: Any) -> Any:
+        session_pool_calls.append((args, kwargs))
+        if False:
+            yield MagicMock()
+
+    mock_agent.agent_pool.session_pool.run_stream = _mock_run_stream  # type: ignore[attr-defined]
+
+    # Mock empty MCP prompts
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+
+    response = await async_client.post(
+        f"/session/{session_id}/command",
+        json={"command": "test-skill", "arguments": "some args"},
+    )
+
+    # Fallback to skill_commands should work — returns 200
+    assert response.status_code == 200
+    result = response.json()
+    assert "info" in result
+    assert "parts" in result
+
+    # Verify session_pool.run_stream was called with scope="descendants"
+    assert len(session_pool_calls) == 1
+    _args, kwargs = session_pool_calls[0]
+    assert kwargs.get("scope") == "descendants"
+
+
+async def test_skill_command_uses_direct_agent_when_flag_disabled(
+    async_client: "AsyncClient",
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that skill command uses direct agent.run_stream() when flag disabled.
+
+    When ``use_session_pool_for_skills`` is False (default), skill commands
+    should preserve the legacy direct path.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # CommandStore doesn't have it
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=None)
+    server_state.command_store = mock_command_store
+
+    # Add skill to pool.skill_commands
+    skill = Skill(
+        name="direct-skill",
+        description="Direct skill",
+        skill_path=UPath("/tmp/direct"),
+        instructions="Direct skill instructions",
+    )
+    skill_cmd = SkillCommand(name="direct-skill", description="Direct skill", skill=skill)
+    mock_agent.agent_pool.skill_commands = {"direct-skill": skill_cmd}  # type: ignore[attr-defined]
+    mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
+
+    # Ensure flag is disabled (default) — no action needed since
+    # ``use_session_pool_for_skills`` defaults to ``False``.
+
+    # Track agent.run_stream calls
+    agent_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_run_stream(*args: Any, **kwargs: Any) -> Any:
+        agent_calls.append((args, kwargs))
+        if False:
+            yield MagicMock()
+
+    mock_agent.run_stream = _mock_run_stream  # type: ignore[method-assign]
+
+    # Track session_pool.run_stream calls
+    session_pool_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_session_run_stream(*args: Any, **kwargs: Any) -> Any:
+        session_pool_calls.append((args, kwargs))
+        if False:
+            yield MagicMock()
+
+    mock_agent.agent_pool.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
+
+    # Mock empty MCP prompts
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+
+    response = await async_client.post(
+        f"/session/{session_id}/command",
+        json={"command": "direct-skill", "arguments": "some args"},
+    )
+
+    # Fallback to skill_commands should work — returns 200
+    assert response.status_code == 200
+    result = response.json()
+    assert "info" in result
+    assert "parts" in result
+
+    # Verify direct agent.run_stream was called (not session_pool.run_stream)
+    assert len(agent_calls) == 1
+    assert len(session_pool_calls) == 0
+
+
+async def test_slash_command_routes_through_session_pool_when_flag_enabled(
+    async_client: "AsyncClient",
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that slash command routes through SessionPool.run_stream() when flag enabled.
+
+    When ``use_session_pool_for_commands`` is True, slashed commands should use
+    ``session_pool.run_stream(session_id, agent_prompt, scope='descendants')``
+    instead of calling ``agent.run_stream()`` directly. ``command.execute()``
+    must still run before the agent stream.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Mock CommandStore with a command
+    mock_command = MagicMock()
+    mock_command.execute = AsyncMock()
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=mock_command)
+    server_state.command_store = mock_command_store
+
+    # Enable session pool for commands by replacing opencode config with a mock
+    mock_opencode = MagicMock()
+    mock_opencode.should_use_session_pool_for.return_value = True
+    mock_agent.agent_pool.manifest.opencode = mock_opencode  # type: ignore[attr-defined]
+
+    # Track session_pool.run_stream calls
+    session_pool_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_run_stream(*args: Any, **kwargs: Any) -> Any:
+        session_pool_calls.append((args, kwargs))
+        if False:
+            yield MagicMock()
+
+    mock_agent.agent_pool.session_pool.run_stream = _mock_run_stream  # type: ignore[attr-defined]
+
+    # Mock empty MCP prompts
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+
+    response = await async_client.post(
+        f"/session/{session_id}/command",
+        json={"command": "test-cmd", "arguments": "arg1 arg2"},
+    )
+
+    # Verify success
+    assert response.status_code == 200
+    result = response.json()
+    assert "info" in result
+    assert "parts" in result
+
+    # Verify command.execute() was called before the agent stream
+    mock_command.execute.assert_called_once()
+
+    # Verify session_pool.run_stream was called with scope="descendants"
+    assert len(session_pool_calls) == 1
+    _args, kwargs = session_pool_calls[0]
+    assert kwargs.get("scope") == "descendants"
+
+
+async def test_slash_command_uses_direct_agent_when_flag_disabled(
+    async_client: "AsyncClient",
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that slash command uses direct agent.run_stream() when flag disabled.
+
+    When ``use_session_pool_for_commands`` is False (default), slashed
+    commands should preserve the legacy direct path.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Mock CommandStore with a command
+    mock_command = MagicMock()
+    mock_command.execute = AsyncMock()
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=mock_command)
+    server_state.command_store = mock_command_store
+
+    # Ensure flag is disabled (default) — no action needed
+
+    # Track agent.run_stream calls
+    agent_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_run_stream(*args: Any, **kwargs: Any) -> Any:
+        agent_calls.append((args, kwargs))
+        if False:
+            yield MagicMock()
+
+    mock_agent.run_stream = _mock_run_stream  # type: ignore[method-assign]
+
+    # Track session_pool.run_stream calls
+    session_pool_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_session_run_stream(*args: Any, **kwargs: Any) -> Any:
+        session_pool_calls.append((args, kwargs))
+        if False:
+            yield MagicMock()
+
+    mock_agent.agent_pool.session_pool.run_stream = _mock_session_run_stream  # type: ignore[attr-defined]
+
+    # Mock empty MCP prompts
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[])
+
+    response = await async_client.post(
+        f"/session/{session_id}/command",
+        json={"command": "test-cmd", "arguments": "arg1 arg2"},
+    )
+
+    # Verify success
+    assert response.status_code == 200
+    result = response.json()
+    assert "info" in result
+    assert "parts" in result
+
+    # Verify command.execute() was called
+    mock_command.execute.assert_called_once()
+
+    # Verify direct agent.run_stream was called (not session_pool.run_stream)
+    assert len(agent_calls) == 1
+    assert len(session_pool_calls) == 0
+
+
+async def test_mcp_prompt_routes_through_session_pool_when_flag_enabled(
+    async_client: "AsyncClient",
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that MCP prompt routes through SessionPool.receive_request() when flag enabled.
+
+    When ``use_session_pool_for_mcp`` is True, MCP prompts should use
+    ``session_pool.receive_request(session_id, prompt_text)`` instead of
+    calling ``agent.run()`` directly. RunHandle should be stored for cancellation.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Mock CommandStore without the command
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=None)
+    server_state.command_store = mock_command_store
+
+    # Mock MCP prompt
+    mock_prompt = MagicMock()
+    mock_prompt.name = "test-prompt"
+    mock_prompt.arguments = [{"name": "arg1"}]
+    mock_prompt.get_components = AsyncMock(return_value=[])
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+
+    # Enable session pool for MCP by replacing opencode config with a mock
+    mock_opencode = MagicMock()
+    mock_opencode.should_use_session_pool_for.return_value = True
+    mock_agent.agent_pool.manifest.opencode = mock_opencode  # type: ignore[attr-defined]
+
+    # Track session_pool.receive_request calls
+    receive_request_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_receive_request(*args: Any, **kwargs: Any) -> Any:
+        receive_request_calls.append((args, kwargs))
+        # Return a mock RunHandle
+        mock_handle = MagicMock()
+        mock_handle.run_id = "test-run-id"
+        return mock_handle
+
+    mock_agent.agent_pool.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
+
+    response = await async_client.post(
+        f"/session/{session_id}/command",
+        json={"command": "test-prompt", "arguments": "value1"},
+    )
+
+    # Verify success
+    assert response.status_code == 200
+    result = response.json()
+    assert "info" in result
+    assert "parts" in result
+
+    # Verify MCP prompt was used
+    mock_agent.tools.list_prompts.assert_called()
+    mock_prompt.get_components.assert_called_once()
+
+    # Verify session_pool.receive_request was called
+    assert len(receive_request_calls) == 1
+    _args, kwargs = receive_request_calls[0]
+    assert kwargs.get("session_id") == session_id
+    assert kwargs.get("priority") == "when_idle"
+
+    # Verify RunHandle was stored
+    assert hasattr(server_state, "_run_handles")
+    assert session_id in server_state._run_handles
+    assert server_state._run_handles[session_id].run_id == "test-run-id"
+
+
+async def test_mcp_prompt_uses_direct_agent_when_flag_disabled(
+    async_client: "AsyncClient",
+    server_state: ServerState,
+    mock_agent: Mock,
+):
+    """Test that MCP prompt uses direct agent.run() when flag disabled.
+
+    When ``use_session_pool_for_mcp`` is False (default), MCP prompts
+    should preserve the legacy direct path.
+    """
+    # Create session first
+    response = await async_client.post("/session", json={"title": "Test Session"})
+    assert response.status_code == 200
+    session_id = response.json()["id"]
+
+    # Mock CommandStore without the command
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=None)
+    server_state.command_store = mock_command_store
+
+    # Mock MCP prompt
+    mock_prompt = MagicMock()
+    mock_prompt.name = "direct-prompt"
+    mock_prompt.arguments = []
+    mock_prompt.get_components = AsyncMock(return_value=[])
+    mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
+    mock_agent.run = AsyncMock(return_value=MagicMock(data="Direct result"))
+
+    # Ensure flag is disabled (default) — no action needed
+
+    # Track session_pool.receive_request calls
+    receive_request_calls: list[tuple[Any, Any]] = []
+
+    async def _mock_receive_request(*args: Any, **kwargs: Any) -> Any:
+        receive_request_calls.append((args, kwargs))
+        return None
+
+    mock_agent.agent_pool.session_pool.receive_request = _mock_receive_request  # type: ignore[attr-defined]
+
+    response = await async_client.post(
+        f"/session/{session_id}/command",
+        json={"command": "direct-prompt"},
+    )
+
+    # Verify success
+    assert response.status_code == 200
+    result = response.json()
+    assert "info" in result
+    assert "parts" in result
+
+    # Verify direct agent.run was called (not session_pool.receive_request)
+    mock_agent.run.assert_called_once()
+    assert len(receive_request_calls) == 0
+
+    # Verify response contains the direct agent result
+    text_parts = [p for p in result["parts"] if p.get("type") == "text"]
+    assert len(text_parts) == 1
+    assert text_parts[0]["text"] == "Direct result"

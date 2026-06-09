@@ -6,12 +6,22 @@ in OpenCode TUI are not reflected in agentpool runtime.
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
+from agentpool_server.opencode_server.models import (
+    MessageRequest,
+    MessageWithParts,
+    ModelRef,
+    TextPartInput,
+    TimeCreated,
+    UserMessage,
+)
 from agentpool_server.opencode_server.models.config import Config
 
 
@@ -393,3 +403,310 @@ async def test_all_root_causes_documented():
 
     # This test always passes - it's just for documentation
     assert True
+
+
+# =============================================================================
+# Per-Session Agent Model Switching Tests
+# =============================================================================
+
+
+class _MockModelInfo:
+    """Minimal stand-in for tokonomics ModelInfo."""
+
+    def __init__(self, id: str, id_override: str | None = None) -> None:
+        self.id = id
+        self.id_override = id_override
+
+
+class PerSessionAgentMock:
+    """Mock agent that tracks set_model calls for per-session isolation testing."""
+
+    def __init__(
+        self,
+        name: str,
+        model_name: str = "test-model",
+        *,
+        available_models: list[str] | None = None,
+    ) -> None:
+        self.name = name
+        self.model_name = model_name
+        self.set_model_calls: list[str] = []
+        self.set_mode_calls: list[tuple[str, str | None]] = []
+        self.get_available_models_calls = 0
+        self.agent_pool: Any = None
+        self.env: Any = None
+        self.storage: Any = None
+        self._input_provider = None
+        self.tools = Mock()
+        self._available_models = [_MockModelInfo(m) for m in (available_models or [])]
+
+    async def get_available_models(self) -> list[Any]:
+        self.get_available_models_calls += 1
+        return self._available_models
+
+    async def set_model(self, model: str) -> None:
+        self.set_model_calls.append(model)
+        self.model_name = model
+
+    async def set_mode(self, mode: str, category_id: str | None = None) -> None:
+        self.set_mode_calls.append((mode, category_id))
+
+
+def _make_mock_state_with_session_agent(
+    tmp_project_dir: Path,
+    session_agents: dict[str, PerSessionAgentMock],
+) -> tuple[Any, Any]:
+    """Create a ServerState wired so get_or_create_session_agent returns per-session mocks."""
+    from unittest.mock import AsyncMock, Mock
+
+    from agentpool.orchestrator.run import RunStatus
+    from agentpool_server.opencode_server.models import SessionStatus
+    from agentpool_server.opencode_server.state import ServerState
+    from agentpool.utils.time_utils import now_ms
+
+    shared_agent = PerSessionAgentMock(name="shared-agent")
+    shared_agent.env = Mock()
+    shared_agent.env.get_fs = Mock(return_value=Mock())
+
+    # Set up pool mock BEFORE creating ServerState so __post_init__ captures it.
+    pool = Mock()
+    pool.manifest = Mock()
+    pool.manifest.config_file_path = "/tmp/test"
+    pool.manifest.model_variants = {}
+    pool.all_agents = {shared_agent.name: shared_agent}
+    pool.skill_commands = None
+
+    storage = Mock()
+    storage.save_session = AsyncMock()
+    storage.log_message = AsyncMock()
+    pool.storage = storage
+
+    # SessionPool mock
+    session_pool = Mock()
+    session_pool.sessions = Mock()
+
+    async def _get_or_create_session_agent(
+        session_id: str,
+        agent_name: str | None = None,
+        input_provider: Any | None = None,
+    ) -> Any:
+        if session_id not in session_agents:
+            session_agents[session_id] = PerSessionAgentMock(
+                name=f"session-agent-{session_id}",
+            )
+        return session_agents[session_id]
+
+    session_pool.sessions.get_or_create_session_agent = AsyncMock(
+        side_effect=_get_or_create_session_agent
+    )
+    session_pool.sessions.get_or_create_session = AsyncMock(
+        return_value=(Mock(), True)
+    )
+
+    # RunHandle that completes immediately
+    run_handle = Mock()
+    run_handle.status = RunStatus.completed
+    run_handle.complete_event = Mock()
+    run_handle.complete_event.wait = AsyncMock(return_value=None)
+    session_pool.receive_request = AsyncMock(return_value=run_handle)
+
+    # EventBus mock
+    session_pool.event_bus = Mock()
+    session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    session_pool.event_bus.unsubscribe = AsyncMock(return_value=None)
+
+    pool.session_pool = session_pool
+    shared_agent.agent_pool = pool
+
+    state = ServerState(
+        working_dir=str(tmp_project_dir),
+        agent=shared_agent,  # type: ignore[arg-type]
+    )
+
+    # Initialize backward-compat dicts removed from ServerState dataclass
+    # so tests and helper fallbacks can access them.
+    state.messages = {}  # type: ignore[attr-defined]
+    state.session_status = {}  # type: ignore[attr-defined]
+    state.todos = {}  # type: ignore[attr-defined]
+    state.input_providers = {}  # type: ignore[attr-defined]
+
+    # Pre-populate sessions in state
+    for session_id in session_agents:
+        from agentpool_server.opencode_server.models import Session
+        from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
+
+        now = now_ms()
+        session = Session(
+            id=session_id,
+            project_id="default",
+            directory=str(tmp_project_dir),
+            title=f"Session {session_id}",
+            version="1",
+            time=TimeCreatedUpdated(created=now, updated=now),
+        )
+        state.sessions[session_id] = session
+        state.messages[session_id] = []  # type: ignore[attr-defined]
+        state.session_status[session_id] = SessionStatus(type="idle")  # type: ignore[attr-defined]
+
+    return state, pool
+
+
+@pytest.mark.unit
+async def test_model_switch_targets_per_session_agent(tmp_project_dir: Path) -> None:
+    """Model switching must call set_model on the per-session agent, not the shared agent.
+
+    The shared ``state.agent`` is no longer used for model switching.
+    ``_process_message_locked`` uses
+    ``session_pool.sessions.get_or_create_session_agent()`` so each session
+    gets its own isolated model configuration.
+    """
+    from agentpool.utils import identifiers as identifier
+    from agentpool_server.opencode_server.routes.message_routes import (
+        _process_message_locked,
+    )
+
+    session_id = "test-session-a"
+    session_agents: dict[str, PerSessionAgentMock] = {
+        session_id: PerSessionAgentMock(
+            name=f"session-agent-{session_id}",
+            available_models=["gpt-4o"],
+        ),
+    }
+    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+
+    shared_agent = state.agent
+    assert isinstance(shared_agent, PerSessionAgentMock)
+
+    request = MessageRequest(
+        parts=[TextPartInput(text="Hello!")],
+        model=ModelRef(provider_id="openai-chat", model_id="gpt-4o"),
+    )
+    user_msg_id = identifier.ascending("message")
+    user_message = UserMessage(
+        id=user_msg_id,
+        session_id=session_id,
+        time=TimeCreated.now(),
+        agent="default",
+        model=request.model,
+    )
+    user_msg_with_parts = MessageWithParts(info=user_message)
+    user_msg_with_parts.add_text_part("Hello!")
+    state.messages[session_id].append(user_msg_with_parts)
+
+    await _process_message_locked(session_id, request, state, user_msg_id, user_msg_with_parts)
+
+    # Per-session agent should have been created and had set_model called on it
+    per_session_agent = session_agents[session_id]
+    assert per_session_agent.set_model_calls == ["gpt-4o"]
+    assert per_session_agent.get_available_models_calls == 1
+
+    # Shared agent must NOT have been touched
+    assert shared_agent.set_model_calls == []
+    assert shared_agent.get_available_models_calls == 0
+
+
+@pytest.mark.unit
+async def test_model_switch_affects_only_target_session(tmp_project_dir: Path) -> None:
+    """Switching model in session A must not affect session B's agent."""
+    from agentpool.utils import identifiers as identifier
+    from agentpool_server.opencode_server.routes.message_routes import (
+        _process_message_locked,
+    )
+
+    session_a = "session-a"
+    session_b = "session-b"
+    session_agents: dict[str, PerSessionAgentMock] = {
+        session_a: PerSessionAgentMock(
+            name="agent-a", model_name="model-a", available_models=["gpt-4o"]
+        ),
+        session_b: PerSessionAgentMock(name="agent-b", model_name="model-b"),
+    }
+    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+
+    # Process message for session A WITH model override
+    request_a = MessageRequest(
+        parts=[TextPartInput(text="Hello A!")],
+        model=ModelRef(provider_id="openai-chat", model_id="gpt-4o"),
+    )
+    user_msg_id_a = identifier.ascending("message")
+    user_message_a = UserMessage(
+        id=user_msg_id_a,
+        session_id=session_a,
+        time=TimeCreated.now(),
+        agent="default",
+        model=request_a.model,
+    )
+    user_msg_with_parts_a = MessageWithParts(info=user_message_a)
+    user_msg_with_parts_a.add_text_part("Hello A!")
+    state.messages[session_a].append(user_msg_with_parts_a)
+
+    await _process_message_locked(session_a, request_a, state, user_msg_id_a, user_msg_with_parts_a)
+
+    # Process message for session B WITHOUT model override
+    request_b = MessageRequest(
+        parts=[TextPartInput(text="Hello B!")],
+    )
+    user_msg_id_b = identifier.ascending("message")
+    user_message_b = UserMessage(
+        id=user_msg_id_b,
+        session_id=session_b,
+        time=TimeCreated.now(),
+        agent="default",
+        model=request_b.model,
+    )
+    user_msg_with_parts_b = MessageWithParts(info=user_message_b)
+    user_msg_with_parts_b.add_text_part("Hello B!")
+    state.messages[session_b].append(user_msg_with_parts_b)
+
+    await _process_message_locked(session_b, request_b, state, user_msg_id_b, user_msg_with_parts_b)
+
+    # Session A's agent should have switched
+    assert session_agents[session_a].set_model_calls == ["gpt-4o"]
+
+    # Session B's agent should NOT have been switched
+    assert session_agents[session_b].set_model_calls == []
+    assert session_agents[session_b].model_name == "model-b"
+
+
+@pytest.mark.unit
+async def test_other_sessions_retain_original_model(tmp_project_dir: Path) -> None:
+    """After switching model in one session, other sessions keep their original model."""
+    from agentpool.utils import identifiers as identifier
+    from agentpool_server.opencode_server.routes.message_routes import (
+        _process_message_locked,
+    )
+
+    session_a = "session-a"
+    session_b = "session-b"
+    session_agents: dict[str, PerSessionAgentMock] = {
+        session_a: PerSessionAgentMock(
+            name="agent-a", model_name="original-model-a", available_models=["new-model"]
+        ),
+        session_b: PerSessionAgentMock(name="agent-b", model_name="original-model-b"),
+    }
+    state, pool = _make_mock_state_with_session_agent(tmp_project_dir, session_agents)
+
+    # Process message for session A with model override
+    request = MessageRequest(
+        parts=[TextPartInput(text="Switch model!")],
+        model=ModelRef(provider_id="openai-chat", model_id="new-model"),
+    )
+    user_msg_id = identifier.ascending("message")
+    user_message = UserMessage(
+        id=user_msg_id,
+        session_id=session_a,
+        time=TimeCreated.now(),
+        agent="default",
+        model=request.model,
+    )
+    user_msg_with_parts = MessageWithParts(info=user_message)
+    user_msg_with_parts.add_text_part("Switch model!")
+    state.messages[session_a].append(user_msg_with_parts)
+
+    await _process_message_locked(session_a, request, state, user_msg_id, user_msg_with_parts)
+
+    # Session A switched
+    assert session_agents[session_a].model_name == "new-model"
+
+    # Session B retained its original model
+    assert session_agents[session_b].model_name == "original-model-b"

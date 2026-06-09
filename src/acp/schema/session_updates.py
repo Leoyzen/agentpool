@@ -25,6 +25,7 @@ from acp.schema.content_blocks import (  # noqa: TC001
 from acp.schema.session_state import SessionConfigOption  # noqa: TC001
 from acp.schema.slash_commands import AvailableCommand  # noqa: TC001
 from acp.schema.tool_call import (  # noqa: TC001
+    SubagentRunInfo,
     ToolCallContent,
     ToolCallKind,
     ToolCallLocation,
@@ -315,6 +316,9 @@ class ToolCallProgress(AnnotatedObject):
     status: ToolCallStatus | None = None
     """Update the execution status."""
 
+    subagent: SubagentRunInfo | None = None
+    """Subagent run information, if this is a subagent tool call."""
+
     title: str | None = None
     """Update the human-readable title."""
 
@@ -426,6 +430,9 @@ class ToolCallStart(AnnotatedObject):
 
     status: ToolCallStatus | None = None
     """Current execution status of the tool call."""
+
+    subagent: SubagentRunInfo | None = None
+    """Subagent run information, if this is a subagent tool call."""
 
     title: str
     """Human-readable title describing what the tool is doing."""

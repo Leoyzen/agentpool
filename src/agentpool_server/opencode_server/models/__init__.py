@@ -207,6 +207,10 @@ from agentpool_server.opencode_server.models.mcp import (
     McpResource,
 )
 from agentpool_server.opencode_server.models.config import Config
+from agentpool_server.opencode_server.models.question_permission import (
+    OpenCodePendingPermission,
+    OpenCodePendingQuestion,
+)
 from agentpool_server.opencode_server.models.question import (
     QuestionInfo,
     QuestionOption,
@@ -214,6 +218,7 @@ from agentpool_server.opencode_server.models.question import (
     QuestionRequest,
     QuestionToolInfo,
 )
+from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 __all__ = [
     "APIError",
@@ -281,6 +286,8 @@ __all__ = [
     "ProviderModalities",
     "ModelRef",
     "OpenCodeBaseModel",
+    "OpenCodePendingPermission",
+    "OpenCodePendingQuestion",
     "OutputFormat",
     "OutputFormatJsonSchema",
     "OutputFormatText",
@@ -347,6 +354,7 @@ __all__ = [
     "SessionIdProperties",
     "SessionIdleEvent",
     "SessionIdleProperties",
+    "SessionInfo",
     "SessionInfoProperties",
     "SessionInitRequest",
     "SessionRevert",

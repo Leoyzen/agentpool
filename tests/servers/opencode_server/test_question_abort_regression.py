@@ -45,6 +45,11 @@ from agentpool_server.opencode_server.models.message import (
     MessageWithParts,
 )
 from agentpool_server.opencode_server.routes.message_routes import _process_message_locked
+from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
+    get_messages_for_session,
+    get_session_status,
+)
 from agentpool_server.opencode_server.state import PendingQuestion, ServerState
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
@@ -152,7 +157,7 @@ class BlockingOnRealQuestionAgentMock:
     """Mock agent that creates a real PendingQuestion and blocks on its Future.
 
     Unlike BlockingOnQuestionAgentMock which blocks on an Event, this creates
-    an actual PendingQuestion in state.pending_questions and awaits the Future.
+    an actual PendingQuestion in session.pending_questions and awaits the Future.
     This simulates the real question_for_user flow more accurately, allowing
     tests to verify that cancel_all_pending_questions() releases agent_lock.
     """
@@ -187,14 +192,25 @@ class BlockingOnRealQuestionAgentMock:
     def run_stream(self, *args: Any, session_id: str | None = None, **kwargs: Any):
         self.run_stream_call_count += 1
         state = self._state
+        _session_id = session_id or "unknown"
 
         async def stream():
             # Simulate: agent calls question_for_user → input_provider.get_elicitation()
             # creates a PendingQuestion and awaits the Future.
+            yield None  # Ensure async for starts executing the generator body
             question_id = f"que_test_{id(self)}"
             future: asyncio.Future[list[list[str]]] = asyncio.get_event_loop().create_future()
-            state.pending_questions[question_id] = PendingQuestion(
-                session_id=session_id or "unknown",
+            # Store on SessionState via session_controller if available
+            pending_questions_dict: dict[str, Any] | None = None
+            if state.session_controller is not None:
+                session = state.session_controller.get_session(_session_id)
+                if session is not None:
+                    pending_questions_dict = session.pending_questions
+            if pending_questions_dict is None:
+                # Fallback: use a local dict (won't be visible to cancel_all)
+                pending_questions_dict = {}
+            pending_questions_dict[question_id] = PendingQuestion(
+                session_id=_session_id,
                 questions=[],
                 future=future,
             )
@@ -205,9 +221,7 @@ class BlockingOnRealQuestionAgentMock:
                 # Same path as input_provider.py:354-356
                 raise RunAbortedError("User cancelled the questionnaire") from None
             finally:
-                state.pending_questions.pop(question_id, None)
-            if False:
-                yield None  # noqa: unreachable — makes this an async generator
+                pending_questions_dict.pop(question_id, None)
 
         return stream()
 
@@ -231,6 +245,52 @@ def _make_pool_mock(agent: Any) -> Mock:
     pool.todos.on_change = None
     pool.skill_commands = None
     pool.all_agents = {agent.name: agent}
+
+    # Set up SessionPool mock for new architecture
+    session_pool = Mock()
+    session_pool.sessions = Mock()
+    session_pool.sessions.get_or_create_session = AsyncMock(
+        return_value=(Mock(), True)
+    )
+    session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
+    session_pool.sessions.store = None
+    sp_session = Mock()
+    sp_session.agent = agent
+    session_pool.sessions.get_session = Mock(return_value=sp_session)
+    session_pool.event_bus = Mock()
+    session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    session_pool.event_bus.unsubscribe = AsyncMock()
+
+    async def _mock_receive_request(
+        session_id: str,
+        content: str,
+        priority: str = "when_idle",
+        input_provider: Any = None,
+    ) -> Any:
+        from agentpool.orchestrator.run import RunStatus
+
+        complete_event = asyncio.Event()
+        run_handle = Mock()
+        run_handle.status = RunStatus.running
+        run_handle.complete_event = complete_event
+
+        async def _background_run():
+            try:
+                stream = agent.run_stream(content, session_id=session_id)
+                async for _ in stream:
+                    pass
+                run_handle.status = RunStatus.completed
+            except Exception:
+                run_handle.status = RunStatus.failed
+            finally:
+                complete_event.set()
+
+        asyncio.create_task(_background_run())
+        return run_handle
+
+    session_pool.receive_request = _mock_receive_request
+    pool.session_pool = session_pool
+
     return pool
 
 
@@ -283,12 +343,32 @@ def blocking_real_question_state(tmp_project_dir):
     placeholder_agent.env = _make_env_mock(str(tmp_project_dir))
     placeholder_agent.storage = placeholder_agent.agent_pool.storage
     state = ServerState(working_dir=str(tmp_project_dir), agent=placeholder_agent)
+    # Set up a mock session_controller for the BlockingOnRealQuestionAgentMock
+    from agentpool.orchestrator.core import SessionState as SPSessionState
+    sp_session = SPSessionState(session_id="test-session", agent_name="test-agent")
+    controller = Mock()
+    controller.get_session = Mock(return_value=sp_session)
+    controller._sessions = {"test-session": sp_session}
+
+    def _cancel_all():
+        cancelled = []
+        for session in controller._sessions.values():
+            for qid, pending in list(session.pending_questions.items()):
+                if not pending.future.done():
+                    pending.future.cancel()
+                    cancelled.append(qid)
+        return cancelled
+
+    controller.cancel_all_pending_questions = Mock(side_effect=_cancel_all)
+    state.session_controller = controller
     # Now create the real blocking agent with state reference
     real_agent = BlockingOnRealQuestionAgentMock(state)
     real_agent.agent_pool = _make_pool_mock(real_agent)
     real_agent.env = _make_env_mock(str(tmp_project_dir))
     real_agent.storage = real_agent.agent_pool.storage
     state.agent = real_agent
+    # Update the pool reference on the state to use the real agent's pool
+    state._pool = real_agent.agent_pool
     return state
 
 
@@ -320,6 +400,11 @@ def _setup_session(state: ServerState, session_id: str) -> None:
         time=TimeCreatedUpdated(created=now, updated=now),
     )
     state.sessions[session_id] = session
+    # Dynamically add fallback dicts for helpers that use getattr
+    if not hasattr(state, "messages"):
+        state.messages = {}
+    if not hasattr(state, "session_status"):
+        state.session_status = {}
     state.messages[session_id] = []
     state.session_status[session_id] = SessionStatus(type="idle")
     state.agent.session_id = session_id
@@ -380,14 +465,14 @@ class TestRunAbortedErrorCorruptsConversation:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         await _process_message_locked(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
         assistant_msgs = [
-            msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+            msg for msg in await get_messages_for_session(state, session_id) if isinstance(msg.info, AssistantMessage)
         ]
         assert len(assistant_msgs) == 1, "Should have one assistant message"
 
@@ -411,14 +496,14 @@ class TestRunAbortedErrorCorruptsConversation:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         await _process_message_locked(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
         assistant_msgs = [
-            msg for msg in state.messages[session_id] if isinstance(msg.info, AssistantMessage)
+            msg for msg in await get_messages_for_session(state, session_id) if isinstance(msg.info, AssistantMessage)
         ]
         assert len(assistant_msgs) == 1
 
@@ -457,7 +542,7 @@ class TestRunAbortedErrorCorruptsConversation:
         initial_count = len(state.agent.conversation.chat_messages)
 
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         await _process_message_locked(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
@@ -500,13 +585,15 @@ class TestRunAbortedErrorCorruptsConversation:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         await _process_message_locked(
             session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
         )
 
-        assert state.session_status[session_id].type == "idle", (
+        status = await get_session_status(state, session_id)
+        assert status is not None
+        assert status.type == "idle", (
             "Session must be idle after RunAbortedError"
         )
 
@@ -529,7 +616,7 @@ class TestRunAbortedErrorCorruptsConversation:
 
         # First message: RunAbortedError
         user_msg_id_1, user_msg_1 = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_1)
+        await append_message_to_session(state, session_id, user_msg_1)
         await _process_message_locked(
             session_id, sample_message_request, state, user_msg_id_1, user_msg_1
         )
@@ -541,11 +628,11 @@ class TestRunAbortedErrorCorruptsConversation:
             message_id="msg-after-abort",
         )
         user_msg_id_2, user_msg_2 = _create_user_message(session_id, second_request)
-        state.messages[session_id].append(user_msg_2)
+        await append_message_to_session(state, session_id, user_msg_2)
         await _process_message_locked(session_id, second_request, state, user_msg_id_2, user_msg_2)
 
         # Simulate the TUI's pending memo logic
-        all_messages = state.messages[session_id]
+        all_messages = await get_messages_for_session(state, session_id)
         pending_id = None
         for msg in all_messages:
             if isinstance(msg.info, AssistantMessage) and msg.info.time.completed is None:
@@ -595,7 +682,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         # Start message processing in background (it will block on the question)
         process_task = asyncio.create_task(
@@ -642,7 +729,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         # Start message processing in background (blocks on question)
         process_task = asyncio.create_task(
@@ -698,7 +785,7 @@ class TestAgentLockDeadlockOnUnresolvedQuestion:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         # Start message processing in background
         process_task = asyncio.create_task(
@@ -756,7 +843,7 @@ class TestSSEDisconnectReleasesAgentLock:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         # Start message processing in background (will create PendingQuestion)
         process_task = asyncio.create_task(
@@ -765,14 +852,22 @@ class TestSSEDisconnectReleasesAgentLock:
             )
         )
 
-        # Wait for the question to be created in state.pending_questions
-        for _ in range(20):
-            if state.pending_questions:
+        # Allow event loop to start process_task and background_run
+        await asyncio.sleep(0)
+
+        # Wait for the question to be created in session controller
+        session = state.session_controller.get_session(session_id) if state.session_controller else None
+        for _ in range(40):
+            if session and session.pending_questions:
                 break
             await asyncio.sleep(0.05)
 
-        assert state.pending_questions, (
-            "Agent should have created a pending question, but state.pending_questions is empty."
+        assert session and session.pending_questions, (
+            "Agent should have created a pending question, but no pending questions found."
+        )
+
+        assert session and session.pending_questions, (
+            "Agent should have created a pending question, but no pending questions found."
         )
 
         # Simulate SSE disconnect: call cancel_all_pending_questions
@@ -817,7 +912,7 @@ class TestSSEDisconnectReleasesAgentLock:
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         # Start message processing in background (will block on question)
         process_task = asyncio.create_task(
@@ -827,8 +922,9 @@ class TestSSEDisconnectReleasesAgentLock:
         )
 
         # Wait for the question to be created
+        session = state.session_controller.get_session(session_id) if state.session_controller else None
         for _ in range(20):
-            if state.pending_questions:
+            if session and session.pending_questions:
                 break
             await asyncio.sleep(0.05)
 
@@ -964,7 +1060,7 @@ class TestUnboundLocalErrorInExceptHandler:
         state.agent_lock = lock_that_cancels
 
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
-        state.messages[session_id].append(user_msg_with_parts)
+        await append_message_to_session(state, session_id, user_msg_with_parts)
 
         # This should NOT raise UnboundLocalError — it should handle CancelledError gracefully
         try:

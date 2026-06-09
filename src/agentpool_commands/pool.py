@@ -185,8 +185,9 @@ class CompactCommand(NodeCommand):
 class SpawnCommand(NodeCommand):
     """Spawn a subagent to execute a specific task.
 
-    The subagent runs and its progress is streamed back through the event system.
-    How the progress is displayed depends on the protocol (tool box in ACP, inline, etc.).
+    The subagent runs through the SessionPool and its events are automatically
+    routed to the frontend via EventBus ``scope="descendants"`` subscription.
+    No manual event wrapping is performed by the business layer.
 
     Examples:
       /spawn agent-name "task description"
@@ -214,12 +215,17 @@ class SpawnCommand(NodeCommand):
             agent_name: Name of the agent to spawn
             task_prompt: Task prompt for the subagent
         """
-        from agentpool.agents.events import SubAgentEvent
+        from agentpool.agents.events import SpawnSessionStart
         from agentpool.common_types import SupportsRunStream
 
         pool = ctx.context.pool
         if pool is None:
             await ctx.output.print("❌ **No agent pool available**")
+            return
+
+        session_pool = pool.session_pool
+        if session_pool is None:
+            await ctx.output.print("❌ **SessionPool is required for spawn command**")
             return
 
         if agent_name not in pool.nodes:
@@ -235,17 +241,40 @@ class SpawnCommand(NodeCommand):
             await ctx.output.print(f"❌ **Agent** `{agent_name}` **does not support streaming**")
             return
 
-        # Stream subagent execution by wrapping events in SubAgentEvent
-        # The event handler system (ACP, OpenCode, CLI, etc.) handles rendering
-        # Get parent agent's context to access event emitter
-        parent_ctx = ctx.context.agent.get_context()
+        # Get parent session ID from the active run context
+        parent_session_id = ""
+        agent_ctx = getattr(ctx.context, "run_ctx", None)
+        if agent_ctx is not None:
+            parent_session_id = getattr(agent_ctx, "session_id", "") or ""
 
-        async for event in agent.run_stream(task_prompt):
-            wrapped = SubAgentEvent(
-                source_name=agent_name,
-                source_type="agent",
-                event=event,
-                depth=1,
-            )
-            # Emit to parent agent's event stream
-            await parent_ctx.events.emit_event(wrapped)
+        child_session_id = await ctx.context.agent.get_context().create_child_session(
+            agent_name=agent_name,
+            agent_type=agent.agent_type,
+            parent_session_id=parent_session_id,
+            source_name=agent_name,
+            source_type="agent",
+            depth=1,
+        )
+
+        # Emit SpawnSessionStart so the protocol layer can set up the child session UI
+        # Emit SpawnSessionStart so the protocol layer can detect child session
+        # creation. All other stream events flow through TurnRunner → EventBus
+        # and reach the frontend via protocol-layer ``scope="descendants"``
+        # subscription — no manual business-layer forwarding is required.
+        spawn_event = SpawnSessionStart(
+            child_session_id=child_session_id,
+            parent_session_id=parent_session_id,
+            spawn_mechanism="spawn",
+            source_name=agent_name,
+            source_type="agent",
+            depth=1,
+            description=f"Spawn {agent_name}",
+            metadata={"prompt": task_prompt[:200]} if task_prompt else {},
+        )
+        await ctx.context.agent.get_context().events.emit_event(spawn_event)
+
+        # Run the subagent through SessionPool — events flow to EventBus automatically
+        async for _event in session_pool.run_stream(child_session_id, task_prompt):
+            # Events are consumed to drive the stream; they reach the protocol layer
+            # via EventBus descendants subscription.
+            pass
