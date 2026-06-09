@@ -118,26 +118,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         msg = "Agent must have agent_pool set"
         raise ValueError(msg)
 
-    session_controller = None
-    if agent.agent_pool is not None and agent.agent_pool.session_pool is not None:
-        session_controller = agent.agent_pool.session_pool.sessions
-
-    state = ServerState(
-        working_dir=working_dir or str(Path.cwd()),
-        agent=agent,
-        session_controller=session_controller,
-    )
-
-    # Set up SessionPool integration for session-scoped event consumption
-    if state.pool.session_pool is not None:
-        from agentpool_server.opencode_server.session_pool_integration import (
-            OpenCodeSessionPoolIntegration,
-        )
-
-        state.session_pool_integration = OpenCodeSessionPoolIntegration(
-            session_pool=state.pool.session_pool,
-            server_state=state,
-        )
+    state = ServerState(working_dir=working_dir or str(Path.cwd()), agent=agent)
 
     # Initialize OpenCode protocol handler for SessionPool integration.
     # When opencode.use_session_pool=True, routes can delegate session
@@ -312,10 +293,8 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         state.on_first_subscriber = check_for_updates
         # Pool context is managed externally (by the caller)
         yield
-        # Shutdown - clean up session pool integration first
-        if state.session_pool_integration is not None:
-            await state.session_pool_integration.shutdown()
-        # Then clean up background tasks
+        # Shutdown - clean up per-session agents and background tasks first
+        await state.cleanup_all_session_agents()
         await state.cleanup_tasks()
         # Then tear down watchers and shared infrastructure
         state.pool.todos.on_change = None

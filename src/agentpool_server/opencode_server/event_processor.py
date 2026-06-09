@@ -180,15 +180,9 @@ class EventProcessor:
                 for e in self._process_tool_complete(ctx, tool_call_id, result, event_metadata):
                     yield e
 
-            case StreamCompleteEvent(session_id=event_session_id, message=msg) if msg:
-                # Check if this is a raw child-session completion event
-                # (TurnRunner no longer wraps child events in SubAgentEvent).
-                if event_session_id and event_session_id != ctx.session_id:
-                    async for e in self._handle_raw_child_stream_complete(ctx, event):
-                        yield e
-                else:
-                    for e in self._process_stream_complete(ctx, msg):
-                        yield e
+            case StreamCompleteEvent(message=msg) if msg:
+                for e in self._process_stream_complete(ctx, msg):
+                    yield e
 
             case SubAgentEvent() as subagent_event:
                 async for e in self._process_subagent_event(subagent_event, ctx):
@@ -202,13 +196,6 @@ class EventProcessor:
                 yield SessionStatusEvent.create(
                     session_id=run_started_event.session_id,
                     status_type="busy",
-                )
-
-            case RunErrorEvent() as run_error_event:
-                yield SessionErrorEvent.create(
-                    session_id=ctx.session_id,
-                    error_name=run_error_event.code or "RunError",
-                    error_message=run_error_event.message,
                 )
 
     def _process_text_start(
@@ -226,21 +213,8 @@ class EventProcessor:
             PartUpdatedEvent for the created text part.
         """
         ctx.set_text(delta)
-        # Close out any active reasoning part before text starts
-        if ctx.reasoning_part is not None:
-            start_time = ctx.reasoning_part.time.start if ctx.reasoning_part.time else now_ms()
-            final_reasoning = ReasoningPart(
-                id=ctx.reasoning_part.id,
-                message_id=ctx.assistant_msg_id,
-                session_id=ctx.session_id,
-                text=ctx.reasoning_part.text,
-                time=TimeStartEndOptional(start=start_time, end=now_ms()),
-                metadata=ctx.reasoning_part.metadata,
-            )
-            ctx.assistant_msg.update_part(final_reasoning)
-            ctx.reasoning_part = final_reasoning
-            yield PartUpdatedEvent.create(final_reasoning)
-            ctx.reasoning_part = None
+        # Reset reasoning part reference when text starts (marks end of thinking phase)
+        ctx.reasoning_part = None
 
         text_part = TextPart(
             id=identifier.ascending("part"),
@@ -686,21 +660,6 @@ class EventProcessor:
         response_time = now_ms()
         start = ctx.stream_start_ms
 
-        # Close out any active reasoning part before finalizing text
-        if ctx.reasoning_part is not None:
-            reasoning_start = ctx.reasoning_part.time.start if ctx.reasoning_part.time else start
-            final_reasoning = ReasoningPart(
-                id=ctx.reasoning_part.id,
-                message_id=ctx.assistant_msg_id,
-                session_id=ctx.session_id,
-                text=ctx.reasoning_part.text,
-                time=TimeStartEndOptional(start=reasoning_start, end=response_time),
-                metadata=ctx.reasoning_part.metadata,
-            )
-            ctx.assistant_msg.update_part(final_reasoning)
-            ctx.reasoning_part = None
-            yield PartUpdatedEvent.create(final_reasoning)
-
         # Final text part
         if ctx.response_text and ctx.text_part is None:
             # Text was never streamed incrementally — create a text part now
@@ -723,7 +682,6 @@ class EventProcessor:
                 time=TimeStartEndOptional(start=start, end=response_time),
             )
             ctx.assistant_msg.update_part(final_text_part)
-            yield PartUpdatedEvent.create(final_text_part)
 
         # Step finish part
         cache = TokenCache(read=0, write=0)
@@ -760,10 +718,6 @@ class EventProcessor:
         Yields:
             OpenCode Event objects for broadcasting to appropriate sessions.
         """
-        from agentpool_server.opencode_server.session_pool_integration import (
-            append_message_to_session,
-        )
-
         # 1. Check and cap depth at 5
         if subagent_event.depth >= 5:
             logger.warning(
@@ -785,9 +739,7 @@ class EventProcessor:
 
         # 3. Ensure child session exists if ID provided
         if child_session_id:
-            from agentpool_server.opencode_server.session_pool_integration import ensure_session
-
-            await ensure_session(ctx.state, child_session_id, parent_id=ctx.session_id)
+            await ctx.state.ensure_session(child_session_id, parent_id=ctx.session_id)
 
         # 4. Get or create child context
         child_ctx: EventProcessorContext | None = None
@@ -809,7 +761,7 @@ class EventProcessor:
                 agent_name=source_name,
             )
             user_msg.add_text_part(f"Task: {source_name}")
-            await append_message_to_session(ctx.state, child_session_id, user_msg)
+            ctx.state.messages[child_session_id].append(user_msg)
             yield MessageUpdatedEvent.create(user_msg.info)
             # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
             # text part.  Without this, the UserMessage component finds no text
@@ -846,7 +798,7 @@ class EventProcessor:
             self._child_contexts[child_session_id] = child_ctx
 
             # Create child session assistant message
-            await append_message_to_session(ctx.state, child_session_id, child_assistant_msg)
+            ctx.state.messages[child_session_id].append(child_assistant_msg)
             yield MessageUpdatedEvent.create(child_assistant_msg.info)
 
             # Persist assistant message to storage
@@ -1007,109 +959,10 @@ class EventProcessor:
             # (broadcast is handled by the caller).
             if child_session_id:
                 from agentpool_server.opencode_server.models import SessionStatus
-                from agentpool_server.opencode_server.session_pool_integration import (
-                    set_session_status,
-                )
 
-                await set_session_status(ctx.state, child_session_id, SessionStatus(type="idle"))
+                ctx.state.session_status[child_session_id] = SessionStatus(type="idle")
                 yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
                 yield SessionIdleEvent.create(child_session_id)
-
-    async def _handle_raw_child_stream_complete(
-        self,
-        ctx: EventProcessorContext,
-        event: StreamCompleteEvent[Any],
-    ) -> AsyncIterator[Event]:
-        """Handle a raw StreamCompleteEvent for a child session.
-
-        With TurnRunner no longer wrapping child events in SubAgentEvent,
-        child session StreamCompleteEvents arrive raw. This method finds
-        the child context (created by _process_spawn_start) and updates
-        the parent ToolPart to Completed.
-
-        Args:
-            ctx: The parent event processor context.
-            event: The raw StreamCompleteEvent from the child session.
-
-        Yields:
-            OpenCode Event objects for broadcasting.
-        """
-        child_session_id = event.session_id
-        child_ctx = self._child_contexts.get(child_session_id)
-
-        if child_ctx is None:
-            logger.warning(
-                "Received StreamCompleteEvent for unknown child session %s",
-                child_session_id,
-            )
-            return
-
-        msg = event.message
-        content = str(msg.content) if msg.content else "(no output)"
-
-        # Update child context with final content (mirror _process_subagent_event)
-        if not child_ctx.has_text_part:
-            text_part = TextPart(
-                id=identifier.ascending("part"),
-                message_id=child_ctx.assistant_msg_id,
-                session_id=child_ctx.session_id,
-                text=content,
-                time=TimeStartEndOptional(start=child_ctx.stream_start_ms, end=now_ms()),
-            )
-            child_ctx.assistant_msg.parts.append(text_part)
-            yield PartUpdatedEvent.create(text_part)
-
-        # Persist final child assistant message to storage
-        with contextlib.suppress(Exception):
-            chat_msg = opencode_to_chat_message(
-                child_ctx.assistant_msg, session_id=child_ctx.session_id
-            )
-            await ctx.state.storage.log_message(chat_msg)
-
-        # Update the ToolPart in parent to completed state
-        # Find the matching ToolPart by sessionId in state metadata
-        for part in ctx.assistant_msg.parts:
-            if isinstance(part, ToolPart):
-                state_metadata = getattr(part.state, "metadata", None)
-                if isinstance(state_metadata, dict) and state_metadata.get("sessionId") == child_session_id:
-                    start_time = (
-                        part.state.time.start
-                        if isinstance(part.state, ToolStateRunning)
-                        else now_ms()
-                    )
-                    completed_state = ToolStateCompleted(
-                        input=getattr(part.state, "input", {}),
-                        output=content,
-                        title=state_metadata.get("title", "subagent"),
-                        metadata=state_metadata,
-                        time=TimeStartEndCompacted(start=start_time, end=now_ms()),
-                    )
-                    updated = ToolPart(
-                        id=part.id,
-                        message_id=part.message_id,
-                        session_id=part.session_id,
-                        tool=part.tool,
-                        call_id=part.call_id,
-                        state=completed_state,
-                    )
-                    ctx.assistant_msg.update_part(updated)
-                    # Also update subagent_tool_parts dict so get_subagent_tool_part works
-                    for key, tracked_part in list(ctx.subagent_tool_parts.items()):
-                        if tracked_part.id == part.id:
-                            ctx.subagent_tool_parts[key] = updated
-                            break
-                    yield PartUpdatedEvent.create(updated)
-                    break
-
-        # Emit idle events for the child session
-        from agentpool_server.opencode_server.models import SessionStatus
-        from agentpool_server.opencode_server.session_pool_integration import (
-            set_session_status,
-        )
-
-        await set_session_status(ctx.state, child_session_id, SessionStatus(type="idle"))
-        yield SessionStatusEvent.create(child_session_id, SessionStatus(type="idle"))
-        yield SessionIdleEvent.create(child_session_id)
 
     async def _process_spawn_start(
         self,
@@ -1128,11 +981,6 @@ class EventProcessor:
         Yields:
             OpenCode Event objects for broadcasting.
         """
-        from agentpool_server.opencode_server.session_pool_integration import (
-            append_message_to_session,
-            ensure_session,
-        )
-
         # Duplicate guard - skip if session already exists
         if event.child_session_id in self._child_contexts:
             logger.debug(
@@ -1142,7 +990,7 @@ class EventProcessor:
             return
 
         # Ensure child session exists
-        await ensure_session(ctx.state, event.child_session_id, parent_id=ctx.session_id)
+        await ctx.state.ensure_session(event.child_session_id, parent_id=ctx.session_id)
 
         # Import identifiers
         from agentpool.utils import identifiers
@@ -1157,7 +1005,7 @@ class EventProcessor:
         )
         # Use prompt from metadata if available, fall back to description
         text_part = user_msg.add_text_part(event.metadata.get("prompt") or event.description)
-        await append_message_to_session(ctx.state, event.child_session_id, user_msg)
+        ctx.state.messages[event.child_session_id].append(user_msg)
         yield MessageUpdatedEvent.create(user_msg.info)
         # Yield PartUpdatedEvent so the TUI's store.part[message.id] gets the
         # text part.  Without this, the UserMessage component finds no text
@@ -1191,7 +1039,7 @@ class EventProcessor:
             working_dir=ctx.working_dir,
         )
         self._child_contexts[event.child_session_id] = child_ctx
-        await append_message_to_session(ctx.state, event.child_session_id, child_assistant_msg)
+        ctx.state.messages[event.child_session_id].append(child_assistant_msg)
         yield MessageUpdatedEvent.create(child_assistant_msg.info)
 
         # Persist assistant message to storage
