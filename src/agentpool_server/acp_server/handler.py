@@ -63,6 +63,56 @@ class ACPProtocolHandler:
         self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
         self._consumer_queues: dict[str, asyncio.Queue[RichAgentStreamEvent[Any] | None]] = {}
 
+    async def _send_converted_event(
+        self,
+        session_id: str,
+        event: RichAgentStreamEvent[Any],
+        converter: ACPEventConverter,
+    ) -> bool:
+        """Convert an event and send updates to the ACP client.
+
+        Args:
+            session_id: The session ID to use in notifications.
+            event: The event to convert and send.
+            converter: The event converter to use.
+
+        Returns:
+            True if processing should continue, False if the loop should break
+            (due to connection errors).
+        """
+        try:
+            async for update in converter.convert(event):
+                from acp.schema import SessionNotification
+
+                notification = SessionNotification(
+                    session_id=session_id,
+                    update=update,
+                )
+                await self.client.session_update(notification)
+        except (ConnectionResetError, BrokenPipeError) as e:
+            logger.debug(
+                "Client connection closed gracefully",
+                session_id=session_id,
+                error=str(e),
+            )
+            return False
+        except Exception as e:
+            import anyio
+
+            if isinstance(e, (anyio.ClosedResourceError, anyio.EndOfStream)):
+                logger.debug(
+                    "Stream closed gracefully",
+                    session_id=session_id,
+                    error=str(e),
+                )
+                return False
+            logger.exception(
+                "Failed to convert or send event",
+                session_id=session_id,
+                event_type=type(event).__name__,
+            )
+        return True
+
     def _should_use_session_pool(self) -> bool:
         """Check whether the current main agent has the per-agent canary flag.
 
@@ -141,36 +191,18 @@ class ACPProtocolHandler:
                 if event is None:
                     break
 
-                try:
-                    async for update in converter.convert(event):
-                        from acp.schema import SessionNotification
+                # Distinguish parent vs child events
+                event_session_id = getattr(event, "session_id", None)
+                is_child_event = event_session_id is not None and event_session_id != session_id
 
-                        notification = SessionNotification(
-                            session_id=session_id,
-                            update=update,
-                        )
-                        await self.client.session_update(notification)
-                except (ConnectionResetError, BrokenPipeError) as e:
-                    logger.debug(
-                        "Client connection closed gracefully",
-                        session_id=session_id,
-                        error=str(e),
-                    )
-                    break
-                except Exception as e:
-                    import anyio
-                    if isinstance(e, (anyio.ClosedResourceError, anyio.EndOfStream)):
-                        logger.debug(
-                            "Stream closed gracefully",
-                            session_id=session_id,
-                            error=str(e),
-                        )
+                if is_child_event:
+                    child_sid: str = event_session_id  # type: ignore[assignment]
+                    if not await self._send_converted_event(child_sid, event, converter):
                         break
-                    logger.exception(
-                        "Failed to convert or send event",
-                        session_id=session_id,
-                        event_type=type(event).__name__,
-                    )
+                    continue
+
+                if not await self._send_converted_event(session_id, event, converter):
+                    break
         except asyncio.CancelledError:
             logger.debug("Event consumer cancelled", session_id=session_id)
             raise

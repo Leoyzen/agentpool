@@ -761,14 +761,13 @@ class ACPEventConverter:
                 yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case SpawnSessionStart(
-                # source_name=source_name,
-                # description=description,
-                # spawn_mechanism=spawn_mechanism,
+                source_name=source_name,
+                description=description,
+                spawn_mechanism=spawn_mechanism,
             ):
-                # icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
-                # text = f"\n{icon} **`{source_name}`**: {description}\n"
-                # yield AgentMessageChunk.text(text)
-                ...
+                icon = "⚡" if spawn_mechanism == "spawn" else "🚀"
+                text = f"\n{icon} **`{source_name}`**: {description}\n"
+                yield AgentMessageChunk.text(text, message_id=self._current_message_id)
 
             case SubAgentEvent(
                 source_name=source_name,

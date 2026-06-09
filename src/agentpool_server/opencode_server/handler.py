@@ -9,23 +9,28 @@ the legacy ServerState session management code.
 Per-agent canary:
     Individual agents can opt into SessionPool via
     ``agent.metadata.use_session_pool: true``.  When set, it overrides the
-    global ``opencode.use_session_pool`` flag for that agent.  This allows
+    global ``opencode.use_session_pool`` manifest flag for that agent.  This allows
     gradual rollout agent-by-agent without affecting the entire pool.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
 
-from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
+from agentpool.agents.events import (
+    RunErrorEvent,
+    SpawnSessionStart,
+    StreamCompleteEvent,
+)
 from agentpool.log import get_logger
+from agentpool_server.mixins import ProtocolEventConsumerMixin
 from agentpool_server.opencode_server.models.events import (
     Event,
     SessionErrorEvent,
     SessionIdleEvent,
 )
+
 
 if TYPE_CHECKING:
     from agentpool.agents.events.events import RichAgentStreamEvent
@@ -37,14 +42,14 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class OpenCodeProtocolHandler:
+class OpenCodeProtocolHandler(ProtocolEventConsumerMixin):
     """Protocol handler that routes OpenCode sessions through SessionPool.
 
     Attributes:
         _agent_pool: The AgentPool used to resolve the SessionPool.
         _state: Optional ServerState for broadcasting OpenCode SSE events.
-        _event_bus_subscriptions: Mapping of session_id -> EventBus queue.
         _consumer_tasks: Mapping of session_id -> asyncio consumer Task.
+        _consumer_queues: Mapping of session_id -> EventBus queue.
         _lock: Serializes subscription/unsubscription operations.
     """
 
@@ -57,11 +62,14 @@ class OpenCodeProtocolHandler:
         """
         self._agent_pool = agent_pool
         self._state = state
-        self._event_bus_subscriptions: dict[
-            str, asyncio.Queue[RichAgentStreamEvent[Any] | None]
-        ] = {}
-        self._consumer_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._consumer_tasks: dict[str, asyncio.Task[None]] = {}
+        self._consumer_queues: dict[str, asyncio.Queue[Any]] = {}
         self._lock = asyncio.Lock()
+
+    @property
+    def agent_pool(self) -> AgentPool:
+        """Return the AgentPool (exposed for the mixin)."""
+        return self._agent_pool
 
     def _agent_uses_session_pool(self, agent_name: str | None = None) -> bool:
         """Return whether SessionPool should be used for *agent_name*.
@@ -122,9 +130,6 @@ class OpenCodeProtocolHandler:
             agent_name: Optional agent name for per-agent canary checks.
         """
         async with self._lock:
-            if session_id in self._consumer_tasks:
-                return
-
             if not self._agent_uses_session_pool(agent_name):
                 logger.debug(
                     "SessionPool disabled for agent, skipping event consumer",
@@ -133,60 +138,14 @@ class OpenCodeProtocolHandler:
                 )
                 return
 
-            session_pool = self._session_pool
-            if session_pool is None:
-                logger.warning(
-                    "SessionPool not available, cannot start event consumer",
-                    session_id=session_id,
-                )
-                return
-
-            queue = await session_pool.event_bus.subscribe(
-                session_id, scope="descendants"
-            )
-            self._event_bus_subscriptions[session_id] = queue
-            task = asyncio.create_task(
-                self._event_consumer_loop(session_id, queue),
-                name=f"opencode_event_consumer_{session_id}",
-            )
-            self._consumer_tasks[session_id] = task
+            await self.start_event_consumer(session_id)
             logger.info("Started event consumer for session", session_id=session_id)
 
-    async def _event_consumer_loop(
+    async def _handle_event(
         self,
         session_id: str,
-        queue: asyncio.Queue[RichAgentStreamEvent[Any] | None],
+        event: RichAgentStreamEvent[Any],
     ) -> None:
-        """Read events from the EventBus queue and forward them as SSE.
-
-        Runs until a sentinel ``None`` is received or the task is cancelled.
-
-        Args:
-            session_id: The session whose events are being consumed.
-            queue: The EventBus queue to read from.
-        """
-        try:
-            while True:
-                event = await queue.get()
-                if event is None:
-                    logger.debug(
-                        "Event consumer received sentinel, exiting",
-                        session_id=session_id,
-                    )
-                    break
-                await self._forward_event(session_id, event)
-        except asyncio.CancelledError:
-            logger.debug("Event consumer cancelled", session_id=session_id)
-            raise
-        except Exception:
-            logger.exception("Event consumer loop failed", session_id=session_id)
-        finally:
-            async with self._lock:
-                self._event_bus_subscriptions.pop(session_id, None)
-                self._consumer_tasks.pop(session_id, None)
-            logger.info("Event consumer stopped", session_id=session_id)
-
-    async def _forward_event(self, session_id: str, event: RichAgentStreamEvent[Any]) -> None:
         """Convert a single agent event to an OpenCode event and broadcast it.
 
         Args:
@@ -199,6 +158,26 @@ class OpenCodeProtocolHandler:
         oc_event = self._convert_event(session_id, event)
         if oc_event is not None:
             await self._state.broadcast_event(oc_event)
+
+    async def _handle_spawn_session_start(
+        self,
+        session_id: str,
+        event: SpawnSessionStart,
+    ) -> None:
+        """Handle SpawnSessionStart by logging the new child session.
+
+        The mixin automatically starts the child consumer; this hook is a
+        no-op beyond debug logging.
+
+        Args:
+            session_id: The session the event was received on.
+            event: The spawn event describing the new child session.
+        """
+        logger.debug(
+            "SpawnSessionStart received",
+            session_id=session_id,
+            child_session_id=event.child_session_id,
+        )
 
     def _convert_event(
         self, session_id: str, event: RichAgentStreamEvent[Any]
@@ -273,23 +252,7 @@ class OpenCodeProtocolHandler:
             session_id: The session to close.
         """
         async with self._lock:
-            task = self._consumer_tasks.pop(session_id, None)
-            if task is not None and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    logger.exception(
-                        "Unexpected exception during consumer task cancellation",
-                        session_id=session_id,
-                    )
-
-            queue = self._event_bus_subscriptions.pop(session_id, None)
-            session_pool = self._session_pool
-            if queue is not None and session_pool is not None:
-                await session_pool.event_bus.unsubscribe(session_id, queue)
+            await self.stop_event_consumer(session_id)
 
         session_pool = self._session_pool
         if session_pool is not None:
