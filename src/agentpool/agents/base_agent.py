@@ -1887,8 +1887,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                             rules_parts.append(f"## Project Rules\n\n{content}")
                             logger.debug("Loaded project rules", path=rules_path)
                             break
-                except (OSError, UnicodeDecodeError):
-                    logger.debug("No project rules found", path=rules_path)
+                except (OSError, UnicodeDecodeError) as exc:
+                    logger.debug("No project rules found", path=rules_path, error=str(exc))
+                    break
+                except Exception as exc:
+                    # Handles MCP/RequestError from remote filesystems (ACP mode)
+                    logger.debug("No project rules found", path=rules_path, error=str(exc))
 
         # Stage combined rules for first prompt
         if rules_parts:
