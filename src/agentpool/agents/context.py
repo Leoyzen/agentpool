@@ -225,7 +225,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         """
         pool = self.node.agent_pool
         if pool is not None and pool.session_pool is not None:
-            effective_parent = parent_session_id or getattr(self.node, "session_id", None)
+            effective_parent = parent_session_id or self.node._events.session_id
             if effective_parent is not None:
                 from agentpool.utils.identifiers import generate_session_id
 
