@@ -6,6 +6,7 @@ import asyncio
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
+from xml.sax.saxutils import escape
 
 from anyenv.async_run import as_generated
 import anyio
@@ -99,6 +100,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if not isinstance(template_vars, dict):
             template_vars = {}
         timeout = self.member_timeout
+        member_skills = self._normalize_member_skills(kwargs.pop("member_skills", {}))
+        member_skill_instructions = await self._load_member_skill_instructions(member_skills)
 
         all_nodes = list(self.nodes)
         execution_talks: list[Talk[Any]] = []
@@ -107,12 +110,18 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             talk = Talk[Any](node, [], connection_type="run", queued=True, queue_strategy="latest")
             execution_talks.append(talk)
             self._team_talk.append(talk)
-            member_prompts[node.name] = self._resolve_member_prompt(
+            resolved = self._resolve_member_prompt(
                 node.name,
                 default_prompt,
                 prompts,
                 template_vars,
             )
+            resolved = self._inject_member_skill_instructions(
+                node.name,
+                resolved,
+                member_skill_instructions,
+            )
+            member_prompts[node.name] = resolved
 
         state = _TeamGraphState(
             prompts=prompts,
@@ -125,6 +134,103 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         )
 
         return await run_team_graph(all_nodes, state)
+
+    @staticmethod
+    def _normalize_member_skills(value: Any) -> dict[str, list[str]]:
+        if not isinstance(value, dict):
+            return {}
+        result: dict[str, list[str]] = {}
+        for member_name, raw_names in value.items():
+            name = str(member_name).strip()
+            if not name:
+                continue
+            raw_list = raw_names if isinstance(raw_names, list) else [raw_names]
+            names = [
+                str(item).strip()
+                for item in raw_list
+                if str(item).strip()
+            ]
+            if names:
+                result[name] = list(dict.fromkeys(names))
+        return result
+
+    async def _load_member_skill_instructions(
+        self,
+        member_skills: dict[str, list[str]],
+    ) -> dict[str, str]:
+        if not member_skills or self.agent_pool is None:
+            return {}
+
+        unique_skill_names = list(dict.fromkeys(
+            skill_name
+            for names in member_skills.values()
+            for skill_name in names
+        ))
+        loaded: dict[str, str] = {}
+        for skill_name in unique_skill_names:
+            instructions = await self._load_skill_instructions(skill_name)
+            if instructions:
+                loaded[skill_name] = instructions
+        return {
+            member_name: "\n\n".join(
+                self._format_skill_instruction(skill_name, loaded[skill_name])
+                for skill_name in skill_names
+                if skill_name in loaded
+            )
+            for member_name, skill_names in member_skills.items()
+        }
+
+    async def _load_skill_instructions(self, skill_name: str) -> str:
+        if self.agent_pool is None:
+            return ""
+
+        from agentpool.skills.exceptions import SkillNotFoundError
+
+        provider = getattr(self.agent_pool, "skill_provider", None)
+        if provider is not None:
+            try:
+                return await provider.get_skill_instructions(skill_name)
+            except SkillNotFoundError:
+                pass
+
+        skills = getattr(self.agent_pool, "skills", None)
+        if skills is not None:
+            try:
+                return skills.get_skill_instructions(skill_name)
+            except SkillNotFoundError:
+                pass
+
+        logger.warning(
+            "Team member skill not found",
+            team=self.name,
+            skill=skill_name,
+        )
+        return ""
+
+    @staticmethod
+    def _format_skill_instruction(skill_name: str, instructions: str) -> str:
+        return (
+            f'<skill-instruction name="{escape(skill_name)}">\n'
+            f"{instructions.strip()}\n"
+            "</skill-instruction>"
+        )
+
+    @staticmethod
+    def _inject_member_skill_instructions(
+        member_name: str,
+        prompts: list[PromptCompatible | None],
+        member_skill_instructions: dict[str, str],
+    ) -> list[PromptCompatible | None]:
+        instructions = member_skill_instructions.get(member_name, "").strip()
+        if not instructions:
+            return prompts
+        prompt_text = "\n\n".join(str(prompt) for prompt in prompts if prompt is not None).strip()
+        combined = (
+            f"{instructions}\n\n{prompt_text}"
+            if prompt_text
+            else instructions
+        )
+        return [combined]
 
     def _resolve_member_prompt(
         self,
