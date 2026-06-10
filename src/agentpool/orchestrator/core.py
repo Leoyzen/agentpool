@@ -187,19 +187,18 @@ class EventBus:
             maxsize=self._max_queue_size
         )
 
-        # 1. Register subscriber FIRST (before replay to avoid missing live events)
+        # 1. Register subscriber and capture replay buffer atomically
+        # (inside the same lock to prevent duplicate delivery)
         async with self._lock:
             self._subscribers.setdefault(session_id, []).append((queue, scope))
-
-        # 2. Get replay buffer snapshot
-        if scope == "all":
-            # Global subscriptions collect from all session buffers
-            historical_events: list[EventEnvelope] = []
-            for buffer in self._replay_buffers.values():
-                historical_events.extend(buffer)
-        else:
-            buffer = self._replay_buffers.get(session_id, deque())
-            historical_events = list(buffer)
+            if scope == "all":
+                # Global subscriptions collect from all session buffers
+                historical_events: list[EventEnvelope] = []
+                for buffer in self._replay_buffers.values():
+                    historical_events.extend(buffer)
+            else:
+                buffer = self._replay_buffers.get(session_id, deque())
+                historical_events = list(buffer)
 
         # 3. Drain any live events that arrived during replay
         # (these are already in the queue from publish())
@@ -308,12 +307,13 @@ class EventBus:
         # Wrap event in envelope with routing metadata
         envelope = EventEnvelope(source_session_id=session_id, event=event)
 
-        # Store in replay buffer
-        if session_id not in self._replay_buffers:
-            self._replay_buffers[session_id] = deque(maxlen=self._replay_buffer_size)
-        self._replay_buffers[session_id].append(envelope)
-
         async with self._lock:
+            # Store in replay buffer while holding lock to prevent race
+            # with subscribe() snapshotting the buffer
+            if session_id not in self._replay_buffers:
+                self._replay_buffers[session_id] = deque(maxlen=self._replay_buffer_size)
+            self._replay_buffers[session_id].append(envelope)
+
             queues: list[tuple[asyncio.Queue[EventEnvelope | None], str]] = []
             for subscriber_sid, subscribers in self._subscribers.items():
                 for queue, scope in subscribers:
