@@ -23,6 +23,7 @@ from agentpool.orchestrator.core import EventEnvelope
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
+from agentpool.agents.events.events import SpawnSessionStart
 
 
 if TYPE_CHECKING:
@@ -90,6 +91,42 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         except RuntimeError:
             return False
         return bool(agent.metadata.get("use_session_pool", False))
+
+    def _get_subscription_scope(self) -> str:
+        """Return the EventBus subscription scope.
+
+        Overridden to "session" so that only the exact session's events are
+        consumed.  Child session events are handled by separate consumers
+        created in response to SpawnSessionStart (see _on_spawn_session_start).
+        This prevents event interleaving when a parent and its background-task
+        child run concurrently.
+
+        Returns:
+            The subscription scope string.
+        """
+        return "session"
+
+    async def _on_spawn_session_start(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Start a dedicated consumer for the newly spawned child session.
+
+        Skips background tasks (spawn_mechanism="task") since their events
+        should remain server-side and not be streamed to the ACP client.
+        Only sync subagents get a child consumer so their progress is visible
+        in real-time.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            envelope: The event envelope containing the spawn session start event.
+        """
+        event = envelope.event
+        if isinstance(event, SpawnSessionStart):
+            # Skip background tasks — their events stay server-side
+            if getattr(event, "spawn_mechanism", None) == "task":
+                return
+
+            child_sid = event.child_session_id
+            if child_sid and child_sid != session_id:
+                await self.start_event_consumer(child_sid)
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Create per-session ACPEventConverter before loop starts.
@@ -162,14 +199,6 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 session_id=session_id,
                 event_type=type(envelope.event).__name__,
             )
-
-    async def _on_spawn_session_start(self, session_id: str, envelope: EventEnvelope) -> None:
-        """No-op — ACP does not create child consumers.
-
-        Args:
-            session_id: The session whose consumer received the event.
-            envelope: The event envelope containing the spawn session start event.
-        """
 
     async def _after_consumer_loop(self, session_id: str) -> None:
         """Clean up per-session converter.
