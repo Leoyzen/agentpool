@@ -1073,8 +1073,13 @@ async def fork_session(  # noqa: D417
             part.model_copy(update={"session_id": new_session_id}) for part in msg_with_parts.parts
         ]
         copied_messages.append(MessageWithParts(info=new_info, parts=new_parts))
-    for msg_with_parts in copied_messages:
-        await append_message_to_session(state, new_session_id, msg_with_parts)
+    if session_pool is not None:
+        in_memory_messages = getattr(state, "messages", None)
+        if in_memory_messages is not None:
+            in_memory_messages[new_session_id] = list(copied_messages)
+    else:
+        for msg_with_parts in copied_messages:
+            await append_message_to_session(state, new_session_id, msg_with_parts)
     if session_pool is not None:
         fork_agent = await session_pool.sessions.get_or_create_session_agent(new_session_id)
         fork_agent.conversation.chat_messages.clear()
@@ -2019,7 +2024,21 @@ async def execute_command(  # noqa: PLR0915
                             run_handles = getattr(state, "_run_handles", {})
                             run_handles[session_id] = run_handle
                             setattr(state, "_run_handles", run_handles)
-                        output_text = ""
+                            # Wait for the background run to complete before finalizing
+                            try:
+                                await asyncio.wait_for(
+                                    run_handle.complete_event.wait(), timeout=30.0
+                                )
+                            except TimeoutError:
+                                run_handle.cancel()
+                                output_text = "Error: command execution timed out"
+                            except asyncio.CancelledError:
+                                run_handle.cancel()
+                                raise
+                            else:
+                                output_text = ""
+                        else:
+                            output_text = ""
                     else:
                         # Fallback to direct agent if SessionPool not available
                         result = await state.agent.run(prompt_text)

@@ -171,7 +171,9 @@ async def set_messages_for_session(
         session_id: The session ID to update.
         messages: The new message list.
     """
-    pass
+    in_memory_messages = getattr(state, "messages", None)
+    if in_memory_messages is not None:
+        in_memory_messages[session_id] = list(messages)
 
 
 async def set_session_status(
