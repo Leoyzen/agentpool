@@ -866,24 +866,34 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             if isinstance(event, SpawnSessionStart):
                 return
 
-            # If this session is a child, update the parent ToolPart on completion/error
-            parent_id = self._child_to_parent.get(session_id)
-            if parent_id is not None:
-                spawn = self._child_spawns.get(session_id)
-                if isinstance(event, StreamCompleteEvent) and spawn is not None:
-                    await self._update_parent_toolpart(
-                        parent_session_id=parent_id,
-                        child_session_id=session_id,
-                        spawn_event=spawn,
-                        event=event,
-                    )
-                elif isinstance(event, RunErrorEvent) and spawn is not None:
-                    await self._update_parent_toolpart_error(
-                        parent_session_id=parent_id,
-                        child_session_id=session_id,
-                        spawn_event=spawn,
-                        event=event,
-                    )
+            # Check if this event originated from a child session.
+            # When parent consumer subscribes with scope="descendants", it
+            # receives child events.  We must distinguish them to avoid
+            # rendering child text in the parent TUI.
+            is_child_event = envelope.source_session_id != session_id
+
+            if is_child_event:
+                # Child completion/error: update parent ToolPart, then skip.
+                # Other child events (PartDeltaEvent etc.) are handled by the
+                # dedicated child consumer started in _on_spawn_session_start.
+                parent_id = self._child_to_parent.get(envelope.source_session_id)
+                if parent_id is not None:
+                    spawn = self._child_spawns.get(envelope.source_session_id)
+                    if isinstance(event, StreamCompleteEvent) and spawn is not None:
+                        await self._update_parent_toolpart(
+                            parent_session_id=parent_id,
+                            child_session_id=envelope.source_session_id,
+                            spawn_event=spawn,
+                            event=event,
+                        )
+                    elif isinstance(event, RunErrorEvent) and spawn is not None:
+                        await self._update_parent_toolpart_error(
+                            parent_session_id=parent_id,
+                            child_session_id=envelope.source_session_id,
+                            spawn_event=spawn,
+                            event=event,
+                        )
+                return
 
             ctx = self._contexts.get(session_id)
             if ctx is None:
