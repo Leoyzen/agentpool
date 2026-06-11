@@ -892,9 +892,8 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                 return
 
             # Check if this event originated from a child session.
-            # When parent consumer subscribes with scope="descendants", it
-            # receives child events.  We must distinguish them to avoid
-            # rendering child text in the parent TUI.
+            # Child events are handled by the child consumer (started via
+            # _on_spawn_session_start). We only process parent events here.
             is_child_event = envelope.source_session_id != session_id
 
             if is_child_event:
@@ -919,6 +918,29 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                             event=event,
                         )
                 return
+
+            # When scope="session", child events are received by the child
+            # consumer itself (not the parent consumer). In that case,
+            # session_id == envelope.source_session_id, so is_child_event is
+            # False.  We still need to update the parent ToolPart when this
+            # session is a child session.
+            parent_id = self._child_to_parent.get(session_id)
+            if parent_id is not None:
+                spawn = self._child_spawns.get(session_id)
+                if isinstance(event, StreamCompleteEvent) and spawn is not None:
+                    await self._update_parent_toolpart(
+                        parent_session_id=parent_id,
+                        child_session_id=session_id,
+                        spawn_event=spawn,
+                        event=event,
+                    )
+                elif isinstance(event, RunErrorEvent) and spawn is not None:
+                    await self._update_parent_toolpart_error(
+                        parent_session_id=parent_id,
+                        child_session_id=session_id,
+                        spawn_event=spawn,
+                        event=event,
+                    )
 
             ctx = self._contexts.get(session_id)
             if ctx is None:

@@ -151,8 +151,9 @@ The codebase is organized into focused packages under `src/`:
 
 **Which protocols use it**:
 - **ACP** (`acp_server/handler.py`): Adopted in Phase 1. Uses `scope="session"` with explicit child consumers created in `_on_spawn_session_start` for sync subagents (skips background tasks with `spawn_mechanism="task"`).
-- **OpenCode** (`opencode_server/session_pool_integration.py`): NOT yet adopted (Phase 2, future change). The mixin interface was designed to be compatible with OpenCode's needs (ToolPart registration, child consumer creation, `OpenCodeEventAdapter`).
-- **AG-UI / OpenAI API**: NOT yet adopted. Can adopt the mixin when subagent event forwarding is needed.
+- **OpenCode** (`opencode_server/session_pool_integration.py`): Adopted in Phase 2. Uses `scope="session"` with all hooks implemented (`_before_consumer_loop`, `_handle_event`, `_on_spawn_session_start`, `_after_consumer_loop`). Handles ToolPart registration and `OpenCodeEventAdapter`.
+- **AG-UI** (`agui_server/server.py`): Adopted in Phase 3. Uses `scope="session"` with minimal implementation (stateless HTTP, child consumer started in `_on_spawn_session_start`).
+- **OpenAI API** (`openai_api_server/server.py`): Adopted in Phase 3. Uses `scope="session"` with minimal implementation (stateless HTTP, child consumer started in `_on_spawn_session_start`).
 
 **Key hooks**:
 - `_before_consumer_loop(session_id)`: Set up per-session context (e.g. create an event converter).
