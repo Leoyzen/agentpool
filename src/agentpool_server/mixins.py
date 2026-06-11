@@ -11,11 +11,11 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.events.events import RichAgentStreamEvent, SpawnSessionStart
-from agentpool.orchestrator.core import EventEnvelope
+
 
 
 if TYPE_CHECKING:
-    from agentpool.orchestrator.core import EventBus
+    from agentpool.orchestrator.core import EventBus, EventEnvelope
 
 
 class ConsumerShutdown(Exception):  # noqa: N818
