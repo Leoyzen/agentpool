@@ -15,6 +15,7 @@ from agentpool.log import get_logger
 from agentpool_server.agui_server.base_agent_adapter import BaseAgentAGUIAdapter
 from agentpool_server.agui_server.skill_tools import AGUISkillBridge
 from agentpool_server.http_server import HTTPServer
+from agentpool_server.mixins import ProtocolEventConsumerMixin
 
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from starlette.routing import Route
 
     from agentpool import AgentPool
+    from agentpool.orchestrator.core import EventBus, EventEnvelope
 
 
 logger = get_logger(__name__)
@@ -30,7 +32,7 @@ logger = get_logger(__name__)
 DEFAULT_PORT = 8002
 
 
-class AGUIServer(HTTPServer):
+class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
     """AG-UI server for exposing pool agents on separate routes.
 
     Provides a unified HTTP server that exposes all agents in the pool via
@@ -70,6 +72,7 @@ class AGUIServer(HTTPServer):
             raise_exceptions: Whether to raise exceptions during server start
         """
         super().__init__(pool, name=name, host=host, port=port, raise_exceptions=raise_exceptions)
+        ProtocolEventConsumerMixin.__init__(self)
         # Setup skill command bridge if pool has skill commands configured
         self._skill_bridge: AGUISkillBridge | None = None
         if pool.skill_commands is not None:
@@ -79,6 +82,40 @@ class AGUIServer(HTTPServer):
                 "AG-UI skill bridge setup complete",
                 command_count=len(pool.skill_commands),
             )
+
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the EventBus instance to subscribe to."""
+        session_pool = self.pool.session_pool
+        if session_pool is None:
+            raise RuntimeError("SessionPool not available")
+        return session_pool.event_bus
+
+    def _get_subscription_scope(self) -> str:
+        """Return the EventBus subscription scope.
+
+        Returns:
+            The subscription scope string.
+        """
+        return "session"
+
+    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Handle a single event from the EventBus.
+
+        AG-UI server is stateless HTTP; events are not consumed here.
+        """
+
+    async def _on_spawn_session_start(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Start a child event consumer for the newly spawned session.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            envelope: The event envelope containing the spawn session start event.
+        """
+        event = envelope.event
+        child_sid = getattr(event, "child_session_id", None)
+        if child_sid and child_sid != session_id:
+            await self.start_event_consumer(child_sid)
 
     async def get_routes(self) -> list[Route]:
         """Get Starlette routes for AG-UI protocol.

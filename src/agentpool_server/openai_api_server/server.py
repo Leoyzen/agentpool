@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Annotated, Any
 import anyenv
 
 from agentpool.log import get_logger
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool_server import BaseServer
+from agentpool_server.mixins import ProtocolEventConsumerMixin
 from agentpool_server.openai_api_server.completions.helpers import stream_response
 from agentpool_server.openai_api_server.completions.models import (
     ChatCompletionResponse,
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
     from fastapi import Header, Response
 
     from agentpool import AgentPool
+    from agentpool.orchestrator.core import EventBus
     from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
     from agentpool_server.openai_api_server.responses.models import (
         Response as ResponsesResponse,
@@ -30,11 +33,49 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class OpenAIAPIServer(BaseServer):
+class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
     """OpenAI-compatible API server backed by AgentPool.
 
     Provides both chat completions and responses endpoints.
     """
+
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the EventBus instance to subscribe to."""
+        session_pool = self.pool.session_pool
+        if session_pool is None:
+            raise RuntimeError("SessionPool not available")
+        return session_pool.event_bus
+
+    def _get_subscription_scope(self) -> str:
+        """Return the EventBus subscription scope.
+
+        Returns:
+            The subscription scope string.
+        """
+        return "session"
+
+    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Handle a single event from the EventBus.
+
+        The OpenAI API server is stateless and does not maintain
+        persistent session connections, so this is a no-op.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            envelope: The event envelope to handle.
+        """
+
+    async def _on_spawn_session_start(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Start child consumer when a SpawnSessionStart event is received.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            envelope: The event envelope containing the spawn session start event.
+        """
+        event = envelope.event
+        if hasattr(event, "child_session_id"):
+            await self.start_event_consumer(event.child_session_id)
 
     def __init__(
         self,
@@ -60,13 +101,14 @@ class OpenAIAPIServer(BaseServer):
             api_key: Optional API key for authentication
             raise_exceptions: Whether to raise exceptions during server start
         """
-        from fastapi import Depends, FastAPI
-        import logfire
-
+        ProtocolEventConsumerMixin.__init__(self)
         super().__init__(pool, name=name, raise_exceptions=raise_exceptions)
         self.host = host
         self.port = port
         self.api_key = api_key
+        from fastapi import Depends, FastAPI
+        import logfire
+
         self.app = FastAPI()
         logfire.instrument_fastapi(self.app)
 
