@@ -209,6 +209,15 @@ class ProtocolEventConsumerMixin(ABC):
                 if envelope is None:
                     break
 
+                # Support both EventEnvelope wrappers (from EventBus) and
+                # raw events (e.g. in tests that put items directly on queue)
+                if not hasattr(envelope, "event"):
+                    from agentpool.orchestrator.core import EventEnvelope
+
+                    envelope = EventEnvelope(
+                        source_session_id=session_id, event=envelope
+                    )
+
                 if isinstance(envelope.event, SpawnSessionStart):
                     await self._on_spawn_session_start(session_id, envelope)
 

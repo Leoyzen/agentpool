@@ -432,10 +432,10 @@ async def test_skill_command_routes_through_session_pool_when_flag_enabled(
     assert "info" in result
     assert "parts" in result
 
-    # Verify session_pool.run_stream was called with scope="descendants"
+    # Verify session_pool.run_stream was called with scope="session"
     assert len(session_pool_calls) == 1
     _args, kwargs = session_pool_calls[0]
-    assert kwargs.get("scope") == "descendants"
+    assert kwargs.get("scope") == "session"
 
 
 async def test_skill_command_routes_through_session_pool(
@@ -563,10 +563,10 @@ async def test_slash_command_routes_through_session_pool_when_flag_enabled(
     # Verify command.execute() was called before the agent stream
     mock_command.execute.assert_called_once()
 
-    # Verify session_pool.run_stream was called with scope="descendants"
+    # Verify session_pool.run_stream was called with scope="session"
     assert len(session_pool_calls) == 1
     _args, kwargs = session_pool_calls[0]
-    assert kwargs.get("scope") == "descendants"
+    assert kwargs.get("scope") == "session"
 
 
 async def test_slash_command_routes_through_session_pool(

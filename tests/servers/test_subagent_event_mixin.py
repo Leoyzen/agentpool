@@ -18,7 +18,7 @@ from agentpool.agents.events.events import (
     RunErrorEvent,
     SpawnSessionStart,
 )
-from agentpool.orchestrator.core import EventBus
+from agentpool.orchestrator.core import EventBus, EventEnvelope
 from agentpool_server.mixins import (
     ConsumerShutdown,
     ProtocolEventConsumerMixin,
@@ -147,7 +147,8 @@ async def test_handle_event_dispatches_to_subclass(mock_event_bus: AsyncMock) ->
     consumer._handle_event = mock_handle  # type: ignore[method-assign]
 
     event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
-    await queue.put(event)
+    envelope = EventEnvelope(source_session_id="sess-1", event=event)
+    await queue.put(envelope)
 
     await consumer.start_event_consumer("sess-1")
 
@@ -156,7 +157,7 @@ async def test_handle_event_dispatches_to_subclass(mock_event_bus: AsyncMock) ->
             break
         await asyncio.sleep(0.01)
 
-    mock_handle.assert_awaited_once_with("sess-1", event)
+    mock_handle.assert_awaited_once_with("sess-1", envelope)
 
     await consumer.stop_event_consumer("sess-1")
 
@@ -275,7 +276,8 @@ async def test_spawn_session_start_calls_hook(mock_event_bus: AsyncMock) -> None
         description="test spawn",
         spawn_mechanism="spawn",
     )
-    await queue.put(event)
+    envelope = EventEnvelope(source_session_id="sess-1", event=event)
+    await queue.put(envelope)
     await queue.put(None)
 
     await consumer.start_event_consumer("sess-1")
@@ -284,8 +286,8 @@ async def test_spawn_session_start_calls_hook(mock_event_bus: AsyncMock) -> None
     await asyncio.wait_for(task, timeout=0.5)
 
     assert len(consumer.spawn_session_start_calls) == 1
-    assert consumer.spawn_session_start_calls[0] == ("sess-1", event)
-    assert consumer.handle_event_calls == [("sess-1", event)]
+    assert consumer.spawn_session_start_calls[0] == ("sess-1", envelope)
+    assert consumer.handle_event_calls == [("sess-1", envelope)]
 
 
 @pytest.mark.anyio

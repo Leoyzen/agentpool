@@ -14,7 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from agentpool.agents.events.events import CustomEvent
-from agentpool.orchestrator.core import EventBus
+from agentpool.orchestrator.core import EventBus, EventEnvelope
 from agentpool_server.opencode_server.event_bridge import OpenCodeEventBridge
 from agentpool_server.opencode_server.models import (
     SessionIdleEvent,
@@ -118,7 +118,9 @@ async def test_bridge_republishes_to_event_bus(
     await asyncio.sleep(0.05)
 
     assert subscriber.qsize() == 1
-    wrapped = subscriber.get_nowait()
+    envelope = subscriber.get_nowait()
+    assert isinstance(envelope, EventEnvelope)
+    wrapped = envelope.event
     assert isinstance(wrapped, CustomEvent)
     assert wrapped.event_data is event
     assert wrapped.event_type == "opencode:session.status"
@@ -144,7 +146,9 @@ async def test_bridge_wraps_different_event_types(
 
     assert subscriber.qsize() == 2
     for i, evt in enumerate(events):
-        wrapped = subscriber.get_nowait()
+        envelope = subscriber.get_nowait()
+        assert isinstance(envelope, EventEnvelope)
+        wrapped = envelope.event
         assert isinstance(wrapped, CustomEvent)
         assert wrapped.event_data is evt
         expected_type = f"opencode:{evt.type}"
@@ -254,6 +258,8 @@ async def test_bridge_isolation_between_sessions(
     assert sub_a.qsize() == 1
     assert sub_b.qsize() == 0
 
-    wrapped = sub_a.get_nowait()
+    envelope = sub_a.get_nowait()
+    assert isinstance(envelope, EventEnvelope)
+    wrapped = envelope.event
     assert isinstance(wrapped, CustomEvent)
     assert wrapped.event_data.properties.session_id == "sess-a"
