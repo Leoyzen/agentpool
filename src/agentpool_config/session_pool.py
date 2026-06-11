@@ -8,6 +8,14 @@ from pydantic import ConfigDict, Field
 from schemez import Schema
 
 
+def _env_flag(var_name: str) -> bool:
+    """Read a boolean env-var defaulting to True.
+
+    Returns True unless the env var is explicitly set to ``0``, ``false``, or ``no``.
+    """
+    return os.environ.get(var_name, "true").lower() not in ("0", "false", "no")
+
+
 class SessionPoolConfig(Schema):
     """Configuration for the SessionPool orchestration layer.
 
@@ -62,37 +70,57 @@ class OpenCodeConfig(Schema):
     """
 
     use_session_pool_for_commands: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_COMMANDS", "").lower() in ("1", "true", "yes"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_COMMANDS"),
         title="Use session pool for commands",
     )
-    """Whether to route command execution through the SessionPool."""
+    """Whether to route command execution through the SessionPool.
+
+    Defaults to True. Set to False to fall back to direct agent invocation
+    for emergency rollback only.
+    """
 
     use_session_pool_for_skills: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_SKILLS", "").lower() in ("1", "true", "yes"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_SKILLS"),
         title="Use session pool for skills",
     )
-    """Whether to route skill invocation through the SessionPool."""
+    """Whether to route skill invocation through the SessionPool.
+
+    Defaults to True. Set to False to fall back to direct agent invocation
+    for emergency rollback only.
+    """
 
     use_session_pool_for_init: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_INIT", "").lower() in ("1", "true", "yes"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_INIT"),
         title="Use session pool for init",
     )
-    """Whether to use SessionPool during agent initialization."""
+    """Whether to use SessionPool during agent initialization.
+
+    Defaults to True. Set to False to fall back to direct agent invocation
+    for emergency rollback only.
+    """
 
     use_session_pool_for_summarize: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_SUMMARIZE", "").lower() in ("1", "true", "yes"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_SUMMARIZE"),
         title="Use session pool for summarize",
     )
-    """Whether to route summarization through the SessionPool."""
+    """Whether to route summarization through the SessionPool.
+
+    Defaults to True. Set to False to fall back to direct agent invocation
+    for emergency rollback only.
+    """
 
     use_session_pool_for_mcp: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_MCP", "").lower() in ("1", "true", "yes"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_MCP"),
         title="Use session pool for MCP",
     )
-    """Whether to route MCP tool calls through the SessionPool."""
+    """Whether to route MCP tool calls through the SessionPool.
+
+    Defaults to True. Set to False to fall back to direct agent invocation
+    for emergency rollback only.
+    """
 
     use_session_pool_for_messages: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_MESSAGES", "true").lower() not in ("0", "false", "no"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_MESSAGES"),
         title="Use session pool for messages",
     )
     """Whether to use SessionPool as the exclusive source of truth for message history.
@@ -102,7 +130,7 @@ class OpenCodeConfig(Schema):
     """
 
     use_session_pool_for_status: bool = Field(
-        default_factory=lambda: os.environ.get("AGENTPOOL_USE_SESSION_POOL_FOR_STATUS", "true").lower() not in ("0", "false", "no"),
+        default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_STATUS"),
         title="Use session pool for status",
     )
     """Whether to use SessionController/SessionStatusBridge as the exclusive source

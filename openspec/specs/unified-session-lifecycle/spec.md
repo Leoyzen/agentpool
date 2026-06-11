@@ -59,3 +59,18 @@ The system SHALL allow `BaseAgent.run_stream()` to receive `session_id` from an 
 - **WHEN** `agent.run_stream("hello")` is called
 - **THEN** an ephemeral session ID is generated internally
 - **AND** no parent-child tracking or EventBus routing is attempted
+
+## ADDED Requirements (from change remove-acp-opencode-legacy-flags)
+
+### Requirement: All protocol sessions SHALL be managed by SessionPool
+The system SHALL ensure that session creation, teardown, and lifecycle management for all protocols are handled exclusively through SessionPool. Protocol handlers SHALL NOT create or close sessions through legacy direct agent methods when SessionPool is available.
+
+#### Scenario: ACP session close through SessionPool
+- **WHEN** an ACP client closes a session
+- **THEN** the ACP protocol handler invokes `SessionPool.close_session()`
+- **AND** the handler does NOT fall back to direct `session.close()` on the agent
+
+#### Scenario: OpenCode session operations through SessionPool
+- **WHEN** an OpenCode session is created, initialized, or closed
+- **THEN** the OpenCode protocol handler uses SessionPool APIs for lifecycle management
+- **AND** the handler does NOT use direct agent session methods bypassing SessionPool

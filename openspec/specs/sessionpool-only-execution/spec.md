@@ -38,3 +38,20 @@ The system SHALL route all streaming agent execution through `SessionPool` when 
 ### Requirement: BaseAgent internal prompt continuation loop (native agents only)
 **Reason**: `BaseAgent._run_stream_once()` contains a `while True` loop that processes queued prompts from the run context after each stream completes. For native agents, this loop duplicates PydanticAI's `PendingMessageDrainCapability` behavior and conflicts with it. Non-native agents retain this loop as it is their only continuation mechanism.
 **Migration**: Remove the internal loop from `_run_stream_once()` for native agents. PydanticAI handles continuation via `PendingMessageDrainCapability` at `before_model_request` and `after_node_run`. Non-native agents keep the loop.
+
+## ADDED Requirements (from change remove-acp-opencode-legacy-flags)
+
+### Requirement: Protocol handlers SHALL NOT conditionally bypass SessionPool
+The system SHALL NOT use feature flags, canary flags, or conditional logic in protocol handlers to bypass SessionPool and route execution to legacy non-session-pool paths. When SessionPool is active, all protocol-level prompt processing MUST route through `SessionPool.receive_request()` or equivalent SessionPool APIs.
+
+#### Scenario: ACP prompt handling without bypass flags
+- **WHEN** an ACP client sends a prompt to an ACP agent
+- **THEN** the ACP protocol handler invokes `SessionPool.receive_request()`
+- **AND** the handler does NOT check per-agent metadata flags to decide whether to use SessionPool
+- **AND** the handler does NOT fall back to `session.process_prompt()` or other legacy paths
+
+#### Scenario: OpenCode command execution without category flags
+- **WHEN** an OpenCode client executes a command, skill, init, summarize, or MCP operation
+- **THEN** the OpenCode protocol handler invokes `SessionPool.receive_request()` for the operation
+- **AND** the handler does NOT check per-category feature flags to decide whether to use SessionPool
+- **AND** the handler does NOT fall back to direct agent invocation or other legacy paths

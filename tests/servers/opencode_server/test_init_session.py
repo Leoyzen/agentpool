@@ -20,23 +20,17 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.asyncio
 
 
-async def test_init_session_routes_through_session_pool_when_flag_enabled(
+async def test_init_session_routes_through_session_pool_with_correct_args(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
     mock_pool: Mock,
 ):
-    """When use_session_pool_for_init is True, endpoint uses SessionPool.receive_request."""
+    """SessionPool.receive_request receives correct session_id and prompt."""
     # Create session
     response = await async_client.post("/session", json={"title": "Test Session"})
     assert response.status_code == 200
     session_id = response.json()["id"]
-
-    # Enable the feature flag
-    mock_pool.manifest.opencode = OpenCodeConfig(
-        use_session_pool=True,
-        use_session_pool_for_init=True,
-    )
 
     # Track receive_request calls and capture arguments
     receive_request_called = False
@@ -66,37 +60,25 @@ async def test_init_session_routes_through_session_pool_when_flag_enabled(
     assert "Please analyze this codebase" in captured_args[1]
 
 
-async def test_init_session_uses_direct_agent_when_flag_disabled(
+async def test_init_session_routes_through_session_pool(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
     mock_pool: Mock,
 ):
-    """When use_session_pool_for_init is False, endpoint uses agent.run directly."""
+    """SessionPool is the default execution path for init."""
     # Create session
     response = await async_client.post("/session", json={"title": "Test Session"})
     assert response.status_code == 200
     session_id = response.json()["id"]
-
-    # Ensure flag is disabled
-    mock_pool.manifest.opencode = OpenCodeConfig(
-        use_session_pool=True,
-        use_session_pool_for_init=False,
-    )
 
     response = await async_client.post(f"/session/{session_id}/init")
 
     assert response.status_code == 200
     assert response.json() is True
 
-    # Verify session_pool.receive_request was NOT called
+    # Verify session_pool.receive_request was called
     assert (
-        not hasattr(mock_pool.session_pool.receive_request, "call_count")
-        or mock_pool.session_pool.receive_request.call_count == 0
+        hasattr(mock_pool.session_pool.receive_request, "call_count")
+        and mock_pool.session_pool.receive_request.call_count == 1
     )
-
-    # Give the background task time to execute
-    await asyncio.sleep(0.1)
-
-    # Verify direct agent.run was invoked
-    mock_agent.run.assert_called()

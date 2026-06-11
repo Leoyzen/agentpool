@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.skill import Skill
+from agentpool_config.session_pool import OpenCodeConfig
 from agentpool_server.opencode_server.state import ServerState
 from upathtools import UPath
 
@@ -437,15 +438,14 @@ async def test_skill_command_routes_through_session_pool_when_flag_enabled(
     assert kwargs.get("scope") == "descendants"
 
 
-async def test_skill_command_uses_direct_agent_when_flag_disabled(
+async def test_skill_command_routes_through_session_pool(
     async_client: "AsyncClient",
     server_state: ServerState,
     mock_agent: Mock,
 ):
-    """Test that skill command uses direct agent.run_stream() when flag disabled.
+    """Test that skill command routes through SessionPool.run_stream().
 
-    When ``use_session_pool_for_skills`` is False (default), skill commands
-    should preserve the legacy direct path.
+    SessionPool is now the default execution path for all categories.
     """
     # Create session first
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -467,9 +467,6 @@ async def test_skill_command_uses_direct_agent_when_flag_disabled(
     skill_cmd = SkillCommand(name="direct-skill", description="Direct skill", skill=skill)
     mock_agent.agent_pool.skill_commands = {"direct-skill": skill_cmd}  # type: ignore[attr-defined]
     mock_agent.agent_pool.skill_provider = None  # type: ignore[attr-defined]
-
-    # Ensure flag is disabled (default) — no action needed since
-    # ``use_session_pool_for_skills`` defaults to ``False``.
 
     # Track agent.run_stream calls
     agent_calls: list[tuple[Any, Any]] = []
@@ -505,9 +502,9 @@ async def test_skill_command_uses_direct_agent_when_flag_disabled(
     assert "info" in result
     assert "parts" in result
 
-    # Verify direct agent.run_stream was called (not session_pool.run_stream)
-    assert len(agent_calls) == 1
-    assert len(session_pool_calls) == 0
+    # Verify session_pool.run_stream was called (not direct agent.run_stream)
+    assert len(session_pool_calls) == 1
+    assert len(agent_calls) == 0
 
 
 async def test_slash_command_routes_through_session_pool_when_flag_enabled(
@@ -572,15 +569,14 @@ async def test_slash_command_routes_through_session_pool_when_flag_enabled(
     assert kwargs.get("scope") == "descendants"
 
 
-async def test_slash_command_uses_direct_agent_when_flag_disabled(
+async def test_slash_command_routes_through_session_pool(
     async_client: "AsyncClient",
     server_state: ServerState,
     mock_agent: Mock,
 ):
-    """Test that slash command uses direct agent.run_stream() when flag disabled.
+    """Test that slash command routes through SessionPool.run_stream().
 
-    When ``use_session_pool_for_commands`` is False (default), slashed
-    commands should preserve the legacy direct path.
+    SessionPool is now the default execution path for all categories.
     """
     # Create session first
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -593,8 +589,6 @@ async def test_slash_command_uses_direct_agent_when_flag_disabled(
     mock_command_store = MagicMock()
     mock_command_store.get_command = MagicMock(return_value=mock_command)
     server_state.command_store = mock_command_store
-
-    # Ensure flag is disabled (default) — no action needed
 
     # Track agent.run_stream calls
     agent_calls: list[tuple[Any, Any]] = []
@@ -633,9 +627,9 @@ async def test_slash_command_uses_direct_agent_when_flag_disabled(
     # Verify command.execute() was called
     mock_command.execute.assert_called_once()
 
-    # Verify direct agent.run_stream was called (not session_pool.run_stream)
-    assert len(agent_calls) == 1
-    assert len(session_pool_calls) == 0
+    # Verify session_pool.run_stream was called (not direct agent.run_stream)
+    assert len(session_pool_calls) == 1
+    assert len(agent_calls) == 0
 
 
 async def test_mcp_prompt_routes_through_session_pool_when_flag_enabled(
@@ -710,15 +704,14 @@ async def test_mcp_prompt_routes_through_session_pool_when_flag_enabled(
     assert server_state._run_handles[session_id].run_id == "test-run-id"
 
 
-async def test_mcp_prompt_uses_direct_agent_when_flag_disabled(
+async def test_mcp_prompt_routes_through_session_pool(
     async_client: "AsyncClient",
     server_state: ServerState,
     mock_agent: Mock,
 ):
-    """Test that MCP prompt uses direct agent.run() when flag disabled.
+    """Test that MCP prompt routes through SessionPool.receive_request().
 
-    When ``use_session_pool_for_mcp`` is False (default), MCP prompts
-    should preserve the legacy direct path.
+    SessionPool is now the default execution path for all categories.
     """
     # Create session first
     response = await async_client.post("/session", json={"title": "Test Session"})
@@ -737,8 +730,6 @@ async def test_mcp_prompt_uses_direct_agent_when_flag_disabled(
     mock_prompt.get_components = AsyncMock(return_value=[])
     mock_agent.tools.list_prompts = AsyncMock(return_value=[mock_prompt])
     mock_agent.run = AsyncMock(return_value=MagicMock(data="Direct result"))
-
-    # Ensure flag is disabled (default) — no action needed
 
     # Track session_pool.receive_request calls
     receive_request_calls: list[tuple[Any, Any]] = []
@@ -760,11 +751,6 @@ async def test_mcp_prompt_uses_direct_agent_when_flag_disabled(
     assert "info" in result
     assert "parts" in result
 
-    # Verify direct agent.run was called (not session_pool.receive_request)
-    mock_agent.run.assert_called_once()
-    assert len(receive_request_calls) == 0
-
-    # Verify response contains the direct agent result
-    text_parts = [p for p in result["parts"] if p.get("type") == "text"]
-    assert len(text_parts) == 1
-    assert text_parts[0]["text"] == "Direct result"
+    # Verify session_pool.receive_request was called (not direct agent.run)
+    assert len(receive_request_calls) == 1
+    mock_agent.run.assert_not_called()

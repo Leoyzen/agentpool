@@ -106,13 +106,13 @@ async def test_summarize_uses_session_pool_when_flag_enabled(
     assert len(result["parts"]) >= 2
 
 
-async def test_summarize_uses_direct_agent_when_flag_disabled(
+async def test_summarize_routes_through_session_pool(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
     mock_pool: Mock,
 ):
-    """When use_session_pool_for_summarize is False, endpoint uses agent.run_stream directly."""
+    """SessionPool is the default execution path for summarization."""
     from pydantic_ai import RequestUsage, TextPart, TextPartDelta
 
     from agentpool.agents.events import PartDeltaEvent, PartStartEvent, StreamCompleteEvent
@@ -149,25 +149,19 @@ async def test_summarize_uses_direct_agent_when_flag_disabled(
         )
     ]
 
-    # Ensure flag is disabled
-    mock_pool.manifest.opencode = OpenCodeConfig(
-        use_session_pool=True,
-        use_session_pool_for_summarize=False,
-    )
-
-    # Mock agent.run_stream
-    async def mock_agent_stream(*args: object, **kwargs: object):
-        yield PartStartEvent(index=0, part=TextPart(content="Direct summary"))
-        yield PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" done"))
-        yield StreamCompleteEvent(
+    # Mock session_pool.run_stream
+    from unittest.mock import AsyncMock
+    mock_pool.session_pool.run_stream = AsyncMock(return_value=[
+        PartStartEvent(index=0, part=TextPart(content="SessionPool summary")),
+        PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" done")),
+        StreamCompleteEvent(
             message=ChatMessage(
-                content="Direct summary done",
+                content="SessionPool summary done",
                 role="assistant",
                 usage=RequestUsage(input_tokens=5, output_tokens=3),
             )
         )
-
-    mock_agent.run_stream = mock_agent_stream
+    ])
 
     # Mock compact_conversation
     with patch(
@@ -178,8 +172,8 @@ async def test_summarize_uses_direct_agent_when_flag_disabled(
 
     assert response.status_code == 200
 
-    # Verify session_pool.run_stream was NOT called
-    assert not hasattr(mock_pool.session_pool.run_stream, "call_count") or mock_pool.session_pool.run_stream.call_count == 0
+    # Verify session_pool.run_stream was called
+    assert mock_pool.session_pool.run_stream.call_count == 1
 
     result = response.json()
     assert "info" in result

@@ -663,79 +663,14 @@ class AgentPoolACPAgent(ACPAgent):
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
 
-        # Delegate to SessionPool-backed handler when feature flag is enabled
+        # Delegate to SessionPool-backed handler when available
         if self._protocol_handler is not None:
-            response = await self._protocol_handler.handle_prompt(
+            return await self._protocol_handler.handle_prompt(
                 params.session_id,
                 params.prompt,
             )
-            if response is not None:
-                return response
-            # Per-agent canary flag is off — fall through to legacy path
 
-        logger.info("Processing prompt", session_id=params.session_id)
-        session = self.session_manager.get_session(params.session_id)
-        # Auto-recreate session if not found (e.g., after pool swap)
-        if not session:
-            logger.info("Session not found, recreating", session_id=params.session_id)
-            # Try to get cwd from stored session data
-            cwd = "."
-            try:
-                stored = (
-                    await self.session_manager.session_store.load(params.session_id)
-                    if self.session_manager.session_store
-                    else None
-                )
-                if stored and stored.cwd:
-                    cwd = stored.cwd
-            except Exception:  # noqa: BLE001
-                pass  # Use default cwd
-
-            try:
-                # Recreate session with same ID using default agent
-                await self.session_manager.create_session(
-                    agent=self.default_agent,
-                    cwd=cwd,
-                    client=self.client,
-                    acp_agent=self,
-                    session_id=params.session_id,
-                    client_capabilities=self.client_capabilities,
-                    client_info=self.client_info,
-                    subagent_display_mode=self.subagent_display_mode,
-                )
-                if session := self.session_manager.get_session(params.session_id):
-                    # Initialize session extras
-                    self.tasks.create_task(session.send_available_commands_update())
-                    self.tasks.create_task(session.agent.load_rules(session.cwd))
-            except Exception:
-                logger.exception("Failed to recreate session", session_id=params.session_id)
-                return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
-
-        try:
-            if not session:
-                raise ValueError(f"Session {params.session_id} not found")  # noqa: TRY301
-            stop_reason = await session.process_prompt(params.prompt)
-            # Return the actual stop reason from the session
-        except Exception as e:
-            logger.exception("Failed to process prompt", session_id=params.session_id)
-            msg = f"Error processing prompt: {e}"
-            if session:
-                # Send error as toast instead of polluting chat history
-                await session._send_toast(
-                    message=msg,
-                    level="error",
-                )
-                await anyio.sleep(0.05)  # Allow network buffers to flush
-
-            return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
-        else:
-            response = PromptResponse(
-                stop_reason=stop_reason,
-                user_message_id=params.message_id,
-                usage=session.last_usage,
-            )
-            logger.info("Returning PromptResponse", stop_reason=stop_reason)
-            return response
+        raise RuntimeError("No protocol handler available")
 
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         """Stop an active session and free its resources.
@@ -743,25 +678,12 @@ class AgentPoolACPAgent(ACPAgent):
         Cancels any ongoing work (like session/cancel) and then
         closes the session and releases all associated resources.
         """
-        # Delegate to SessionPool-backed handler when feature flag is enabled
+        # Delegate to SessionPool-backed handler when available
         if self._protocol_handler is not None:
             await self._protocol_handler.close_session(params.session_id)
-            # Handler returns early when per-agent canary is off;
-            # legacy cleanup below still runs for those agents.
-            if self.default_agent.metadata.get("use_session_pool", False):
-                return CloseSessionResponse()
+            return CloseSessionResponse()
 
-        logger.info("Stopping session", session_id=params.session_id)
-        try:
-            # Cancel ongoing work first
-            if session := self.session_manager.get_session(params.session_id):
-                await session.cancel()
-            # Close and release session resources
-            await self.session_manager.close_session(params.session_id)
-            logger.info("Session stopped", session_id=params.session_id)
-        except Exception:
-            logger.exception("Failed to stop session", session_id=params.session_id)
-        return CloseSessionResponse()
+        raise RuntimeError("No protocol handler available")
 
     async def cancel(self, params: CancelNotification) -> None:
         """Cancel operations for a session."""

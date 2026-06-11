@@ -28,12 +28,16 @@ def mock_pool() -> MagicMock:
     """Return a mocked AgentPool with SessionPool enabled."""
     pool = MagicMock()
     pool.main_agent = MagicMock()
-    pool.main_agent.metadata = {"use_session_pool": True}
 
     session_pool = MagicMock()
     session_pool.create_session = AsyncMock()
     session_pool.receive_request = AsyncMock()
     session_pool.event_bus = MagicMock()
+
+    # Mock sessions registry
+    sessions_registry = MagicMock()
+    sessions_registry.get_or_create_session_agent = AsyncMock(return_value=MagicMock())
+    session_pool.sessions = sessions_registry
 
     # Event consumer loop should exit immediately in tests
     async def _mock_queue_get():
@@ -187,15 +191,14 @@ class TestHandlePromptInputProvider:
         assert caps.elicitation.url is True
 
     @pytest.mark.anyio
-    async def test_handle_prompt_skips_when_canary_disabled(
+    async def test_handle_prompt_returns_end_turn_when_session_pool_missing(
         self,
         mock_pool: MagicMock,
         mock_event_converter: MagicMock,
         mock_client: MagicMock,
     ) -> None:
-        """When the canary flag is off, handle_prompt returns None and
-        does not create an input_provider."""
-        mock_pool.main_agent.metadata = {"use_session_pool": False}
+        """When SessionPool is not available, handle_prompt returns end_turn."""
+        mock_pool.session_pool = None
         handler = ACPProtocolHandler(
             agent_pool=mock_pool,
             session_manager=MagicMock(),
@@ -206,8 +209,8 @@ class TestHandlePromptInputProvider:
         prompt = [TextContentBlock(text="hello")]
         result = await handler.handle_prompt("sess-1", prompt)
 
-        assert result is None
-        assert not mock_pool.session_pool.receive_request.called
+        assert result is not None
+        assert result.stop_reason == "end_turn"
 
     @pytest.mark.anyio
     async def test_handle_prompt_skips_when_session_pool_missing(

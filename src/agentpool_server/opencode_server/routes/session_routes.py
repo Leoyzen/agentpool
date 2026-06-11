@@ -277,29 +277,17 @@ async def _execute_slashed_command(
                 "请使用已加载的 skill context 来回答用户的请求。"
             )
 
-            # Check feature flag for SessionPool routing
-            use_session_pool = (
-                state.pool.manifest.opencode.should_use_session_pool_for("commands")
-                if state.pool is not None and state.pool.manifest is not None
-                else False
-            )
-
-            if use_session_pool:
-                session_pool = state.pool.session_pool
-                if session_pool is not None:
-                    input_provider = state.ensure_input_provider(session_id)
-                    iterator = session_pool.run_stream(
-                        session_id,
-                        agent_prompt,
-                        scope="descendants",
-                        input_provider=input_provider,
-                    )
-                else:
-                    # Fallback to direct agent if SessionPool not available
-                    agent = state.agent
-                    iterator = agent.run_stream(agent_prompt, session_id=session_id)
+            # Route through SessionPool when available, otherwise direct agent
+            session_pool = state.pool.session_pool if state.pool is not None else None
+            if session_pool is not None:
+                input_provider = state.ensure_input_provider(session_id)
+                iterator = session_pool.run_stream(
+                    session_id,
+                    agent_prompt,
+                    scope="descendants",
+                    input_provider=input_provider,
+                )
             else:
-                # Preserve existing behavior: direct agent run_stream
                 agent = state.agent
                 iterator = agent.run_stream(agent_prompt, session_id=session_id)
 
@@ -470,25 +458,13 @@ async def _execute_skill_command(
                 working_dir=state.working_dir,
             )
 
-            # Check if SessionPool routing is enabled for skills
-            use_session_pool = (
-                state.pool.manifest.opencode.should_use_session_pool_for("skills")
-                if state.pool and hasattr(state.pool, "manifest") and state.pool.manifest
-                else False
-            )
-
-            if use_session_pool:
-                session_pool = state.pool.session_pool
-                if session_pool is not None:
-                    iterator = session_pool.run_stream(
-                        session_id, user_prompt, scope="descendants"
-                    )
-                else:
-                    # Fallback to direct agent if session_pool is not available
-                    agent = state.agent
-                    iterator = agent.run_stream(user_prompt, session_id=session_id)
+            # Route through SessionPool when available, otherwise direct agent
+            session_pool = state.pool.session_pool if state.pool is not None else None
+            if session_pool is not None:
+                iterator = session_pool.run_stream(
+                    session_id, user_prompt, scope="descendants"
+                )
             else:
-                # Legacy direct path
                 agent = state.agent
                 iterator = agent.run_stream(user_prompt, session_id=session_id)
             async for oc_event in adapter.process_stream(iterator):
@@ -1162,37 +1138,30 @@ async def init_session(  # noqa: D417
 
     init_prompt = "\n".join(prompt_parts)
 
-    # Check feature flag for SessionPool routing
-    use_session_pool = (
-        state.pool.manifest.opencode.should_use_session_pool_for("init")
-        if state.pool is not None and state.pool.manifest is not None
-        else False
-    )
+    # Route through SessionPool when available, otherwise direct agent
+    session_pool = state.pool.session_pool if state.pool is not None else None
+    if session_pool is not None:
+        # Get or create agent and optionally set model before fire-and-forget
+        agent = state.agent
+        if request and request.model_id and request.provider_id:
+            requested_model = f"{request.provider_id}:{request.model_id}"
+            try:
+                available_models = await agent.get_available_models()
+                if available_models:
+                    valid_ids = [
+                        m.id_override if m.id_override else m.id for m in available_models
+                    ]
+                    if requested_model in valid_ids:
+                        await agent.set_model(requested_model)
+            except Exception:  # noqa: BLE001
+                pass
 
-    if use_session_pool:
-        session_pool = state.pool.session_pool
-        if session_pool is not None:
-            # Get or create agent and optionally set model before fire-and-forget
-            agent = state.agent
-            if request and request.model_id and request.provider_id:
-                requested_model = f"{request.provider_id}:{request.model_id}"
-                try:
-                    available_models = await agent.get_available_models()
-                    if available_models:
-                        valid_ids = [
-                            m.id_override if m.id_override else m.id for m in available_models
-                        ]
-                        if requested_model in valid_ids:
-                            await agent.set_model(requested_model)
-                except Exception:  # noqa: BLE001
-                    pass
+        # Fire-and-forget through SessionPool; RunHandle is stored
+        # in SessionController._runs for cancellation tracking.
+        await session_pool.receive_request(session_id, init_prompt)
+        return True
 
-            # Fire-and-forget through SessionPool; RunHandle is stored
-            # in SessionController._runs for cancellation tracking.
-            await session_pool.receive_request(session_id, init_prompt)
-            return True
-
-    # Legacy path: run the agent in the background directly
+    # Fallback path: run the agent in the background directly
     async def run_init() -> None:
         agent = state.agent
         try:
@@ -1460,11 +1429,8 @@ async def summarize_session(  # noqa: PLR0915
     if not await get_messages_for_session(state, session_id):
         raise HTTPException(status_code=400, detail="No messages to summarize")
 
-    # Check feature flag for SessionPool-based summarization
-    use_session_pool = (
-        state.pool is not None
-        and state.pool.manifest.opencode.should_use_session_pool_for("summarize")
-    )
+    # Determine whether SessionPool is available for summarization
+    session_pool = state.pool.session_pool if state.pool is not None else None
 
     # Route-level lock: serialize summarization for this session.
     # Summarization has two phases (stream LLM + compaction) that must
@@ -1518,11 +1484,7 @@ async def summarize_session(  # noqa: PLR0915
             cost = 0.0
             text_part: TextPart | None = None
             try:
-                if use_session_pool:
-                    session_pool = state.pool.session_pool
-                    if session_pool is None:
-                        msg = "SessionPool is not available"
-                        raise RuntimeError(msg)
+                if session_pool is not None:
                     stream = session_pool.run_stream(
                         session_id, SUMMARIZE_PROMPT, scope="descendants"
                     )
@@ -1577,7 +1539,7 @@ async def summarize_session(  # noqa: PLR0915
             except Exception as e:  # noqa: BLE001
                 response_text = f"Error generating summary: {e}"
             finally:
-                if use_session_pool:
+                if session_pool is not None:
                     # Post-stream cleanup: compact conversation when using SessionPool.
                     # This runs in finally so compaction always occurs after streaming,
                     # even if the stream raised an exception.
@@ -1614,7 +1576,7 @@ async def summarize_session(  # noqa: PLR0915
                 assistant_msg_with_parts.parts.append(text_part)
                 await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
-            if not use_session_pool:
+            if session_pool is None:
                 # Step 2: Run compaction pipeline AFTER summary is generated
                 # The summary was generated with full context. Now we compact the history.
                 # Final state will be: [compacted history] + [summary message]
@@ -2004,47 +1966,37 @@ async def execute_command(  # noqa: PLR0915
                                     prompt_texts.append(item)
                 prompt_text = "\n".join(prompt_texts)
 
-                # Check feature flag for SessionPool routing
-                use_session_pool = (
-                    state.pool is not None
-                    and state.pool.manifest.opencode.should_use_session_pool_for("mcp")
-                )
-
-                if use_session_pool:
-                    session_pool = state.pool.session_pool
-                    if session_pool is not None:
-                        input_provider = state.ensure_input_provider(session_id)
-                        run_handle = await session_pool.receive_request(
-                            session_id=session_id,
-                            content=prompt_text,
-                            priority="when_idle",
-                            input_provider=input_provider,
-                        )
-                        if run_handle is not None:
-                            run_handles = getattr(state, "_run_handles", {})
-                            run_handles[session_id] = run_handle
-                            setattr(state, "_run_handles", run_handles)
-                            # Wait for the background run to complete before finalizing
-                            try:
-                                await asyncio.wait_for(
-                                    run_handle.complete_event.wait(), timeout=30.0
-                                )
-                            except TimeoutError:
-                                run_handle.cancel()
-                                output_text = "Error: command execution timed out"
-                            except asyncio.CancelledError:
-                                run_handle.cancel()
-                                raise
-                            else:
-                                output_text = ""
+                # Route through SessionPool when available, otherwise direct agent
+                session_pool = state.pool.session_pool if state.pool is not None else None
+                if session_pool is not None:
+                    input_provider = state.ensure_input_provider(session_id)
+                    run_handle = await session_pool.receive_request(
+                        session_id=session_id,
+                        content=prompt_text,
+                        priority="when_idle",
+                        input_provider=input_provider,
+                    )
+                    if run_handle is not None:
+                        run_handles = getattr(state, "_run_handles", {})
+                        run_handles[session_id] = run_handle
+                        setattr(state, "_run_handles", run_handles)
+                        # Wait for the background run to complete before finalizing
+                        try:
+                            await asyncio.wait_for(
+                                run_handle.complete_event.wait(), timeout=30.0
+                            )
+                        except TimeoutError:
+                            run_handle.cancel()
+                            output_text = "Error: command execution timed out"
+                        except asyncio.CancelledError:
+                            run_handle.cancel()
+                            raise
                         else:
                             output_text = ""
                     else:
-                        # Fallback to direct agent if SessionPool not available
-                        result = await state.agent.run(prompt_text)
-                        output_text = str(result.data)
+                        output_text = ""
                 else:
-                    # Run the expanded prompt through the session agent
+                    # Fallback to direct agent if SessionPool not available
                     result = await state.agent.run(prompt_text)
                     output_text = str(result.data)
 

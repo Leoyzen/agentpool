@@ -2,7 +2,7 @@
 
 This module provides ``ACPProtocolHandler``, a protocol handler that delegates
 ACP session lifecycle and prompt processing to the ``SessionPool`` orchestration
-layer when the ``acp.use_session_pool`` feature flag is enabled.
+layer.
 
 The handler bridges AgentPool's EventBus with the ACP protocol by running a
 per-session event consumer loop that converts agent stream events to ACP
@@ -18,12 +18,11 @@ import anyio
 
 from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
+from agentpool.agents.events.events import SpawnSessionStart
 from agentpool.log import get_logger
-from agentpool.orchestrator.core import EventEnvelope
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
-from agentpool.agents.events.events import SpawnSessionStart
 
 
 if TYPE_CHECKING:
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
     from acp import Client
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
-    from agentpool.orchestrator.core import EventBus
+    from agentpool.orchestrator.core import EventBus, EventEnvelope
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
@@ -78,19 +77,6 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         if session_pool is None:
             raise RuntimeError("SessionPool not available")
         return session_pool.event_bus
-
-    def _should_use_session_pool(self) -> bool:
-        """Check whether the current main agent has the per-agent canary flag.
-
-        Returns:
-            True if ``agent.metadata.use_session_pool`` is set and truthy,
-            False otherwise (falls back to the legacy session path).
-        """
-        try:
-            agent = self.agent_pool.main_agent
-        except RuntimeError:
-            return False
-        return bool(agent.metadata.get("use_session_pool", False))
 
     def _get_subscription_scope(self) -> str:
         """Return the EventBus subscription scope.
@@ -228,14 +214,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         """Subscribe to EventBus once per session and start consumer loop.
 
         If a consumer task already exists and has not finished, this is a
-        no-op.  Skips creation when the per-agent canary flag is disabled.
+        no-op.
 
         Args:
             session_id: The session to ensure a consumer for.
         """
-        if not self._should_use_session_pool():
-            return
-
         await self.start_event_consumer(session_id)
         logger.debug("Started event consumer", session_id=session_id)
 
@@ -243,40 +226,39 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self,
         session_id: str,
         prompt: Sequence[ContentBlock],
-    ) -> PromptResponse | None:
+    ) -> PromptResponse:
         """Process a prompt through the SessionPool.
 
         Ensures the session exists (via ``SessionPool.create_session``) and
         that an event consumer is running before delegating the prompt to
         ``SessionPool.receive_request()``.
 
-        When the per-agent canary flag is disabled, returns ``None`` so the
-        caller can fall back to the legacy session path.
-
         Args:
             session_id: The ACP session identifier.
             prompt: ACP content blocks from the prompt request.
 
         Returns:
-            A ``PromptResponse`` with the stop reason, or ``None`` when the
-            per-agent flag is disabled.
+            A ``PromptResponse`` with the stop reason.
         """
         from agentpool_server.acp_server.converters import from_acp_content
-
-        if not self._should_use_session_pool():
-            logger.debug(
-                "Per-agent canary flag off, skipping SessionPool",
-                session_id=session_id,
-            )
-            return None
 
         session_pool = self.agent_pool.session_pool
         if session_pool is None:
             logger.error("SessionPool not available", session_id=session_id)
             return self._prompt_response("end_turn")
 
-        # Ensure the session exists in the SessionPool
-        await session_pool.create_session(session_id)
+        # Recover cwd from session_store for clients reconnecting after pool swaps
+        cwd = "."
+        if self.session_manager.session_store is not None:
+            try:
+                stored = await self.session_manager.session_store.load(session_id)
+                if stored and stored.cwd:
+                    cwd = stored.cwd
+            except Exception:  # noqa: BLE001
+                pass  # Use default cwd
+
+        # Ensure the session exists in the SessionPool (pass recovered cwd as metadata)
+        await session_pool.create_session(session_id, cwd=cwd)
 
         # Add session MCP providers to SessionPool's per-session agent.
         # Use deduplication because get_or_create_session_agent returns a cached
@@ -345,18 +327,9 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         waits for it to finish, then delegates to
         ``SessionPool.close_session()``.
 
-        Skips SessionPool cleanup when the per-agent canary flag is disabled.
-
         Args:
             session_id: The session to close.
         """
-        if not self._should_use_session_pool():
-            logger.debug(
-                "Per-agent canary flag off, skipping SessionPool close",
-                session_id=session_id,
-            )
-            return
-
         session_pool = self.agent_pool.session_pool
 
         # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
