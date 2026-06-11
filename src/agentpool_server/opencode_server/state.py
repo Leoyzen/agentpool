@@ -74,6 +74,7 @@ class ServerState:
     session_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     agent_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     reverted_messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
+    messages: dict[str, list[MessageWithParts]] = field(default_factory=dict)
     event_subscribers: list[asyncio.Queue[Event]] = field(default_factory=list)
     _event_factory: GlobalEventFactory | None = field(default=None, repr=False)
     on_first_subscriber: OnFirstSubscriberCallback | None = None
@@ -170,6 +171,7 @@ class ServerState:
         depend on individual routes remembering to initialize each bucket.
         """
         self.reverted_messages.setdefault(session_id, [])
+        self.messages.setdefault(session_id, [])
 
     @property
     def fs(self) -> AsyncFileSystem:
