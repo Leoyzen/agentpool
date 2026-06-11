@@ -150,7 +150,7 @@ The codebase is organized into focused packages under `src/`:
 **Why it exists**: Before this mixin, OpenCode and ACP each implemented their own event consumer loop independently. The code was duplicated, and ACP's implementation was missing features like `SpawnSessionStart` handling and recursive child subscription. The mixin centralizes the loop mechanics while letting each protocol define its own event conversion.
 
 **Which protocols use it**:
-- **ACP** (`acp_server/handler.py`): Adopted in Phase 1. Uses `scope="descendants"` to receive child events through the parent consumer. `_on_spawn_session_start` is a no-op because ACP does not create child consumers.
+- **ACP** (`acp_server/handler.py`): Adopted in Phase 1. Uses `scope="session"` with explicit child consumers created in `_on_spawn_session_start` for sync subagents (skips background tasks with `spawn_mechanism="task"`).
 - **OpenCode** (`opencode_server/session_pool_integration.py`): NOT yet adopted (Phase 2, future change). The mixin interface was designed to be compatible with OpenCode's needs (ToolPart registration, child consumer creation, `OpenCodeEventAdapter`).
 - **AG-UI / OpenAI API**: NOT yet adopted. Can adopt the mixin when subagent event forwarding is needed.
 
