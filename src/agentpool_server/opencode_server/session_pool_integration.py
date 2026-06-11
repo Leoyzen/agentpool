@@ -86,6 +86,11 @@ async def get_messages_for_session(
 ) -> list[MessageWithParts]:
     """Get messages for a session from SessionPool or fall back to ServerState.
 
+    For subagent/child sessions (identified by ``parent_id``), the in-memory
+    ``state.messages`` cache is consulted first because streaming parts are
+    updated in-place on those objects and may be more recent than the
+    SessionPool snapshot.
+
     Args:
         state: The OpenCode server state.
         session_id: The session ID to get messages for.
@@ -93,6 +98,17 @@ async def get_messages_for_session(
     Returns:
         List of MessageWithParts for the session.
     """
+    # Fast-path: subagent sessions are streamed live into memory, so the
+    # in-memory copy is always the most up-to-date.
+    cached_session = state.sessions.get(session_id)
+    is_subagent = cached_session is not None and cached_session.parent_id is not None
+    if is_subagent:
+        messages: list[MessageWithParts] = (
+            getattr(state, "messages", {}).get(session_id, []) or []
+        )
+        if messages:
+            return messages
+
     if _use_session_pool_for_messages(state):
         session_pool = getattr(state.pool, "session_pool", None)
         if session_pool is not None:
@@ -849,10 +865,11 @@ class OpenCodeSessionPoolIntegration:
                 # Distinguish parent vs child events.  With
                 # TurnRunner._maybe_wrap_event removed, child events arrive
                 # raw via scope="descendants".
-                event_session_id = getattr(envelope.event, "session_id", None)
-                is_child_event = (
-                    event_session_id is not None and event_session_id != session_id
-                )
+                # Use envelope.source_session_id because many streaming events
+                # (e.g. PartDeltaEvent from pydantic-ai) do not carry a
+                # session_id attribute on the payload itself.
+                event_session_id = envelope.source_session_id
+                is_child_event = event_session_id != session_id
 
                 if is_child_event:
                     # For child completion events, update the parent ToolPart
