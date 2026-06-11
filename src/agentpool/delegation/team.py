@@ -181,31 +181,12 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         }
 
     async def _load_skill_instructions(self, skill_name: str) -> str:
-        if self.agent_pool is None:
-            return ""
+        if self.agent_pool is None or self.agent_pool.skill_provider is None:
+            from agentpool.skills.exceptions import SkillNotFoundError
 
-        from agentpool.skills.exceptions import SkillNotFoundError
+            raise SkillNotFoundError(skill_name)
 
-        provider = getattr(self.agent_pool, "skill_provider", None)
-        if provider is not None:
-            try:
-                return await provider.get_skill_instructions(skill_name)
-            except SkillNotFoundError:
-                pass
-
-        skills = getattr(self.agent_pool, "skills", None)
-        if skills is not None:
-            try:
-                return skills.get_skill_instructions(skill_name)
-            except SkillNotFoundError:
-                pass
-
-        logger.warning(
-            "Team member skill not found",
-            team=self.name,
-            skill=skill_name,
-        )
-        return ""
+        return await self.agent_pool.skill_provider.get_skill_instructions(skill_name)
 
     @staticmethod
     def _format_skill_instruction(skill_name: str, instructions: str) -> str:

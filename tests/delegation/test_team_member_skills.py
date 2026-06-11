@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from agentpool import Team
+from agentpool.skills.exceptions import SkillNotFoundError
 
 
 class _SkillProvider:
@@ -12,7 +15,6 @@ class _SkillProvider:
 
 class _Pool:
     skill_provider = _SkillProvider()
-    skills = None
 
 
 def test_team_loads_member_skills_from_pool_provider() -> None:
@@ -25,6 +27,14 @@ def test_team_loads_member_skills_from_pool_provider() -> None:
 
     assert "<skill-instruction name=\"fta-causal-path-review\">" in result["root_cause_reviewer"]
     assert "Use this skill." in result["root_cause_reviewer"]
+
+
+def test_team_requires_pool_skill_provider_for_member_skills() -> None:
+    team = Team([], name="review_team")
+    team.agent_pool = None
+
+    with pytest.raises(SkillNotFoundError):
+        asyncio.run(team._load_skill_instructions("fta-causal-path-review"))
 
 
 def test_team_injects_member_skills_into_member_prompt() -> None:
