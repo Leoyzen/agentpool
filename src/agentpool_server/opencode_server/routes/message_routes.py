@@ -504,7 +504,7 @@ async def _process_message_locked(  # noqa: PLR0915
         #
         # Architecture note (auto-subscribe-subagent-events change):
         # When SessionPool is enabled, the protocol layer auto-subscribes
-        # to the EventBus with scope="descendants". This means child session
+        # to the EventBus with scope="session". This means child session
         # events are automatically received and forwarded to the frontend
         # via SubAgentEvent without any manual subscription in message_routes.
         # The _consume_events loop below only handles the parent session's

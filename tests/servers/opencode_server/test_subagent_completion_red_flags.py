@@ -399,7 +399,6 @@ async def test_background_task_inject_prompt_wakes_lead_agent(
     assert "agent_pool" in source, (
         "inject_prompt must check agent_pool as fallback for shared agents"
     )
-    )
 
 
 # =============================================================================

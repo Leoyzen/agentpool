@@ -43,7 +43,7 @@ async def test_reasoning_events_published_to_eventbus():
     await event_bus.publish(session_id, run_started)
     await event_bus.publish(session_id, thinking_start)
     await event_bus.publish(session_id, thinking_delta)
-    await event_bus.publish(session_id, None)  # sentinel
+    await event_bus.close_session(session_id)  # sends sentinel
 
     # Consume events
     collected = []
@@ -56,11 +56,11 @@ async def test_reasoning_events_published_to_eventbus():
     await event_bus.unsubscribe(session_id, queue)
 
     # Verify thinking events are received
-    thinking_events = [e for e in collected if isinstance(e, (PartStartEvent, PartDeltaEvent))]
+    thinking_events = [e for e in collected if isinstance(e.event, (PartStartEvent, PartDeltaEvent))]
     assert len(thinking_events) == 2, f"Expected 2 thinking events, got: {thinking_events}"
-    assert isinstance(thinking_events[0].part, ThinkingPart)
-    assert thinking_events[0].part.content == "Let me analyze"
-    assert thinking_events[1].delta.content_delta == " this problem..."
+    assert isinstance(thinking_events[0].event.part, ThinkingPart)
+    assert thinking_events[0].event.part.content == "Let me analyze"
+    assert thinking_events[1].event.delta.content_delta == " this problem..."
 
 
 @pytest.mark.asyncio
@@ -80,7 +80,7 @@ async def test_eventbus_preserves_event_types_after_copy():
 
     thinking_start = PartStartEvent(index=0, part=ThinkingPart(content="Deep thinking..."))
     await event_bus.publish(session_id, thinking_start)
-    await event_bus.publish(session_id, None)
+    await event_bus.close_session(session_id)
 
     # Verify both subscribers got the event with correct type
     for queue in [queue1, queue2]:
@@ -93,9 +93,9 @@ async def test_eventbus_preserves_event_types_after_copy():
 
         assert len(collected) == 1
         event = collected[0]
-        assert isinstance(event, PartStartEvent)
-        assert isinstance(event.part, ThinkingPart)
-        assert event.part.content == "Deep thinking..."
+        assert isinstance(event.event, PartStartEvent)
+        assert isinstance(event.event.part, ThinkingPart)
+        assert event.event.part.content == "Deep thinking..."
 
     await event_bus.unsubscribe(session_id, queue1)
     await event_bus.unsubscribe(session_id, queue2)
@@ -123,7 +123,7 @@ async def test_multiple_subscribers_receive_reasoning():
             session_id,
             PartDeltaEvent(index=0, delta=ThinkingPartDelta(content_delta=f"chunk{i}")),
         )
-    await event_bus.publish(session_id, None)
+    await event_bus.close_session(session_id)
 
     # Both queues should receive all events
     async def drain_queue(queue):
@@ -143,7 +143,7 @@ async def test_multiple_subscribers_receive_reasoning():
     assert len(adapter_events) == 3
     assert len(consumer_events) == 3
     for e in adapter_events:
-        assert isinstance(e.delta, ThinkingPartDelta)
+        assert isinstance(e.event.delta, ThinkingPartDelta)
 
     await event_bus.unsubscribe(session_id, adapter_queue)
     await event_bus.unsubscribe(session_id, consumer_queue)
@@ -179,7 +179,8 @@ async def test_eventbus_with_subagent_wrapping():
 
     # Publish to child session
     await event_bus.publish(child_session, subagent_event)
-    await event_bus.publish(child_session, None)
+    # Sentinel must be sent to parent session since that's what the queue is subscribed to
+    await event_bus.close_session(parent_session)
 
     # Parent subscriber should receive it
     collected = []
@@ -190,8 +191,8 @@ async def test_eventbus_with_subagent_wrapping():
         collected.append(event)
 
     assert len(collected) == 1
-    assert isinstance(collected[0], SubAgentEvent)
-    assert isinstance(collected[0].event, PartStartEvent)
-    assert isinstance(collected[0].event.part, ThinkingPart)
+    assert isinstance(collected[0].event, SubAgentEvent)
+    assert isinstance(collected[0].event.event, PartStartEvent)
+    assert isinstance(collected[0].event.event.part, ThinkingPart)
 
     await event_bus.unsubscribe(parent_session, queue)

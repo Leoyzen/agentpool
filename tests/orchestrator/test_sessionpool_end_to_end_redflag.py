@@ -161,7 +161,7 @@ async def test_integration_route_message_starts_consumer_for_existing_session():
     await session_pool.sessions.get_or_create_session(session_id, agent_name="default")
 
     # Verify consumer is NOT running yet
-    assert session_id not in integration._event_consumers
+    assert session_id not in integration._consumer_tasks
 
     # Call route_message - should detect missing consumer and start it
     await integration.route_message(
@@ -206,8 +206,8 @@ async def test_consumer_restarted_after_crash():
     await integration._start_event_consumer(session_id)
 
     # Verify it's running
-    assert session_id in integration._event_consumers
-    old_task = integration._event_consumers[session_id]
+    assert session_id in integration._consumer_tasks
+    old_task = integration._consumer_tasks[session_id]
     assert not old_task.done()
 
     # Simulate consumer crash by cancelling it
@@ -219,7 +219,7 @@ async def test_consumer_restarted_after_crash():
     await integration._start_event_consumer(session_id)
 
     # FIXED: New consumer should be started, old task reference cleaned up
-    new_task = integration._event_consumers[session_id]
+    new_task = integration._consumer_tasks[session_id]
     assert new_task is not old_task
     assert not new_task.done()
 

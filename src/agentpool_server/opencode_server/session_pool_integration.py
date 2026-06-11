@@ -8,7 +8,6 @@ consuming events from the SessionPool's EventBus.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
@@ -17,10 +16,11 @@ from agentpool.agents.events.events import (
     SpawnSessionStart,
     StreamCompleteEvent,
 )
-from agentpool.orchestrator.run import RunStatus
 from agentpool.log import get_logger
+from agentpool.orchestrator.run import RunStatus
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.time_utils import now_ms
+from agentpool_server.mixins import ProtocolEventConsumerMixin
 from agentpool_server.opencode_server.converters import (
     chat_message_to_opencode,
     opencode_to_chat_message,
@@ -58,7 +58,7 @@ from agentpool_server.opencode_server.status_bridge import SessionStatusBridge
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from agentpool.orchestrator.core import SessionPool, SessionState
+    from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool, SessionState
     from agentpool.orchestrator.run import RunHandle
     from agentpool_server.opencode_server.state import ServerState
 
@@ -68,16 +68,18 @@ logger = get_logger(__name__)
 
 def _use_session_pool_for_messages(state: ServerState) -> bool:
     """Check if SessionPool should be used for messages."""
-    if state.config is None:
+    config = getattr(state, "config", None)
+    if config is None:
         return True
-    return getattr(state.config, "use_session_pool_for_messages", True)
+    return getattr(config, "use_session_pool_for_messages", True)
 
 
 def _use_session_pool_for_status(state: ServerState) -> bool:
     """Check if SessionPool should be used for session status."""
-    if state.config is None:
+    config = getattr(state, "config", None)
+    if config is None:
         return True
-    return getattr(state.config, "use_session_pool_for_status", True)
+    return getattr(config, "use_session_pool_for_status", True)
 
 
 async def get_messages_for_session(
@@ -86,11 +88,6 @@ async def get_messages_for_session(
 ) -> list[MessageWithParts]:
     """Get messages for a session from SessionPool or fall back to ServerState.
 
-    For subagent/child sessions (identified by ``parent_id``), the in-memory
-    ``state.messages`` cache is consulted first because streaming parts are
-    updated in-place on those objects and may be more recent than the
-    SessionPool snapshot.
-
     Args:
         state: The OpenCode server state.
         session_id: The session ID to get messages for.
@@ -98,17 +95,6 @@ async def get_messages_for_session(
     Returns:
         List of MessageWithParts for the session.
     """
-    # Fast-path: subagent sessions are streamed live into memory, so the
-    # in-memory copy is always the most up-to-date.
-    cached_session = state.sessions.get(session_id)
-    is_subagent = cached_session is not None and cached_session.parent_id is not None
-    if is_subagent:
-        messages: list[MessageWithParts] = (
-            getattr(state, "messages", {}).get(session_id, []) or []
-        )
-        if messages:
-            return messages
-
     if _use_session_pool_for_messages(state):
         session_pool = getattr(state.pool, "session_pool", None)
         if session_pool is not None:
@@ -152,7 +138,9 @@ async def append_message_to_session(
         msg: The OpenCode message to append.
     """
     if _use_session_pool_for_messages(state):
-        session_pool = getattr(state.pool, "session_pool", None)
+        session_pool = None
+        if hasattr(state, "pool") and state.pool is not None:
+            session_pool = getattr(state.pool, "session_pool", None)
         if session_pool is not None:
             chat_msg = opencode_to_chat_message(msg, session_id=session_id)
             try:
@@ -468,7 +456,7 @@ async def _create_and_persist_session(
     return session
 
 
-class OpenCodeSessionPoolIntegration:
+class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
     """Integration layer between OpenCode server routes and SessionPool.
 
     Encapsulates session lifecycle, message routing, event subscription,
@@ -482,10 +470,17 @@ class OpenCodeSessionPoolIntegration:
 
     def __init__(self, session_pool: SessionPool, server_state: ServerState) -> None:
         """Initialize the integration with a SessionPool and ServerState."""
+        super().__init__()
         self.session_pool = session_pool
         self.server_state = server_state
         self._status_bridges: dict[str, SessionStatusBridge] = {}
-        self._event_consumers: dict[str, asyncio.Task[Any]] = {}
+        # Per-session state for mixin hooks
+        self._contexts: dict[str, EventProcessorContext] = {}
+        self._adapters: dict[str, OpenCodeEventAdapter] = {}
+        self._message_registered: dict[str, bool] = {}
+        self._child_to_parent: dict[str, str] = {}
+        self._child_spawns: dict[str, SpawnSessionStart] = {}
+        self._children_of: dict[str, set[str]] = {}
 
     async def create_session(
         self,
@@ -711,16 +706,22 @@ class OpenCodeSessionPoolIntegration:
 
     async def shutdown(self) -> None:
         """Shutdown the integration and stop all consumers and bridges."""
-        for session_id in list(self._event_consumers.keys()):
+        for session_id in list(self._consumer_tasks.keys()):
             try:
-                await self._stop_event_consumer(session_id)
+                await self.stop_event_consumer(session_id)
             except Exception:
-                logger.exception("Failed to stop event consumer during shutdown", session_id=session_id)
+                logger.exception(
+                    "Failed to stop event consumer during shutdown",
+                    session_id=session_id,
+                )
         for session_id in list(self._status_bridges.keys()):
             try:
                 await self._stop_status_bridge(session_id)
             except Exception:
-                logger.exception("Failed to stop status bridge during shutdown", session_id=session_id)
+                logger.exception(
+                    "Failed to stop status bridge during shutdown",
+                    session_id=session_id,
+                )
         await self.session_pool.shutdown()
 
     async def _start_status_bridge(self, session_id: str) -> None:
@@ -749,64 +750,33 @@ class OpenCodeSessionPoolIntegration:
         if bridge is not None:
             await bridge.stop()
 
-    async def _start_event_consumer(self, session_id: str) -> None:
-        """Start a session-scoped EventBus consumer for a session.
+    # ------------------------------------------------------------------
+    # ProtocolEventConsumerMixin hooks
+    # ------------------------------------------------------------------
 
-        The consumer runs for the entire session lifecycle, converting
-        AgentPool events to OpenCode SSE events via EventBus subscription.
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the EventBus instance to subscribe to."""
+        return self.session_pool.event_bus
 
-        If a previous consumer task exists but is done (e.g. crashed), it is
-        cleaned up and a new consumer is started.
+    def _get_subscription_scope(self) -> str:
+        """Return the EventBus subscription scope.
+
+        Overridden to "session" so that only the exact session's events are
+        consumed. Child session events are handled by separate consumers
+        created in response to SpawnSessionStart (see _on_spawn_session_start).
+
+        Returns:
+            The subscription scope string.
+        """
+        return "session"
+
+    async def _before_consumer_loop(self, session_id: str) -> None:
+        """Set up per-session context before the consumer loop starts.
 
         Args:
-            session_id: The session to start consuming events for.
+            session_id: The session whose consumer is starting.
         """
-        existing = self._event_consumers.get(session_id)
-        if existing is not None:
-            if not existing.done():
-                return
-            # Clean up finished/crashed task before starting a new one
-            self._event_consumers.pop(session_id, None)
-        task = asyncio.create_task(
-            self._event_consumer_loop(session_id),
-            name=f"event_consumer_{session_id}",
-        )
-        self._event_consumers[session_id] = task
-        logger.info("Started session-scoped event consumer", session_id=session_id)
-
-    async def _stop_event_consumer(self, session_id: str) -> None:
-        """Stop the session-scoped EventBus consumer for a session.
-
-        Args:
-            session_id: The session to stop consuming events for.
-        """
-        task = self._event_consumers.pop(session_id, None)
-        if task is not None and not task.done():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        logger.info("Stopped session-scoped event consumer", session_id=session_id)
-
-    async def _event_consumer_loop(self, session_id: str) -> None:
-        """Consume events from EventBus and broadcast as OpenCode SSE events.
-
-        Subscribes with ``scope="descendants"`` so that child session events
-        (e.g. subagent output) are also received and forwarded.
-
-        Handles ``SpawnSessionStart`` by creating child-session consumers
-        recursively so nested subagents also stream to the frontend.
-
-        Also handles child-session completion events (StreamCompleteEvent /
-        RunErrorEvent) to update the parent session's ToolPart, since
-        TurnRunner no longer wraps child events in SubAgentEvent.
-
-        Args:
-            session_id: The session whose events to consume.
-        """
-        queue = await self.session_pool.event_bus.subscribe(
-            session_id, scope="descendants"
-        )
-
         assistant_msg_id = identifier.ascending("message")
         assistant_msg = MessageWithParts.assistant(
             message_id=assistant_msg_id,
@@ -826,101 +796,153 @@ class OpenCodeSessionPoolIntegration:
             working_dir=self.server_state.working_dir,
         )
         event_adapter = OpenCodeEventAdapter(ctx)
-        child_tasks: dict[str, asyncio.Task[Any]] = {}
-        message_registered = False
-        # Track child spawns so we can update parent ToolParts on completion
-        child_spawns: dict[str, SpawnSessionStart] = {}
+        self._contexts[session_id] = ctx
+        self._adapters[session_id] = event_adapter
+        self._message_registered[session_id] = False
 
+    async def _on_spawn_session_start(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Handle SpawnSessionStart by creating ToolPart and child consumer.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            envelope: The event envelope containing the spawn session start event.
+        """
         try:
-            while True:
-                envelope = await queue.get()
-                if envelope is None:
-                    break
+            event = envelope.event
+            if not isinstance(event, SpawnSessionStart):
+                return
+            child_id = event.child_session_id
+            if not child_id or child_id == session_id:
+                return
 
-                # Spawn child-session consumers for nested subagents
-                if isinstance(envelope.event, SpawnSessionStart):
-                    # Record spawn info for later ToolPart updates
-                    child_spawns[envelope.event.child_session_id] = envelope.event
-                    # Ensure assistant message is registered before creating
-                    # ToolPart, since _create_subagent_tool_part looks it up via
-                    # get_messages_for_session.
-                    if not message_registered:
-                        await append_message_to_session(self.server_state, session_id, assistant_msg)
-                        await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
-                        message_registered = True
-                    # Create ToolPart in parent session before spawning child
-                    tool_part = await self._create_subagent_tool_part(session_id, envelope.event)
-                    # Also register in EventProcessorContext so SubAgentEvent
-                    # handling can find and update the ToolPart later.
-                    if tool_part is not None:
-                        subagent_key = f"{envelope.event.depth}:{envelope.event.source_name}:{envelope.event.child_session_id}"
-                        event_adapter.context.add_subagent_tool_part(subagent_key, tool_part)
-                    child_task = asyncio.create_task(
-                        self._event_consumer_loop(envelope.event.child_session_id),
-                        name=f"event_consumer_{envelope.event.child_session_id}",
-                    )
-                    child_tasks[envelope.event.child_session_id] = child_task
-                    continue
+            ctx = self._contexts.get(session_id)
+            if ctx is None:
+                return
 
-                # Distinguish parent vs child events.  With
-                # TurnRunner._maybe_wrap_event removed, child events arrive
-                # raw via scope="descendants".
-                # Use envelope.source_session_id because many streaming events
-                # (e.g. PartDeltaEvent from pydantic-ai) do not carry a
-                # session_id attribute on the payload itself.
-                event_session_id = envelope.source_session_id
-                is_child_event = event_session_id != session_id
+            # Ensure assistant message is registered before ToolPart creation
+            if not self._message_registered.get(session_id, False):
+                await append_message_to_session(
+                    self.server_state, session_id, ctx.assistant_msg
+                )
+                await self.server_state.broadcast_event(
+                    MessageUpdatedEvent.create(ctx.assistant_msg.info)
+                )
+                self._message_registered[session_id] = True
 
-                if is_child_event:
-                    # For child completion events, update the parent ToolPart
-                    # before letting the child consumer handle them.
-                    child_id: str = event_session_id  # type: ignore[assignment]
-                    if isinstance(envelope.event, StreamCompleteEvent):
-                        spawn = child_spawns.get(child_id)
-                        if spawn is not None:
-                            await self._update_parent_toolpart(
-                                parent_session_id=session_id,
-                                child_session_id=child_id,
-                                spawn_event=spawn,
-                                event=envelope.event,
-                            )
-                    elif isinstance(envelope.event, RunErrorEvent):
-                        spawn = child_spawns.get(child_id)
-                        if spawn is not None:
-                            await self._update_parent_toolpart_error(
-                                parent_session_id=session_id,
-                                child_session_id=child_id,
-                                spawn_event=spawn,
-                                event=envelope.event,
-                            )
-                    # Child consumer (subscribed to the child session)
-                    # will render the child UI, so parent skips the rest.
-                    continue
+            tool_part = await self._create_subagent_tool_part(session_id, event)
+            if tool_part is not None:
+                subagent_key = f"{event.depth}:{event.source_name}:{child_id}"
+                ctx.add_subagent_tool_part(subagent_key, tool_part)
 
-                # Register message on first non-spawn event so the TUI
-                # can render parts. Without this, PartUpdatedEvents are
-                # ignored because the message store lacks the entry.
-                if not message_registered:
-                    await append_message_to_session(self.server_state, session_id, assistant_msg)
-                    await self.server_state.broadcast_event(MessageUpdatedEvent.create(assistant_msg.info))
-                    message_registered = True
+            # Track parent-child relationship for later ToolPart updates
+            self._child_to_parent[child_id] = session_id
+            self._child_spawns[child_id] = event
+            self._children_of.setdefault(session_id, set()).add(child_id)
 
-                async for oc_event in event_adapter.convert_event(envelope.event):
-                    await self.server_state.broadcast_event(oc_event)
-        except asyncio.CancelledError:
-            logger.debug("Event consumer cancelled", session_id=session_id)
-            raise
+            # Start dedicated consumer for the child session
+            await self.start_event_consumer(child_id)
         except Exception:
-            logger.exception("Event consumer loop failed", session_id=session_id)
-        finally:
-            # Cancel and await any child consumers
-            for task in child_tasks.values():
-                if not task.done():
-                    task.cancel()
-            for task in child_tasks.values():
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-            await self.session_pool.event_bus.unsubscribe(session_id, queue)
+            logger.exception(
+                "SpawnSessionStart handler failed",
+                session_id=session_id,
+                child_session_id=getattr(envelope.event, "child_session_id", None),
+            )
+
+    async def _handle_event(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Handle a single event from the EventBus.
+
+        Distinguishes parent vs child events (via the child-to-parent mapping),
+        updates parent ToolParts on child completion/error, and converts all
+        events to OpenCode SSE events via the adapter.
+
+        Args:
+            session_id: The session whose consumer received the event.
+            envelope: The event envelope to handle.
+        """
+        try:
+            event = envelope.event
+
+            # SpawnSessionStart is handled in _on_spawn_session_start; skip here
+            if isinstance(event, SpawnSessionStart):
+                return
+
+            # If this session is a child, update the parent ToolPart on completion/error
+            parent_id = self._child_to_parent.get(session_id)
+            if parent_id is not None:
+                spawn = self._child_spawns.get(session_id)
+                if isinstance(event, StreamCompleteEvent) and spawn is not None:
+                    await self._update_parent_toolpart(
+                        parent_session_id=parent_id,
+                        child_session_id=session_id,
+                        spawn_event=spawn,
+                        event=event,
+                    )
+                elif isinstance(event, RunErrorEvent) and spawn is not None:
+                    await self._update_parent_toolpart_error(
+                        parent_session_id=parent_id,
+                        child_session_id=session_id,
+                        spawn_event=spawn,
+                        event=event,
+                    )
+
+            ctx = self._contexts.get(session_id)
+            if ctx is None:
+                return
+
+            # Register assistant message on first non-spawn event
+            if not self._message_registered.get(session_id, False):
+                await append_message_to_session(
+                    self.server_state, session_id, ctx.assistant_msg
+                )
+                await self.server_state.broadcast_event(
+                    MessageUpdatedEvent.create(ctx.assistant_msg.info)
+                )
+                self._message_registered[session_id] = True
+
+            adapter = self._adapters.get(session_id)
+            if adapter is None:
+                return
+
+            async for oc_event in adapter.convert_event(event):
+                await self.server_state.broadcast_event(oc_event)
+        except Exception:
+            logger.exception(
+                "Event handler failed",
+                session_id=session_id,
+                event_type=type(envelope.event).__name__,
+            )
+
+    async def _after_consumer_loop(self, session_id: str) -> None:
+        """Clean up per-session context after the consumer loop exits.
+
+        Args:
+            session_id: The session whose consumer has stopped.
+        """
+        # Stop any child consumers that were started from this session
+        for child_id in list(self._children_of.get(session_id, [])):
+            await self.stop_event_consumer(child_id)
+        self._children_of.pop(session_id, None)
+
+        # Clean up per-session state
+        self._contexts.pop(session_id, None)
+        self._adapters.pop(session_id, None)
+        self._message_registered.pop(session_id, None)
+        self._child_to_parent.pop(session_id, None)
+        self._child_spawns.pop(session_id, None)
+
+    # ------------------------------------------------------------------
+    # Backward-compatible wrappers (used by tests)
+    # ------------------------------------------------------------------
+
+    async def _start_event_consumer(self, session_id: str) -> None:
+        """Backward-compatible wrapper for the mixin's start_event_consumer."""
+        await self.start_event_consumer(session_id)
+        logger.info("Started session-scoped event consumer", session_id=session_id)
+
+    async def _stop_event_consumer(self, session_id: str) -> None:
+        """Backward-compatible wrapper for the mixin's stop_event_consumer."""
+        await self.stop_event_consumer(session_id)
+        logger.info("Stopped session-scoped event consumer", session_id=session_id)
 
     async def _create_subagent_tool_part(
         self,
@@ -940,8 +962,10 @@ class OpenCodeSessionPoolIntegration:
         Returns:
             The created ToolPart, or None if one already exists for this child.
         """
-        # Find the parent session's latest assistant message
-        messages = await get_messages_for_session(self.server_state, parent_session_id)
+        # Find the parent session's latest assistant message from in-memory state
+        # (not via get_messages_for_session, which may return copies when
+        # SessionPool message storage is enabled).
+        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
         assistant_msg = None
         for msg in reversed(messages):
             if msg.info.role == "assistant":
@@ -1014,7 +1038,8 @@ class OpenCodeSessionPoolIntegration:
             spawn_event: The spawn event containing subagent metadata.
             event: The StreamCompleteEvent from the child.
         """
-        messages = await get_messages_for_session(self.server_state, parent_session_id)
+        # Find the parent session's latest assistant message from in-memory state
+        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
         assistant_msg = None
         for msg in reversed(messages):
             if msg.info.role == "assistant":
@@ -1102,7 +1127,8 @@ class OpenCodeSessionPoolIntegration:
             spawn_event: The spawn event containing subagent metadata.
             event: The RunErrorEvent from the child.
         """
-        messages = await get_messages_for_session(self.server_state, parent_session_id)
+        # Find the parent session's latest assistant message from in-memory state
+        messages = getattr(self.server_state, "messages", {}).get(parent_session_id, []) or []
         assistant_msg = None
         for msg in reversed(messages):
             if msg.info.role == "assistant":

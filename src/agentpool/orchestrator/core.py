@@ -180,6 +180,14 @@ class EventBus:
             scope: Subscription scope - "session" (exact match),
                 "descendants" (self + children), or "subtree" (self + parent + siblings).
 
+                !!! warning "Deprecated: descendants scope"
+                    The "descendants" scope is deprecated for protocol server use.
+                    It has known issues with replay buffer data loss, O(N) recursive
+                    traversal, and duplicate deliveries. Protocol servers should use
+                    "session" scope with explicit child consumers via
+                    `ProtocolEventConsumerMixin._on_spawn_session_start()` instead.
+                    The "descendants" enum value is retained for backward compatibility.
+
         Returns:
             A queue to consume events from.
         """
