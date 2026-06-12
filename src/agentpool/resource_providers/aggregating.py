@@ -150,15 +150,19 @@ class AggregatingResourceProvider(ResourceProvider):
         """
         from agentpool.skills.exceptions import SkillNotFoundError
 
+        last_not_found: SkillNotFoundError | None = None
         for provider in self.providers:
             try:
                 # Check if provider has this skill
                 skills = await provider.get_skills()
                 if any(s.name == skill_name for s in skills):
                     return await provider.get_skill_instructions(skill_name, arguments)
-            except Exception:  # noqa: BLE001
+            except SkillNotFoundError as exc:
+                last_not_found = exc
                 continue
 
+        if last_not_found is not None:
+            raise last_not_found
         raise SkillNotFoundError(skill_name)
 
     async def get_request_parts(

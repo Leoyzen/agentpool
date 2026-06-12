@@ -16,6 +16,7 @@ import pytest
 
 from agentpool.resource_providers.aggregating import AggregatingResourceProvider
 from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvider
+from agentpool.skills.exceptions import SkillNotFoundError
 
 if TYPE_CHECKING:
     from agentpool.skills.skill import Skill
@@ -498,3 +499,48 @@ async def test_get_skills_all_providers_empty() -> None:
     result = await aggregating.get_skills()
 
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_skill_instructions_propagates_provider_read_error() -> None:
+    """Do not mask a provider instruction-loading failure as skill-not-found."""
+    skill = MagicMock(spec="Skill")
+    skill.name = "fta-causal-path-review"
+    provider = MagicMock(spec=ResourceProvider)
+    provider.get_skills = AsyncMock(return_value=[skill])
+    provider.get_skill_instructions = AsyncMock(side_effect=RuntimeError("resource read failed"))
+    provider.skills_changed = MagicMock()
+    provider.skills_changed.connect = MagicMock()
+    provider.skills_changed.disconnect = MagicMock()
+
+    aggregating = AggregatingResourceProvider([provider])
+
+    with pytest.raises(RuntimeError, match="resource read failed"):
+        await aggregating.get_skill_instructions("fta-causal-path-review")
+
+
+@pytest.mark.asyncio
+async def test_get_skill_instructions_continues_after_skill_not_found() -> None:
+    """A provider-level SkillNotFoundError still allows later providers to satisfy the skill."""
+    skill = MagicMock(spec="Skill")
+    skill.name = "fta-causal-path-review"
+
+    provider1 = MagicMock(spec=ResourceProvider)
+    provider1.get_skills = AsyncMock(return_value=[skill])
+    provider1.get_skill_instructions = AsyncMock(
+        side_effect=SkillNotFoundError("fta-causal-path-review")
+    )
+    provider1.skills_changed = MagicMock()
+    provider1.skills_changed.connect = MagicMock()
+    provider1.skills_changed.disconnect = MagicMock()
+
+    provider2 = MagicMock(spec=ResourceProvider)
+    provider2.get_skills = AsyncMock(return_value=[skill])
+    provider2.get_skill_instructions = AsyncMock(return_value="instructions")
+    provider2.skills_changed = MagicMock()
+    provider2.skills_changed.connect = MagicMock()
+    provider2.skills_changed.disconnect = MagicMock()
+
+    aggregating = AggregatingResourceProvider([provider1, provider2])
+
+    assert await aggregating.get_skill_instructions("fta-causal-path-review") == "instructions"
