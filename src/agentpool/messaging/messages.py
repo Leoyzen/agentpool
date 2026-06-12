@@ -621,11 +621,13 @@ class TeamResponse[TMessageContent = Any](list[AgentResponse[Any]]):
         responses: list[AgentResponse[TMessageContent]],
         start_time: datetime | None = None,
         errors: dict[str, Exception] | None = None,
+        child_session_ids: dict[str, str] | None = None,
     ) -> None:
         super().__init__(responses)
         self.start_time = start_time or get_now()
         self.end_time = get_now()
         self.errors = errors or {}
+        self.child_session_ids = child_session_ids or {}
 
     @property
     def duration(self) -> float:
@@ -665,5 +667,6 @@ class TeamResponse[TMessageContent = Any](list[AgentResponse[Any]]):
             "agents": [r.agent_name for r in self],
             "duration": self.duration,
             "success_count": len(self),
+            "child_session_ids": self.child_session_ids,
         }
         return ChatMessage(content=content, role="assistant", metadata=meta)  # type: ignore

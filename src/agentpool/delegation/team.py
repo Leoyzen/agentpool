@@ -81,6 +81,67 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
 
     _error_mode: Literal["fail_all", "collect_exceptions"] = "collect_exceptions"
 
+    @staticmethod
+    def _active_parent_session_id() -> str | None:
+        """Return the active SessionPool session id when running inside a turn."""
+        from agentpool.agents.base_agent import _current_run_ctx_var
+
+        run_ctx = _current_run_ctx_var.get()
+        session_id = getattr(run_ctx, "session_id", None)
+        return str(session_id) if session_id else None
+
+    async def _resolve_scoped_team_nodes(
+        self,
+        nodes: list[MessageNode[Any, Any]],
+        parent_session_id: str | None,
+        team_run_id: str,
+    ) -> tuple[list[MessageNode[Any, Any]], dict[str, str]]:
+        """Resolve team members to child-session agents for a parent session."""
+        if not parent_session_id or self.agent_pool is None or self.agent_pool.session_pool is None:
+            return nodes, {}
+
+        from agentpool.agents.base_agent import BaseAgent
+        from agentpool.utils.identifiers import generate_session_id
+
+        session_pool = self.agent_pool.session_pool
+        pool_agents = self.agent_pool.all_agents
+        pool_teams = getattr(self.agent_pool, "teams", {})
+        scoped_nodes: list[MessageNode[Any, Any]] = []
+        child_session_ids: dict[str, str] = {}
+
+        for node in nodes:
+            if node.name not in pool_agents and node.name not in pool_teams:
+                scoped_nodes.append(node)
+                continue
+            child_state = await session_pool.create_session(
+                session_id=generate_session_id(),
+                parent_session_id=parent_session_id,
+                lifecycle_policy="cascade",
+                agent_name=node.name,
+                agent_type=getattr(node, "agent_type", type(node).__name__),
+                team_name=self.name,
+                team_run_id=team_run_id,
+            )
+            child_session_id = child_state.session_id
+            if isinstance(node, BaseAgent) and node.name in pool_agents:
+                child_node = await session_pool.sessions.get_or_create_session_agent(
+                    child_session_id,
+                    agent_name=node.name,
+                )
+            else:
+                child_node = node
+            scoped_nodes.append(child_node)
+            child_session_ids[node.name] = child_session_id
+
+        return scoped_nodes, child_session_ids
+
+    async def _close_scoped_team_nodes(self, child_session_ids: dict[str, str]) -> None:
+        """Close and delete round-scoped child sessions created for a team run."""
+        if not child_session_ids or self.agent_pool is None or self.agent_pool.session_pool is None:
+            return
+        for session_id in reversed(list(child_session_ids.values())):
+            await self.agent_pool.session_pool.close_session(session_id)
+
     async def execute(self, *prompts: PromptCompatible | None, **kwargs: Any) -> TeamResponse:
         """Run all agents in parallel via pydantic-graph Fork + Join.
 
@@ -96,6 +157,18 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if self.shared_prompt:
             default_prompt.insert(0, self.shared_prompt)
 
+        session_id_kwarg = str(kwargs.pop("session_id", "") or "")
+        parent_session_id_kwarg = str(kwargs.pop("parent_session_id", "") or "")
+        if session_id_kwarg:
+            kwargs["session_id"] = session_id_kwarg
+        if parent_session_id_kwarg:
+            kwargs["parent_session_id"] = parent_session_id_kwarg
+        parent_session_id = (
+            parent_session_id_kwarg
+            or session_id_kwarg
+            or self._active_parent_session_id()
+        )
+        team_run_id = uuid4().hex
         template_vars = kwargs.pop("template_vars", {})
         if not isinstance(template_vars, dict):
             template_vars = {}
@@ -103,7 +176,12 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         member_skills = self._normalize_member_skills(kwargs.pop("member_skills", {}))
         member_skill_instructions = await self._load_member_skill_instructions(member_skills)
 
-        all_nodes = list(self.nodes)
+        base_nodes = list(self.nodes)
+        all_nodes, child_session_ids = await self._resolve_scoped_team_nodes(
+            base_nodes,
+            parent_session_id,
+            team_run_id,
+        )
         execution_talks: list[Talk[Any]] = []
         member_prompts: dict[str, list[PromptCompatible | None]] = {}
         for node in all_nodes:
@@ -128,12 +206,17 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             member_prompts=member_prompts,
             kwargs=kwargs,
             shared_prompt=self.shared_prompt,
+            child_session_ids=child_session_ids,
+            parent_session_id=parent_session_id,
             member_timeout=timeout,
             execution_talks=execution_talks,
             error_mode=self._error_mode,
         )
 
-        return await run_team_graph(all_nodes, state)
+        try:
+            return await run_team_graph(all_nodes, state)
+        finally:
+            await self._close_scoped_team_nodes(child_session_ids)
 
     @staticmethod
     def _normalize_member_skills(value: Any) -> dict[str, list[str]]:
@@ -322,6 +405,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 "agent_names": [r.agent_name for r in result],
                 "errors": {name: str(error) for name, error in result.errors.items()},
                 "start_time": result.start_time.isoformat(),
+                "child_session_ids": result.child_session_ids,
             },
         )
 
@@ -357,7 +441,6 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         Yields:
             RichAgentStreamEvent, with member events wrapped in SubAgentEvent
         """
-        from agentpool.common_types import SupportsRunStream
         from agentpool.utils.identifiers import generate_session_id
 
         # Pop session_id/depth/parent_session_id from kwargs to avoid duplicate
@@ -380,29 +463,13 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         parent_sid: str | None = parent_session_id_kwarg or session_id_kwarg
 
         # Get nodes to run
-        all_nodes = list(self.nodes)
+        base_nodes = list(self.nodes)
+        all_nodes, child_session_ids = await self._resolve_scoped_team_nodes(
+            base_nodes,
+            parent_sid,
+            uuid4().hex,
+        )
         timeout = self.member_timeout
-
-        # Pre-create child sessions for each member so that SpawnSessionStart
-        # can be emitted *before* the member's stream begins.
-        # Use id(node) as key instead of node.name to avoid collisions
-        # when multiple team members share the same name.
-        child_session_ids: dict[int, str] = {}
-        for node in all_nodes:
-            if self.agent_pool and self.agent_pool.session_pool:
-                if parent_sid:
-                    child_state = await self.agent_pool.session_pool.create_session(
-                        session_id=generate_session_id(),
-                        parent_session_id=parent_sid,
-                        agent_name=node.name,
-                        agent_type=node.agent_type,
-                    )
-                    child_sid = child_state.session_id
-                else:
-                    child_sid = generate_session_id()
-            else:
-                child_sid = generate_session_id()
-            child_session_ids[id(node)] = child_sid
 
         # Create list of streams — one per member, prefixed by SpawnSessionStart
         async def wrap_stream(
@@ -422,6 +489,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 description=f"Spawning {node.name} as team member",
                 spawn_mechanism="spawn",
             )
+
+            from agentpool.common_types import SupportsRunStream
 
             if not isinstance(node, SupportsRunStream):
                 return
@@ -462,10 +531,16 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                         parent_session_id=parent_sid,
                     )
 
-        streams = [wrap_stream(node, child_session_ids[id(node)]) for node in all_nodes]
+        streams = [
+            wrap_stream(node, child_session_ids.get(node.name, generate_session_id()))
+            for node in all_nodes
+        ]
         # Merge all streams
-        async for event in as_generated(streams):
-            yield event
+        try:
+            async for event in as_generated(streams):
+                yield event
+        finally:
+            await self._close_scoped_team_nodes(child_session_ids)
 
 
 if __name__ == "__main__":

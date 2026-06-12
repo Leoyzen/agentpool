@@ -7,12 +7,15 @@ compatibility with legacy Team/TeamRun APIs.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 import anyio
 import pytest
 
 from agentpool import Agent, Team
+from agentpool.agents.base_agent import _current_run_ctx_var
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     SpawnSessionStart,
     StreamCompleteEvent,
@@ -41,6 +44,62 @@ def _make_echo_agent(name: str, response: str = "hello") -> Agent[Any, str]:
 
     model = TestModel(custom_output_text=response)
     return Agent(name=name, model=model)
+
+
+class _FakeSessionAgents:
+    """Minimal session agent registry for scoped team tests."""
+
+    def __init__(self) -> None:
+        self.created_agents: dict[str, Agent[Any, str]] = {}
+
+    async def get_or_create_session_agent(
+        self,
+        session_id: str,
+        agent_name: str | None = None,
+        input_provider: Any | None = None,
+    ) -> Agent[Any, str]:
+        if session_id not in self.created_agents:
+            name = agent_name or "agent"
+            self.created_agents[session_id] = _make_echo_agent(name, f"child:{name}:{session_id}")
+        return self.created_agents[session_id]
+
+
+class _FakeSessionPool:
+    """Minimal SessionPool facade used by `Team.execute` scoped mode."""
+
+    def __init__(self) -> None:
+        self.sessions = _FakeSessionAgents()
+        self.created: list[dict[str, str]] = []
+        self.closed: list[str] = []
+
+    async def create_session(
+        self,
+        session_id: str,
+        agent_name: str | None = None,
+        parent_session_id: str | None = None,
+        lifecycle_policy: str | None = None,
+        **metadata: Any,
+    ) -> Any:
+        self.created.append({
+            "session_id": session_id,
+            "agent_name": agent_name or "",
+            "parent_session_id": parent_session_id or "",
+            "lifecycle_policy": lifecycle_policy or "",
+            "team_name": str(metadata.get("team_name") or ""),
+            "team_run_id": str(metadata.get("team_run_id") or ""),
+        })
+        return SimpleNamespace(session_id=session_id)
+
+    async def close_session(self, session_id: str) -> None:
+        self.closed.append(session_id)
+
+
+class _FakeAgentPool:
+    """Minimal AgentPool facade with team-scoped session support."""
+
+    def __init__(self, agents: list[Agent[Any, str]]) -> None:
+        self.session_pool = _FakeSessionPool()
+        self.all_agents = {agent.name: agent for agent in agents}
 
 
 class FailingAgent(MessageNode[Any, Any]):
@@ -144,6 +203,33 @@ async def test_parallel_team_execute_returns_team_response() -> None:
         assert r.message is not None
         assert r.timing is not None
         assert r.timing >= 0
+
+
+@pytest.mark.anyio
+async def test_parallel_team_execute_uses_scoped_child_sessions_by_default() -> None:
+    """Team.execute creates child-session member agents inside SessionPool turns."""
+    agent_a = _make_echo_agent("alpha", "shared_a")
+    agent_b = _make_echo_agent("beta", "shared_b")
+    pool = _FakeAgentPool([agent_a, agent_b])
+    team = Team([agent_a, agent_b], name="parallel_scoped", agent_pool=pool)  # type: ignore[arg-type]
+    run_ctx = AgentRunContext(session_id="parent-session")
+
+    token = _current_run_ctx_var.set(run_ctx)
+    try:
+        response = await team.execute("prompt")
+    finally:
+        _current_run_ctx_var.reset(token)
+
+    assert response.child_session_ids.keys() == {"alpha", "beta"}
+    assert {item["agent_name"] for item in pool.session_pool.created} == {"alpha", "beta"}
+    assert {item["parent_session_id"] for item in pool.session_pool.created} == {"parent-session"}
+    assert {item["lifecycle_policy"] for item in pool.session_pool.created} == {"cascade"}
+    assert {item["team_name"] for item in pool.session_pool.created} == {"parallel_scoped"}
+    assert set(pool.session_pool.closed) == set(response.child_session_ids.values())
+
+    contents = {str(item.message.content) for item in response if item.message is not None}
+    for agent_name, session_id in response.child_session_ids.items():
+        assert f"child:{agent_name}:{session_id}" in contents
 
 
 # ---------------------------------------------------------------------------

@@ -56,6 +56,12 @@ class _TeamGraphState:
     member_prompts: dict[str, list[Any]] = field(default_factory=dict)
     """Resolved prompt list per member name."""
 
+    child_session_ids: dict[str, str] = field(default_factory=dict)
+    """Session id allocated for each member in this team run."""
+
+    parent_session_id: str | None = None
+    """Parent session id for scoped team member runs."""
+
     member_timeout: float | None = None
     """Maximum seconds a member may run before being cancelled."""
 
@@ -97,7 +103,12 @@ def _make_member_step(
 
         try:
             start = perf_counter()
-            coro = node.run(*final_prompt, **state.kwargs)
+            run_kwargs = dict(state.kwargs)
+            if child_session_id := state.child_session_ids.get(node.name):
+                run_kwargs["session_id"] = child_session_id
+            if state.parent_session_id:
+                run_kwargs["parent_session_id"] = state.parent_session_id
+            coro = node.run(*final_prompt, **run_kwargs)
             message = (
                 await asyncio.wait_for(coro, timeout=state.member_timeout)
                 if state.member_timeout is not None
@@ -220,4 +231,5 @@ async def run_team_graph(
         responses=responses,
         start_time=start_time,
         errors=errors,
+        child_session_ids=state.child_session_ids,
     )
