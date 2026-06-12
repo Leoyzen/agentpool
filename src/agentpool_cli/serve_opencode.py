@@ -70,7 +70,7 @@ def opencode_command(
     or falls back to the first agent).
     """
     from agentpool import AgentPool, log as ap_log
-    from agentpool.config_resources import CLAUDE_CODE_ASSISTANT
+    from agentpool.config_resources import ACP_ASSISTANT
     from agentpool.models.manifest import AgentsManifest
     from agentpool_config.context import ConfigContextManager
     from agentpool_config.resolution import resolve_config
@@ -81,7 +81,7 @@ def opencode_command(
     try:
         resolved = resolve_config(
             explicit_path=config,
-            fallback_config=CLAUDE_CODE_ASSISTANT,
+            fallback_config=ACP_ASSISTANT,
         )
     except ValueError as e:
         raise t.BadParameter(str(e)) from e

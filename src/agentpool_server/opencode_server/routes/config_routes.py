@@ -362,21 +362,6 @@ async def _get_variants_from_agent(agent: object) -> dict[str, dict[str, object]
     Returns:
         Dict mapping variant names to empty config dicts (config is agent-internal)
     """
-    from agentpool.agents.claude_code_agent import ClaudeCodeAgent
-    from agentpool.agents.codex_agent import CodexAgent
-
-    # Only Codex and Claude Code have static thought_level modes we can expose
-    if not isinstance(agent, (CodexAgent, ClaudeCodeAgent)):
-        return {}
-
-    try:
-        mode_categories = await agent.get_modes()
-    except Exception:  # noqa: BLE001
-        return {}
-    for category in mode_categories:
-        if category.id == "thought_level":
-            # Convert modes to variants - the actual config is handled by set_mode
-            return {mode.id: {} for mode in category.available_modes}
     return {}
 
 

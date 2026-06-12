@@ -16,9 +16,6 @@ from upathtools_config.base import URIFileSystemConfig
 from agentpool import log
 from agentpool.models.acp_agents import ACPAgentConfigTypes
 from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.agui_agents import AGUIAgentConfig
-from agentpool.models.claude_code_agents import ClaudeCodeAgentConfig
-from agentpool.models.codex_agents import CodexAgentConfig
 from agentpool.models.file_agents import FileAgentConfig
 from agentpool_config.commands import CommandConfig, StaticCommandConfig
 from agentpool_config.compaction import CompactionConfig
@@ -57,9 +54,6 @@ ResourceConfig = _FileSystemConfigUnion | str
 # Unified agent config type with top-level discriminator
 AnyAgentConfig = Annotated[
     NativeAgentConfig
-    | AGUIAgentConfig
-    | ClaudeCodeAgentConfig
-    | CodexAgentConfig
     | ACPAgentConfigTypes,
     Field(discriminator="type"),
 ]
@@ -566,16 +560,6 @@ class AgentsManifest(Schema):
         return {k: v for k, v in self.agents.items() if isinstance(v, BaseACPAgentConfig)}
 
     @property
-    def agui_agents(self) -> dict[str, AGUIAgentConfig]:
-        """Get AG-UI agents filtered from unified agents dict."""
-        return {k: v for k, v in self.agents.items() if isinstance(v, AGUIAgentConfig)}
-
-    @property
-    def claude_code_agents(self) -> dict[str, ClaudeCodeAgentConfig]:
-        """Get Claude Code agents filtered from unified agents dict."""
-        return {k: v for k, v in self.agents.items() if isinstance(v, ClaudeCodeAgentConfig)}
-
-    @property
     def native_agents(self) -> dict[str, NativeAgentConfig]:
         """Get native agents filtered from unified agents dict."""
         return {k: v for k, v in self.agents.items() if isinstance(v, NativeAgentConfig)}
@@ -757,8 +741,8 @@ class AgentsManifest(Schema):
         Returns None if no result type is configured or agent doesn't support output_type.
         """
         agent_config = self.agents[agent_name]
-        # Only NativeAgentConfig and ClaudeCodeAgentConfig have output_type
-        if not isinstance(agent_config, NativeAgentConfig | ClaudeCodeAgentConfig):
+        # Only NativeAgentConfig has output_type
+        if not isinstance(agent_config, NativeAgentConfig):
             return None
         if not agent_config.output_type:
             return None

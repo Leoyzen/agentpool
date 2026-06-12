@@ -64,9 +64,9 @@ class ListModelsCommand(NodeCommand):
 
     @classmethod
     def supports_node(cls, node: MessageNode[Any, Any]) -> bool:
-        from agentpool import ACPAgent, Agent, ClaudeCodeAgent
+        from agentpool import ACPAgent, Agent
 
-        return isinstance(node, Agent | ACPAgent | ClaudeCodeAgent)
+        return isinstance(node, Agent | ACPAgent)
 
 
 class SetModelCommand(NodeCommand):
@@ -110,6 +110,6 @@ class SetModelCommand(NodeCommand):
 
     @classmethod
     def supports_node(cls, node: MessageNode[Any, Any]) -> bool:
-        from agentpool import ACPAgent, Agent, ClaudeCodeAgent
+        from agentpool import ACPAgent, Agent
 
-        return isinstance(node, Agent | ACPAgent | ClaudeCodeAgent)
+        return isinstance(node, Agent | ACPAgent)

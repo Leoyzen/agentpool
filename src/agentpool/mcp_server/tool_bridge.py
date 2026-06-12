@@ -100,7 +100,7 @@ def _create_stub_run_context(
     match ctx.agent:
         case Agent():
             model = ctx.agent._model or TestModel()
-        # case ACPAgent() | ClaudeCodeAgent():
+        # case ACPAgent():
         #     try:
         #         model = infer_model(ctx.agent.model_name or "test")
         #     except Exception:

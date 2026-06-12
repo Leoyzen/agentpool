@@ -487,7 +487,7 @@ if __name__ == "__main__":
     from agentpool import AgentPool, config_resources
 
     async def main() -> None:
-        pool = AgentPool(config_resources.CLAUDE_CODE_ASSISTANT)
+        pool = AgentPool(config_resources.ACP_ASSISTANT)
         async with pool:
             run_server(pool.main_agent)
 

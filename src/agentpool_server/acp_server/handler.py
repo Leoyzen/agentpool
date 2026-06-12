@@ -20,6 +20,7 @@ from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
 from agentpool.agents.events.events import SpawnSessionStart
 from agentpool.log import get_logger
+from agentpool.resource_providers.base import ResourceProvider
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
@@ -273,6 +274,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 for provider in acp_session.session_mcp_providers:
                     if provider not in session_agent.tools.external_providers:
                         session_agent.tools.add_provider(provider)
+                # Also sync to SessionState so child sessions (subagents) inherit
+                # these providers via SessionController's parent-child copy.
+                session_state = session_pool.sessions._sessions.get(session_id)
+                if session_state is not None:
+                    session_state.resource_providers = list(
+                        acp_session.session_mcp_providers
+                    )
                 logger.info(
                     "Added session MCP providers to SessionPool agent",
                     session_id=session_id,

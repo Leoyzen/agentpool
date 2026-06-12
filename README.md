@@ -12,20 +12,18 @@
 
 ## The Problem
 
-You want to use multiple AI agents together - Claude Code for refactoring, Codex for code editing with advanced reasoning, a custom analysis agent, maybe Goose for specific tasks. But each has different APIs, protocols, and integration patterns. Coordinating them means writing glue code for each combination.
+You want to use multiple AI agents together - native PydanticAI agents for analysis, ACP-compatible agents like Goose for specific tasks, maybe a custom agent. But each has different APIs, protocols, and integration patterns. Coordinating them means writing glue code for each combination.
 
 ## The Solution
 
-AgentPool acts as a protocol bridge. Define all your agents in one YAML file - whether they're native (PydanticAI-based), direct integrations (Claude Code, Codex), external ACP agents (Goose), or AG-UI agents. Then expose them all through ACP or AG-UI protocols, letting them cooperate, delegate, and communicate through a unified interface. 
+AgentPool acts as a protocol bridge. Define all your agents in one YAML file - whether they're native (PydanticAI-based) or external ACP agents. Then expose them all through ACP or AG-UI protocols, letting them cooperate, delegate, and communicate through a unified interface. 
 
 ```mermaid
 flowchart TB
     subgraph AgentPool
         subgraph config[YAML Configuration]
             native[Native Agents<br/>PydanticAI]
-            direct[Direct Integrations<br/>Claude Code, Codex]
             acp_agents[ACP Agents<br/>Goose, etc.]
-            agui_agents[AG-UI Agents]
             workflows[Teams & Workflows]
         end
         
@@ -87,29 +85,11 @@ agents:
       - type: subagent  # Can delegate to all other agents
     system_prompt: "Coordinate tasks between available agents."
 
-  # Claude Code agent (direct integration)
-  claude:
-    type: claude_code
-    description: "Claude Code for complex refactoring"
-
-  # Codex agent (direct integration)
-  codex:
-    type: codex
-    model: gpt-5.1-codex-max
-    reasoning_effort: medium
-    description: "Codex for code editing with advanced reasoning"
-
   # ACP protocol agents
   goose:
     type: acp
     provider: goose
     description: "Goose for file operations"
-
-  # AG-UI protocol agent
-  agui_agent:
-    type: agui
-    url: "http://localhost:8000"
-    description: "Custom AG-UI agent"
 ```
 
 Now `coordinator` can delegate work to any of these agents, and all are accessible through the same interface.

@@ -209,38 +209,19 @@ async def _event_generator(
 ) -> AsyncGenerator[dict[str, Any]]:
     """Generate SSE events for connected clients.
 
-    Registers a subscriber queue, sends an initial connected event,
-    then streams subsequent events from the broadcast system.
-
-    **Dual-path event delivery (Migration B)**
-
-    During the transition from legacy SSE-only broadcasting to
-    EventBus-based routing, this generator consumes events from
-    BOTH paths:
-
-    1. **Legacy path** – ``state.event_subscribers`` queues.  Events
-       broadcast via :meth:`ServerState.broadcast_event` are placed
-       here.  This preserves backward compatibility with all existing
-       consumers.
-
-    2. **EventBus path** – ``EventBus.subscribe("__global_sse__",
-       scope="all")``.  Events published to any session are picked
-       up here via the global subscription.
-
-    **CustomEvent unwrapping**
-
-    Non-bridge :class:`CustomEvent` instances from the EventBus are
-    unwrapped (``event_data``) before serialization.  Bridge-wrapped
-    events are skipped since they are already visible on the legacy
-    path.
+    Events are received from the SessionPool EventBus via a global
+    subscription (``"__global_sse__"``) and streamed to SSE clients.
 
     Args:
         state: The server state holding subscribers and event factory
         wrap_payload: Whether to wrap events in GlobalEvent envelopes
     """
     factory = state.get_event_factory() if wrap_payload else None
-    queue: asyncio.Queue[Event] = asyncio.Queue()
-    state.event_subscribers.append(queue)
+    # Track connection for diagnostic subscriber counting.
+    # The queue is maintained only for the event_subscribers counter;
+    # actual event delivery now flows exclusively through the EventBus.
+    _sentinel_queue: asyncio.Queue[Event] = asyncio.Queue()
+    state.event_subscribers.append(_sentinel_queue)
     subscriber_count = len(state.event_subscribers)
     logger.info("SSE: New client connected (total subscribers: %s)", subscriber_count)
 
@@ -256,9 +237,7 @@ async def _event_generator(
         state._first_subscriber_triggered = True
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
-    # ------------------------------------------------------------------
-    # EventBus integration (Migration B)
-    # ------------------------------------------------------------------
+    # Subscribe to EventBus for global SSE events
     event_bus_queue: asyncio.Queue[Any] | None = None
     session_controller = getattr(state, "session_controller", None)
     if session_controller is not None:
@@ -267,34 +246,8 @@ async def _event_generator(
             event_bus = session_pool.event_bus
             event_bus_queue = await event_bus.subscribe("__global_sse__", scope="all")
 
-    # Merged queue fed by background forwarders so either source can
-    # unblock us immediately.
-    merged_queue: asyncio.Queue[tuple[str, Event]] = asyncio.Queue()
-    forwarder_tasks: list[asyncio.Task[Any]] = []
-
-    async def _forward_legacy() -> None:
-        while True:
-            evt = await queue.get()
-            await merged_queue.put(("legacy", evt))
-
-    async def _forward_eventbus(eb_queue: asyncio.Queue[Any]) -> None:
-        while True:
-            evt = await eb_queue.get()
-            await merged_queue.put(("eventbus", evt))
-
-    forwarder_tasks.append(
-        asyncio.create_task(_forward_legacy(), name="sse_legacy_forwarder")
-    )
-    if event_bus_queue is not None:
-        forwarder_tasks.append(
-            asyncio.create_task(
-                _forward_eventbus(event_bus_queue), name="sse_eventbus_forwarder"
-            )
-        )
-
     try:
-        # Send initial connected event with payload wrapper on /global/event,
-        # but without directory/project metadata.
+        # Send initial connected event
         connected = ServerConnectedEvent()
         data = _serialize_event(connected, wrap_payload=wrap_payload)
         logger.info("SSE: Sending connected event", data=data)
@@ -302,57 +255,72 @@ async def _event_generator(
         if event_id > last_id:
             yield {"data": data, "id": str(event_id)}
 
-        while True:
-            try:
-                source, raw_event = await asyncio.wait_for(
-                    merged_queue.get(), timeout=10.0
-                )
-            except TimeoutError:
+        if event_bus_queue is None:
+            # No EventBus available — send periodic heartbeats only
+            while True:
+                await asyncio.sleep(10.0)
                 heartbeat = ServerHeartbeatEvent()
                 data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
                 yield {"data": data}
-                continue
-
-            # Unwrap / deduplicate CustomEvent from EventBus
-            if source == "eventbus" and isinstance(raw_event, CustomEvent):
-                if raw_event.source == "opencode_event_bridge":
-                    # Already on legacy path — skip
+        else:
+            while True:
+                try:
+                    raw_event = await asyncio.wait_for(
+                        event_bus_queue.get(), timeout=10.0
+                    )
+                except TimeoutError:
+                    heartbeat = ServerHeartbeatEvent()
+                    data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
+                    yield {"data": data}
                     continue
-                event = cast(Event, raw_event.event_data)
-            else:
-                event = raw_event
 
-            # Skip non-OpenCode events (RichAgentStreamEvent, etc.).
-            # The legacy path already provides properly formatted OpenCode events
-            # during the transition period.
-            if not hasattr(event, "type"):
-                continue
-            if factory is not None and not isinstance(
-                event, ServerHeartbeatEvent | ServerConnectedEvent
-            ):
-                data = factory.wrap(event)
-            elif wrap_payload:
-                data = _serialize_event(event, wrap_payload=True)
-            else:
-                data = _serialize_event(event)
-            logger.info("SSE: Sending event", event_type=getattr(event, "type", "unknown"))
-            event_id = state.get_next_event_id()
-            if event_id > last_id:
-                yield {"data": data, "id": str(event_id)}
+                # Unwrap EventEnvelope (EventBus always wraps events)
+                from agentpool.orchestrator.core import EventEnvelope
+
+                inner_event: Any
+                if isinstance(raw_event, EventEnvelope):
+                    inner_event = raw_event.event
+                else:
+                    inner_event = raw_event
+
+                # Unwrap CustomEvent (event_bridge wraps OpenCode events)
+                if isinstance(inner_event, CustomEvent):
+                    if inner_event.event_data is None:
+                        continue
+                    event = cast(Event, inner_event.event_data)
+                else:
+                    event = inner_event
+
+                # Skip non-OpenCode events
+                if not hasattr(event, "type"):
+                    continue
+                if factory is not None and not isinstance(
+                    event, ServerHeartbeatEvent | ServerConnectedEvent
+                ):
+                    data = factory.wrap(event)
+                elif wrap_payload:
+                    data = _serialize_event(event, wrap_payload=True)
+                else:
+                    data = _serialize_event(event)
+                logger.info(
+                    "SSE: Sending event",
+                    event_type=getattr(event, "type", "unknown"),
+                    session_id=_extract_session_id(event) or "-",
+                )
+                event_id = state.get_next_event_id()
+                if event_id > last_id:
+                    yield {"data": data, "id": str(event_id)}
     finally:
-        # Cancel background forwarders.
-        for task in forwarder_tasks:
-            task.cancel()
-        # Unsubscribe from EventBus.
+        # Unsubscribe from EventBus
         if event_bus_queue is not None:
             session_pool = getattr(state.pool, "session_pool", None)
             if session_pool is not None:
                 with contextlib.suppress(Exception):
                     await session_pool.event_bus.unsubscribe("__global_sse__", event_bus_queue)
-        # Legacy cleanup: safe removal from event_subscribers.
+        # Remove from subscriber count
         with contextlib.suppress(ValueError):
-            state.event_subscribers.remove(queue)
-        # Cancel any pending questions when the SSE client disconnects.
+            state.event_subscribers.remove(_sentinel_queue)
+        # Cancel any pending questions when the SSE client disconnects
         if session_controller is not None:
             cancelled = session_controller.cancel_all_pending_questions()
         else:

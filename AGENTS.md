@@ -1,6 +1,6 @@
 ## Project Overview
 
-AgentPool is a unified agent orchestration framework that enables YAML-based configuration of heterogeneous AI agents. It bridges multiple protocols (ACP, AG-UI, OpenCode, MCP) and supports native PydanticAI agents, Claude Code agents, Goose, and other external agents.
+AgentPool is a unified agent orchestration framework that enables YAML-based configuration of heterogeneous AI agents. It bridges multiple protocols (ACP, AG-UI, OpenCode, MCP) and supports native PydanticAI agents and external agents via ACP.
 
 **Core Philosophy**: Define once in YAML, expose through multiple protocols, enable seamless inter-agent collaboration.
 
@@ -93,7 +93,7 @@ agentpool history stats --group-by model
 The codebase is organized into focused packages under `src/`:
 
 - **`agentpool/`** - Core agent framework
-  - `agents/` - Agent implementations (native, ACP, AG-UI, Claude Code)
+  - `agents/` - Agent implementations (native, ACP)
   - `delegation/` - AgentPool orchestration, Team coordination, message routing
   - `messaging/` - Message processing, MessageNode abstraction, compaction
   - `tools/` - Tool framework and implementations
@@ -219,7 +219,7 @@ Tools follow PydanticAI's tool pattern with AgentPool extensions:
 
 #### Protocol Bridging
 AgentPool acts as a protocol adapter:
-1. Agent defined once in YAML (with type: native/acp/agui/claude)
+1. Agent defined once in YAML (with type: native or acp)
 2. Pool loads and manages agent lifecycle
 3. Server exposes agent through chosen protocol (ACP/AG-UI/OpenCode/OpenAI API)
 4. Client interacts via standardized protocol
@@ -525,7 +525,7 @@ AgentPool maintains two queue systems because native and non-native agents use d
 
 Native agents drive execution through `RunExecutor`, which calls `agent_run.next(node)` in a loop. The bare `async for node in agent_run:` pattern does not fire `after_node_run` hooks, so `"when_idle"` messages would never drain. `RunExecutor` avoids this by using explicit `next()` calls.
 
-**Non-native agents** (ACP, ClaudeCode, AGUI) do not use PydanticAI's agent loop. They communicate through subprocess JSON-RPC, Claude SDK, or HTTP/SSE. These agents use `TurnRunner`, which preserves the manual queue system:
+**Non-native agents** (ACP) do not use PydanticAI's agent loop. They communicate through subprocess JSON-RPC. These agents use `TurnRunner`, which preserves the manual queue system:
 
 - `_post_turn_injections` for immediate injections.
 - `_post_turn_prompts` for follow-up prompts.
@@ -594,18 +594,8 @@ The `RunExecutor` runs PydanticAI iteration in a background task and pushes even
 
 **ACP Agents** (`type: acp`)
 - External agents implementing Agent Communication Protocol
-- Examples: Goose, Codex, custom ACP servers
+- Examples: Goose, custom ACP servers
 - Communicate via stdio or websocket
-
-**Claude Code Agents** (`type: claude`)
-- Direct integration with Claude Code CLI
-- Specialized for code-related tasks
-- Access to Claude Code's tool ecosystem
-
-**AG-UI Agents** (`type: agui`)
-- Remote agents implementing AG-UI protocol
-- HTTP-based communication
-- Useful for distributed agent architectures
 
 **File Agents** (`type: file`)
 - Agent behavior defined by file content/prompts
@@ -802,19 +792,6 @@ async with ACPAgent(
     cwd="/path/to/project",
 ) as agent:
     async for event in agent.run_stream("Write code"):
-        ...
-```
-
-**Claude Code Agent**
-```python
-from agentpool.agents.claude_code_agent import ClaudeCodeAgent
-
-async with ClaudeCodeAgent(
-    name="claude_coder",
-    model="claude-sonnet-4-20250514",  # Optional: defaults to latest
-    cwd="/path/to/project",  # Optional: defaults to current directory
-) as agent:
-    async for event in agent.run_stream("Refactor this code"):
         ...
 ```
 

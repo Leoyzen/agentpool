@@ -102,7 +102,7 @@ Transport = (
     | WebSocketTransport
     | StreamTransport
     | ACPWebSocketTransport
-    | Literal["stdio", "websocket", "streamable-http"]
+    | Literal["stdio", "streamable-http"]
 )
 
 
@@ -129,8 +129,7 @@ async def serve(
             an AgentSideConnection and returns an Agent.
         transport: Transport configuration. Can be:
             - "stdio" or StdioTransport(): Use stdin/stdout
-            - "websocket" or WebSocketTransport(...): Run WebSocket server
-            - StreamTransport(...): Use custom streams
+                       - StreamTransport(...): Use custom streams
         shutdown_event: Optional event to signal shutdown. If not provided,
             runs until cancelled.
         debug_file: Optional file path for debug message logging.
@@ -156,14 +155,7 @@ async def serve(
     match transport:
         case "stdio":
             transport = StdioTransport()
-        case "websocket":
-            warnings.warn(
-                "WebSocketTransport is deprecated; use ACPWebSocketTransport "
-                "or 'streamable-http' instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            transport = WebSocketTransport()
+
         case "streamable-http":
             transport = ACPWebSocketTransport()
 

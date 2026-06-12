@@ -66,9 +66,8 @@ class ConfigOptionChanged:
 class ModeCategoryProtocol(Protocol[AgentT_contra]):
     """Protocol for mode categories that can apply themselves.
 
-    Generic over agent type. Use ModeCategoryProtocol[CodexAgent] for
-    Codex-specific categories, ModeCategoryProtocol[BaseAgent] for
-    agent-agnostic ones.
+    Generic over agent type. Use ModeCategoryProtocol[BaseAgent] for
+    agent-agnostic categories.
 
     State (current mode) lives on the agent - categories just know how to
     read and write it via get_current() and apply().

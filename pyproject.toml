@@ -34,7 +34,6 @@ dependencies = [
   "alembic>=1.16.5",
   "ag-ui-protocol>=0.1.10",
   "anyenv[httpx]>=0.3.0",
-  "clawd-code-sdk>=0.1.36",
   # "clawd-code-sdk@git+https://github.com/phil65/claude-agent-sdk-python.git@efbaa798",
   "docler>=1.0.3",
   "docstring-parser>=0.17.0",
@@ -471,7 +470,6 @@ module-name = [
   "agentpool_server",
   "agentpool_toolsets",
   "acp",
-  "codex_adapter",
 ]
 wheel-exclude = [
   ".mypy_cache/**",

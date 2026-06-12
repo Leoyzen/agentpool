@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
@@ -131,11 +130,6 @@ class ConnectionManager:
             exit_condition: When to exit application
             name: Optional name for cross-referencing connections
         """
-        warnings.warn(
-            "create_connection() is deprecated. Use YAML config or GraphBuilder instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if isinstance(target, Sequence):
             # Create individual talks recursively
             talks = [

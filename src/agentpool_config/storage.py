@@ -172,33 +172,6 @@ class MemoryStorageConfig(BaseStorageProviderConfig):
 
         return MemoryStorageProvider(self)
 
-
-class ClaudeStorageConfig(BaseStorageProviderConfig):
-    """Claude Code native storage format configuration.
-
-    Reads/writes to Claude Code's native JSONL format in ~/.claude/projects/.
-    Useful for sharing conversation history between agentpool and Claude Code CLI.
-    """
-
-    model_config = ConfigDict(json_schema_extra={"x-doc-title": "Claude Storage"})
-
-    type: Literal["claude"] = Field("claude", init=False)
-    """Claude Code native storage configuration."""
-
-    path: str = Field(
-        default="~/.claude",
-        examples=["~/.claude", "/home/user/.claude"],
-        title="Claude data directory",
-    )
-    """Path to Claude data directory (default: ~/.claude)"""
-
-    def get_provider(self) -> StorageProvider:
-        """Create a Claude storage provider instance."""
-        from agentpool_storage.claude_provider import ClaudeStorageProvider
-
-        return ClaudeStorageProvider(self)
-
-
 class OpenCodeStorageConfig(BaseStorageProviderConfig):
     """OpenCode SQLite storage format configuration.
 
@@ -271,35 +244,13 @@ class ACPStorageConfig(BaseStorageProviderConfig):
 
         return ACPStorageProvider(self)
 
-
-class CodexStorageConfig(BaseStorageProviderConfig):
-    """Codex server storage configuration.
-
-    Read-only provider that queries a connected Codex server for session history.
-    The connection is established at runtime by the agent, not from config.
-    """
-
-    model_config = ConfigDict(json_schema_extra={"x-doc-title": "Codex Storage"})
-
-    type: Literal["codex"] = Field("codex", init=False)
-    """Codex server storage configuration."""
-
-    def get_provider(self) -> StorageProvider:
-        """Create a Codex storage provider instance."""
-        from agentpool_storage.codex_provider import CodexStorageProvider
-
-        return CodexStorageProvider(self)
-
-
 StorageProviderConfig = Annotated[
     SQLStorageConfig
     | FileStorageConfig
     | MemoryStorageConfig
-    | ClaudeStorageConfig
     | OpenCodeStorageConfig
     | ZedStorageConfig
-    | ACPStorageConfig
-    | CodexStorageConfig,
+    | ACPStorageConfig,
     Field(discriminator="type"),
 ]
 

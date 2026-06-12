@@ -172,7 +172,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         usage_limits: UsageLimits | None = None,
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
-        history_processors: Sequence[Callable[..., Any]] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Initialize agent.
@@ -221,7 +220,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers: Model providers for model discovery (e.g., ["openai", "anthropic"]).
                 Defaults to ["models.dev"] if not specified.
             commands: Slash commands
-            history_processors: History processors (deprecated - use session=MemoryConfig(history_processors=[...]))
             metadata: Arbitrary metadata for the agent (e.g., feature flags)
         """
         from agentpool.agents.interactions import Interactions
@@ -235,46 +233,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self.model_settings = model_settings
         self.config = agent_config
         self._direct_history_processors = None
-        # Handle deprecated history_processors parameter
-        if history_processors is not None:
-            # Convert to session configuration
-            if session is None or isinstance(session, str):
-                memory_cfg = MemoryConfig.from_value(session)
-                if memory_cfg.history_processors is None:
-                    memory_cfg.history_processors = []
-                # Merge history_processors from parameter with config
-                if memory_cfg.history_processors and history_processors:
-                    logger.warning(
-                        "history_processors parameter is merged with session.history_processors; "
-                        "prefer configuring processors only on MemoryConfig",
-                        session_processors=len(memory_cfg.history_processors),
-                        param_processors=len(history_processors),
-                    )
-                # Store processors for manual resolution
-                self._direct_history_processors = list(history_processors)
-            elif isinstance(session, MemoryConfig):
-                memory_cfg = session
-                if memory_cfg.history_processors is None:
-                    memory_cfg.history_processors = []
-                # Merge history_processors from parameter with config
-                if memory_cfg.history_processors and history_processors:
-                    logger.warning(
-                        "history_processors parameter is merged with session.history_processors; "
-                        "prefer configuring processors only on MemoryConfig",
-                        session_processors=len(memory_cfg.history_processors),
-                        param_processors=len(history_processors),
-                    )
-                # Store processors for manual resolution
-                self._direct_history_processors = list(history_processors)
-            else:
-                raise ValueError(
-                    "Cannot use history_processors parameter with non-MemoryConfig session"
-                )
-        else:
-            memory_cfg = (
-                session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
-            )
-            self._direct_history_processors = None
+        memory_cfg = (
+            session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
+        )
         # Collect MCP servers from config
         all_mcp_servers = list(mcp_servers) if mcp_servers else []
         if agent_config and agent_config.mcp_servers:

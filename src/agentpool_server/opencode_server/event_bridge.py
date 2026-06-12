@@ -1,26 +1,17 @@
-"""Event bridge between OpenCode SSE broadcasting and SessionPool EventBus.
+"""Event bridge that publishes OpenCode events to the SessionPool EventBus.
 
-Provides :class:`OpenCodeEventBridge` which intercepts events destined for
-OpenCode SSE subscribers and additionally republishes them to the
-SessionPool's :class:`EventBus`. This enables dual-path event delivery during
-the migration from legacy SSE-only broadcasting to EventBus-based routing.
+Provides :class:`OpenCodeEventBridge` which republishes events destined for
+OpenCode clients to the SessionPool's :class:`EventBus` for EventBus-based
+routing to all consumers.
 
 **Event flow**
 
 1. Caller invokes ``state.broadcast_event(event)`` (or ``bridge.publish(event)``).
-2. Bridge forwards the raw event to the original
-   :meth:`ServerState.broadcast_event` so all existing SSE subscribers
-   continue to receive events unchanged.
-3. Bridge extracts ``session_id`` from the event's ``properties``.
-4. If a session_id is present, the event is wrapped in a
+2. Bridge extracts ``session_id`` from the event's ``properties``.
+3. If a session_id is present, the event is wrapped in a
    :class:`CustomEvent` and published to the EventBus for that session.
-5. EventBus subscribers (status bridges, protocol adapters, test consumers)
+4. EventBus subscribers (status bridges, protocol adapters, SSE clients)
    receive the wrapped event.
-
-**Backward compatibility**
-
-When ``session_controller`` is ``None`` (legacy mode) the bridge is not
-instantiated and ``broadcast_event`` behaves exactly as before.
 """
 
 from __future__ import annotations
@@ -41,13 +32,11 @@ logger = get_logger(__name__)
 
 
 class OpenCodeEventBridge:
-    """Bridge that dual-publishes OpenCode events to SSE and EventBus.
+    """Bridge that publishes OpenCode events to the SessionPool EventBus.
 
-    Wraps :meth:`ServerState._broadcast_event_impl` so that every event
-    sent to OpenCode SSE subscribers is also made available on the
-    SessionPool EventBus.  This allows incremental migration of consumers
-    from SSE queues to EventBus subscriptions without breaking existing
-    subscribers.
+    Every event published through this bridge is made available on the
+    SessionPool EventBus so that all consumers (SSE clients, status bridges,
+    protocol adapters) receive events via EventBus subscriptions.
 
     Args:
         state: The OpenCode server state.
@@ -60,30 +49,25 @@ class OpenCodeEventBridge:
         self._event_bus = event_bus
 
     async def publish(self, event: Event) -> None:
-        """Publish an event to SSE subscribers and the EventBus.
+        """Publish an event to the EventBus.
 
         Steps:
-        1. Forward the raw event to the original SSE broadcast path via
-           :meth:`ServerState._broadcast_event_impl`.
-        2. Extract ``session_id`` from the event properties.
-        3. If a session_id is found, wrap the event in a
+        1. Extract ``session_id`` from the event properties.
+        2. If a session_id is found, wrap the event in a
            :class:`CustomEvent` and publish it to the EventBus.
 
         Args:
             event: An OpenCode protocol event (e.g. ``SessionStatusEvent``,
                 ``PartUpdatedEvent``, ``MessageUpdatedEvent``).
         """
-        # Step 1: backward-compatible SSE broadcast
-        await self._state._broadcast_event_impl(event)
-
-        # Step 2: extract session_id
+        # Step 1: extract session_id
         session_id = self._extract_session_id(event)
         if session_id is None:
             # Global events (server.heartbeat, vcs.branch.updated, etc.)
             # have no session scope and are not republished to the EventBus.
             return
 
-        # Step 3: wrap and republish to EventBus
+        # Step 2: wrap and republish to EventBus
         wrapped = self._wrap_event(event)
         try:
             await self._event_bus.publish(session_id, wrapped)
@@ -99,8 +83,15 @@ class OpenCodeEventBridge:
         """Extract session_id from an OpenCode event's properties.
 
         Most session-scoped events inherit from ``SessionIdProperties`` and
-        expose ``properties.session_id``.  Global events (heartbeats,
-        branch updates) do not have a session_id.
+        expose ``properties.session_id`` directly.  However, some event types
+        nest session_id deeper:
+
+        - ``PartUpdatedEvent`` → ``properties.part.session_id``
+        - ``SessionCreatedEvent`` / ``SessionUpdatedEvent`` → ``properties.info.id``
+        - ``MessageUpdatedEvent`` → ``properties.info.session_id``
+
+        This method tries each known path in order and returns the first
+        non-None ``str`` result.
 
         Args:
             event: The OpenCode event to inspect.
@@ -111,8 +102,27 @@ class OpenCodeEventBridge:
         properties = getattr(event, "properties", None)
         if properties is None:
             return None
+
+        # Fast path: direct session_id (SessionIdProperties subclasses)
         session_id = getattr(properties, "session_id", None)
-        return session_id if isinstance(session_id, str) else None
+        if isinstance(session_id, str):
+            return session_id
+
+        # PartUpdatedEvent: session_id is at properties.part.session_id
+        part = getattr(properties, "part", None)
+        if part is not None:
+            sid = getattr(part, "session_id", None)
+            if isinstance(sid, str):
+                return sid
+
+        # SessionCreated / SessionUpdated: session_id is at properties.info.id
+        info = getattr(properties, "info", None)
+        if info is not None:
+            sid = getattr(info, "id", None)
+            if isinstance(sid, str):
+                return sid
+
+        return None
 
     @staticmethod
     def _wrap_event(event: Event) -> CustomEvent[Any]:
