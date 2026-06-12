@@ -9,6 +9,7 @@ from pydantic import ConfigDict, TypeAdapter
 from pydantic_ai import ModelMessage, ModelResponsePart
 
 from agentpool.log import get_logger
+from agentpool.sessions.models import PendingDeferredCall
 
 
 if TYPE_CHECKING:
@@ -28,6 +29,9 @@ messages_adapter = TypeAdapter(
     list[ModelMessage],
     config=ConfigDict(ser_json_bytes="base64", val_json_bytes="base64"),
 )
+
+# Type adapter for serializing PendingDeferredCall sequences
+deferred_calls_adapter = TypeAdapter(list[PendingDeferredCall])
 
 
 def deserialize_parts(parts_json: str | None) -> Sequence[ModelResponsePart]:
@@ -134,3 +138,38 @@ def serialize_messages(messages: Sequence[ModelMessage]) -> str | None:
     except Exception as e:  # noqa: BLE001
         logger.warning("Failed to serialize model messages", error=e)
         return str(messages)  # Fallback to string representation
+
+
+def serialize_pending_calls(calls: list[PendingDeferredCall]) -> str:
+    """Serialize PendingDeferredCall list to JSON string.
+
+    Args:
+        calls: List of PendingDeferredCall objects to serialize.
+
+    Returns:
+        JSON string representation of the calls. Empty list returns "[]".
+    """
+    try:
+        return deferred_calls_adapter.dump_json(calls).decode()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to serialize pending deferred calls", error=e)
+        return "[]"
+
+
+def deserialize_pending_calls(json_str: str | None) -> list[PendingDeferredCall]:
+    """Deserialize PendingDeferredCall list from JSON string.
+
+    Args:
+        json_str: JSON string representation of pending calls or None if empty.
+
+    Returns:
+        List of PendingDeferredCall objects, empty if deserialization fails.
+    """
+    if not json_str:
+        return []
+
+    try:
+        return deferred_calls_adapter.validate_json(json_str.encode())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to deserialize pending deferred calls", error=e)
+        return []

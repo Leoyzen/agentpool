@@ -290,6 +290,9 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     metadata_json: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     """Protocol-specific or custom metadata stored as JSON."""
 
+    checkpoint_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    """Checkpoint data for durable execution (messages_json, pending_calls)."""
+
     model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
 
 
