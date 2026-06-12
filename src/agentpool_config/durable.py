@@ -397,6 +397,20 @@ class CheckpointConfig(Schema):
     )
     """How often to check for expired deferred calls."""
 
+    compaction_threshold_messages: int = Field(
+        default=500,
+        ge=1,
+        title="Compaction message threshold",
+    )
+    """Minimum message count that triggers compaction before checkpoint."""
+
+    compaction_threshold_bytes: int = Field(
+        default=5_242_880,  # 5 MB
+        ge=1,
+        title="Compaction byte threshold",
+    )
+    """Minimum serialized byte size that triggers compaction before checkpoint."""
+
 
 DurableExecutionConfig = Annotated[
     TemporalDurableConfig | PrefectDurableConfig | DBOSDurableConfig,

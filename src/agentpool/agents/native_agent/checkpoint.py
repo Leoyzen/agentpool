@@ -116,14 +116,25 @@ class CheckpointManager:
     the agent continues running with its resources intact.
     """
 
-    def __init__(self, storage_manager: StorageManager) -> None:
+    def __init__(
+        self,
+        storage_manager: StorageManager,
+        compaction_threshold_messages: int = 500,
+        compaction_threshold_bytes: int = 5_242_880,
+    ) -> None:
         """Initialize the checkpoint manager.
 
         Args:
             storage_manager: Storage backend for persisting checkpoint data.
+            compaction_threshold_messages: Minimum message count that triggers
+                compaction before checkpoint.
+            compaction_threshold_bytes: Minimum serialized byte size that
+                triggers compaction before checkpoint.
         """
         self._storage = storage_manager
         self._is_mid_stream: bool = False
+        self._compaction_threshold_messages = compaction_threshold_messages
+        self._compaction_threshold_bytes = compaction_threshold_bytes
 
     async def checkpoint(
         self,
@@ -163,10 +174,40 @@ class CheckpointManager:
             else None
         )
 
+        # Auto-compact message history if above thresholds
+        messages_json_for_save = messages_json
+        if messages_json and len(messages_json) > 0:
+            message_count = len(message_history)
+            byte_size = len(
+                messages_json.encode() if isinstance(messages_json, str) else messages_json
+            )
+            if (
+                message_count > self._compaction_threshold_messages
+                or byte_size > self._compaction_threshold_bytes
+            ):
+                from agentpool.messaging.compaction import (
+                    CompactionPipeline,
+                    KeepLastMessages,
+                    TruncateToolOutputs,
+                )
+
+                pipeline = CompactionPipeline(steps=[
+                    TruncateToolOutputs(max_length=1000),
+                    KeepLastMessages(count=500),
+                ])
+                compacted = await pipeline.apply(message_history)
+                messages_json_for_save = messages_adapter.dump_json(compacted).decode()
+                logger.info(
+                    "Compacted message history before checkpoint",
+                    session_id=session_id,
+                    original_count=message_count,
+                    compacted_count=len(compacted),
+                )
+
         # Store atomically via StorageManager (messages + pending_calls together)
         await self._storage.save_checkpoint(
             session_id=session_id,
-            messages_json=messages_json or "[]",
+            messages_json=messages_json_for_save or "[]",
             pending_calls=pending_calls,
         )
 
