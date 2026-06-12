@@ -1,7 +1,7 @@
 """Add checkpoint_data JSON column to conversation.
 
 Revision ID: c3d4e5f6a7b8
-Revises: b2c3d4e5f6a7
+Revises: 2f5ee67f43ce
 Create Date: 2026-06-12
 """
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 # revision identifiers, used by Alembic.
 revision: str = "c3d4e5f6a7b8"
-down_revision: str | None = "b2c3d4e5f6a7"
+down_revision: str | None = "2f5ee67f43ce"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
