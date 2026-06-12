@@ -66,6 +66,26 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _resolve_message_agent_name(
+    state: ServerState,
+    session_id: str,
+    requested_agent: str | None,
+) -> str:
+    """Resolve the agent for a message, inheriting the session binding by default."""
+    if requested_agent and requested_agent != "default":
+        if requested_agent not in state.pool.all_agents:
+            raise HTTPException(status_code=400, detail=f"Unknown agent: {requested_agent}")
+        return requested_agent
+
+    session_pool = state.pool.session_pool
+    if session_pool is not None:
+        session_state = session_pool.sessions.get_session(session_id)
+        if session_state is not None and isinstance(session_state.agent_name, str):
+            return session_state.agent_name
+
+    return state.agent.name or "default"
+
+
 def _warmup_lsp_for_files(state: ServerState, file_paths: list[str]) -> None:
     """Warm up LSP servers for the given file paths.
 
@@ -230,12 +250,13 @@ async def _process_message(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    agent_name = _resolve_message_agent_name(state, session_id, request.agent)
     user_msg_id = identifier.ascending("message", request.message_id)
     user_message = UserMessage(
         id=user_msg_id,
         session_id=session_id,
         time=TimeCreated.now(),
-        agent=request.agent or "default",
+        agent=agent_name,
         model=request.model,
     )
 
@@ -317,6 +338,7 @@ async def _process_message_locked(  # noqa: PLR0915
         busy = SessionStatus(type="busy")
         await set_session_status(state, session_id, busy)
         await state.broadcast_event(SessionStatusEvent.create(session_id, busy))
+    agent_name = _resolve_message_agent_name(state, session_id, request.agent)
     # --- Extract user prompt ---
     user_prompt = await extract_user_prompt_from_parts(
         request.parts,
@@ -342,8 +364,8 @@ async def _process_message_locked(  # noqa: PLR0915
         parent_id=user_msg_id,
         model_id=request.model.model_id if request.model else "default",
         provider_id=request.model.provider_id if request.model else "agentpool",
-        mode=request.agent or "default",
-        agent=request.agent or "default",
+        mode=agent_name,
+        agent=agent_name,
         path=MessagePath(cwd=state.working_dir, root=state.working_dir),
         time=MessageTime(created=now),
     )
@@ -388,17 +410,17 @@ async def _process_message_locked(  # noqa: PLR0915
     # due to MCP subprocess overhead.  If OpenCode ever supports direct
     # multi-agent selection, this must be redesigned via AgentPool's
     # delegation/team mechanism instead.
-    if request.agent and state.pool is not None:
+    if state.pool is not None:
         all_agents = state.pool.all_agents
         # Only delegate to a different agent from the pool — if the request
         # names the same agent as the session's default, the per-session
         # instance is already the right one.
-        if request.agent in all_agents and all_agents[request.agent] is not agent:
+        if agent_name in all_agents and all_agents[agent_name] is not agent:
             agent_config = getattr(state, "_agent_config", None)
-            if agent_config is not None and request.agent == getattr(agent_config, "name", None):
+            if agent_config is not None and agent_name == getattr(agent_config, "name", None):
                 pass  # Use per-session agent, don't replace with pool singleton
             else:
-                agent = all_agents[request.agent]
+                agent = all_agents[agent_name]
     # Get input provider for this session — stored on SessionState, NOT on agent.
     # SessionController passes input_provider to the agent via kwargs at run time.
     input_provider = state.ensure_input_provider(session_id)
@@ -414,12 +436,12 @@ async def _process_message_locked(  # noqa: PLR0915
     if integration is not None:
         sp_state = await integration.create_session(
             session_id,
-            agent_name=request.agent or state.agent.name or "default",
+            agent_name=agent_name,
         )
     else:
         sp_state, _was_created = await session_pool.sessions.get_or_create_session(
             session_id,
-            agent_name=request.agent or state.agent.name or "default",
+            agent_name=agent_name,
         )
     sp_state.input_provider = input_provider
 
@@ -427,7 +449,7 @@ async def _process_message_locked(  # noqa: PLR0915
     # gets its own isolated model configuration.
     session_agent = await session_pool.sessions.get_or_create_session_agent(
         session_id,
-        agent_name=request.agent or state.agent.name or "default",
+        agent_name=agent_name,
         input_provider=input_provider,
     )
 
@@ -516,6 +538,7 @@ async def _process_message_locked(  # noqa: PLR0915
                 content=user_prompt,
                 priority="when_idle",
                 input_provider=input_provider,
+                agent_name=agent_name,
             )
         else:
             run_handle = await session_pool.receive_request(
@@ -709,12 +732,13 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    agent_name = _resolve_message_agent_name(state, session_id, request.agent)
     user_msg_id = identifier.ascending("message", request.message_id)
     user_message = UserMessage(
         id=user_msg_id,
         session_id=session_id,
         time=TimeCreated.now(),
-        agent=request.agent or "default",
+        agent=agent_name,
         model=request.model,
     )
 
@@ -767,11 +791,12 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                 content=user_prompt,
                 priority="when_idle",
                 input_provider=input_provider,
+                agent_name=agent_name,
             )
         else:
             sp_state, _was_created = await session_pool.sessions.get_or_create_session(
                 session_id,
-                agent_name=request.agent or state.agent.name or "default",
+                agent_name=agent_name,
             )
             sp_state.input_provider = input_provider
 

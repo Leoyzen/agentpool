@@ -569,6 +569,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         content: Any,
         priority: str = "when_idle",
         input_provider: Any | None = None,
+        agent_name: str | None = None,
         **kwargs: Any,
     ) -> RunHandle | None:
         """Route a message through SessionPool.receive_request().
@@ -581,6 +582,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             content: Message / prompt content.
             priority: "when_idle" to queue, "asap" to inject into active turn.
             input_provider: Optional input provider for the agent.
+            agent_name: Agent to bind if the session must be created.
             **kwargs: Additional arguments passed to the turn runner.
 
         Returns:
@@ -588,7 +590,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         """
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is None:
-            await self.create_session(session_id)
+            await self.create_session(session_id, agent_name=agent_name)
         else:
             # Ensure event consumer is running even for pre-existing sessions.
             # Sessions created via other paths (e.g. get_or_load_session) don't

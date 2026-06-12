@@ -62,6 +62,7 @@ class SessionCreateRequest(OpenCodeBaseModel):
 
     parent_id: str | None = None
     title: str | None = None
+    agent: str | None = None
 
 
 class SessionTimeUpdate(OpenCodeBaseModel):

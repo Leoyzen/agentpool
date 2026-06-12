@@ -79,6 +79,18 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _resolve_session_create_agent(state: ServerState, requested_agent: str | None) -> str:
+    """Resolve the agent to bind to a newly created OpenCode session."""
+    default_agent = state.agent.name or "default"
+    if not requested_agent or requested_agent == "default":
+        return default_agent
+
+    pool = state.pool
+    if requested_agent not in pool.all_agents:
+        raise HTTPException(status_code=400, detail=f"Unknown agent: {requested_agent}")
+    return requested_agent
+
+
 async def _get_session_messages_from_pool(
     state: ServerState,
     session_id: str,
@@ -702,6 +714,7 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
     session_id = identifier.ascending("session")
     base_path = state.base_path
     project_id = helpers.compute_project_id(base_path)
+    agent_name = _resolve_session_create_agent(state, request.agent if request else None)
     session = Session(
         id=session_id,
         project_id=project_id,
@@ -718,7 +731,7 @@ async def create_session(state: StateDep, request: SessionCreateRequest | None =
         try:
             await session_pool.create_session(
                 session_id=session_id,
-                agent_name=state.agent.name,
+                agent_name=agent_name,
                 parent_session_id=session.parent_id,
                 project_id=project_id,
                 cwd=base_path,
