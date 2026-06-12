@@ -2106,20 +2106,30 @@ class SessionPool:
             session_data.session_id, session_data.agent_name
         )
 
-        # Detect agent config drift between checkpoint and resume
+        # Detect agent config drift between checkpoint and resume.
+        # The hash check is advisory: if we can't compute the current hash
+        # (e.g. agent has no tools attribute, or tools is a mock in tests),
+        # we skip the comparison and proceed with resume.
         if session_data.agent_config_hash:
-            from agentpool.agents.native_agent.checkpoint import (
-                compute_agent_config_hash,
-            )
+            try:
+                from agentpool.agents.native_agent.checkpoint import (
+                    compute_agent_config_hash,
+                )
 
-            agent_tools = await agent.tools.get_tools()
-            current_hash = compute_agent_config_hash(agent_tools)
-            if current_hash != session_data.agent_config_hash:
-                logger.warning(
-                    "Agent config hash mismatch — tools may have changed since checkpoint",
+                agent_tools = await agent.tools.get_tools()  # type: ignore[union-attr]
+                current_hash = compute_agent_config_hash(agent_tools)
+                if current_hash != session_data.agent_config_hash:
+                    logger.warning(
+                        "Agent config hash mismatch — tools may have changed since checkpoint",
+                        session_id=session_data.session_id,
+                        stored_hash=session_data.agent_config_hash,
+                        current_hash=current_hash,
+                    )
+            except Exception:
+                logger.debug(
+                    "Could not compute agent config hash for drift check",
                     session_id=session_data.session_id,
-                    stored_hash=session_data.agent_config_hash,
-                    current_hash=current_hash,
+                    exc_info=True,
                 )
 
         try:

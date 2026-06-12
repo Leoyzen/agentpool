@@ -67,13 +67,17 @@ def acp_handler(
     """Return an ACPProtocolHandler with mocked dependencies."""
     session_manager = AsyncMock()
     event_converter = ACPEventConverter()
-    return ACPProtocolHandler(
+    handler = ACPProtocolHandler(
         agent_pool=mock_agent_pool,
         session_manager=session_manager,
         event_converter=event_converter,
         client=mock_client,
         client_capabilities=None,
     )
+    # Prevent child consumer creation from SpawnSessionStart events
+    # (existing tests were written before child consumer support was added)
+    handler._on_spawn_session_start = AsyncMock()  # type: ignore[method-assign]
+    return handler
 
 
 async def test_acp_handler_converts_spawn_session_start(
