@@ -211,6 +211,41 @@ async def test_adapter_receives_events_before_finalize(
 
 
 @pytest.mark.asyncio
+async def test_message_cleanup_tolerates_deleted_session(
+    event_bus_test_state: ServerState,
+    sample_message_request: MessageRequest,
+    mock_agent_with_event_bus: tuple[Any, Any, EventBus],
+) -> None:
+    """Message cleanup should not fail if the client deleted the session."""
+    state = event_bus_test_state
+    session_id = "test-session-deleted-before-cleanup"
+    _agent, run_handle, event_bus = mock_agent_with_event_bus
+
+    _setup_session(state, session_id)
+    user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
+    state.messages[session_id].append(user_msg_with_parts)
+
+    process_task = asyncio.create_task(
+        _process_message_locked(
+            session_id, sample_message_request, state, user_msg_id, user_msg_with_parts
+        )
+    )
+
+    await asyncio.sleep(0.05)
+    chat_msg = ChatMessage(
+        role="assistant",
+        content="Completed after client timeout",
+        usage=RequestUsage(input_tokens=1, output_tokens=1),
+    )
+    await event_bus.publish(session_id, StreamCompleteEvent(message=chat_msg))
+    state.sessions.pop(session_id)
+
+    run_handle.complete_event.set()
+    await process_task
+    assert session_id not in state.sessions
+
+
+@pytest.mark.asyncio
 async def test_adapter_response_text_populated_after_finalize(
     event_bus_test_state: ServerState,
     sample_message_request: MessageRequest,

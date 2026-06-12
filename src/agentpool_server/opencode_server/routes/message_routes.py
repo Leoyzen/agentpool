@@ -689,12 +689,21 @@ async def _process_message_locked(  # noqa: PLR0915
             await state.mark_session_idle(session_id)
         # --- Update session timestamp ---
         if response_time is not None:
-            session = state.sessions[session_id]
-            state.sessions[session_id] = session.model_copy(
-                update={
-                    "time": TimeCreatedUpdated(created=session.time.created, updated=response_time)
-                }
-            )
+            session = state.sessions.get(session_id)
+            if session is None:
+                logger.info(
+                    "Session removed before message cleanup completed",
+                    session_id=session_id,
+                )
+            else:
+                state.sessions[session_id] = session.model_copy(
+                    update={
+                        "time": TimeCreatedUpdated(
+                            created=session.time.created,
+                            updated=response_time,
+                        )
+                    }
+                )
     return assistant_msg_with_parts
 
 
