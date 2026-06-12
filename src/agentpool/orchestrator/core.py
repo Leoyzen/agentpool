@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 from agentpool.agents.context import AgentRunContext
+from agentpool.agents.events import SessionResumeEvent
+from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.models.pending_interaction import PendingPermission, PendingQuestion
@@ -69,6 +71,56 @@ logger = get_logger(__name__)
 DEFAULT_QUEUE_MAXSIZE: Final[int] = 1000
 DEFAULT_MAX_AUTO_RESUME: Final[int] = 10
 DEFAULT_SESSION_TTL_SECONDS: Final[float] = 3600.0
+
+
+class SessionNotFoundError(Exception):
+    """Raised when a session cannot be found for resume."""
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__(f"Session not found: {session_id}")
+        self.session_id = session_id
+
+
+class SessionBusyError(Exception):
+    """Raised when trying to resume a session that has an active run."""
+
+    def __init__(self, session_id: str, run_id: str) -> None:
+        super().__init__(
+            f"Session '{session_id}' already has an active run '{run_id}'. "
+            "Wait for it to complete or cancel it first."
+        )
+        self.session_id = session_id
+        self.run_id = run_id
+
+
+class CheckpointMismatchError(Exception):
+    """Raised when deferred_tool_results don't cover all pending_deferred_calls."""
+
+    def __init__(
+        self,
+        session_id: str,
+        expected: set[str],
+        provided: set[str],
+        missing: set[str],
+        extra: set[str],
+    ) -> None:
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing results for: {sorted(missing)}")
+        if extra:
+            parts.append(f"unexpected results for: {sorted(extra)}")
+        msg = (
+            f"Checkpoint mismatch for session '{session_id}': "
+            + "; ".join(parts)
+            + f". Expected tool_call_ids: {sorted(expected)}, "
+            f"provided: {sorted(provided)}."
+        )
+        super().__init__(msg)
+        self.session_id = session_id
+        self.expected = expected
+        self.provided = provided
+        self.missing = missing
+        self.extra = extra
 
 
 class SessionLifecyclePolicy:
@@ -1693,6 +1745,8 @@ class SessionPool:
         self._enable_auto_resume = enable_auto_resume
         self._enable_event_bus = enable_event_bus
         self._runs_lock: asyncio.Lock = asyncio.Lock()
+        self._resume_locks: dict[str, asyncio.Lock] = {}
+        self._resume_locks_lock = asyncio.Lock()
         self._message_cache: dict[str, list[ChatMessage[Any]]] = {}
 
     async def start(self) -> None:
@@ -1748,6 +1802,308 @@ class SessionPool:
             session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
         )
         return state
+
+    async def _get_resume_lock(self, session_id: str) -> asyncio.Lock:
+        """Get or create per-session lock for resume serialization.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            The per-session resume lock.
+        """
+        async with self._resume_locks_lock:
+            lock = self._resume_locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._resume_locks[session_id] = lock
+            return lock
+
+    async def _load_checkpoint_data(
+        self, session_id: str
+    ) -> CheckpointData:
+        """Load checkpoint data for a session.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            Checkpoint data.
+
+        Raises:
+            SessionNotFoundError: If no checkpoint exists for the session.
+        """
+        from agentpool.agents.native_agent.checkpoint import CheckpointManager
+
+        storage = self.pool.storage
+        if storage is None:
+            raise SessionNotFoundError(session_id)
+
+        checkpoint_mgr = CheckpointManager(storage)
+        data = await checkpoint_mgr.load_checkpoint(session_id)
+        if data is None:
+            raise SessionNotFoundError(session_id)
+        return data
+
+    async def _reconstruct_native_agent(
+        self,
+        session_id: str,
+        agent_name: str,
+    ) -> Agent[Any, Any]:
+        """Reconstruct a native agent from config for session resume.
+
+        Args:
+            session_id: Session identifier.
+            agent_name: Name of the agent configuration to use.
+
+        Returns:
+            A reconstructed native agent instance.
+
+        Raises:
+            SessionNotFoundError: If the agent config is not found.
+        """
+        from agentpool.models.agents import NativeAgentConfig
+        from agentpool_config.context import ConfigContextManager
+
+        cfg = self.pool.manifest.agents.get(agent_name)
+        if cfg is None:
+            raise SessionNotFoundError(session_id)
+
+        if not isinstance(cfg, NativeAgentConfig):
+            raise SessionNotFoundError(session_id)
+
+        if cfg.name is None:
+            cfg = cfg.model_copy(update={"name": agent_name})
+
+        session = self.sessions.get_session(session_id)
+        input_provider = session.input_provider if session else None
+
+        with ConfigContextManager(self.pool._config_file_path):
+            agent: Agent[Any, Any] = cfg.get_agent(
+                input_provider=input_provider,
+                pool=self.pool,
+            )
+
+        # Add pool-level providers
+        if self.pool is not None:
+            agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
+            if self.pool.skills_instruction_provider:
+                agent.tools.add_provider(self.pool.skills_instruction_provider)
+            agent.tools.add_provider(self.pool.skills_tools_provider)
+
+        await agent.__aenter__()
+        return agent
+
+    async def _reconstruct_acp_agent(
+        self,
+        _session_id: str,
+        agent_name: str,
+    ) -> BaseAgent[Any, Any]:
+        """Reconstruct an ACP agent by reopening the subprocess.
+
+        Args:
+            session_id: Session identifier.
+            agent_name: Name of the agent configuration to use.
+
+        Returns:
+            A reconstructed ACP agent with reopened subprocess.
+        """
+        agent = self.pool.get_agent(agent_name)
+
+        # For ACP agents, reopen the subprocess via __aenter__
+        if hasattr(agent, "__aenter__"):
+            await agent.__aenter__()
+        return agent
+
+    async def _resume_native_agent(
+        self,
+        session_data: SessionData,
+        checkpoint: CheckpointData,
+        results: Any,
+    ) -> None:
+        """Resume a native agent from checkpoint with deferred results.
+
+        Loads message_history from checkpoint, reconstructs the agent from its
+        original config, and calls agent.run() with the restored history and
+        deferred results.
+
+        Args:
+            session_data: Persisted session data.
+            checkpoint: Checkpoint data with message_history and pending_calls.
+            results: DeferredToolResults for resolving pending deferred calls.
+
+        Raises:
+            SessionNotFoundError: If agent config is not found.
+            RuntimeError: If agent.run() fails (pending_calls remain uncleared).
+        """
+        agent = await self._reconstruct_native_agent(
+            session_data.session_id, session_data.agent_name
+        )
+        try:
+            message_history: list[Any] = list(checkpoint.message_history)
+            # deferred_tool_results is forwarded to pydantic-ai Agent.run()
+            # which accepts it natively; cast to Any since BaseAgent.run()
+            # doesn't declare this kwarg in its signature.
+            run_fn: Any = agent.run
+            await run_fn(
+                message_history=message_history,
+                deferred_tool_results=results,
+            )
+        finally:
+            await agent.__aexit__(None, None, None)
+
+    async def _resume_acp_agent(
+        self,
+        session_data: SessionData,
+        checkpoint: CheckpointData,
+        results: Any,
+    ) -> None:
+        """Resume an ACP agent by reopening the subprocess and sending session/resume.
+
+        Reopens the ACP subprocess and calls agent.run() to restart the
+        session with restored state.
+
+        Args:
+            session_data: Persisted session data.
+            checkpoint: Checkpoint data (used for metadata only; ACP agents
+                manage their own message history).
+            results: DeferredToolResults for resolving pending deferred calls.
+        """
+        agent = await self._reconstruct_acp_agent(
+            session_data.session_id, session_data.agent_name
+        )
+        try:
+            # ACP agents receive the resumed session context through run()
+            run_fn: Any = agent.run
+            await run_fn(
+                message_history=list(checkpoint.message_history),
+                deferred_tool_results=results,
+            )
+        finally:
+            if hasattr(agent, "__aexit__"):
+                await agent.__aexit__(None, None, None)  # type: ignore[union-attr]
+
+    async def resume_session(
+        self,
+        session_id: str,
+        deferred_tool_results: Any,
+        *,
+        source: str = "resume_prompt",
+    ) -> None:
+        """Resume a paused session with resolved deferred tool results.
+
+        Loads the persisted SessionData, validates that deferred_tool_results
+        cover all pending_deferred_calls (raising CheckpointMismatchError if not),
+        and resumes execution via the appropriate path:
+        - Native agent: load checkpoint → reconstruct agent from config →
+          agent.run(message_history=restored, deferred_tool_results=results)
+        - ACP agent: load session data → reopen subprocess →
+          agent.run(message_history=restored, deferred_tool_results=results)
+
+        Per-session resume_lock ensures only one resume at a time.
+        Emits SessionResumeEvent on success.
+
+        Args:
+            session_id: Session to resume.
+            deferred_tool_results: Results for pending deferred tool calls
+                (DeferredToolResults-compatible object with .calls dict).
+            source: Identifier for the entity triggering the resume.
+
+        Raises:
+            SessionNotFoundError: If the session does not exist in storage.
+            SessionBusyError: If the session has an active run.
+            CheckpointMismatchError: If results don't cover all pending calls.
+        """
+        store = self.sessions.store
+        if store is None:
+            raise SessionNotFoundError(session_id)
+
+        # Load persisted session data
+        data = await store.load(session_id)
+        if data is None:
+            raise SessionNotFoundError(session_id)
+
+        # Check for active run in live sessions
+        session = self.sessions.get_session(session_id)
+        if session is not None and session.current_run_id is not None:
+            raise SessionBusyError(session_id, session.current_run_id)
+
+        # Validate deferred_tool_results cover all pending_deferred_calls
+        pending_call_ids: set[str] = {
+            call.tool_call_id for call in data.pending_deferred_calls
+        }
+        provided_call_ids: set[str] = set(
+            getattr(deferred_tool_results, "calls", {}).keys()
+        )
+
+        missing = pending_call_ids - provided_call_ids
+        extra = provided_call_ids - pending_call_ids
+        if missing or extra:
+            raise CheckpointMismatchError(
+                session_id=session_id,
+                expected=pending_call_ids,
+                provided=provided_call_ids,
+                missing=missing,
+                extra=extra,
+            )
+
+        # Determine agent type
+        agent_type = data.metadata.get("agent_type", "native")
+
+        # Per-session resume lock (Decision 8)
+        resume_lock = await self._get_resume_lock(session_id)
+        async with resume_lock:
+            try:
+                # Load checkpoint data
+                checkpoint = await self._load_checkpoint_data(session_id)
+
+                # Mark session as resuming
+                data = data.model_copy(update={"status": "resuming"})
+                await store.save(data)
+
+                # Route to appropriate resume path
+                if agent_type == "acp":
+                    await self._resume_acp_agent(data, checkpoint, deferred_tool_results)
+                else:
+                    await self._resume_native_agent(data, checkpoint, deferred_tool_results)
+
+                # Clear pending_deferred_calls ONLY after agent.run() succeeds (Decision 8)
+                data = data.model_copy(
+                    update={
+                        "status": "active",
+                        "pending_deferred_calls": [],
+                    }
+                )
+                data.touch()
+                await store.save(data)
+
+                # Update live session if one exists
+                if session is not None:
+                    session.last_active_at = time.monotonic()
+
+                # Emit SessionResumeEvent
+                await self.event_bus.publish(
+                    session_id,
+                    SessionResumeEvent(
+                        session_id=session_id,
+                        resolved_call_count=len(pending_call_ids),
+                        source=source,
+                    ),
+                )
+
+                logger.info(
+                    "Session resumed successfully",
+                    session_id=session_id,
+                    agent_type=agent_type,
+                    resolved_calls=len(pending_call_ids),
+                )
+
+            except Exception:
+                # On failure, keep status as checkpointed and do NOT clear pending calls
+                data = data.model_copy(update={"status": "checkpointed"})
+                data.touch()
+                await store.save(data)
+                raise
 
     async def close_session(self, session_id: str) -> None:
         """Close a session.
