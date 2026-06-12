@@ -2105,6 +2105,23 @@ class SessionPool:
         agent = await self._reconstruct_native_agent(
             session_data.session_id, session_data.agent_name
         )
+
+        # Detect agent config drift between checkpoint and resume
+        if session_data.agent_config_hash:
+            from agentpool.agents.native_agent.checkpoint import (
+                compute_agent_config_hash,
+            )
+
+            agent_tools = await agent.tools.get_tools()
+            current_hash = compute_agent_config_hash(agent_tools)
+            if current_hash != session_data.agent_config_hash:
+                logger.warning(
+                    "Agent config hash mismatch — tools may have changed since checkpoint",
+                    session_id=session_data.session_id,
+                    stored_hash=session_data.agent_config_hash,
+                    current_hash=current_hash,
+                )
+
         try:
             message_history: list[Any] = list(checkpoint.message_history)
             # deferred_tool_results is forwarded to pydantic-ai Agent.run()

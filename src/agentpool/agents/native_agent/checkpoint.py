@@ -8,7 +8,7 @@ tool boundaries.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.messages import ModelMessage
 
@@ -49,6 +49,59 @@ class CheckpointData:
     """Unresolved deferred tool calls pending external resolution."""
 
 
+def compute_agent_config_hash(tools: list[Any]) -> str:
+    """Compute a deterministic SHA-256 hash of agent tool configurations.
+
+    Hashes the deferred-relevant fields of each tool to detect config
+    drift between checkpoint and resume.
+
+    Args:
+        tools: List of Tool objects or tool config dicts.
+
+    Returns:
+        Hex-encoded SHA-256 hash string.
+    """
+    import hashlib
+    import json
+
+    tool_data: list[dict[str, Any]] = []
+    for tool in tools:
+        if isinstance(tool, dict):
+            entry = {
+                "name": tool.get("name", ""),
+                "deferred": tool.get("deferred", False),
+                "deferred_kind": tool.get("deferred_kind", "external"),
+                "deferred_strategy": tool.get("deferred_strategy", "block"),
+            }
+        else:
+            entry = {
+                "name": getattr(tool, "name", ""),
+                "deferred": getattr(tool, "deferred", False),
+                "deferred_kind": getattr(tool, "deferred_kind", "external"),
+                "deferred_strategy": getattr(tool, "deferred_strategy", "block"),
+            }
+        # Include parameter schema if available (non-deferred fields excluded)
+        if hasattr(tool, "model_dump_json"):
+            entry["param_schema"] = tool.model_dump_json(
+                exclude={
+                    "name",
+                    "deferred",
+                    "deferred_kind",
+                    "deferred_strategy",
+                    "created_at",
+                    "updated_at",
+                }
+            )
+        elif hasattr(tool, "parameters_json_schema"):
+            entry["param_schema"] = json.dumps(tool.parameters_json_schema, sort_keys=True)
+        tool_data.append(entry)
+
+    # Sort for deterministic output
+    tool_data.sort(key=lambda x: x["name"])
+    canonical = json.dumps(tool_data, sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 class CheckpointManager:
     """Manages checkpoint lifecycle for durable execution.
 
@@ -78,6 +131,7 @@ class CheckpointManager:
         session_id: str,
         message_history: list[ModelMessage],
         pending_calls: list[PendingDeferredCall],
+        agent_config_hash: str | None = None,
     ) -> None:
         """Save a checkpoint of the current agent execution state.
 
@@ -89,6 +143,8 @@ class CheckpointManager:
             session_id: Session identifier.
             message_history: Current pydantic-ai message history.
             pending_calls: Deferred tool calls awaiting external resolution.
+            agent_config_hash: Optional SHA-256 hash of agent tool configuration
+                for drift detection on resume.
 
         Raises:
             MidStreamCheckpointError: If checkpoint is attempted mid-stream.
@@ -132,6 +188,7 @@ class CheckpointManager:
             session_id=session_id,
             message_count=len(message_history),
             pending_call_count=len(pending_calls),
+            agent_config_hash=agent_config_hash,
         )
 
     async def load_checkpoint(self, session_id: str) -> CheckpointData | None:
