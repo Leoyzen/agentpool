@@ -325,6 +325,73 @@ class DBOSDurableConfig(BaseDurableExecutionConfig):
     """Step config for MCP server steps."""
 
 
+class DeferredToolConfig(Schema):
+    """Configuration for deferred tool execution.
+
+    Controls how tools that support deferred execution behave,
+    including timeout and blocking/streaming strategy.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "x-icon": "octicon:clock-16",
+            "title": "Deferred Tool Configuration",
+        }
+    )
+
+    enabled: bool = Field(
+        default=True,
+        title="Enable deferred tools",
+    )
+    """Whether deferred tool execution is enabled."""
+
+    default_strategy: Literal["block", "continue", "stream"] = Field(
+        default="block",
+        title="Default deferral strategy",
+    )
+    """Default strategy for deferred tool execution.
+
+    - ``block``: Block execution until the tool completes.
+    - ``continue``: Continue execution immediately, collect result later.
+    - ``stream``: Stream the deferred tool result as it becomes available.
+    """
+
+    default_timeout: str | timedelta | None = Field(
+        default=None,
+        title="Default timeout",
+        examples=["30s", "5m", "1h"],
+    )
+    """Default timeout for deferred tool execution. None means no timeout."""
+
+    @field_validator("default_timeout", mode="before")
+    @classmethod
+    def parse_timeout(cls, v: str | timedelta | None) -> timedelta | None:
+        """Parse string timeout to timedelta."""
+        if v is None or isinstance(v, timedelta):
+            return v
+        return parse_time_period(v)
+
+
+class CheckpointConfig(Schema):
+    """Configuration for agent checkpointing.
+
+    Controls whether agent state is persisted for durable execution.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "x-icon": "octicon:checkpoint-16",
+            "title": "Checkpoint Configuration",
+        }
+    )
+
+    enabled: bool = Field(
+        default=True,
+        title="Enable checkpointing",
+    )
+    """Whether agent checkpointing is enabled."""
+
+
 DurableExecutionConfig = Annotated[
     TemporalDurableConfig | PrefectDurableConfig | DBOSDurableConfig,
     Field(discriminator="type"),

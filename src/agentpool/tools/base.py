@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import abstractmethod
 import ast
 from dataclasses import dataclass, field
+from datetime import timedelta
 import inspect
 from typing import TYPE_CHECKING, Any, Literal
 import warnings
@@ -14,6 +15,7 @@ from pydantic_ai.tools import Tool as PydanticAiTool
 import schemez
 
 from agentpool.log import get_logger
+from agentpool.tools.exceptions import ToolError
 from agentpool.utils.inspection import (
     dataclasses_no_defaults_repr,
     execute,
@@ -127,6 +129,50 @@ class Tool[TOutputType = Any]:
     instructions: str | None = None
     """Instructions for how to use this tool effectively."""
 
+    deferred: bool = False
+    """Whether this tool uses deferred execution (runs in background)."""
+
+    deferred_kind: Literal["external", "unapproved"] = "external"
+    """The reason for deferral: external (e.g., CI/CD) or unapproved (pending human approval)."""
+
+    deferred_strategy: Literal["block", "continue", "stream"] = "block"
+    """How to handle the conversation while the tool is deferred.
+    ``block`` pauses until the tool completes, ``continue`` proceeds with placeholder,
+    ``stream`` emits the placeholder as a streaming token.
+    """
+
+    deferred_placeholder: str = "This tool is processing in the background."
+    """Message shown to the user while the deferred tool runs."""
+
+    deferred_timeout: timedelta | None = None
+    """Maximum duration to wait for a deferred tool to complete. ``None`` means no timeout."""
+
+    def __post_init__(self) -> None:
+        """Validate deferred configuration combinations.
+
+        Raises:
+            ToolError: If deferred_kind and deferred_strategy form an invalid combination.
+            NotImplementedError: If the stream strategy is used (deferred to follow-up change).
+        """
+        if not self.deferred:
+            return
+
+        # unapproved tools must block — continue/stream would bypass approval
+        if self.deferred_kind == "unapproved":
+            if self.deferred_strategy in ("continue", "stream"):
+                raise ToolError(
+                    f"Tool '{self.name}': deferred_kind='unapproved' requires "
+                    f"deferred_strategy='block', got '{self.deferred_strategy}'. "
+                    f"Deferred unapproved tools must block to await approval."
+                )
+
+        # stream strategy is not yet implemented
+        if self.deferred_strategy == "stream":
+            raise NotImplementedError(
+                f"Tool '{self.name}': deferred_strategy='stream' is deferred "
+                f"to a follow-up change."
+            )
+
     __repr__ = dataclasses_no_defaults_repr
 
     @abstractmethod
@@ -145,17 +191,62 @@ class Tool[TOutputType = Any]:
         Returns self.prepare if set. If schema_override is set but prepare is not,
         generates a prepare function that applies the schema_override values.
 
+        When ``self.deferred_kind == 'external'``, wraps the prepare to set
+        ``kind='external'`` on the ``ToolDefinition``, since pydantic-ai's
+        ``Tool`` constructor does not accept a ``kind`` parameter directly.
+
         Returns:
             Prepare function or None.
         """
+        base_prepare: (
+            Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]
+            | None
+        ) = None
+
         if self.prepare is not None:
-            return self.prepare
+            base_prepare = self.prepare
+        elif self.schema_override is not None:
+            base_prepare = self._generate_schema_override_prepare()
 
-        # If we have a schema_override, generate a prepare function
-        if self.schema_override is not None:
-            return self._generate_schema_override_prepare()
+        # For external deferred tools, wrap the prepare to set kind='external'.
+        # pydantic-ai's Tool.__init__ does not accept `kind`; the only way to
+        # produce ToolDefinition.kind='external' is via a prepare function.
+        if self.deferred and self.deferred_kind == "external":
+            return self._wrap_prepare_with_external_kind(base_prepare)
 
-        return None
+        return base_prepare
+
+    def _wrap_prepare_with_external_kind(
+        self,
+        base_prepare: (
+            Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]
+            | None
+        ),
+    ) -> Callable[[RunContext[AgentContext], ToolDefinition], Awaitable[ToolDefinition | None]]:
+        """Wrap a prepare function to additionally set ``kind='external'`` on the ToolDefinition.
+
+        Args:
+            base_prepare: The existing prepare function, or None.
+
+        Returns:
+            A new prepare function that chains base_prepare (if set) and then
+            overrides ``kind`` to ``'external'``.
+        """
+        from dataclasses import replace
+
+        async def deferred_external_prepare(
+            ctx: RunContext[AgentContext], tool_def: ToolDefinition
+        ) -> ToolDefinition | None:
+            if base_prepare is not None:
+                result = base_prepare(ctx, tool_def)
+                if inspect.isawaitable(result):
+                    result = await result
+                if result is None:
+                    return None
+                tool_def = result
+            return replace(tool_def, kind="external")
+
+        return deferred_external_prepare
 
     def _generate_schema_override_prepare(
         self,
@@ -339,6 +430,12 @@ class Tool[TOutputType = Any]:
         }
         function = function_override if function_override is not None else self.get_callable()
 
+        # Compute effective requires_approval: respect both
+        # requires_confirmation and deferred_kind='unapproved'.
+        requires_approval = self.requires_confirmation or (
+            self.deferred and self.deferred_kind == "unapproved"
+        )
+
         # Check if we have a custom JSON schema that needs to be used
         json_schema = self._get_json_schema(function)
 
@@ -357,15 +454,17 @@ class Tool[TOutputType = Any]:
                 json_schema=json_schema,
                 takes_ctx=takes_ctx,
             )
-            # Tool.from_schema doesn't accept prepare parameter, assign it manually
+            # Tool.from_schema doesn't accept prepare or requires_approval,
+            # assign them manually after construction.
             tool_instance.prepare = self._get_effective_prepare()  # type: ignore[assignment]
+            tool_instance.requires_approval = requires_approval
             return tool_instance
         # No custom schema, let pydantic-ai infer it automatically
         return PydanticAiTool(
             function=function,
             name=self.name,
             description=self.description,
-            requires_approval=self.requires_confirmation,
+            requires_approval=requires_approval,
             metadata=metadata,
             prepare=self._get_effective_prepare(),  # type: ignore[arg-type]
         )

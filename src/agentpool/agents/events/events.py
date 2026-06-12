@@ -743,6 +743,49 @@ class CompactionEvent:
     """Event type identifier."""
 
 
+@dataclass(kw_only=True)
+class ToolCallDeferredEvent:
+    """Event indicating a tool call has been deferred for durable execution.
+
+    This event is emitted when a tool execution cannot be completed immediately
+    and must be persisted for later resumption. The deferred_handle identifies
+    the external resource needed to resolve the call.
+    """
+
+    tool_call_id: str
+    """The ID of the deferred tool call."""
+    tool_name: str
+    """The name of the tool that was deferred."""
+    deferred_strategy: Literal["block", "continue", "stream"]
+    """How the agent should handle the deferral: block, continue, or stream."""
+    deferred_handle: str = ""
+    """Opaque handle for resolving the deferred call externally."""
+    status: Literal["pending", "resolved", "expired"]
+    """Current status of the deferred call."""
+    session_id: str = ""
+    """ID of the session that emitted this event."""
+    event_kind: Literal["tool_call_deferred"] = "tool_call_deferred"
+    """Event type identifier."""
+
+
+@dataclass(kw_only=True)
+class SessionResumeEvent:
+    """Event indicating a session has been resumed from a checkpoint.
+
+    Emitted when a previously suspended session resumes execution,
+    carrying metadata about the deferred calls that were resolved.
+    """
+
+    session_id: str
+    """ID of the resumed session."""
+    resolved_call_count: int
+    """Number of deferred calls that were resolved before resumption."""
+    source: str = ""
+    """Identifier for the entity that triggered the resume."""
+    event_kind: Literal["session_resume"] = "session_resume"
+    """Event type identifier."""
+
+
 type RichAgentStreamEvent[OutputDataT] = (
     AgentStreamEvent
     | StreamCompleteEvent[OutputDataT]
@@ -752,6 +795,8 @@ type RichAgentStreamEvent[OutputDataT] = (
     | ToolCallStartEvent
     | ToolCallProgressEvent
     | ToolCallCompleteEvent
+    | ToolCallDeferredEvent
+    | SessionResumeEvent
     | PlanUpdateEvent
     | CompactionEvent
     | SubAgentEvent
