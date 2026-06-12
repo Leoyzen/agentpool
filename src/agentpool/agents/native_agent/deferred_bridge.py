@@ -109,6 +109,11 @@ async def _resolve_deferred_calls(
                     session_id=session_id,
                 )
                 await _emit_deferred_event(ctx, event)
+                # Mark the run as checkpointed so that the orchestrator
+                # can transition the RunHandle to checkpointed status.
+                run_ctx = ctx.deps.run_ctx
+                if run_ctx is not None:
+                    run_ctx.checkpointed = True
                 logger.debug(
                     "Deferred tool call (block strategy)",
                     tool_name=call.tool_name,

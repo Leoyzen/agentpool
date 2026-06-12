@@ -21,6 +21,7 @@ class RunStatus(Enum):
     running = auto()
     completed = auto()
     failed = auto()
+    checkpointed = auto()
 
 
 @dataclass
@@ -63,6 +64,17 @@ class RunHandle:
     def complete(self) -> None:
         """Transition the run to completed and trigger cleanup."""
         self.status = RunStatus.completed
+        self._cleanup_run()
+
+    def checkpoint(self) -> None:
+        """Transition the run to checkpointed and trigger cleanup.
+
+        Unlike :meth:`fail`, checkpoint does **not** emit a
+        :class:`RunFailedEvent` — it is a normal lifecycle transition
+        that occurs when the agent's execution state has been persisted
+        for later resumption (e.g. deferred tool calls).
+        """
+        self.status = RunStatus.checkpointed
         self._cleanup_run()
 
     def fail(

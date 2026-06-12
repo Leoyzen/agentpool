@@ -775,16 +775,68 @@ class SessionController:
                 cid for cid in self._children[session.parent_session_id] if cid != session_id
             ]
 
+    @staticmethod
+    def _should_checkpoint_on_close(data: SessionData | None) -> bool:
+        """Check whether a session should be checkpointed before close.
+
+        A session needs checkpoint-on-close when it has pending deferred calls
+        that must be preserved for later resume.
+
+        Args:
+            data: The session data loaded from the store, or None.
+
+        Returns:
+            True if the session has pending deferred calls that require
+            checkpointing before releasing resources.
+        """
+        return data is not None and bool(data.pending_deferred_calls)
+
+    async def _save_close_checkpoint(
+        self, session_id: str, data: SessionData
+    ) -> bool:
+        """Save session data with checkpointed status before close.
+
+        Marks the session as ``"checkpointed"`` so it can be located by
+        :meth:`resume_session` later. Returns ``True`` on success, ``False``
+        if the storage write fails (caller should NOT release resources).
+
+        Args:
+            session_id: Session identifier (for logging).
+            data: The session data to persist as checkpointed.
+
+        Returns:
+            True if the checkpoint was saved successfully, False on failure.
+        """
+        try:
+            data = data.model_copy(update={"status": "checkpointed"})
+            data.touch()
+            if self.store is not None:
+                await self.store.save(data)
+            logger.info(
+                "Session checkpointed before close",
+                session_id=session_id,
+                pending_call_count=len(data.pending_deferred_calls),
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "Failed to save checkpoint before close",
+                session_id=session_id,
+            )
+            return False
+
     async def close_session(self, session_id: str) -> None:
         """Close a session and clean up resources.
 
         Order matters:
         1. Mark session as closing (prevents new turns from starting)
-        2. Handle child sessions based on lifecycle policy
-        3. Remove from tracking dicts
-        4. Acquire turn_lock to wait for active turn to complete
-        5. Exit agent context if per-session
-        6. Clean up session state
+        2. Checkpoint-on-close: if pending deferred calls exist, save
+           checkpointed status before releasing resources
+        3. Handle child sessions based on lifecycle policy
+        4. Remove from tracking dicts
+        5. Acquire turn_lock to wait for active turn to complete
+        6. Exit agent context if per-session
+        7. Clean up session state
 
         Args:
             session_id: The session to close.
@@ -796,6 +848,24 @@ class SessionController:
 
             session.is_closing = True
             session.closed_at = time.monotonic()
+
+            # Checkpoint-before-close: if pending deferred calls exist, save
+            # checkpoint state before releasing resources so the session can
+            # be resumed later. If the checkpoint save fails, do NOT release
+            # resources (agent stays alive).
+            was_checkpointed = False
+            if self.store is not None:
+                data = await self.store.load(session_id)
+                if self._should_checkpoint_on_close(data):
+                    assert data is not None  # _should_checkpoint_on_close ensures this
+                    checkpoint_ok = await self._save_close_checkpoint(session_id, data)
+                    if not checkpoint_ok:
+                        logger.error(
+                            "Close checkpoint failed - resources NOT released",
+                            session_id=session_id,
+                        )
+                        return  # Keep session alive
+                    was_checkpointed = True
 
             # Handle child sessions based on lifecycle policy
             children = self._children.pop(session_id, [])
@@ -811,7 +881,7 @@ class SessionController:
 
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
-            if self.store is not None:
+            if self.store is not None and not was_checkpointed:
                 await self.store.delete(session_id)
             # Remove from parent's children list
             if session.parent_session_id and session.parent_session_id in self._children:
@@ -1354,6 +1424,7 @@ class TurnRunner:
                 if run_handle is not None and run_handle.status not in (
                     RunStatus.completed,
                     RunStatus.failed,
+                    RunStatus.checkpointed,
                 ):
                     run_handle.fail(exception=exc, event_bus=self.event_bus)
                 raise
@@ -1386,8 +1457,15 @@ class TurnRunner:
 
             # Clean up RunHandle if we created it
             if created_run_handle and run_handle is not None:
-                if run_handle.status not in (RunStatus.completed, RunStatus.failed):
-                    run_handle.complete()
+                if run_handle.status not in (
+                    RunStatus.completed,
+                    RunStatus.failed,
+                    RunStatus.checkpointed,
+                ):
+                    if run_ctx.checkpointed:
+                        run_handle.checkpoint()
+                    else:
+                        run_handle.complete()
                 # Note: complete_event is NOT set here — it is deferred to
                 # run_loop() so that it covers the full run loop including
                 # auto-resume turns.  Per-request waiters (e.g. sync HTTP
@@ -1819,6 +1897,39 @@ class SessionPool:
                 self._resume_locks[session_id] = lock
             return lock
 
+    @contextlib.asynccontextmanager
+    async def _with_resume_lock(
+        self, session_id: str
+    ) -> AsyncIterator[SessionState | None]:
+        """Acquire per-session resume lock with state validation.
+
+        Ensures only one resume runs per session at a time and that
+        the session is in a resumable state (no active run, persisted
+        status is ``"checkpointed"``).
+
+        Args:
+            session_id: Session to lock.
+
+        Yields:
+            The live ``SessionState``, or ``None`` if no live session exists.
+
+        Raises:
+            SessionBusyError: If the session has an active run or its
+                persisted status is not ``"checkpointed"``.
+        """
+        resume_lock = await self._get_resume_lock(session_id)
+        async with resume_lock:
+            session = self.sessions.get_session(session_id)
+            if session is not None and session.current_run_id is not None:
+                raise SessionBusyError(session_id, session.current_run_id)
+
+            if self.sessions.store is not None:
+                current_data = await self.sessions.store.load(session_id)
+                if current_data is not None and current_data.status != "checkpointed":
+                    raise SessionBusyError(session_id, current_data.status)
+
+            yield session
+
     async def _load_checkpoint_data(
         self, session_id: str
     ) -> CheckpointData:
@@ -2023,7 +2134,9 @@ class SessionPool:
         if data is None:
             raise SessionNotFoundError(session_id)
 
-        # Check for active run in live sessions
+        # Fast-path: check for active run in live sessions (before lock).
+        # The authoritative check is inside _with_resume_lock, but this
+        # early check avoids unnecessary store operations for busy sessions.
         session = self.sessions.get_session(session_id)
         if session is not None and session.current_run_id is not None:
             raise SessionBusyError(session_id, session.current_run_id)
@@ -2050,9 +2163,8 @@ class SessionPool:
         # Determine agent type
         agent_type = data.metadata.get("agent_type", "native")
 
-        # Per-session resume lock (Decision 8)
-        resume_lock = await self._get_resume_lock(session_id)
-        async with resume_lock:
+        # Per-session resume lock with state validation (Decision 8, Task 19)
+        async with self._with_resume_lock(session_id) as session:
             try:
                 # Load checkpoint data
                 checkpoint = await self._load_checkpoint_data(session_id)
@@ -2145,6 +2257,22 @@ class SessionPool:
                 self.turns._injection_locks.pop(session_id, None)
 
         self._message_cache.pop(session_id, None)
+
+    async def _await_inflight_checkpoints(self) -> None:
+        """Wait for any in-flight checkpoint operations to complete.
+
+        During normal operation, checkpoint-on-close happens synchronously
+        inside :meth:`close_session`, so there are no in-flight operations
+        to await. This method is a future-proof hook for graceful teardown:
+        if the checkpoint mechanism ever becomes asynchronous (e.g.,
+        background flush), this method ensures the shutdown waits for
+        completion.
+
+        Called from :meth:`AgentPool.__aexit__` during pool shutdown.
+        """
+        # Currently no-op: all checkpoint operations complete synchronously
+        # within SessionController.close_session() under its lock.
+        logger.debug("No in-flight checkpoint operations to await")
 
     async def process_prompt(
         self,

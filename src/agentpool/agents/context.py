@@ -81,6 +81,9 @@ class AgentRunContext:
     completed: bool = False
     """Whether the run has completed (stream finished)."""
 
+    checkpointed: bool = False
+    """Whether the run has been checkpointed (deferred tools pending)."""
+
 
 @dataclass(kw_only=True)
 class AgentContext[TDeps = Any](NodeContext[TDeps]):
