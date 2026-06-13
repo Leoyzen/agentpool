@@ -636,10 +636,10 @@ async def test_receive_request_routes_native_agents_correctly(
     await session_pool.receive_request(session_id, "hello", priority="when_idle")
 
     # Wait for execution to start
-    event = await asyncio.wait_for(queue.get(), timeout=2.0)
-    assert event is not None
-    assert isinstance(event, RunStartedEvent)
-    assert event.agent_name == native_agent.name
+    envelope = await asyncio.wait_for(queue.get(), timeout=2.0)
+    assert envelope is not None
+    assert isinstance(envelope.event, RunStartedEvent)
+    assert envelope.event.agent_name == native_agent.name
 
 
 @pytest.mark.anyio
@@ -682,7 +682,7 @@ async def test_receive_request_inject_prompt_into_active_run(
         pass
 
     # Should have at least one RunStartedEvent
-    started_events = [e for e in events if isinstance(e, RunStartedEvent)]
+    started_events = [e for e in events if isinstance(getattr(e, 'event', e), RunStartedEvent)]
     assert len(started_events) >= 1
 
 
@@ -725,8 +725,8 @@ async def test_native_agent_auto_resumes_with_queued_prompts(
         pass
 
     # Should get RunStartedEvent and StreamCompleteEvent
-    started = [e for e in events if isinstance(e, RunStartedEvent)]
-    completed = [e for e in events if isinstance(e, StreamCompleteEvent)]
+    started = [e for e in events if isinstance(getattr(e, 'event', e), RunStartedEvent)]
+    completed = [e for e in events if isinstance(getattr(e, 'event', e), StreamCompleteEvent)]
 
     assert len(started) >= 1, f"Expected at least one RunStartedEvent, got events: {_event_type_names(events)}"
     assert len(completed) >= 1, f"Expected at least one StreamCompleteEvent, got events: {_event_type_names(events)}"
@@ -846,7 +846,7 @@ async def test_run_handle_lifecycle_created_completed_cancelled(
     assert len(session_pool.sessions._runs) == 0
 
     # Verify we got a complete stream
-    assert any(isinstance(e, StreamCompleteEvent) for e in events)
+    assert any(isinstance(getattr(e, 'event', e), StreamCompleteEvent) for e in events)
 
 
 # ---------------------------------------------------------------------------

@@ -1579,8 +1579,14 @@ class TurnRunner:
                 await self._process_queued_work(session_id, session, **kwargs)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.exception("Turn loop failed", session_id=session_id)
+                # Publish RunFailedEvent so protocol handlers can notify clients
+                run_id = session.current_run_id
+                if run_id is not None:
+                    run_handle = self.sessions._runs.get(run_id)
+                    if run_handle is not None:
+                        run_handle.fail(exception=exc, event_bus=self.event_bus)
                 await self._drain_post_turn_injections(session_id)
                 await self._drain_post_turn_prompts(session_id)
             finally:

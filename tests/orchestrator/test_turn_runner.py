@@ -951,26 +951,31 @@ def test_bypass_session_pool_contextvar_true() -> None:
 
 
 def test_bypass_session_pool_agui_stack_inspection() -> None:
-    """AG-UI callers still bypass via stack inspection (permanent — see docs/audit/agui-bypass-audit.md)."""
-    import types
-    from typing import Any
+    """AG-UI stack inspection was removed in thin-agentpool-core Phase 1 (c28e4f85b).
 
-    from agentpool.agents.base_agent import _should_bypass_session_pool
+    AG-UI callers must now set the _bypass_session_pool ContextVar instead of
+    relying on stack inspection. The agui agent type was also removed from
+    AgentTypeLiteral (narrowed to native | acp only).
+    """
+    from agentpool.agents.base_agent import _bypass_session_pool, _should_bypass_session_pool
 
-    agui_module: Any = types.ModuleType("agui_test_module")
-    agui_module.__dict__["_should_bypass_session_pool"] = _should_bypass_session_pool
-
-    # Execute function definition inside the module so its f_globals are agui_module's
-    exec(
-        "def _check():\n    return _should_bypass_session_pool()\n",
-        agui_module.__dict__,
+    # Without ContextVar set, bypass is NOT active — even from AG-UI code.
+    # Stack inspection was intentionally removed.
+    result = _should_bypass_session_pool()
+    assert result is False, (
+        "_should_bypass_session_pool should return False without ContextVar "
+        "(stack inspection was removed in thin-agentpool-core Phase 1)"
     )
 
-    check_fn = agui_module.__dict__["_check"]
-    result = check_fn()
-    assert result is True, (
-        "AG-UI stack inspection should bypass SessionPool (permanent — see docs/audit/agui-bypass-audit.md)"
-    )
+    # With ContextVar set, bypass IS active.
+    token = _bypass_session_pool.set(True)
+    try:
+        result = _should_bypass_session_pool()
+        assert result is True, (
+            "_should_bypass_session_pool should return True when ContextVar is set"
+        )
+    finally:
+        _bypass_session_pool.reset(token)
 
 
 # ---------------------------------------------------------------------------

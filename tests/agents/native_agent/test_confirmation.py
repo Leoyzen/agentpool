@@ -276,14 +276,18 @@ def _create_mock_agentlet_from_caps(
     deferred_requests: DeferredToolRequests,
     final_text: str = "Done",
 ) -> MagicMock:
-    """Create a mock pydantic-ai agentlet that simulates deferred approval flow."""
+    """Create a mock pydantic-ai agentlet that simulates deferred approval flow.
+
+    Iterates ALL HandleDeferredToolCalls capabilities in order, chaining
+    results: a None return means "pass to next capability". This mirrors
+    how pydantic-ai combines multiple HandleDeferredToolCalls into a
+    single pipeline at runtime.
+    """
     from pydantic_ai.capabilities import HandleDeferredToolCalls
 
-    deferred_cap = None
-    for cap in capabilities:
-        if isinstance(cap, HandleDeferredToolCalls):
-            deferred_cap = cap
-            break
+    deferred_caps: list[HandleDeferredToolCalls] = [
+        cap for cap in capabilities if isinstance(cap, HandleDeferredToolCalls)
+    ]
 
     mock_result = MagicMock()
     mock_result.data = final_text
@@ -295,7 +299,7 @@ def _create_mock_agentlet_from_caps(
     mock_usage.total_tokens = 15
     mock_result.usage = mock_usage
 
-    cap_instance = deferred_cap
+    cap_instances = deferred_caps
 
     def mock_iter(
         prompts: list[Any],
@@ -317,15 +321,19 @@ def _create_mock_agentlet_from_caps(
                 return self
 
             async def __anext__(self) -> Any:
-                if cap_instance is not None:
+                for cap in cap_instances:
                     run_ctx = RunContext(
                         deps=deps,
                         model=MagicMock(),
                         usage=MagicMock(),
                     )
-                    await cap_instance.handle_deferred_tool_calls(
+                    result = await cap.handle_deferred_tool_calls(
                         run_ctx, requests=deferred_requests
                     )
+                    # None means "pass through to next capability"
+                    # DeferredToolResults means "handled, stop chaining"
+                    if result is not None:
+                        break
                 raise StopAsyncIteration
 
             async def __aenter__(self) -> Any:
