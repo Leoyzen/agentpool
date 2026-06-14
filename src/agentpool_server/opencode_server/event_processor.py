@@ -645,6 +645,11 @@ class EventProcessor:
         Yields:
             Final events including text part timing update and step finish part.
         """
+        if not ctx.response_text:
+            final_content = _message_content_to_text(msg.content)
+            if final_content:
+                ctx.set_text(final_content)
+
         # Update token and cost tracking from the message
         if msg.usage:
             ctx.update_tokens(
@@ -731,3 +736,12 @@ def _extract_title_from_tool_state(state: ToolState) -> str:
             return title or ""
         case ToolStateError() | _:
             return ""
+
+
+def _message_content_to_text(content: Any) -> str:
+    """Convert final `ChatMessage` content into display text."""
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    return str(content)

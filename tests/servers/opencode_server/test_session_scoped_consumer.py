@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentpool.agents.events import RunStartedEvent
+from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentpool.messaging.messages import ChatMessage
 from agentpool.orchestrator.core import SessionPool
 from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
+    get_messages_for_session,
 )
 from agentpool_server.opencode_server.state import ServerState
 
@@ -27,7 +29,11 @@ def mock_agent_pool() -> Mock:
     pool.main_agent.name = "test-agent"
     pool.manifest = Mock()
     pool.manifest.agents = {}
+    pool.manifest.config_file_path = "test-pool-config"
     pool._config_file_path = None
+    pool.storage = Mock()
+    pool.storage.load_session = AsyncMock(return_value=None)
+    pool.storage.save_session = AsyncMock(return_value=None)
 
     async def _mock_run_stream_once(*args: Any, **kwargs: Any) -> Any:
         """Yield a minimal run event sequence for testing."""
@@ -68,17 +74,20 @@ async def session_pool(mock_agent_pool: Mock, mock_session_store: Mock) -> Sessi
         enable_auto_resume=False,
         enable_event_bus=True,
     )
+    mock_agent_pool.session_pool = sp
     await sp.start()
     yield sp
     await sp.shutdown()
 
 
 @pytest.fixture
-def server_state(tmp_path: Any) -> ServerState:
+def server_state(tmp_path: Any, mock_agent_pool: Mock) -> ServerState:
     """Create a minimal ServerState for testing."""
     agent = Mock()
     agent.name = "test-agent"
     agent.storage = Mock()
+    agent.agent_pool = mock_agent_pool
+    agent.env = Mock()
     return ServerState(working_dir=str(tmp_path), agent=agent)
 
 
@@ -237,10 +246,11 @@ async def test_consumer_handles_spawn_session_start(
         SpawnSessionStart(
             parent_session_id="test-parent-session",
             child_session_id="test-child-session",
-            spawn_mechanism="subagent",
+            spawn_mechanism="task",
             source_name="test-tool",
             source_type="tool",
             description="Test subagent spawn",
+            metadata={"prompt": "Inspect child task"},
         ),
     )
 
@@ -252,6 +262,28 @@ async def test_consumer_handles_spawn_session_start(
     task = integration._consumer_tasks.get("test-parent-session")
     assert task is not None
     assert not task.done()
+    assert "test-child-session" in server_state.sessions
+    assert server_state.sessions["test-child-session"].parent_id == "test-parent-session"
+
+    child_messages = await get_messages_for_session(server_state, "test-child-session")
+    assert child_messages
+    child_text = str(child_messages[0].parts)
+    assert "Inspect child task" in child_text
+
+    await session_pool.event_bus.publish(
+        "test-child-session",
+        StreamCompleteEvent(
+            message=ChatMessage(role="assistant", content="Child task finished"),
+            session_id="test-child-session",
+        ),
+    )
+    await asyncio.sleep(0.1)
+
+    completed_child_messages = await get_messages_for_session(
+        server_state, "test-child-session"
+    )
+    completed_child_text = " ".join(str(message.parts) for message in completed_child_messages)
+    assert "Child task finished" in completed_child_text
 
     # Clean up
     await integration._stop_event_consumer("test-parent-session")
