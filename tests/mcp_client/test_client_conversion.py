@@ -7,10 +7,13 @@ to PydanticAI-compatible return types without mocks.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import anyio
-from llmling_models import infer_model
+from mcp.types import TextContent
 from pydantic_ai import BinaryContent, RunContext, ToolReturn
+from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 import pytest
 
@@ -41,7 +44,7 @@ async def test_rich_content_image(mcp_client: MCPClient):
     ctx = RunContext(
         tool_call_id="test-call-123",
         deps=None,
-        model=infer_model("openai:gpt-5-nano"),
+        model=TestModel(),
         usage=RunUsage(),
     )
     result = await mcp_client.call_tool(
@@ -50,17 +53,17 @@ async def test_rich_content_image(mcp_client: MCPClient):
         arguments={"content_type": "image"},
     )
     assert isinstance(result, ToolReturn)
-    assert result.content
-    assert isinstance(result.content[0], BinaryContent)
+    assert isinstance(result.return_value, list)
+    assert isinstance(result.return_value[0], BinaryContent)
     result = await mcp_client.call_tool(
         "test_rich_content",
         run_context=ctx,
         arguments={"content_type": "audio"},
     )
     assert isinstance(result, ToolReturn)
-    assert result.content
-    assert isinstance(result.content[0], BinaryContent)
-    assert result.content[0].media_type == "audio/wav"
+    assert isinstance(result.return_value, list)
+    assert isinstance(result.return_value[0], BinaryContent)
+    assert result.return_value[0].media_type == "audio/wav"
     result = await mcp_client.call_tool(
         "test_rich_content",
         run_context=ctx,
@@ -73,6 +76,36 @@ async def test_rich_content_image(mcp_client: MCPClient):
         arguments={"content_type": "mixed"},
     )
     assert result is not None
+
+
+async def test_structured_mcp_result_preserves_text_as_tool_return() -> None:
+    """MCP text content must remain visible as the tool result when metadata exists."""
+    ctx = RunContext(
+        tool_call_id="test-call-structured",
+        deps=None,
+        model=TestModel(),
+        usage=RunUsage(),
+    )
+    client = MCPClient(StdioMCPServerConfig(name="test_server", command="uv", args=["--version"]))
+    client._client = MagicMock()
+    client._client.is_connected.return_value = True
+    client._client.call_tool = AsyncMock(
+        return_value=SimpleNamespace(
+            is_error=False,
+            content=[TextContent(type="text", text="<file>\n00001| report body\n</file>")],
+            data={"file_path": "reports/case.md", "total_lines": 1},
+        )
+    )
+
+    result = await client.call_tool(
+        "read",
+        run_context=ctx,
+        arguments={"file_path": "reports/case.md"},
+    )
+
+    assert isinstance(result, ToolReturn)
+    assert result.return_value == "<file>\n00001| report body\n</file>"
+    assert result.metadata == {"file_path": "reports/case.md", "total_lines": 1}
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Self, assert_never
 
 import anyio
-from pydantic_ai import RunContext, ToolReturn
+from pydantic_ai import BinaryContent, RunContext, ToolReturn
 from schemez import FunctionSchema
 
 from agentpool.agents.context import AgentContext
@@ -482,12 +482,14 @@ class MCPClient:
             # Decision logic for return type
             match (result.data is not None, bool(content)):
                 case (True, True):  # Both structured data and rich content -> ToolReturn
-                    return ToolReturn(return_value=result.data, content=content)
+                    return ToolReturn(
+                        return_value=_mcp_content_return_value(content),
+                        metadata=result.data,
+                    )
                 case (True, False):  # Only structured data -> return directly
                     return result.data
                 case (False, True):  # Only content -> ToolReturn with content
-                    msg = "Tool executed successfully"
-                    return ToolReturn(return_value=msg, content=content)
+                    return ToolReturn(return_value=_mcp_content_return_value(content))
                 case (False, False):  # Fallback to text extraction
                     return extract_text_content(result.content)
                 case _:  # Handle unexpected cases
@@ -497,6 +499,15 @@ class MCPClient:
         finally:
             # Clear per-call handler
             self._current_elicitation_handler = None
+
+
+def _mcp_content_return_value(
+    content: list[str | BinaryContent],
+) -> str | list[str | BinaryContent]:
+    """Return MCP content in the value field that PydanticAI sends as tool output."""
+    if len(content) == 1 and isinstance(content[0], str):
+        return content[0]
+    return content
 
 
 if __name__ == "__main__":
