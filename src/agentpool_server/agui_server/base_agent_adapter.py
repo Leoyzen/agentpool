@@ -111,11 +111,9 @@ class BaseAgentAGUIAdapter:
 
         try:
             # Get user prompt and run agent
-            # NOTE: AG-UI uses direct agent.run_stream() to preserve its
-            # specialized event-handling path. BaseAgent._should_bypass_session_pool()
-            # detects AG-UI callers via stack inspection and bypasses SessionPool
-            # delegation, ensuring AG-UI events flow directly without interception.
-            # The AG-UI bypass is permanent — see docs/audit/agui-bypass-audit.md.
+            # NOTE: AG-UI routes through SessionPool via ProtocolEventConsumerMixin.
+            # run_stream() delegates to SessionPool for turn management and event routing.
+            # AG-UI events flow through the EventBus via the mixin's consumer loop.
             # AG-UI protocol requires direct agent access for protocol-specific
             # event transformation (AGUIEventStream).
             # TODO: Properly handle agent statefulness with AG-UI protocol.
