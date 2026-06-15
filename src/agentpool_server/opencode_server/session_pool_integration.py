@@ -95,6 +95,10 @@ async def get_messages_for_session(
     Returns:
         List of MessageWithParts for the session.
     """
+    messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
+    if messages:
+        return messages
+
     if _use_session_pool_for_messages(state):
         session_pool = getattr(state.pool, "session_pool", None)
         if session_pool is not None:
@@ -117,7 +121,6 @@ async def get_messages_for_session(
                     )
                     for chat_msg in sp_messages
                 ]
-    messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
     return messages
 
 

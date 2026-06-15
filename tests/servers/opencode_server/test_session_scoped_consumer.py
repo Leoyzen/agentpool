@@ -11,6 +11,11 @@ import pytest
 from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
 from agentpool.messaging.messages import ChatMessage
 from agentpool.orchestrator.core import SessionPool
+from agentpool_server.opencode_server.models import (
+    MessagePath,
+    MessageTime,
+    MessageWithParts,
+)
 from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
     get_messages_for_session,
@@ -89,6 +94,37 @@ def server_state(tmp_path: Any, mock_agent_pool: Mock) -> ServerState:
     agent.agent_pool = mock_agent_pool
     agent.env = Mock()
     return ServerState(working_dir=str(tmp_path), agent=agent)
+
+
+@pytest.mark.asyncio
+async def test_get_messages_prefers_live_opencode_messages(
+    server_state: ServerState,
+) -> None:
+    """Live OpenCode messages should be authoritative for TUI rendering."""
+    session_id = "live-session"
+    assistant_msg = MessageWithParts.assistant(
+        message_id="assistant-message",
+        session_id=session_id,
+        time=MessageTime(created=1000),
+        agent_name="test-agent",
+        model_id="test-model",
+        parent_id="user-message",
+        provider_id="test-provider",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+    )
+    assistant_msg.add_text_part("Live streamed content")
+    server_state.messages[session_id] = [assistant_msg]
+
+    stale_session_pool = Mock()
+    stale_session_pool.get_messages = AsyncMock(
+        return_value=[ChatMessage(content="", role="assistant")]
+    )
+    server_state.pool.session_pool = stale_session_pool
+
+    messages = await get_messages_for_session(server_state, session_id)
+
+    assert messages == [assistant_msg]
+    stale_session_pool.get_messages.assert_not_awaited()
 
 
 @pytest.mark.asyncio
