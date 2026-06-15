@@ -65,6 +65,12 @@ class _TeamGraphState:
     member_timeout: float | None = None
     """Maximum seconds a member may run before being cancelled."""
 
+    member_retry_attempts: int = 0
+    """Additional attempts for non-timeout runtime member failures."""
+
+    member_retry_delay: float = 0.0
+    """Seconds to wait before retrying a failed member."""
+
     execution_talks: list[Talk[Any]] = field(default_factory=list)
     """Talk connections for tracking execution stats."""
 
@@ -108,12 +114,34 @@ def _make_member_step(
                 run_kwargs["session_id"] = child_session_id
             if state.parent_session_id:
                 run_kwargs["parent_session_id"] = state.parent_session_id
-            coro = node.run(*final_prompt, **run_kwargs)
-            message = (
-                await asyncio.wait_for(coro, timeout=state.member_timeout)
-                if state.member_timeout is not None
-                else await coro
-            )
+            attempts = max(1, state.member_retry_attempts + 1)
+            message = None
+            for attempt_index in range(attempts):
+                try:
+                    coro = node.run(*final_prompt, **run_kwargs)
+                    message = (
+                        await asyncio.wait_for(coro, timeout=state.member_timeout)
+                        if state.member_timeout is not None
+                        else await coro
+                    )
+                    break
+                except TimeoutError:
+                    raise
+                except RuntimeError as exc:
+                    if attempt_index >= attempts - 1:
+                        raise
+                    logger.warning(
+                        "Team member failed; retrying",
+                        member=node.name,
+                        attempt=attempt_index + 1,
+                        max_attempts=attempts,
+                        error=str(exc),
+                    )
+                    if state.member_retry_delay > 0:
+                        await asyncio.sleep(state.member_retry_delay)
+            if message is None:
+                msg = f"Member {node.name!r} returned no message"
+                raise RuntimeError(msg)
             timing = perf_counter() - start
             response = AgentResponse(agent_name=node.name, message=message, timing=timing)
 

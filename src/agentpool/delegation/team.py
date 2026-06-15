@@ -109,6 +109,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         scoped_nodes: list[MessageNode[Any, Any]] = []
         child_session_ids: dict[str, str] = {}
 
+        await self._save_scoped_storage_session(parent_session_id)
         for node in nodes:
             if node.name not in pool_agents and node.name not in pool_teams:
                 scoped_nodes.append(node)
@@ -121,6 +122,7 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 agent_type=getattr(node, "agent_type", type(node).__name__),
                 team_name=self.name,
                 team_run_id=team_run_id,
+                generate_title=False,
             )
             child_session_id = child_state.session_id
             if isinstance(node, BaseAgent) and node.name in pool_agents:
@@ -132,8 +134,22 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
                 child_node = node
             scoped_nodes.append(child_node)
             child_session_ids[node.name] = child_session_id
+            await self._save_scoped_storage_session(child_session_id)
 
         return scoped_nodes, child_session_ids
+
+    async def _save_scoped_storage_session(self, session_id: str | None) -> None:
+        """Persist SessionPool session data to protocol storage for lineage checks."""
+        if not session_id or self.agent_pool is None or self.agent_pool.session_pool is None:
+            return
+        storage = getattr(self.agent_pool, "storage", None)
+        if storage is None:
+            return
+        session_controller = self.agent_pool.session_pool.sessions
+        session = session_controller.get_session(session_id)
+        if session is None:
+            return
+        await storage.save_session(session_controller._state_to_data(session))
 
     async def _close_scoped_team_nodes(self, child_session_ids: dict[str, str]) -> None:
         """Close and delete round-scoped child sessions created for a team run."""
@@ -141,6 +157,17 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             return
         for session_id in reversed(list(child_session_ids.values())):
             await self.agent_pool.session_pool.close_session(session_id)
+            await self._delete_scoped_storage_session(session_id)
+
+    async def _delete_scoped_storage_session(self, session_id: str) -> None:
+        """Remove protocol storage written for a round-scoped child session."""
+        if self.agent_pool is None:
+            return
+        storage = getattr(self.agent_pool, "storage", None)
+        if storage is None:
+            return
+        await storage.delete_session_messages(session_id)
+        await storage.delete_session(session_id)
 
     async def execute(self, *prompts: PromptCompatible | None, **kwargs: Any) -> TeamResponse:
         """Run all agents in parallel via pydantic-graph Fork + Join.
@@ -173,6 +200,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         if not isinstance(template_vars, dict):
             template_vars = {}
         timeout = self.member_timeout
+        member_retry_attempts = max(0, int(kwargs.pop("member_retry_attempts", 0) or 0))
+        member_retry_delay = max(0.0, float(kwargs.pop("member_retry_delay", 0.0) or 0.0))
         member_skills = self._normalize_member_skills(kwargs.pop("member_skills", {}))
         member_skill_instructions = await self._load_member_skill_instructions(member_skills)
 
@@ -209,6 +238,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
             child_session_ids=child_session_ids,
             parent_session_id=parent_session_id,
             member_timeout=timeout,
+            member_retry_attempts=member_retry_attempts,
+            member_retry_delay=member_retry_delay,
             execution_talks=execution_talks,
             error_mode=self._error_mode,
         )

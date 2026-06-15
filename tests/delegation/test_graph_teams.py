@@ -51,6 +51,35 @@ class _FakeSessionAgents:
 
     def __init__(self) -> None:
         self.created_agents: dict[str, Agent[Any, str]] = {}
+        self.states: dict[str, Any] = {}
+
+    def add_state(
+        self,
+        session_id: str,
+        *,
+        agent_name: str = "agent",
+        parent_session_id: str | None = None,
+        **metadata: Any,
+    ) -> Any:
+        state = SimpleNamespace(
+            session_id=session_id,
+            agent_name=agent_name,
+            parent_session_id=parent_session_id,
+            metadata=metadata,
+        )
+        self.states[session_id] = state
+        return state
+
+    def get_session(self, session_id: str) -> Any | None:
+        return self.states.get(session_id)
+
+    def _state_to_data(self, state: Any) -> Any:
+        return SimpleNamespace(
+            session_id=state.session_id,
+            agent_name=state.agent_name,
+            parent_id=state.parent_session_id,
+            metadata=state.metadata,
+        )
 
     async def get_or_create_session_agent(
         self,
@@ -87,11 +116,37 @@ class _FakeSessionPool:
             "lifecycle_policy": lifecycle_policy or "",
             "team_name": str(metadata.get("team_name") or ""),
             "team_run_id": str(metadata.get("team_run_id") or ""),
+            "generate_title": str(metadata.get("generate_title")),
         })
-        return SimpleNamespace(session_id=session_id)
+        return self.sessions.add_state(
+            session_id,
+            agent_name=agent_name or "",
+            parent_session_id=parent_session_id,
+            **metadata,
+        )
 
     async def close_session(self, session_id: str) -> None:
         self.closed.append(session_id)
+
+
+class _FakeStorage:
+    """Storage facade that records scoped session persistence calls."""
+
+    def __init__(self) -> None:
+        self.saved: list[Any] = []
+        self.deleted_sessions: list[str] = []
+        self.deleted_messages: list[str] = []
+
+    async def save_session(self, data: Any) -> None:
+        self.saved.append(data)
+
+    async def delete_session_messages(self, session_id: str) -> int:
+        self.deleted_messages.append(session_id)
+        return 0
+
+    async def delete_session(self, session_id: str) -> bool:
+        self.deleted_sessions.append(session_id)
+        return True
 
 
 class _FakeAgentPool:
@@ -100,6 +155,7 @@ class _FakeAgentPool:
     def __init__(self, agents: list[Agent[Any, str]]) -> None:
         self.session_pool = _FakeSessionPool()
         self.all_agents = {agent.name: agent for agent in agents}
+        self.storage = _FakeStorage()
 
 
 class FailingAgent(MessageNode[Any, Any]):
@@ -112,6 +168,50 @@ class FailingAgent(MessageNode[Any, Any]):
     async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
         msg = self.exc_msg
         raise RuntimeError(msg)
+
+    async def get_stats(self) -> Any:
+        return None
+
+    def run_iter(self, *prompts: Any, **kwargs: Any) -> Any:
+        pass
+
+    def get_context(self, data: Any = None, input_provider: Any = None) -> Any:
+        return None
+
+
+class FlakyAgent(MessageNode[Any, Any]):
+    """An agent that fails once and then succeeds."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name=name)
+        self.calls = 0
+
+    async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("temporary failure")
+        return ChatMessage(content="recovered", role="assistant", name=self.name)
+
+    async def get_stats(self) -> Any:
+        return None
+
+    def run_iter(self, *prompts: Any, **kwargs: Any) -> Any:
+        pass
+
+    def get_context(self, data: Any = None, input_provider: Any = None) -> Any:
+        return None
+
+
+class InvalidAgent(MessageNode[Any, Any]):
+    """An agent that raises a non-runtime failure."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name=name)
+        self.calls = 0
+
+    async def run(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
+        self.calls += 1
+        raise ValueError("invalid member configuration")
 
     async def get_stats(self) -> Any:
         return None
@@ -211,6 +311,7 @@ async def test_parallel_team_execute_uses_scoped_child_sessions_by_default() -> 
     agent_a = _make_echo_agent("alpha", "shared_a")
     agent_b = _make_echo_agent("beta", "shared_b")
     pool = _FakeAgentPool([agent_a, agent_b])
+    pool.session_pool.sessions.add_state("parent-session", agent_name="rebuttal_agent")
     team = Team([agent_a, agent_b], name="parallel_scoped", agent_pool=pool)  # type: ignore[arg-type]
     run_ctx = AgentRunContext(session_id="parent-session")
 
@@ -225,7 +326,15 @@ async def test_parallel_team_execute_uses_scoped_child_sessions_by_default() -> 
     assert {item["parent_session_id"] for item in pool.session_pool.created} == {"parent-session"}
     assert {item["lifecycle_policy"] for item in pool.session_pool.created} == {"cascade"}
     assert {item["team_name"] for item in pool.session_pool.created} == {"parallel_scoped"}
+    assert {item["generate_title"] for item in pool.session_pool.created} == {"False"}
     assert set(pool.session_pool.closed) == set(response.child_session_ids.values())
+    saved_ids = [item.session_id for item in pool.storage.saved]
+    assert saved_ids[0] == "parent-session"
+    assert set(saved_ids[1:]) == set(response.child_session_ids.values())
+    child_saved = [item for item in pool.storage.saved if item.session_id != "parent-session"]
+    assert all(item.metadata.get("generate_title") is False for item in child_saved)
+    assert set(pool.storage.deleted_messages) == set(response.child_session_ids.values())
+    assert set(pool.storage.deleted_sessions) == set(response.child_session_ids.values())
 
     contents = {str(item.message.content) for item in response if item.message is not None}
     for agent_name, session_id in response.child_session_ids.items():
@@ -396,6 +505,33 @@ async def test_parallel_team_execute_applies_member_timeout() -> None:
     assert response[0].agent_name == "ok"
     assert "slow" in response.errors
     assert isinstance(response.errors["slow"], TimeoutError)
+
+
+@pytest.mark.anyio
+async def test_parallel_team_execute_retries_transient_member_failure() -> None:
+    """Team.execute() retries runtime member failures when requested."""
+    agent = FlakyAgent("flaky")
+    team = Team([agent], name="retry_team")
+
+    response = await team.execute("prompt", member_retry_attempts=1)
+
+    assert agent.calls == 2
+    assert not response.errors
+    assert len(response) == 1
+    assert response[0].message is not None
+    assert response[0].message.content == "recovered"
+
+
+@pytest.mark.anyio
+async def test_parallel_team_execute_does_not_retry_non_runtime_failure() -> None:
+    """Team.execute() does not retry non-runtime member failures."""
+    agent = InvalidAgent("invalid")
+    team = Team([agent], name="retry_team")
+
+    response = await team.execute("prompt", member_retry_attempts=1)
+
+    assert agent.calls == 1
+    assert isinstance(response.errors["invalid"], ValueError)
 
 
 # ---------------------------------------------------------------------------

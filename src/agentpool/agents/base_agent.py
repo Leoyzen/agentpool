@@ -211,6 +211,28 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     # Signal emitted when agent is interrupted
     interrupted: Signal[InterruptEvent] = Signal()
 
+    def _session_initial_prompt_for_title(
+        self,
+        session_id: str,
+        initial_prompt: str | None,
+    ) -> str | None:
+        """Return the prompt used for title generation for this session."""
+        if initial_prompt is None:
+            return None
+        if self.agent_pool is None or self.agent_pool.session_pool is None:
+            return initial_prompt
+
+        session_controller = self.agent_pool.session_pool.sessions
+        get_session = getattr(session_controller, "get_session", None)
+        if not callable(get_session):
+            return initial_prompt
+
+        session_state = get_session(session_id)
+        metadata = getattr(session_state, "metadata", None)
+        if isinstance(metadata, dict) and metadata.get("generate_title") is False:
+            return None
+        return initial_prompt
+
     def __init__(
         self,
         *,
@@ -1040,10 +1062,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         user_prompts = [str(p) for p in prompts if isinstance(p, str)]
         initial_prompt = user_prompts[-1] if user_prompts else None
+        title_initial_prompt = self._session_initial_prompt_for_title(
+            effective_session_id,
+            initial_prompt,
+        )
 
         await self.log_session(
             session_id=effective_session_id,
-            initial_prompt=initial_prompt,
+            initial_prompt=title_initial_prompt,
             model=self.model_name,
             parent_session_id=parent_session_id,
         )
