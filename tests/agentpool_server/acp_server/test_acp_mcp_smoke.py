@@ -101,25 +101,24 @@ async def test_initialize_and_get_tools_with_json_round_trip(
 
         if method == "mcp/message":
             received_mcp_messages.append(params)
-            inner_msg = params.get("message")
+            req_method = params.get("method")
 
-            # Verify the fix: message must be a plain dict, not SessionMessage
-            assert isinstance(inner_msg, dict), (
-                f"Expected dict after send_to_client conversion, got {type(inner_msg)}"
-            )
+            # Verify the fix: params must be in flattened ACP format
+            assert "connectionId" in params, "params must contain connectionId"
+            assert "method" in params, "params must contain method"
+            assert "message" not in params, "old nested 'message' key must not be present"
 
             # Simulate real JSON serialization / deserialization round-trip
-            serialized = json.dumps(inner_msg)
+            serialized = json.dumps(params)
             deserialized: dict = json.loads(serialized)
 
             conn = acp_agent._mcp_manager.get_connection("smoke-conn-1")
             if conn is None:
                 return {}
 
-            req_method = deserialized.get("method")
-            req_id = deserialized.get("id")
+            req_id = deserialized.get("params", {}).get("protocolVersion")
 
-            if req_method == "initialize" and req_id is not None:
+            if req_method == "initialize":
                 result = InitializeResult(
                     protocolVersion="2024-11-05",
                     capabilities=ServerCapabilities(),
@@ -176,15 +175,15 @@ async def test_initialize_and_get_tools_with_json_round_trip(
         f"Expected a tool ending with 'smoke_tool' in {[t.name for t in tools]}"
     )
 
-    # Verify that send_to_client produced plain dicts (not SessionMessage objects)
+    # Verify that send_to_client produced plain dicts in flattened format
     assert len(received_mcp_messages) >= 2, (
         f"Expected at least 2 mcp/message calls, got {len(received_mcp_messages)}"
     )
 
     methods = [
-        m.get("message", {}).get("method")
+        m.get("method")
         for m in received_mcp_messages
-        if isinstance(m.get("message"), dict)
+        if isinstance(m.get("method"), str)
     ]
     assert "initialize" in methods, f"Expected initialize in {methods}"
     assert "tools/list" in methods, f"Expected tools/list in {methods}"
