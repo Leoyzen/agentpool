@@ -90,6 +90,10 @@ _bypass_session_pool: ContextVar[bool] = ContextVar(
     default=False,
 )
 
+_in_turn_context: ContextVar[bool] = ContextVar(
+    "_in_turn_context",
+    default=False,
+)
 
 logger = get_logger(__name__)
 

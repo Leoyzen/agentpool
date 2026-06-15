@@ -168,6 +168,7 @@ class SessionState:
     lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
     current_run_id: str | None = None
     _request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _turn_owner_task: asyncio.Task[Any] | None = None
     input_provider: Any | None = None
     pending_questions: dict[str, Any] = field(default_factory=dict)
     """Pending questions stored on SessionState for per-session isolation."""
