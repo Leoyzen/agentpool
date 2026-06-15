@@ -1,7 +1,6 @@
 """Parsing logic for file-based agent definitions.
 
 Supports loading agents from markdown files with YAML frontmatter in various formats:
-- Claude Code: https://code.claude.com/docs/en/sub-agents.md
 - OpenCode: https://github.com/sst/opencode
 - AgentPool (native): Full NativeAgentConfig fields in frontmatter
 """
@@ -22,22 +21,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-AgentFileFormat = Literal["claude", "opencode", "native"]
-
-# Claude Code model alias mapping
-CLAUDE_MODEL_ALIASES: dict[str, str] = {
-    "sonnet": "anthropic:claude-sonnet-4-20250514",
-    "opus": "anthropic:claude-opus-4-20250514",
-    "haiku": "anthropic:claude-haiku-3-5-20241022",
-}
-
-# Claude Code permissionMode to ToolConfirmationMode mapping
-PERMISSION_MODE_MAP: dict[str, Literal["always", "never", "per_tool"]] = {
-    "default": "per_tool",
-    "acceptEdits": "never",
-    "bypassPermissions": "never",
-    # 'plan' and 'ignore' don't map well, default to per_tool
-}
+AgentFileFormat = Literal["opencode", "native"]
 
 # Fields that pass through directly to NativeAgentConfig
 PASSTHROUGH_FIELDS = {
@@ -97,7 +81,7 @@ def detect_format(metadata: dict[str, Any]) -> AgentFileFormat:
         metadata: Parsed YAML frontmatter
 
     Returns:
-        Detected format: "claude", "opencode", or "agentpool"
+        Detected format: "opencode" or "native"
     """
     # OpenCode indicators
     is_opencode = (
@@ -108,84 +92,8 @@ def detect_format(metadata: dict[str, Any]) -> AgentFileFormat:
     if is_opencode:
         return "opencode"
 
-    # Native format indicators (agentpool specific fields)
-    native_fields = {"toolsets", "session", "knowledge", "workers", "triggers"}
-    if any(field in metadata for field in native_fields):
-        return "native"
-
-    # Default to Claude Code format
-    return "claude"
-
-
-def parse_claude_format(
-    metadata: dict[str, Any],
-    system_prompt: str,
-    file_path: str,
-    *,
-    skills_registry: Any | None = None,
-) -> dict[str, Any]:
-    """Parse Claude Code format frontmatter.
-
-    Args:
-        metadata: Parsed YAML frontmatter
-        system_prompt: Markdown body content
-        file_path: Path for logging
-        skills_registry: Optional skills registry for loading skills
-
-    Returns:
-        Dict of NativeAgentConfig kwargs
-    """
-    config_kwargs: dict[str, Any] = {}
-
-    # Description
-    if description := metadata.get("description"):
-        config_kwargs["description"] = description
-
-    # Model handling
-    if model := metadata.get("model"):
-        if model == "inherit":
-            pass  # Leave as None, will use default
-        elif model in CLAUDE_MODEL_ALIASES:
-            config_kwargs["model"] = CLAUDE_MODEL_ALIASES[model]
-        else:
-            config_kwargs["model"] = model
-
-    # Permission mode mapping
-    if permission_mode := metadata.get("permissionMode"):
-        if mapped := PERMISSION_MODE_MAP.get(permission_mode):
-            config_kwargs["requires_tool_confirmation"] = mapped
-        else:
-            logger.warning(
-                "Unknown permissionMode, using default",
-                permission_mode=permission_mode,
-                file_path=file_path,
-            )
-
-    # Tools string format (comma-separated) - not yet supported
-    if (tools := metadata.get("tools")) and isinstance(tools, str):
-        logger.debug("Claude Code tools string not yet supported", tools=tools, file_path=file_path)
-
-    # Skills handling
-    if (skills_str := metadata.get("skills")) and skills_registry is not None:
-        skill_names = [s.strip() for s in skills_str.split(",")]
-        for skill_name in skill_names:
-            if skill_name not in skills_registry:
-                logger.warning(
-                    "Skill not found in registry, ignoring",
-                    skill_name=skill_name,
-                    file_path=file_path,
-                )
-
-    # System prompt from markdown body
-    if system_prompt:
-        config_kwargs["system_prompt"] = system_prompt
-
-    # Pass through agentpool specific fields
-    for field in PASSTHROUGH_FIELDS:
-        if field in metadata:
-            config_kwargs[field] = metadata[field]
-
-    return config_kwargs
+    # Default to native format
+    return "native"
 
 
 def parse_opencode_format(
@@ -211,11 +119,7 @@ def parse_opencode_format(
 
     # Model handling
     if model := metadata.get("model"):
-        if model == "inherit":
-            pass
-        elif model in CLAUDE_MODEL_ALIASES:
-            config_kwargs["model"] = CLAUDE_MODEL_ALIASES[model]
-        else:
+        if model != "inherit":
             config_kwargs["model"] = model
 
     # Temperature (logged, not directly supported)
@@ -300,7 +204,7 @@ def parse_agent_file(
 ) -> NativeAgentConfig:
     """Parse agent markdown file to NativeAgentConfig.
 
-    Supports Claude Code, OpenCode, and native formats with auto-detection.
+    Supports OpenCode and native formats with auto-detection.
     Also supports local and remote paths via UPath.
 
     Args:
@@ -325,10 +229,6 @@ def parse_agent_file(
     # Detect or use specified format
     detected_format = detect_format(metadata) if file_format == "auto" else file_format
     match detected_format:
-        case "claude":
-            config_kwargs = parse_claude_format(
-                metadata, system_prompt, file_path, skills_registry=skills_registry
-            )
         case "opencode":
             config_kwargs = parse_opencode_format(metadata, system_prompt, file_path)
         case "native":

@@ -1,4 +1,4 @@
-"""Simple pydantic-ai AG-UI server for testing AGUIAgent."""
+"""Simple pydantic-ai AG-UI server for testing."""
 
 from __future__ import annotations
 

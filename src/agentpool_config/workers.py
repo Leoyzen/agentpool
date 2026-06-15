@@ -56,15 +56,7 @@ class ACPAgentWorkerConfig(BaseWorkerConfig):
     type: Literal["acp_agent"] = Field("acp_agent", init=False)
     """ACP agent worker configuration."""
 
-
-class AGUIAgentWorkerConfig(BaseWorkerConfig):
-    """AG-UI agent workers."""
-
-    type: Literal["agui_agent"] = Field("agui_agent", init=False)
-    """AG-UI agent worker configuration."""
-
-
 WorkerConfig = Annotated[
-    TeamWorkerConfig | AgentWorkerConfig | ACPAgentWorkerConfig | AGUIAgentWorkerConfig,
+    TeamWorkerConfig | AgentWorkerConfig | ACPAgentWorkerConfig,
     Field(discriminator="type"),
 ]

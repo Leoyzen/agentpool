@@ -551,3 +551,161 @@ async def test_handle_event_falls_back_to_consumer_session_id(
     assert notification.session_id == "parent-sid", (
         f"Expected parent-sid, got {notification.session_id}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Slash command expansion in SessionPool path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_handle_prompt_splits_and_executes_slash_commands(
+    mock_pool: MagicMock,
+    mock_event_converter: MagicMock,
+) -> None:
+    """Slash commands are split, executed, and non-command content reaches receive_request."""
+    from acp.schema import TextContentBlock
+
+    mock_client = AsyncMock()
+    mock_session_manager = MagicMock()
+
+    # Set up a SkillCommand in the command_store so split_commands detects it.
+    # A plain MagicMock passes the `get_command` check and won't match NodeCommand
+    # duck-typing (no `supports_node` attribute).
+    mock_skill_cmd = MagicMock()
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=mock_skill_cmd)
+    mock_command_store.execute_command = AsyncMock()
+    mock_command_store.create_context = MagicMock(return_value=MagicMock())
+
+    mock_acp_session = MagicMock()
+    mock_acp_session.command_store = mock_command_store
+    mock_acp_session.session_mcp_providers = []
+    mock_session_manager.get_session = MagicMock(return_value=mock_acp_session)
+
+    # Per-session agent with staged_content and get_context
+    mock_session_agent = MagicMock()
+    mock_session_agent.get_context = MagicMock(return_value=MagicMock())
+    mock_session_agent.staged_content = MagicMock()
+    mock_session_agent.staged_content.__len__ = MagicMock(return_value=0)
+    mock_pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
+        return_value=mock_session_agent
+    )
+
+    handler = ACPProtocolHandler(
+        agent_pool=mock_pool,
+        session_manager=mock_session_manager,
+        event_converter=mock_event_converter,
+        client=mock_client,
+        client_capabilities=None,
+    )
+
+    content_blocks = [TextContentBlock(text="/test-skill foo bar")]
+
+    result = await handler.handle_prompt("sess-1", content_blocks)
+
+    # Command should have been executed with the correct command string
+    mock_command_store.execute_command.assert_called_once()
+    call_args = mock_command_store.execute_command.call_args
+    assert "test-skill foo bar" in call_args[0][0], (
+        f"Expected 'test-skill foo bar' in args, got: {call_args}"
+    )
+
+    # Since all content was commands and staged_content is empty,
+    # handle_prompt should return end_turn without calling receive_request.
+    assert result.stop_reason == "end_turn"
+    mock_pool.session_pool.receive_request.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_handle_prompt_passes_non_command_content_to_receive_request(
+    mock_pool: MagicMock,
+    mock_event_converter: MagicMock,
+) -> None:
+    """Non-command content is passed through to receive_request after command execution."""
+    from acp.schema import TextContentBlock
+
+    mock_client = AsyncMock()
+    mock_session_manager = MagicMock()
+
+    # Set up a skill command in the store
+    mock_skill_cmd = MagicMock()
+    mock_command_store = MagicMock()
+    mock_command_store.get_command = MagicMock(return_value=mock_skill_cmd)
+    mock_command_store.execute_command = AsyncMock()
+    mock_command_store.create_context = MagicMock(return_value=MagicMock())
+
+    mock_acp_session = MagicMock()
+    mock_acp_session.command_store = mock_command_store
+    mock_acp_session.session_mcp_providers = []
+    mock_session_manager.get_session = MagicMock(return_value=mock_acp_session)
+
+    # Per-session agent - staged_content has content so agent will run
+    mock_session_agent = MagicMock()
+    mock_session_agent.get_context = MagicMock(return_value=MagicMock())
+    mock_session_agent.staged_content = MagicMock()
+    mock_session_agent.staged_content.__len__ = MagicMock(return_value=1)
+    mock_pool.session_pool.sessions.get_or_create_session_agent = AsyncMock(
+        return_value=mock_session_agent
+    )
+
+    handler = ACPProtocolHandler(
+        agent_pool=mock_pool,
+        session_manager=mock_session_manager,
+        event_converter=mock_event_converter,
+        client=mock_client,
+        client_capabilities=None,
+    )
+
+    # Mix: slash command + regular text
+    content_blocks = [
+        TextContentBlock(text="/test-skill foo"),
+        TextContentBlock(text="regular message"),
+    ]
+
+    await handler.handle_prompt("sess-1", content_blocks)
+
+    # Command should be executed
+    mock_command_store.execute_command.assert_called_once()
+
+    # Non-command content should reach receive_request
+    mock_pool.session_pool.receive_request.assert_called_once()
+    call_args = mock_pool.session_pool.receive_request.call_args
+    # receive_request(session_id, contents, input_provider=...)
+    contents_arg = call_args[0][1]  # positional arg 1 = contents list
+    assert len(contents_arg) == 1
+    assert contents_arg[0] == "regular message"
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_handle_prompt_no_acp_session_skips_command_splitting(
+    mock_pool: MagicMock,
+    mock_event_converter: MagicMock,
+) -> None:
+    """When acp_session is None, command splitting is skipped entirely."""
+    from acp.schema import TextContentBlock
+
+    mock_client = AsyncMock()
+    mock_session_manager = MagicMock()
+    mock_session_manager.get_session = MagicMock(return_value=None)  # No session!
+
+    handler = ACPProtocolHandler(
+        agent_pool=mock_pool,
+        session_manager=mock_session_manager,
+        event_converter=mock_event_converter,
+        client=mock_client,
+        client_capabilities=None,
+    )
+
+    content_blocks = [TextContentBlock(text="/test-skill foo")]
+
+    await handler.handle_prompt("sess-1", content_blocks)
+
+    # The raw "/test-skill foo" should reach receive_request (no splitting)
+    mock_pool.session_pool.receive_request.assert_called_once()
+    call_args = mock_pool.session_pool.receive_request.call_args
+    contents_arg = call_args[0][1]  # positional arg 1 = contents list
+    assert "/test-skill foo" in contents_arg

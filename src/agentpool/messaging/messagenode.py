@@ -6,8 +6,6 @@ from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
-import warnings
-
 from anyenv.signals import Signal
 
 from agentpool.log import get_logger
@@ -382,11 +380,6 @@ class MessageNode[TDeps, TResult](ABC):
         exit_condition: AsyncFilterFn | None = None,
     ) -> Talk[Any] | TeamTalk:
         """Create connection(s) to target(s)."""
-        warnings.warn(
-            "connect_to() is deprecated. Use YAML config or GraphBuilder instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         # Handle callable case
         from agentpool.agents import Agent
         from agentpool.delegation.base_team import BaseTeam

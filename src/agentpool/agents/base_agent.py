@@ -10,8 +10,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 import inspect
 import os
-import sys
-import types
+
 from pathlib import Path
 import re
 import warnings
@@ -95,7 +94,7 @@ _bypass_session_pool: ContextVar[bool] = ContextVar(
 logger = get_logger(__name__)
 
 # Literal type for all agent types
-type AgentTypeLiteral = Literal["native", "acp", "agui", "claude", "codex"]
+type AgentTypeLiteral = Literal["native", "acp"]
 
 
 _SLASH_PATTERN: re.Pattern[str] = re.compile(r"^/([\w-]+)(?:\s+(.*))?$")
@@ -125,19 +124,10 @@ def _is_slash_command(text: str) -> bool:
 def _should_bypass_session_pool() -> bool:
     """Detect if the caller should bypass SessionPool delegation.
 
-    Three cases require bypass:
-    1. SessionPool internal turns: When run()/run_stream() is called from
-       within a TurnRunner turn (e.g., via message forwarding), delegating
-       back to SessionPool would cause a deadlock on the per-session turn_lock.
-       Detected via _bypass_session_pool ContextVar set by TurnRunner.
-    2. AG-UI adapter code: AG-UI uses direct streaming and must not go
-       through SessionPool to preserve its event handling.
-    3. AG-UI server frame detection (permanent — see docs/audit/agui-bypass-audit.md).
-
-    The AG-UI bypass is permanent because AG-UI protocol requires direct agent
-    access for protocol-specific event transformation (AGUIEventStream).
-    Routing AG-UI through SessionPool would require a complex adapter layer
-    with high risk of breaking AG-UI compatibility.
+    SessionPool internal turns: When run()/run_stream() is called from within
+    a TurnRunner turn (e.g., via message forwarding), delegating back to
+    SessionPool would cause a deadlock on the per-session turn_lock. Detected
+    via _bypass_session_pool ContextVar set by TurnRunner.
 
     Returns:
         True if SessionPool delegation should be bypassed, False otherwise.
@@ -146,20 +136,11 @@ def _should_bypass_session_pool() -> bool:
     if _bypass_session_pool.get():
         return True
 
-    # Cases 2 & 3: AG-UI stack inspection (permanent — see docs/audit/agui-bypass-audit.md)
-    frame: types.FrameType | None = sys._getframe(1)
-    while frame:
-        module_name = frame.f_globals.get("__name__", "")
-        if "agui" in module_name:
-            return True
-        if "agui_server" in frame.f_code.co_filename:
-            return True
-        frame = frame.f_back
     return False
 
 
 class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
-    """Base class for Agent, ACPAgent, AGUIAgent, and ClaudeCodeAgent.
+    """Base class for Agent and ACPAgent.
 
     Provides shared infrastructure:
     - tools: ToolManager for tool registration and execution
@@ -1473,10 +1454,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         Each agent type handles permission modes differently:
         - NativeAgent: tool_confirmation_mode ("always", "never", "per_tool")
-        - ClaudeCodeAgent: permission_mode ("default", "acceptEdits", "plan", "bypassPermissions")
-        - CodexAgent: approval_policy ("never", "on-request", "on-failure", "untrusted")
         - ACPAgent: auto_approve (bool)
-        - AGUIAgent: Not supported
 
         Subclasses should override this method if they support permission modes.
         The default implementation delegates to _set_mode(mode, "mode").
@@ -1582,8 +1560,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         the OpenCode /mcp endpoint to display MCP servers in the UI.
 
         The default implementation checks external_providers on the tool manager.
-        Subclasses may override to provide agent-specific MCP server info
-        (e.g., ClaudeCodeAgent has its own MCP server handling).
+        Subclasses may override to provide agent-specific MCP server info.
 
         Returns:
             Dict mapping server name to MCPServerStatus
@@ -1759,9 +1736,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         Different agent types expose different modes:
         - Native Agent: permissions + model selection
-        - ClaudeCodeAgent: permissions + model selection
         - ACPAgent: Passthrough from remote server
-        - AGUIAgent: model selection (if applicable)
 
         Returns:
             List of ModeCategory, empty list if no modes supported

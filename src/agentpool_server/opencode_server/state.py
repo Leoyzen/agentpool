@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
-import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
@@ -303,33 +302,15 @@ class ServerState:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
         self.background_tasks.clear()
 
-    async def _broadcast_event_impl(self, event: Event) -> None:
-        """Original SSE broadcast implementation.
-
-        Isolates failures: if one subscriber's queue raises,
-        other subscribers still receive the event.
-        """
-        for queue in list(self.event_subscribers):  # iterate copy to avoid mutation
-            try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.warning("SSE subscriber queue full, dropping event")
-            except Exception:  # noqa: BLE001
-                logger.warning("SSE subscriber queue error, removing subscriber")
-                with contextlib.suppress(ValueError):
-                    self.event_subscribers.remove(queue)
-
     async def broadcast_event(self, event: Event) -> None:
-        """Broadcast an event to all SSE subscribers.
+        """Broadcast an event via the EventBus bridge.
 
-        When :attr:`event_bridge` is present, delegates to the bridge so
-        that events are also republished to the SessionPool EventBus.
-        Otherwise falls back to the original SSE-only path.
+        When :attr:`event_bridge` is present, delegates to the bridge which
+        publishes the event to the SessionPool EventBus. If the bridge is
+        not available the event is silently dropped (logged at debug level).
         """
         if self.event_bridge is not None:
             await self.event_bridge.publish(event)
-        else:
-            await self._broadcast_event_impl(event)
 
     async def mark_session_idle(self, session_id: str) -> None:
         """Mark a session idle and broadcast the matching status events."""

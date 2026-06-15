@@ -618,7 +618,7 @@ class ToolResultMetadataEvent:
     This event provides a sidechannel to preserve that metadata:
     - Tool returns ToolResult with metadata
     - ToolManagerBridge emits this event with metadata before converting
-    - ClaudeCodeAgent correlates by tool_call_id and enriches ToolCallCompleteEvent
+    - The agent correlates by tool_call_id and enriches ToolCallCompleteEvent
     - Downstream consumers (OpenCode, ACP) receive complete events with metadata
 
     This avoids polluting LLM context with UI-only data while preserving it for clients.

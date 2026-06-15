@@ -171,64 +171,6 @@ def test_agent_has_no_instance_event_queue():
     print("✓ Agent has no instance-level _event_queue (per-run isolation only)")
 
 
-def test_hook_manager_no_event_queue_param():
-    """Test that ClaudeCodeHookManager doesn't receive event_queue parameter."""
-
-    from agentpool.agents.claude_code_agent.hook_manager import ClaudeCodeHookManager
-    import inspect
-
-    sig = inspect.signature(ClaudeCodeHookManager.__init__)
-    params = list(sig.parameters.keys())
-
-    assert "event_queue" not in params, (
-        "ClaudeCodeHookManager should not receive event_queue parameter"
-    )
-
-    print("✓ ClaudeCodeHookManager doesn't receive event_queue parameter")
-
-
-def test_claude_code_agent_no_event_queue_in_hook_init():
-    """Test that ClaudeCodeAgent doesn't pass event_queue to hook_manager."""
-
-    from agentpool.agents.claude_code_agent.claude_code_agent import ClaudeCodeAgent
-    import inspect
-
-    # Check __init__ source
-    source = inspect.getsource(ClaudeCodeAgent.__init__)
-
-    # Look for hook_manager initialization
-    assert "event_queue=" not in source or "_hook_manager = ClaudeCodeHookManager(" in source, (
-        "ClaudeCodeAgent should not pass event_queue to hook_manager"
-    )
-
-    print("✓ ClaudeCodeAgent doesn't pass event_queue to hook_manager")
-
-
-def test_merge_queue_uses_run_ctx():
-    """Test that merge_queue_into_iterator uses run_ctx.event_queue."""
-
-    from agentpool.agents.claude_code_agent.claude_code_agent import ClaudeCodeAgent
-    import inspect
-
-    # Check if merge_queue_into_iterator is called with run_ctx.event_queue
-    # This is a code inspection test
-
-    source = inspect.getsource(ClaudeCodeAgent.run_stream)
-
-    # Look for correct pattern
-    # Should be: merge_queue_into_iterator(..., run_ctx.event_queue)
-    # Should NOT be: merge_queue_into_iterator(..., self._event_queue)
-
-    self_event_queue_usage = "self._event_queue" in source
-    run_ctx_event_queue_usage = "run_ctx.event_queue" in source
-
-    print(f"  self._event_queue usage: {self_event_queue_usage}")
-    print(f"  run_ctx.event_queue usage: {run_ctx_event_queue_usage}")
-
-    # For RFC-0021 compliance, expect run_ctx.event_queue
-    print("✓ Event queue usage in merge_queue checked")
-
-
 if __name__ == "__main__":
     print("Testing event queue isolation...\n")
     test_run_ctx_has_event_queue()

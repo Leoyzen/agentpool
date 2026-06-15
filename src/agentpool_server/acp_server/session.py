@@ -555,7 +555,7 @@ class ACPSession:
 
         This actively interrupts the running agent by calling its interrupt() method,
         which handles protocol-specific cancellation (e.g., sending CancelNotification
-        for ACP agents, calling SDK interrupt for ClaudeCodeAgent, etc.).
+        for ACP agents, etc.).
 
         Note:
             Tool call cleanup is handled in process_prompt() to avoid race conditions

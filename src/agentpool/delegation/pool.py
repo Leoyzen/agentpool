@@ -797,7 +797,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
 
     def _load_graph_config(self, path_for_loading: Any | None) -> None:
         """Load graph configuration from raw YAML or manifest extras."""
-        from agentpool_config.graph_translation import GraphConfig, translate_config
+        from agentpool_config.graph_config import GraphConfig
 
         if path_for_loading is not None:
             import yamling
@@ -806,7 +806,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             except (OSError, ValueError):
                 return
             try:
-                self._graph_config = translate_config(raw_data)
+                self._graph_config = GraphConfig.model_validate(raw_data)
             except Exception as exc:
                 config_str = str(path_for_loading)
                 raise ValueError(
