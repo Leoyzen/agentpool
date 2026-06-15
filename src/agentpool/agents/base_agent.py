@@ -143,6 +143,44 @@ def _should_bypass_session_pool() -> bool:
     return False
 
 
+def _should_route_via_sessionpool(
+    session_pool: Any,
+    session_id: str,
+) -> bool:
+    """Determine whether an incoming request should be routed via SessionPool.
+
+    Checks in order:
+    1. If called from within an active turn context → False (child task).
+    2. If no session pool is available → False.
+    3. If the session doesn't exist yet → True (new session needs routing).
+    4. If the current task owns the session turn → False (already the owner).
+    5. Otherwise → True (route via pool).
+
+    Args:
+        session_pool: The SessionPool instance (or None).
+        session_id: The target session identifier.
+
+    Returns:
+        True if the request should be routed via SessionPool, False otherwise.
+    """
+    # Case 1: Within an active turn context (child tasks should not route)
+    if _in_turn_context.get():
+        return False
+
+    # Case 2: No pool available
+    if session_pool is None:
+        return False
+
+    # Case 3: Session doesn't exist yet → route
+    session = session_pool.sessions.get_session(session_id)
+    if session is None:
+        return True
+
+    # Case 4: We are the turn owner → False; otherwise → True
+    current_task = asyncio.current_task()
+    return current_task is not session._turn_owner_task
+
+
 class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     """Base class for Agent and ACPAgent.
 

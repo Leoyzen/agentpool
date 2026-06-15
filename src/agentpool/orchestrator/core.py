@@ -1380,7 +1380,7 @@ class TurnRunner:
         )
         _session = self.sessions.get_session(session_id)
 
-        from agentpool.agents.base_agent import _bypass_session_pool, _current_run_ctx_var
+        from agentpool.agents.base_agent import _in_turn_context, _current_run_ctx_var
         from agentpool.orchestrator.run import RunHandle, RunStatus
 
         run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
@@ -1454,7 +1454,9 @@ class TurnRunner:
         stream_kwargs = dict(kwargs)
         if input_provider is not None and (has_var_keyword or "input_provider" in stream_params):
             stream_kwargs["input_provider"] = input_provider
-        _bypass_session_pool.set(True)
+        if _session is not None:
+            _session._turn_owner_task = asyncio.current_task()
+        _in_turn_context.set(True)
         try:
             try:
                 # Process prompts and handle injections/queued prompts
@@ -1499,7 +1501,9 @@ class TurnRunner:
 
             self._runs.pop(run_ctx.run_id, None)
             _current_run_ctx_var.set(None)
-            _bypass_session_pool.set(False)
+            if _session is not None:
+                _session._turn_owner_task = None
+            _in_turn_context.set(False)
 
             # Cancel the event consumer task
             event_consumer.cancel()
