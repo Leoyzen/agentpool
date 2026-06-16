@@ -734,37 +734,39 @@ async def test_native_agent_auto_resumes_with_queued_prompts(
 
 @pytest.mark.anyio
 async def test_native_agent_standalone_inject_prompt_routes_to_session_pool() -> None:
-    """Pooled native agent inject_prompt() delegates to SessionPool.receive_request()."""
+    """Pooled native inject_prompt() delegates to TurnRunner.steer()."""
     agent = Agent(name="native-pooled-test", model=TestModel())
 
+    runs = MagicMock()
+    runs.steer = AsyncMock()
+
     session_pool_mock = MagicMock()
-    session_pool_mock.receive_request = AsyncMock()
+    session_pool_mock.turns = runs
 
     pool_mock = MagicMock()
     pool_mock.session_pool = session_pool_mock
     agent.agent_pool = pool_mock
     agent._events.session_id = "test-session"
 
-    # No active run context — should delegate to SessionPool.receive_request
+    # No active run context — should delegate to TurnRunner.steer()
     agent.inject_prompt("injected message")
 
     # fire_and_forget creates a task; give it a moment to run
     await asyncio.sleep(0.05)
 
-    session_pool_mock.receive_request.assert_called_once()
-    call_args = session_pool_mock.receive_request.call_args
-    assert call_args[0][0] == "test-session"
-    assert call_args[0][1] == "injected message"
-    assert call_args[1].get("priority") == "asap"
+    runs.steer.assert_called_once_with("test-session", "injected message")
 
 
 @pytest.mark.anyio
 async def test_native_agent_standalone_queue_prompt_routes_to_session_pool() -> None:
-    """Pooled native agent queue_prompt() delegates to SessionPool.receive_request()."""
+    """Pooled native queue_prompt() delegates to TurnRunner.followup()."""
     agent = Agent(name="native-pooled-queue-test", model=TestModel())
 
+    runs = MagicMock()
+    runs.followup = AsyncMock()
+
     session_pool_mock = MagicMock()
-    session_pool_mock.receive_request = AsyncMock()
+    session_pool_mock.turns = runs
 
     pool_mock = MagicMock()
     pool_mock.session_pool = session_pool_mock
@@ -775,11 +777,7 @@ async def test_native_agent_standalone_queue_prompt_routes_to_session_pool() -> 
 
     await asyncio.sleep(0.05)
 
-    session_pool_mock.receive_request.assert_called_once()
-    call_args = session_pool_mock.receive_request.call_args
-    assert call_args[0][0] == "test-session"
-    assert call_args[0][1] == ("queued message",)
-    assert call_args[1].get("priority") == "when_idle"
+    runs.followup.assert_called_once_with("test-session", "queued message")
 
 
 # ---------------------------------------------------------------------------

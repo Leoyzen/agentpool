@@ -917,7 +917,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             ) as agent_run:
                 pending_tcs: dict[str, BaseToolCallPart] = {}
                 emitted_tool_starts: set[str] = set()
-                async for node in agent_run:
+                # Use explicit next() loop instead of bare async for.
+                # Bare `async for node in agent_run` does NOT fire
+                # after_node_run hooks, so PendingMessageDrainCapability
+                # cannot drain when_idle messages.  Mirror the pattern
+                # from RunExecutor.execute() (run_executor.py:159-205).
+                node = agent_run.next_node
+                while True:
                     if run_ctx.cancelled:
                         self.log.info("Stream cancelled by user")
                         break
@@ -990,6 +996,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                             run_ctx,
                                         ):
                                             await event_queue.put(combined)
+
+                    node = await agent_run.next(node)
 
             response_time = time.perf_counter() - start_time
             if run_ctx.cancelled:

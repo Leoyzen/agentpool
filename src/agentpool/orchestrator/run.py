@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai import AgentRun
+
 from agentpool.agents.context import AgentRunContext
 
 
@@ -40,7 +42,8 @@ class RunHandle:
         run_ctx: Per-run isolated state container.
         complete_event: Set after cleanup finishes.
         _cleanup_callback: Optional callback invoked with run_id during cleanup.
-        _native_run_ref: Optional reference to PydanticAI AgentRun.
+        active_agent_run: Reference to PydanticAI AgentRun, set by
+            RunExecutor during execution and cleared in ``finally``.
     """
 
     run_id: str
@@ -50,7 +53,7 @@ class RunHandle:
     run_ctx: AgentRunContext = field(default_factory=AgentRunContext)
     complete_event: asyncio.Event = field(default_factory=asyncio.Event)
     _cleanup_callback: Callable[[str], None] | None = None
-    _native_run_ref: Any | None = None
+    active_agent_run: AgentRun[Any, Any] | None = None
 
     def start(self, task: asyncio.Task[Any] | None = None) -> None:
         """Transition the run to running and store the task.

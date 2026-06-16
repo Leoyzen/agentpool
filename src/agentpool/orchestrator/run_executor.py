@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.native_agent.agent import Agent
+    from agentpool.orchestrator.run import RunHandle
 
 
 logger = get_logger(__name__)
@@ -58,8 +59,9 @@ class RunExecutor:
         agent: The native Agent instance whose agentlet will be executed.
     """
 
-    def __init__(self, agent: Agent[Any, Any]) -> None:
+    def __init__(self, agent: Agent[Any, Any], run_handle: RunHandle | None = None) -> None:
         self._agent = agent
+        self._run_handle = run_handle
         self._iteration_task: asyncio.Task[Any] | None = None
 
     async def execute(  # noqa: PLR0915
@@ -156,6 +158,8 @@ class RunExecutor:
                     message_history=history,
                     usage_limits=self._agent._default_usage_limits,
                 ) as agent_run:
+                    if self._run_handle is not None:
+                        self._run_handle.active_agent_run = agent_run
                     node = agent_run.next_node
 
                     while True:
@@ -251,6 +255,8 @@ class RunExecutor:
                 logger.exception("Agent iteration failed")
                 iteration_error = exc
             finally:
+                if self._run_handle is not None:
+                    self._run_handle.active_agent_run = None
                 await event_queue.put(None)
 
         self._iteration_task = asyncio.create_task(agent_iteration_task())

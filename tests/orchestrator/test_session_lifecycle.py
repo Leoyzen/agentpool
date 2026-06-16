@@ -42,6 +42,8 @@ pytestmark = pytest.mark.unit
 class MockAgent:
     """Simple mock agent for testing."""
 
+    AGENT_TYPE: str = "native"
+
     def __init__(self) -> None:
         self._stream_impl: Any = None
         self.get_active_run_context = MagicMock(return_value=None)

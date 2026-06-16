@@ -682,9 +682,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         processed in a continuation loop without exiting the stream. This
         allows tools or external code to schedule follow-up work.
 
-        For native agents when pooled, delegates to SessionPool.receive_request()
-        with priority="when_idle". The active-run path still queues directly into
-        the injection_manager to avoid race conditions with tool augmentation.
+        !!! warning "Deprecated for pooled native agents"
+            Use ``agent_pool.session_pool.turns.followup()`` instead.
+
+        For non-native agents and standalone native agents, the existing
+        injection_manager-based path remains unchanged.
 
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
@@ -698,33 +700,24 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Native agents when pooled: route through SessionPool.receive_request.
-        # For active runs, also queue directly for synchronous tool augmentation.
-        if self.AGENT_TYPE == "native":
-            if self.agent_pool is not None and self.agent_pool.session_pool is not None:
-                effective_session_id = session_id or (
-                    run_ctx.session_id if run_ctx else self._events.session_id
+        # Pooled native agents: emit DeprecationWarning, delegate to TurnRunner.followup().
+        if self.AGENT_TYPE == "native" and self.agent_pool is not None and self.agent_pool.session_pool is not None:
+            warnings.warn(
+                "queue_prompt() is deprecated for pooled native agents. "
+                "Use agent_pool.session_pool.turns.followup() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            session_pool = self.agent_pool.session_pool
+            effective_session_id = session_id or (
+                run_ctx.session_id if run_ctx else self._events.session_id
+            )
+            if effective_session_id is not None:
+                combined = "\n".join(str(p) for p in prompts)
+                self.task_manager.fire_and_forget(
+                    session_pool.turns.followup(effective_session_id, combined)
                 )
-                if effective_session_id is not None:
-                    session_pool = self.agent_pool.session_pool
-                    if run_ctx is not None and not run_ctx.completed:
-                        # Active run: queue directly for immediate availability
-                        if run_ctx.injection_manager is not None:
-                            run_ctx.injection_manager.queue(*prompts)
-                        # Also schedule through SessionPool for consistency
-                        self.task_manager.fire_and_forget(
-                            session_pool.receive_request(
-                                effective_session_id, prompts, priority="when_idle"
-                            )
-                        )
-                        return
-                    # No active run: delegate to SessionPool for auto-resume
-                    self.task_manager.fire_and_forget(
-                        session_pool.receive_request(
-                            effective_session_id, prompts, priority="when_idle"
-                        )
-                    )
-                    return
+                return
             # Standalone native agents: fall through to legacy path
 
         # Legacy path for non-native agents and standalone native agents
@@ -739,13 +732,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         iteration completes, the message is automatically queued for the
         next iteration.
 
-        For native agents when pooled, delegates to SessionPool.receive_request()
-        with priority="asap". The active-run path still injects directly into
-        the injection_manager to avoid race conditions with tool augmentation
-        (after_tool_execute -> consume()).
+        !!! warning "Deprecated for pooled native agents"
+            Use ``agent_pool.session_pool.turns.steer()`` instead.
 
-        If no active run context exists (e.g., after end_turn), delegates to
-        SessionPool.receive_request() to trigger auto-resume.
+        For non-native agents and standalone native agents, the existing
+        injection_manager-based path remains unchanged.
 
         Args:
             message: Message to inject
@@ -760,47 +751,35 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Native agents when pooled: route through SessionPool.receive_request.
-        # For active runs, also inject directly for synchronous tool augmentation.
-        if self.AGENT_TYPE == "native":
-            if self.agent_pool is not None and self.agent_pool.session_pool is not None:
-                effective_session_id = session_id or (
-                    run_ctx.session_id if run_ctx else self._events.session_id
+        # Pooled native agents: emit DeprecationWarning, delegate to TurnRunner.steer().
+        if self.AGENT_TYPE == "native" and self.agent_pool is not None and self.agent_pool.session_pool is not None:
+            warnings.warn(
+                "inject_prompt() is deprecated for pooled native agents. "
+                "Use agent_pool.session_pool.turns.steer() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            session_pool = self.agent_pool.session_pool
+            effective_session_id = session_id or (
+                run_ctx.session_id if run_ctx else self._events.session_id
+            )
+            if effective_session_id is not None:
+                self.task_manager.fire_and_forget(
+                    session_pool.turns.steer(effective_session_id, message)
                 )
-                if effective_session_id is not None:
-                    session_pool = self.agent_pool.session_pool
-                    if run_ctx is not None and not run_ctx.completed:
-                        # Active run: inject directly for immediate availability
-                        # (tool augmentation needs synchronous access)
-                        if run_ctx.injection_manager is not None:
-                            run_ctx.injection_manager.inject(message)
-                        # Also schedule through SessionPool for consistency
-                        self.task_manager.fire_and_forget(
-                            session_pool.receive_request(
-                                effective_session_id, message, priority="asap"
-                            )
-                        )
-                        return
-                    # No active run: delegate to SessionPool for auto-resume
-                    self.task_manager.fire_and_forget(
-                        session_pool.receive_request(effective_session_id, message, priority="asap")
-                    )
-                    return
-                # FALLBACK: effective_session_id is None but session_pool exists.
-                # This happens when BackgroundTaskProvider calls inject_prompt
-                # after the lead agent's run has ended (no active run context
-                # and agent's _events.session_id is None for shared agents).
-                # Try to find the most recently active session for this agent.
-                session_pool = self.agent_pool.session_pool
-                sessions = session_pool.sessions.find_sessions_by_agent_name(self.name)
-                if sessions:
-                    most_recent = max(sessions, key=lambda s: s.last_active_at)
-                    self.task_manager.fire_and_forget(
-                        session_pool.receive_request(
-                            most_recent.session_id, message, priority="asap"
-                        )
-                    )
-                    return
+                return
+            # FALLBACK: effective_session_id is None but session_pool exists.
+            # This happens when BackgroundTaskProvider calls inject_prompt
+            # after the lead agent's run has ended (no active run context
+            # and agent's _events.session_id is None for shared agents).
+            # Try to find the most recently active session for this agent.
+            sessions = session_pool.sessions.find_sessions_by_agent_name(self.name)
+            if sessions:
+                most_recent = max(sessions, key=lambda s: s.last_active_at)
+                self.task_manager.fire_and_forget(
+                    session_pool.turns.steer(most_recent.session_id, message)
+                )
+                return
             # Standalone native agents: fall through to legacy path
 
         # Legacy path for non-native agents and standalone native agents
