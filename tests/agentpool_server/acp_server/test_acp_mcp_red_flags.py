@@ -57,29 +57,28 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
     acp_agent: AgentPoolACPAgent,
     server_config: AcpMcpServer,
 ) -> None:
-    """Regression test: mcp/message must NOT be double-wrapped.
+    """Regression test: mcp/message must use flattened ACP format.
 
     Bug: connect_acp_mcp_server() created a send_to_client callback that
-    wrapped messages in {"connectionId": conn_id, "message": msg}. But
-    AcpMcpConnection.send_to_client() ALREADY wraps messages the same way.
-    This caused double-wrapping:
+    wrapped messages in {"connectionId": conn_id, "message": msg} (nested).
+    But the ACP spec requires flattened format:
+    {"connectionId": conn_id, "method": ..., "params": ...}.
+    This caused MCP initialization to fail because the client couldn't
+    parse the malformed nested request.
 
-        {"connectionId": "x", "message":
-            {"connectionId": "x", "message":
-                {"jsonrpc": "2.0", ...}}}
+    Impact: When fastmcp ClientSession sends initialize internally, the
+    message was nested. The client received a malformed request and
+    silently failed to return tools.
 
-    Impact: When fastmcp ClientSession sends tools/list internally, the
-    message gets double-wrapped. The client receives a malformed request
-    and silently fails to return tools.
-
-    Fix: The callback now passes through the already-wrapped message directly.
+    Fix: send_to_client() now extracts method/params and sends flattened
+    format per MCP-over-ACP RFD.
 
     This test simulates the real fastmcp flow:
     1. ClientSession writes to from_session
     2. Transport forwarder reads and calls connection.send_to_client()
-    3. connection.send_to_client() wraps as {"connectionId": id, "message": msg}
+    3. connection.send_to_client() wraps as {"connectionId": id, "method": ..., "params": ...}
     4. The callback from connect_acp_mcp_server() passes through directly
-    5. client.send_request("mcp/message", wrapped) receives single-wrapped msg
+    5. client.send_request("mcp/message", flattened) receives correct format
     """
     # Setup: mock client returns connectionId on mcp/connect
     send_request_mock = AsyncMock(return_value={"connectionId": "conn-redflag-1"})
@@ -94,7 +93,7 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
 
     # Step 2: Start transport session to activate the forwarder task
     transport = AcpMcpTransport(conn)
-    raw_mcp_msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    raw_mcp_msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 
     with patch("mcp.client.session.ClientSession.initialize", new_callable=AsyncMock):
         async with transport.connect_session():
@@ -118,24 +117,16 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
 
     _, params = mcp_message_calls[0].args
 
-    # The params MUST be a single-wrapped object: {"connectionId": ..., "message": raw_msg}
+    # The params MUST be in flattened ACP format: {"connectionId": ..., "method": ..., "params": ...}
     assert "connectionId" in params, "params must contain connectionId"
-    assert "message" in params, "params must contain message"
+    assert "method" in params, "params must contain method"
     assert params["connectionId"] == connection_id
+    assert params["method"] == "tools/list"
+    assert params.get("params") == {}
 
-    inner_message = params["message"]
-
-    # CRITICAL: inner_message must be the RAW MCP JSON-RPC message,
-    # NOT another wrapped object. If double-wrapping occurred, this
-    # would be {"connectionId": ..., "message": ...} instead.
-    assert inner_message == raw_mcp_msg, (
-        f"Double-wrapping bug detected! Expected raw message {raw_mcp_msg}, "
-        f"got {inner_message}"
-    )
-
-    # Also verify it's not a dict with nested wrapping keys
-    assert "connectionId" not in inner_message, (
-        "inner_message contains 'connectionId' — double-wrapping bug!"
+    # CRITICAL: There must NOT be a nested "message" key (old buggy format)
+    assert "message" not in params, (
+        f"Nested 'message' key detected — old buggy format! Got: {params}"
     )
 
 

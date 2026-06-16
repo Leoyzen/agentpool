@@ -9,10 +9,13 @@ from typing import TYPE_CHECKING, Any, Self
 
 from anyenv import method_spawner
 from anyenv.signals import Signal
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
+from pydantic_ai.messages import ModelMessage
 
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
+from agentpool.sessions.models import PendingDeferredCall
+from agentpool.storage.serialization import deserialize_messages
 from agentpool.utils.identifiers import generate_session_id
 from agentpool.utils.tasks import TaskManager
 from agentpool_config.session import SessionQuery
@@ -414,6 +417,8 @@ class StorageManager:
                     provider=provider.__class__.__name__,
                     session_id=session_id,
                 )
+        # Also clean up any checkpoint data
+        await self.delete_checkpoint(session_id)
         return deleted
 
     @method_spawner
@@ -862,6 +867,90 @@ class StorageManager:
         metadata = await self._generate_title_core(session_id, formatted)
 
         return metadata.title if metadata else None
+
+    # Checkpoint methods
+
+    async def save_checkpoint(
+        self,
+        session_id: str,
+        messages_json: str,
+        pending_calls: list[PendingDeferredCall],
+    ) -> None:
+        """Save checkpoint data to all capable providers.
+
+        Serializes pending_calls and distributes messages_json and
+        pending_calls_json together atomically.
+
+        Args:
+            session_id: Session identifier.
+            messages_json: Pre-serialized JSON of ModelMessage list.
+            pending_calls: List of unresolved deferred tool calls.
+        """
+        calls_adapter = TypeAdapter(list[PendingDeferredCall])
+        pending_calls_json = calls_adapter.dump_json(pending_calls).decode()
+
+        for provider in self.providers:
+            try:
+                await provider.save_checkpoint(session_id, messages_json, pending_calls_json)
+            except NotImplementedError:
+                pass
+            except Exception:
+                logger.exception(
+                    "Error saving checkpoint",
+                    provider=provider.__class__.__name__,
+                    session_id=session_id,
+                )
+
+    async def load_checkpoint(
+        self,
+        session_id: str,
+    ) -> tuple[list[ModelMessage], list[PendingDeferredCall]] | None:
+        """Load and deserialize checkpoint from first capable provider.
+
+        Returns:
+            Tuple of (messages, pending_calls) or None if no checkpoint found.
+        """
+        for provider in self.providers:
+            try:
+                result = await provider.load_checkpoint(session_id)
+                if result is not None:
+                    messages_json, pending_calls_json = result
+                    messages = deserialize_messages(messages_json) if messages_json else []
+                    calls = (
+                        TypeAdapter(list[PendingDeferredCall]).validate_json(
+                            pending_calls_json.encode()
+                        )
+                        if pending_calls_json
+                        else []
+                    )
+                    return messages, calls
+            except NotImplementedError:
+                continue
+            except Exception:
+                logger.exception(
+                    "Error loading checkpoint",
+                    provider=provider.__class__.__name__,
+                    session_id=session_id,
+                )
+        return None
+
+    async def delete_checkpoint(self, session_id: str) -> None:
+        """Delete checkpoint from all providers.
+
+        Args:
+            session_id: Session identifier.
+        """
+        for provider in self.providers:
+            try:
+                await provider.delete_checkpoint(session_id)
+            except NotImplementedError:
+                pass
+            except Exception:
+                logger.exception(
+                    "Error deleting checkpoint",
+                    provider=provider.__class__.__name__,
+                    session_id=session_id,
+                )
 
     # Project methods
 

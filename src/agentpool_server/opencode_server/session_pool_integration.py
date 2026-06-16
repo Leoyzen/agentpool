@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 
     from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionPool, SessionState
     from agentpool.orchestrator.run import RunHandle
+    from agentpool.sessions.models import PendingDeferredCall, SessionData
     from agentpool_server.opencode_server.state import ServerState
 
 
@@ -364,6 +365,15 @@ async def ensure_session(
                 state.ensure_input_provider(session_id)
                 await state.mark_session_idle(session_id)
 
+                # --- Checkpoint restoration (Task 27) ---------------------------
+                if session_data.status == "checkpointed":
+                    await _restore_checkpoint_state(state, session_data, session_id)
+                    logger.info(
+                        "ensure_session: restored checkpointed session",
+                        session_id=session_id,
+                        pending_call_count=len(session_data.pending_deferred_calls),
+                    )
+
                 # Sync input_provider to SessionPool's SessionState for all sessions
                 input_provider = state.ensure_input_provider(session_id)
                 if state.pool.session_pool is not None:
@@ -471,6 +481,126 @@ async def _create_and_persist_session(
     return session
 
 
+async def _restore_checkpoint_state(
+    state: ServerState,
+    session_data: SessionData,
+    session_id: str,
+) -> None:
+    """Restore opencode runtime state from a checkpointed session.
+
+    Reconstructs running ToolParts for pending deferred calls and
+    restores the parent/child spawn graph topology.
+
+    Args:
+        state: The OpenCode server state.
+        session_data: The persisted SessionData with checkpoint metadata.
+        session_id: The session being restored.
+    """
+    _reconstruct_tool_parts_from_checkpoint(
+        state, session_id, session_data.pending_deferred_calls
+    )
+    _restore_spawn_topology_from_checkpoint(state, session_data, session_id)
+
+
+def _reconstruct_tool_parts_from_checkpoint(
+    state: ServerState,
+    session_id: str,
+    pending_calls: list[PendingDeferredCall],
+) -> None:
+    """Reconstruct running ToolParts from pending deferred calls.
+
+    Creates an assistant message (if one does not exist) and appends
+    a ``ToolPart`` with ``ToolStateRunning`` for each pending deferred
+    call. This restores the visual tool state in the OpenCode TUI so
+    the user sees what tools were in-flight at checkpoint time.
+
+    Args:
+        state: The OpenCode server state.
+        session_id: The session to reconstruct ToolParts for.
+        pending_calls: Unresolved deferred tool calls from the checkpoint.
+    """
+    if not pending_calls:
+        return
+
+    from agentpool.utils import identifiers as identifier
+    from agentpool.utils.time_utils import now_ms
+
+    from agentpool_server.opencode_server.models.parts import (
+        TimeStart,
+        ToolPart,
+        ToolStateRunning,
+    )
+
+    # Create an assistant message to hold the ToolParts
+    assistant_msg_id = identifier.ascending("message")
+    assistant_msg = MessageWithParts.assistant(
+        message_id=assistant_msg_id,
+        session_id=session_id,
+        time=MessageTime(created=now_ms()),
+        agent_name="agentpool",
+        model_id="default",
+        parent_id=session_id,
+        provider_id="agentpool",
+        path=MessagePath(cwd=state.working_dir, root=state.working_dir),
+    )
+
+    for call in pending_calls:
+        ts = TimeStart(start=now_ms())
+        running_state = ToolStateRunning(
+            time=ts,
+            input={
+                "description": call.tool_name,
+                "tool_call_id": call.tool_call_id,
+            },
+            metadata={"deferred": True, "deferred_strategy": call.deferred_strategy},
+            title=call.tool_name,
+        )
+        tool_part = ToolPart(
+            id=identifier.ascending("part"),
+            message_id=assistant_msg_id,
+            session_id=session_id,
+            tool=call.tool_name,
+            call_id=call.tool_call_id,
+            state=running_state,
+        )
+        assistant_msg.parts.append(tool_part)
+
+    # Register in the in-memory message list
+    messages = getattr(state, "messages", None)
+    if messages is not None:
+        messages.setdefault(session_id, [])
+        messages[session_id].append(assistant_msg)
+
+
+def _restore_spawn_topology_from_checkpoint(
+    state: ServerState,
+    session_data: SessionData,
+    session_id: str,
+) -> None:
+    """Restore parent/child spawn graph from checkpoint metadata.
+
+    Reads ``spawn_children`` from the session's metadata and stores it
+    on ``state.checkpoint_spawn_graph`` so that
+    :class:`OpenCodeSessionPoolIntegration` can reconstruct
+    ``_children_of``, ``_child_to_parent``, and ``_child_spawns`` maps
+    when the consumer starts.
+
+    Args:
+        state: The OpenCode server state.
+        session_data: The persisted SessionData with checkpoint metadata.
+        session_id: The parent session being restored.
+    """
+    spawn_children: list[str] = session_data.metadata.get("spawn_children", [])
+    if not hasattr(state, "checkpoint_spawn_graph"):
+        state.checkpoint_spawn_graph = {}  # type: ignore[attr-defined]
+    state.checkpoint_spawn_graph[session_id] = list(spawn_children)  # type: ignore[attr-defined]
+    logger.debug(
+        "Restored spawn topology from checkpoint",
+        session_id=session_id,
+        child_count=len(spawn_children),
+    )
+
+
 class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
     """Integration layer between OpenCode server routes and SessionPool.
 
@@ -496,6 +626,10 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         self._child_to_parent: dict[str, str] = {}
         self._child_spawns: dict[str, SpawnSessionStart] = {}
         self._children_of: dict[str, set[str]] = {}
+        # Serialized context data for session resume (keyed by session_id).
+        # Populated by external orchestrator before start_event_consumer() is
+        # called for a resumed session. Consumed (popped) by _before_consumer_loop.
+        self._resume_contexts: dict[str, dict[str, Any]] = {}
 
     async def create_session(
         self,
@@ -592,6 +726,10 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         Creates the session if it does not yet exist. Stores the input
         provider on the session for auto-resume.
 
+        If the session is checkpointed and ``deferred_tool_results`` is provided
+        (via ``**kwargs``), :meth:`SessionPool.resume_session` is called first to
+        replay deferred results into the agent loop before accepting new input.
+
         Args:
             session_id: Target session.
             content: Message / prompt content.
@@ -599,10 +737,23 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             input_provider: Optional input provider for the agent.
             agent_name: Agent to bind if the session must be created.
             **kwargs: Additional arguments passed to the turn runner.
+                Supports ``deferred_tool_results`` for checkpoint replay.
 
         Returns:
             The RunHandle if a new run was started, otherwise None.
         """
+        # --- Checkpoint replay: resume session before new input ----------
+        deferred_results = kwargs.pop("deferred_tool_results", None)
+        if deferred_results is not None:
+            if self.session_pool.sessions.store is not None:
+                stored = await self.session_pool.sessions.store.load(session_id)
+                if stored is not None and stored.status == "checkpointed":
+                    await self.session_pool.resume_session(
+                        session_id,
+                        deferred_results,
+                        source="opencode_route_message",
+                    )
+
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is None:
             await self.create_session(session_id, agent_name=agent_name)
@@ -767,6 +918,33 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         if bridge is not None:
             await bridge.stop()
 
+    def set_session_context_data(self, session_id: str, data: dict[str, Any]) -> None:
+        """Store serialized EventProcessorContext data for session resume.
+
+        The orchestrator calls this before :meth:`start_event_consumer` for
+        a resumed session.  The data is consumed (popped) by
+        :meth:`_before_consumer_loop` and used to reconstruct the context
+        instead of creating a fresh one.
+
+        Args:
+            session_id: The session to store context data for.
+            data: Serialized context dict from :meth:`EventProcessorContext.serialize`.
+        """
+        self._resume_contexts[session_id] = data
+
+    def get_session_context_data(self, session_id: str) -> dict[str, Any] | None:
+        """Retrieve and consume serialized EventProcessorContext data for resume.
+
+        Returns the stored data and removes it so it is consumed exactly once.
+
+        Args:
+            session_id: The session to retrieve context data for.
+
+        Returns:
+            The serialized context dict, or ``None`` if no resume data is set.
+        """
+        return self._resume_contexts.pop(session_id, None)
+
     # ------------------------------------------------------------------
     # ProtocolEventConsumerMixin hooks
     # ------------------------------------------------------------------
@@ -791,9 +969,42 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Set up per-session context before the consumer loop starts.
 
+        On a fresh session, creates a new :class:`EventProcessorContext` and
+        :class:`OpenCodeEventAdapter`.  On a **resumed** session (where
+        :meth:`set_session_context_data` was called before ``start_event_consumer``),
+        restores the context from the serialized data so that accumulated
+        text, tool parts, and tracking state are preserved.
+
+        !!! note
+            Restored contexts are NOT re-broadcast to the frontend.
+            The parts already exist on the client from the original session.
+
         Args:
             session_id: The session whose consumer is starting.
         """
+        # --- Check for persisted resume context -------------------------------
+        resume_data = self.get_session_context_data(session_id)
+        if resume_data:
+            ctx = EventProcessorContext.deserialize(
+                resume_data,
+                state=self.server_state,
+                working_dir=self.server_state.working_dir,
+            )
+            event_adapter = OpenCodeEventAdapter(ctx)
+            self._contexts[session_id] = ctx
+            self._adapters[session_id] = event_adapter
+            # On resume, the assistant message was already registered in the
+            # original session. Mark it as such so _handle_event does not
+            # re-broadcast MessageUpdatedEvent.
+            self._message_registered[session_id] = True
+            logger.info(
+                "Restored EventProcessorContext from persisted data",
+                session_id=session_id,
+                response_text_len=len(ctx.response_text),
+            )
+            return
+
+        # --- Fresh context (original behaviour) -------------------------------
         assistant_msg_id = identifier.ascending("message")
         assistant_msg = MessageWithParts.assistant(
             message_id=assistant_msg_id,

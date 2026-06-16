@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai import RunContext
+from pydantic_ai.exceptions import ApprovalRequired, CallDeferred
 from pydantic_ai.messages import ToolReturn
 
 from agentpool.agents.context import AgentContext
@@ -188,6 +189,16 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                 tool_input = kwargs.copy()
                 if run_ctx_key:
                     # Pass RunContext to original function
+                    if tool.deferred:
+                        try:
+                            return await _execute_with_hooks(
+                                lambda *a, **kw: execute(fn, ctx, *a, **kw),
+                                tool_input,
+                                *args,
+                                **kwargs,
+                            )
+                        except (CallDeferred, ApprovalRequired) as exc:
+                            return await _handle_deferred_exception(exc, tool)
                     return await _execute_with_hooks(
                         lambda *a, **kw: execute(fn, ctx, *a, **kw),
                         tool_input,
@@ -196,6 +207,16 @@ def wrap_tool[TReturn](  # noqa: PLR0915
                         **kwargs,
                     )
                 # Don't pass RunContext to original function since it didn't expect it
+                if tool.deferred:
+                    try:
+                        return await _execute_with_hooks(
+                            lambda *a, **kw: execute(fn, *a, **kw),
+                            tool_input,
+                            *args,
+                            **kwargs,
+                        )
+                    except (CallDeferred, ApprovalRequired) as exc:
+                        return await _handle_deferred_exception(exc, tool)
                 return await _execute_with_hooks(
                     lambda *a, **kw: execute(fn, *a, **kw),
                     tool_input,
@@ -217,6 +238,16 @@ def wrap_tool[TReturn](  # noqa: PLR0915
             result = await confirm_ctx.handle_confirmation(tool, kwargs)
             if result == "allow":
                 tool_input = kwargs.copy()
+                if tool.deferred:
+                    try:
+                        return await _execute_with_hooks(
+                            lambda *a, **kw: execute(fn, *a, **kw),
+                            tool_input,
+                            *args,
+                            **kwargs,
+                        )
+                    except (CallDeferred, ApprovalRequired) as exc:
+                        return await _handle_deferred_exception(exc, tool)
                 return await _execute_with_hooks(
                     lambda *a, **kw: execute(fn, *a, **kw),
                     tool_input,
@@ -246,6 +277,38 @@ def wrap_tool[TReturn](  # noqa: PLR0915
         new_sig = create_modified_signature(fn, remove=agent_ctx_key)
         update_signature(wrapped, new_sig)
     return wrapped
+
+
+async def _handle_deferred_exception(
+    exc: CallDeferred | ApprovalRequired,
+    tool: Tool[Any],  # noqa: ARG001 — reserved for Task 12 DeferredToolBridge integration
+) -> ToolReturn:
+    """Handle a deferred execution exception raised during resume re-execution.
+
+    When a tool body raises ``CallDeferred`` or ``ApprovalRequired`` during
+    resume re-execution (after ``ToolApproved`` triggers the body), this
+    function routes the exception to ``DeferredToolBridge`` based on
+    ``tool.deferred_strategy``.
+
+    For ``block`` strategy, the bridge checkpoints and emits deferral events.
+    For ``continue`` strategy, the bridge resolves inline with a placeholder.
+
+    .. note::
+        ``DeferredToolBridge`` integration is deferred to Task 12.
+        Until the bridge is available, this function re-raises the original
+        exception so that pydantic-ai's native handling applies as fallback.
+
+    Args:
+        exc: The deferred execution exception raised by the tool body.
+        tool: The Tool instance that was executing.
+
+    Returns:
+        A ``ToolReturn`` placeholder representing the deferred result.
+    """
+    # TODO(Task 12): Route through DeferredToolBridge once it exists.
+    #   bridge = DeferredToolBridge.from_tool(tool)
+    #   return await bridge.handle(exc)
+    raise exc
 
 
 async def _handle_confirmation_result(

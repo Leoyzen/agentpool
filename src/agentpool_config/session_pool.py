@@ -7,6 +7,8 @@ import os
 from pydantic import ConfigDict, Field
 from schemez import Schema
 
+from agentpool_config.durable import CheckpointConfig
+
 
 def _env_flag(var_name: str) -> bool:
     """Read a boolean env-var defaulting to True.
@@ -42,6 +44,14 @@ class SessionPoolConfig(Schema):
 
     mcp_max_processes: int = Field(default=100, ge=1, title="MCP max processes")
     """Maximum number of MCP processes for per-session agents."""
+
+    checkpoint: CheckpointConfig | None = Field(
+        default=None,
+        title="Checkpoint configuration",
+    )
+    """Configuration for agent checkpointing (durable execution).
+    When set, enables persistence of agent state for recovery.
+    """
 
     model_config = ConfigDict(frozen=True)
 

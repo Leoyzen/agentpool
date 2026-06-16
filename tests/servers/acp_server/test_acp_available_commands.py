@@ -184,6 +184,9 @@ def _create_initialized_acp_agent(
     acp_agent = AgentPoolACPAgent(client=mock_client, default_agent=agent)
     # Mark as initialized to bypass initialize() requirement
     acp_agent._initialized = True
+    # Clear protocol handler to avoid event_bus.subscribe issues in tests
+    # (the mock agent_pool doesn't have a real EventBus)
+    acp_agent._protocol_handler = None
     return acp_agent
 
 

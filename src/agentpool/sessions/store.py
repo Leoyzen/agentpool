@@ -107,6 +107,7 @@ class MemorySessionStore(SessionStore):
 
     def __init__(self) -> None:
         self._sessions: dict[str, SessionData] = {}
+        self._checkpoints: dict[str, dict[str, object]] = {}
 
     async def __aenter__(self) -> Self:
         return self
@@ -129,6 +130,7 @@ class MemorySessionStore(SessionStore):
     async def delete(self, session_id: str) -> bool:
         if session_id in self._sessions:
             del self._sessions[session_id]
+            self._checkpoints.pop(session_id, None)
             logger.debug("Deleted session", session_id=session_id)
             return True
         return False
@@ -166,3 +168,50 @@ class MemorySessionStore(SessionStore):
         if expired:
             logger.info("Cleaned up expired sessions", count=len(expired))
         return len(expired)
+
+    async def save_checkpoint(
+        self,
+        session_id: str,
+        messages_json: str,
+        pending_calls: list[dict[str, object]],
+    ) -> None:
+        """Save checkpoint data for a session.
+
+        Args:
+            session_id: Session identifier
+            messages_json: Serialized message history
+            pending_calls: List of pending deferred call info dicts
+        """
+        self._checkpoints[session_id] = {
+            "messages_json": messages_json,
+            "pending_calls": pending_calls,
+        }
+        logger.debug("Saved checkpoint", session_id=session_id)
+
+    async def load_checkpoint(
+        self, session_id: str
+    ) -> dict[str, object] | None:
+        """Load checkpoint data for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            Dict with messages_json and pending_calls, or None if no checkpoint exists
+        """
+        return self._checkpoints.get(session_id)
+
+    async def delete_checkpoint(self, session_id: str) -> bool:
+        """Delete checkpoint data for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            True if checkpoint was deleted, False if not found
+        """
+        if session_id in self._checkpoints:
+            del self._checkpoints[session_id]
+            logger.debug("Deleted checkpoint", session_id=session_id)
+            return True
+        return False

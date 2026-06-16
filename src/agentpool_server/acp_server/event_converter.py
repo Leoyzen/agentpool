@@ -63,6 +63,7 @@ from agentpool.agents.events import (
     TerminalContentItem,
     TextContentItem,
     ToolCallCompleteEvent,
+    ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
     ToolResultMetadataEvent,
@@ -202,6 +203,37 @@ class ACPEventConverter:
         self._child_sessions.clear()
         self._current_message_id = str(uuid.uuid4())
         self.last_usage = None
+
+    # =========================================================================
+    # V2_EXTENSION: ACP V2 protocol hooks (no-op on V1)
+    #
+    # These hooks are placeholders for ACP V2 concepts:
+    #   - _on_state_change   → session/update with state_change notification
+    #   - _on_out_of_turn_update → out-of-turn content delivery
+    #
+    # Reference: ACP V2 spec (unstable) — state_change, out_of_turn_update
+    # =========================================================================
+
+    def _on_state_change(self, state: str) -> None:
+        """Handle agent processing state transitions.
+
+        # V2_EXTENSION: In ACP V2 this would emit a ``session/update``
+        # notification with a ``state_change`` payload. On V1 this is
+        # a no-op.
+
+        Args:
+            state: The new processing state (e.g. ``"idle"``, ``"running"``).
+        """
+        pass  # V2_EXTENSION: emit state_change session/update in ACP V2
+
+    def _on_out_of_turn_update(self) -> None:
+        """Handle out-of-turn content updates.
+
+        # V2_EXTENSION: In ACP V2 this would deliver content that arrives
+        # outside of an active turn (e.g. background notifications,
+        # deferred tool completions). On V1 this is a no-op.
+        """
+        pass  # V2_EXTENSION: deliver out-of-turn content in ACP V2
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
         """Cancel all pending tool calls.
@@ -609,6 +641,31 @@ class ACPEventConverter:
                 error_text = f"\n\n❌ **Error**: {agent_prefix}{message}\n\n"
                 yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
 
+            case ToolCallDeferredEvent(
+                tool_call_id=tc_id,
+                tool_name=tool_name,
+                deferred_strategy=_strategy,
+                deferred_handle=deferred_handle,
+                status="pending",
+            ):
+                # Create or get tool state for the deferred call
+                state = self._get_or_create_tool_state(tc_id, tool_name, {})
+                if not state.started:
+                    state.started = True
+                    yield ToolCallStart(
+                        tool_call_id=tc_id,
+                        title=f"Deferred: {tool_name}",
+                        kind=state.kind,
+                        raw_input=state.raw_input,
+                        status="pending",
+                        field_meta={"deferred_handle": deferred_handle},
+                    )
+
+            case ToolCallDeferredEvent():
+                # Deferred events with status "resolved" or "expired" are no-ops
+                # on the converter side — resolution is handled by the session pool
+                pass
+
             case _:
                 # Graceful fallback for unknown event types
                 # Handles future events like ToolRequiresAuthEvent without crashing
@@ -684,6 +741,7 @@ class ACPEventConverter:
                 | SpawnSessionStart()
                 | SubAgentEvent()
                 | ToolCallCompleteEvent()
+                | ToolCallDeferredEvent()
                 | ToolCallProgressEvent()
                 | ToolCallStartEvent()
                 | ToolResultMetadataEvent()

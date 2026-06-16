@@ -9,24 +9,28 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, Mock
 
+from typing import Any
+
 import anyio
-from mcp.shared.message import SessionMessage
-from mcp.types import (
-    Implementation,
-    InitializeResult,
-    JSONRPCMessage,
-    JSONRPCResponse,
-    ServerCapabilities,
-)
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
 from agentpool import Agent
 from agentpool.delegation import AgentPool
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
-from agentpool_config.mcp_server import AcpMCPServerConfig
 from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
 from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
+from agentpool_config.mcp_server import AcpMCPServerConfig
+from mcp.shared.message import SessionMessage
+from mcp.types import (
+    JSONRPCMessage,
+    JSONRPCResponse,
+    Implementation,
+    InitializeResult,
+    ListToolsResult,
+    ServerCapabilities,
+    Tool,
+)
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -160,12 +164,8 @@ async def test_ext_method_routes_message(
     acp_agent.client.send_request = send_request_mock  # type: ignore[method-assign]
     await acp_agent.connect_acp_mcp_server(server_config)
 
-    # Use a notification (no id) to avoid blocking on correlation registry
-    msg = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}}
-    result = await acp_agent.ext_method("mcp/message", {"connectionId": "conn-789", "message": msg})
-
-    # Notifications return {} immediately
-    assert result == {}
+    msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    await acp_agent.ext_method("mcp/message", {"connectionId": "conn-789", "method": "tools/list", "id": 1})
 
     # Give the async task a chance to run, then receive with timeout
     conn = acp_agent._mcp_manager.get_connection("conn-789")
@@ -176,7 +176,7 @@ async def test_ext_method_routes_message(
     from mcp.shared.message import SessionMessage
 
     assert isinstance(received, SessionMessage)
-    assert received.message.root.method == "notifications/progress"
+    assert received.message.root.method == "tools/list"  # type: ignore[union-attr]
 
 
 # Test 5: ext_method with unknown connectionId logs warning and does not crash
@@ -186,11 +186,8 @@ async def test_ext_method_unknown_connection_id(
     acp_agent: AgentPoolACPAgent,
 ) -> None:
     """Verify ext_method handles unknown connectionId gracefully without crashing."""
-    # Use a notification (no id) to avoid blocking on correlation registry
-    msg = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}}
-
     result = await acp_agent.ext_method(
-        "mcp/message", {"connectionId": "unknown-conn", "message": msg}
+        "mcp/message", {"connectionId": "unknown-conn", "method": "tools/list"}
     )
 
     assert result == {}
@@ -217,13 +214,12 @@ async def test_ext_method_concurrent_messages(
         AcpMcpServer(name="test-server-2", id="test-id-2")
     )
 
-    # Use notifications (no id) to avoid blocking on correlation registry
-    msg_a = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 25}}
-    msg_b = {"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 75}}
+    msg_a = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    msg_b = {"jsonrpc": "2.0", "id": 2, "method": "tools/call"}
 
     await asyncio.gather(
-        acp_agent.ext_method("mcp/message", {"connectionId": "conn-a", "message": msg_a}),
-        acp_agent.ext_method("mcp/message", {"connectionId": "conn-b", "message": msg_b}),
+        acp_agent.ext_method("mcp/message", {"connectionId": "conn-a", "method": "tools/list", "id": 1}),
+        acp_agent.ext_method("mcp/message", {"connectionId": "conn-b", "method": "tools/call", "id": 2}),
     )
 
     conn_a = acp_agent._mcp_manager.get_connection("conn-a")
@@ -239,8 +235,8 @@ async def test_ext_method_concurrent_messages(
 
     assert isinstance(received_a, SessionMessage)
     assert isinstance(received_b, SessionMessage)
-    assert received_a.message.root.method == "notifications/progress"
-    assert received_b.message.root.method == "notifications/progress"
+    assert received_a.message.root.method == "tools/list"  # type: ignore[union-attr]
+    assert received_b.message.root.method == "tools/call"  # type: ignore[union-attr]
 
 
 # Test 7: close disconnects all ACP MCP servers and cleans up
@@ -310,11 +306,12 @@ async def test_session_initialize_triggers_mcp_message(
 
         if method == "mcp/message":
             received_mcp_messages.append(params)
-            session_msg = params.get("message")
-            if isinstance(session_msg, dict) and session_msg.get("method") == "initialize":
+            req_method = params.get("method")
+            if req_method == "initialize":
                 conn = acp_agent._mcp_manager.get_connection("test-conn-init")
                 if conn is not None:
-                    req_id = session_msg.get("id")
+                    req_id = params.get("params", {}).get("protocolVersion")
+                    # Find the original request id from the session
                     result = InitializeResult(
                         protocolVersion="2024-11-05",
                         capabilities=ServerCapabilities(),
@@ -322,14 +319,14 @@ async def test_session_initialize_triggers_mcp_message(
                     )
                     response = JSONRPCResponse(
                         jsonrpc="2.0",
-                        id=req_id,
+                        id=0,  # Will be matched by session
                         result=result.model_dump(
                             by_alias=True, mode="json", exclude_none=True
                         ),
                     )
                     response_msg = SessionMessage(message=JSONRPCMessage(response))
                     assert conn._to_session_send is not None
-                    await conn._to_session_send.send(response_msg)
+                    await conn._to_session_send.send(response_msg)  # type: ignore[arg-type]
             return {}
 
         return {}
@@ -353,8 +350,7 @@ async def test_session_initialize_triggers_mcp_message(
 
     initialize_found = False
     for msg in received_mcp_messages:
-        inner = msg.get("message")
-        if isinstance(inner, dict) and inner.get("method") == "initialize":
+        if msg.get("method") == "initialize":
             initialize_found = True
             break
 
@@ -393,21 +389,18 @@ async def test_get_tools_sends_tools_list_via_acp(
 
         if method == "mcp/message":
             received_mcp_messages.append(params)
-            session_msg = params.get("message")
-            if isinstance(session_msg, dict):
+            req_method = params.get("method")
+            if req_method:
                 conn = acp_agent._mcp_manager.get_connection("test-conn-tools")
                 if conn is not None:
-                    req_method = session_msg.get("method")
-                    req_id = session_msg.get("id")
-
-                    if req_method == "initialize" and req_id is not None:
+                    if req_method == "initialize":
                         return {
                             "protocolVersion": "2024-11-05",
                             "capabilities": {},
                             "serverInfo": {"name": "test", "version": "1.0"},
                         }
 
-                    if req_method == "tools/list":
+                    elif req_method == "tools/list":
                         return {
                             "tools": [
                                 {
@@ -450,8 +443,7 @@ async def test_get_tools_sends_tools_list_via_acp(
 
     tools_list_found = False
     for msg in received_mcp_messages:
-        inner = msg.get("message")
-        if isinstance(inner, dict) and inner.get("method") == "tools/list":
+        if msg.get("method") == "tools/list":
             tools_list_found = True
             break
 

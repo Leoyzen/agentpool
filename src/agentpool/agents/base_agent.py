@@ -8,13 +8,11 @@ from collections.abc import Callable
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-import inspect
 import os
-
 from pathlib import Path
 import re
-import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, assert_never, overload
+import warnings
 
 from anyenv import MultiEventHandler, method_spawner
 from anyenv.signals import Signal
@@ -47,12 +45,12 @@ if TYPE_CHECKING:
     from upathtools.filesystems import OverlayFileSystem
 
     from acp.schema import AvailableCommandsUpdate
-    from agentpool.agents.events import ToastInfo
     from agentpool.agents.events import (
         CommandCompleteEvent,
         CommandOutputEvent,
         RichAgentStreamEvent,
         StreamWithCommandsEvent,
+        ToastInfo,
     )
     from agentpool.agents.modes import ConfigOptionChanged, ModeCategory, ModeCategoryId
     from agentpool.agents.native_agent import Agent
@@ -84,12 +82,10 @@ _current_run_ctx_var: ContextVar[AgentRunContext | None] = ContextVar(
     default=None,
 )
 
-# ContextVar for SessionPool bypass flag (set by TurnRunner before agent calls)
-_bypass_session_pool: ContextVar[bool] = ContextVar(
-    "_bypass_session_pool",
+_in_turn_context: ContextVar[bool] = ContextVar(
+    "_in_turn_context",
     default=False,
 )
-
 
 logger = get_logger(__name__)
 
@@ -121,22 +117,42 @@ def _is_slash_command(text: str) -> bool:
     return bool(_SLASH_PATTERN.match(text.strip()))
 
 
-def _should_bypass_session_pool() -> bool:
-    """Detect if the caller should bypass SessionPool delegation.
+def _should_route_via_sessionpool(
+    session_pool: Any,
+    session_id: str,
+) -> bool:
+    """Determine whether an incoming request should be routed via SessionPool.
 
-    SessionPool internal turns: When run()/run_stream() is called from within
-    a TurnRunner turn (e.g., via message forwarding), delegating back to
-    SessionPool would cause a deadlock on the per-session turn_lock. Detected
-    via _bypass_session_pool ContextVar set by TurnRunner.
+    Checks in order:
+    1. If called from within an active turn context → False (child task).
+    2. If no session pool is available → False.
+    3. If the session doesn't exist yet → True (new session needs routing).
+    4. If the current task owns the session turn → False (already the owner).
+    5. Otherwise → True (route via pool).
+
+    Args:
+        session_pool: The SessionPool instance (or None).
+        session_id: The target session identifier.
 
     Returns:
-        True if SessionPool delegation should be bypassed, False otherwise.
+        True if the request should be routed via SessionPool, False otherwise.
     """
-    # Case 1: ContextVar set by TurnRunner before agent calls
-    if _bypass_session_pool.get():
+    # Case 1: Within an active turn context (child tasks should not route)
+    if _in_turn_context.get():
+        return False
+
+    # Case 2: No pool available
+    if session_pool is None:
+        return False
+
+    # Case 3: Session doesn't exist yet → route
+    session = session_pool.sessions.get_session(session_id)
+    if session is None:
         return True
 
-    return False
+    # Case 4: We are the turn owner → False; otherwise → True
+    current_task = asyncio.current_task()
+    return current_task is not session._turn_owner_task
 
 
 class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
@@ -934,54 +950,51 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         Yields:
             Stream events during execution
         """
-        # When SessionPool is available and the caller is not bypassing it,
-        # delegate to SessionPool for turn management and event routing.
+        # When SessionPool is available and _should_route_via_sessionpool()
+        # returns True, delegate to SessionPool for turn management and event routing.
         # AG-UI bypass is permanent — see docs/audit/agui-bypass-audit.md.
-        if (
-            not _should_bypass_session_pool()
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
-        ):
+        if self.agent_pool is not None and self.agent_pool.session_pool is not None:
             from agentpool.utils.identifiers import generate_session_id
 
-            effective_session_id = session_id or generate_session_id()
             session_pool = self.agent_pool.session_pool
+            effective_session_id = session_id or generate_session_id()
+            if _should_route_via_sessionpool(session_pool, effective_session_id):
 
-            # If the session already exists but belongs to a different agent,
-            # fall through to direct execution so THIS agent runs.
-            existing_session = session_pool.sessions.get_session(effective_session_id)
-            if existing_session is None or existing_session.agent_name == self.name:
-                # Ensure session exists in SessionPool
-                if existing_session is None:
-                    await session_pool.create_session(
-                        effective_session_id,
-                        agent_name=self.name,
-                        parent_session_id=parent_session_id,
-                    )
-
-                final_message: ChatMessage[TResult] | None = None
-                async for event in session_pool.run_stream(
-                    effective_session_id,
-                    *prompts,  # type: ignore[arg-type]
-                    input_provider=input_provider,
-                ):
-                    yield event
-                    if isinstance(event, StreamCompleteEvent):
-                        final_message = event.message
-                if final_message is not None:
-                    await self.message_sent.emit(final_message)
-                    session = session_pool.sessions.get_session(effective_session_id)
-                    if session is not None and getattr(session, "is_per_session_agent", False):
-                        await self.connections.route_message(
-                            final_message, wait=wait_for_connections
+                # If the session already exists but belongs to a different agent,
+                # fall through to direct execution so THIS agent runs.
+                existing_session = session_pool.sessions.get_session(effective_session_id)
+                if existing_session is None or existing_session.agent_name == self.name:
+                    # Ensure session exists in SessionPool
+                    if existing_session is None:
+                        await session_pool.create_session(
+                            effective_session_id,
+                            agent_name=self.name,
+                            parent_session_id=parent_session_id,
                         )
-                return
+
+                    final_message: ChatMessage[TResult] | None = None
+                    async for event in session_pool.run_stream(
+                        effective_session_id,
+                        *prompts,  # type: ignore[arg-type]
+                        input_provider=input_provider,
+                    ):
+                        yield event
+                        if isinstance(event, StreamCompleteEvent):
+                            final_message = event.message
+                    if final_message is not None:
+                        await self.message_sent.emit(final_message)
+                        session = session_pool.sessions.get_session(effective_session_id)
+                        if session is not None and getattr(session, "is_per_session_agent", False):
+                            await self.connections.route_message(
+                                final_message, wait=wait_for_connections
+                            )
+                    return
 
         # Direct execution path for AG-UI bypass and standalone mode.
         # AG-UI requires direct agent access for protocol-specific event
         # transformation (AGUIEventStream). Standalone agents run without
         # an AgentPool / SessionPool.
-        async for event in self._run_stream_direct(
+        async for event in self._execute_direct(
             *prompts,
             store_history=store_history,
             message_id=message_id,
@@ -997,7 +1010,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         ):
             yield event
 
-    async def _run_stream_direct(
+    async def _execute_direct(
         self,
         *prompts: PromptCompatible,
         store_history: bool = True,
@@ -1273,7 +1286,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
             # Emit signal (always - for event handlers)
             # Skip when running through session pool; run()/run_stream() will emit
-            if not _should_bypass_session_pool():
+            if not _in_turn_context.get():
                 await self.message_sent.emit(final_message)
             # Route to connected agents (always - they decide what to do with it)
             await self.connections.route_message(final_message, wait=wait_for_connections)
@@ -1612,80 +1625,77 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             RuntimeError: If no final message received from stream
             UnexpectedModelBehavior: If the model fails or behaves unexpectedly
         """
-        # When SessionPool is available and the caller is not bypassing it,
-        # delegate to SessionPool for turn management and event routing.
+        # When SessionPool is available and _should_route_via_sessionpool()
+        # returns True, delegate to SessionPool for turn management and event routing.
         # AG-UI bypass is permanent — see docs/audit/agui-bypass-audit.md.
-        if (
-            not _should_bypass_session_pool()
-            and self.agent_pool is not None
-            and self.agent_pool.session_pool is not None
-        ):
+        if self.agent_pool is not None and self.agent_pool.session_pool is not None:
             from agentpool.utils.identifiers import generate_session_id
 
-            effective_session_id = session_id or generate_session_id()
             session_pool = self.agent_pool.session_pool
+            effective_session_id = session_id or generate_session_id()
+            if _should_route_via_sessionpool(session_pool, effective_session_id):
 
-            # If the session already exists but belongs to a different agent,
-            # fall through to direct execution so THIS agent runs.
-            existing_session = session_pool.sessions.get_session(effective_session_id)
-            if existing_session is None or existing_session.agent_name == self.name:
-                # Ensure session exists in SessionPool
-                if existing_session is None:
-                    await session_pool.create_session(
-                        effective_session_id,
-                        agent_name=self.name,
-                        parent_session_id=parent_session_id,
+                # If the session already exists but belongs to a different agent,
+                # fall through to direct execution so THIS agent runs.
+                existing_session = session_pool.sessions.get_session(effective_session_id)
+                if existing_session is None or existing_session.agent_name == self.name:
+                    # Ensure session exists in SessionPool
+                    if existing_session is None:
+                        await session_pool.create_session(
+                            effective_session_id,
+                            agent_name=self.name,
+                            parent_session_id=parent_session_id,
+                        )
+
+                    # Subscribe to EventBus and process prompt
+                    queue = await session_pool.event_bus.subscribe(effective_session_id)
+                    process_kwargs = {
+                        "store_history": store_history,
+                        "message_id": message_id,
+                        "parent_id": parent_id,
+                        "message_history": message_history,
+                        "input_provider": input_provider,
+                        "wait_for_connections": wait_for_connections,
+                        "deps": deps,
+                        "event_handlers": event_handlers,
+                    }
+                    process_task = asyncio.create_task(
+                        session_pool.process_prompt(effective_session_id, *prompts, **process_kwargs)
                     )
+                    final_message: ChatMessage[TResult] | None = None
+                    try:
+                        while not process_task.done():
+                            try:
+                                envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+                                if envelope is not None and isinstance(
+                                    envelope.event, StreamCompleteEvent
+                                ):
+                                    final_message = envelope.event.message
+                            except TimeoutError:
+                                continue
 
-                # Subscribe to EventBus and process prompt
-                queue = await session_pool.event_bus.subscribe(effective_session_id)
-                process_kwargs = {
-                    "store_history": store_history,
-                    "message_id": message_id,
-                    "parent_id": parent_id,
-                    "message_history": message_history,
-                    "input_provider": input_provider,
-                    "wait_for_connections": wait_for_connections,
-                    "deps": deps,
-                    "event_handlers": event_handlers,
-                }
-                process_task = asyncio.create_task(
-                    session_pool.process_prompt(effective_session_id, *prompts, **process_kwargs)
-                )
-                final_message: ChatMessage[TResult] | None = None
-                try:
-                    while not process_task.done():
-                        try:
-                            envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+                        # Drain remaining events
+                        while not queue.empty():
+                            envelope = queue.get_nowait()
                             if envelope is not None and isinstance(
                                 envelope.event, StreamCompleteEvent
                             ):
                                 final_message = envelope.event.message
-                        except TimeoutError:
-                            continue
 
-                    # Drain remaining events
-                    while not queue.empty():
-                        envelope = queue.get_nowait()
-                        if envelope is not None and isinstance(
-                            envelope.event, StreamCompleteEvent
-                        ):
-                            final_message = envelope.event.message
+                        if (exc := process_task.exception()) is not None:
+                            raise exc
+                    finally:
+                        await session_pool.event_bus.unsubscribe(effective_session_id, queue)
 
-                    if (exc := process_task.exception()) is not None:
-                        raise exc
-                finally:
-                    await session_pool.event_bus.unsubscribe(effective_session_id, queue)
-
-                if final_message is None:
-                    raise RuntimeError("No final message received from stream")
-                await self.message_sent.emit(final_message)
-                # Per-session agents don't inherit connections from the base agent.
-                # Route from the base agent so Talk targets still receive the message.
-                session = session_pool.sessions.get_session(effective_session_id)
-                if session is not None and getattr(session, "is_per_session_agent", False):
-                    await self.connections.route_message(final_message, wait=wait_for_connections)
-                return final_message
+                    if final_message is None:
+                        raise RuntimeError("No final message received from stream")
+                    await self.message_sent.emit(final_message)
+                    # Per-session agents don't inherit connections from the base agent.
+                    # Route from the base agent so Talk targets still receive the message.
+                    session = session_pool.sessions.get_session(effective_session_id)
+                    if session is not None and getattr(session, "is_per_session_agent", False):
+                        await self.connections.route_message(final_message, wait=wait_for_connections)
+                    return final_message
 
         # Direct execution path for AG-UI bypass and standalone mode.
         final_message = None

@@ -19,11 +19,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 from agentpool.agents.context import AgentRunContext
+from agentpool.agents.events import SessionResumeEvent
+from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.models.pending_interaction import PendingPermission, PendingQuestion
 from agentpool.orchestrator.run import RunHandle, RunStatus
-from agentpool.sessions.models import SessionData
+from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
@@ -71,6 +73,56 @@ DEFAULT_MAX_AUTO_RESUME: Final[int] = 10
 DEFAULT_SESSION_TTL_SECONDS: Final[float] = 3600.0
 
 
+class SessionNotFoundError(Exception):
+    """Raised when a session cannot be found for resume."""
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__(f"Session not found: {session_id}")
+        self.session_id = session_id
+
+
+class SessionBusyError(Exception):
+    """Raised when trying to resume a session that has an active run."""
+
+    def __init__(self, session_id: str, run_id: str) -> None:
+        super().__init__(
+            f"Session '{session_id}' already has an active run '{run_id}'. "
+            "Wait for it to complete or cancel it first."
+        )
+        self.session_id = session_id
+        self.run_id = run_id
+
+
+class CheckpointMismatchError(Exception):
+    """Raised when deferred_tool_results don't cover all pending_deferred_calls."""
+
+    def __init__(
+        self,
+        session_id: str,
+        expected: set[str],
+        provided: set[str],
+        missing: set[str],
+        extra: set[str],
+    ) -> None:
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing results for: {sorted(missing)}")
+        if extra:
+            parts.append(f"unexpected results for: {sorted(extra)}")
+        msg = (
+            f"Checkpoint mismatch for session '{session_id}': "
+            + "; ".join(parts)
+            + f". Expected tool_call_ids: {sorted(expected)}, "
+            f"provided: {sorted(provided)}."
+        )
+        super().__init__(msg)
+        self.session_id = session_id
+        self.expected = expected
+        self.provided = provided
+        self.missing = missing
+        self.extra = extra
+
+
 class SessionLifecyclePolicy:
     """Session lifecycle policy constants and helpers."""
 
@@ -116,6 +168,7 @@ class SessionState:
     lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
     current_run_id: str | None = None
     _request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _turn_owner_task: asyncio.Task[Any] | None = None
     input_provider: Any | None = None
     pending_questions: dict[str, Any] = field(default_factory=dict)
     """Pending questions stored on SessionState for per-session isolation."""
@@ -723,16 +776,86 @@ class SessionController:
                 cid for cid in self._children[session.parent_session_id] if cid != session_id
             ]
 
+    @staticmethod
+    def _should_checkpoint_on_close(data: SessionData | None) -> bool:
+        """Check whether a session should be checkpointed before close.
+
+        A session needs checkpoint-on-close when it has pending deferred calls
+        that must be preserved for later resume.
+
+        Args:
+            data: The session data loaded from the store, or None.
+
+        Returns:
+            True if the session has pending deferred calls that require
+            checkpointing before releasing resources.
+        """
+        return data is not None and bool(data.pending_deferred_calls)
+
+    @staticmethod
+    def _check_expired_calls(session_data: SessionData) -> list[PendingDeferredCall]:
+        """Return pending calls whose timeout has elapsed.
+
+        Args:
+            session_data: The session data to check for expired calls.
+
+        Returns:
+            A list of ``PendingDeferredCall`` entries whose timeout has
+            elapsed. Returns an empty list if none have expired.
+        """
+        now = datetime.now()
+        expired: list[PendingDeferredCall] = []
+        for call in session_data.pending_deferred_calls:
+            if call.timeout is not None and (now - call.created_at) > call.timeout:
+                expired.append(call)
+        return expired
+
+    async def _save_close_checkpoint(
+        self, session_id: str, data: SessionData
+    ) -> bool:
+        """Save session data with checkpointed status before close.
+
+        Marks the session as ``"checkpointed"`` so it can be located by
+        :meth:`resume_session` later. Returns ``True`` on success, ``False``
+        if the storage write fails (caller should NOT release resources).
+
+        Args:
+            session_id: Session identifier (for logging).
+            data: The session data to persist as checkpointed.
+
+        Returns:
+            True if the checkpoint was saved successfully, False on failure.
+        """
+        try:
+            data = data.model_copy(update={"status": "checkpointed"})
+            data.touch()
+            if self.store is not None:
+                await self.store.save(data)
+            logger.info(
+                "Session checkpointed before close",
+                session_id=session_id,
+                pending_call_count=len(data.pending_deferred_calls),
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "Failed to save checkpoint before close",
+                session_id=session_id,
+            )
+            return False
+
     async def close_session(self, session_id: str) -> None:
         """Close a session and clean up resources.
 
         Order matters:
         1. Mark session as closing (prevents new turns from starting)
-        2. Handle child sessions based on lifecycle policy
-        3. Remove from tracking dicts
-        4. Acquire turn_lock to wait for active turn to complete
-        5. Exit agent context if per-session
-        6. Clean up session state
+        2. Checkpoint-on-close: if pending deferred calls exist, save
+           checkpointed status before releasing resources
+        3. Handle child sessions based on lifecycle policy
+        4. Remove from tracking dicts
+        5. Acquire turn_lock to wait for active turn to complete
+        6. Exit agent context if per-session
+        7. Clean up session state
 
         Args:
             session_id: The session to close.
@@ -744,6 +867,24 @@ class SessionController:
 
             session.is_closing = True
             session.closed_at = time.monotonic()
+
+            # Checkpoint-before-close: if pending deferred calls exist, save
+            # checkpoint state before releasing resources so the session can
+            # be resumed later. If the checkpoint save fails, do NOT release
+            # resources (agent stays alive).
+            was_checkpointed = False
+            if self.store is not None:
+                data = await self.store.load(session_id)
+                if self._should_checkpoint_on_close(data):
+                    assert data is not None  # _should_checkpoint_on_close ensures this
+                    checkpoint_ok = await self._save_close_checkpoint(session_id, data)
+                    if not checkpoint_ok:
+                        logger.error(
+                            "Close checkpoint failed - resources NOT released",
+                            session_id=session_id,
+                        )
+                        return  # Keep session alive
+                    was_checkpointed = True
 
             # Handle child sessions based on lifecycle policy
             children = self._children.pop(session_id, [])
@@ -759,7 +900,7 @@ class SessionController:
 
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
-            if self.store is not None:
+            if self.store is not None and not was_checkpointed:
                 await self.store.delete(session_id)
             # Remove from parent's children list
             if session.parent_session_id and session.parent_session_id in self._children:
@@ -1103,6 +1244,43 @@ class SessionController:
                     session_id=session_id,
                 )
 
+    async def _start_cleanup_loop(self) -> None:
+        """Periodically scan and expire deferred calls whose timeout has elapsed.
+
+        Runs indefinitely in a background task. Checks every 60 seconds
+        for pending deferred calls whose timeout has elapsed and removes
+        them from the session data.
+        """
+        while True:
+            try:
+                await asyncio.sleep(60)
+                if self.store is None:
+                    continue
+                async with self._lock:
+                    for session_id in list(self._sessions.keys()):
+                        data = await self.store.load(session_id)
+                        if data is None:
+                            continue
+                        expired = self._check_expired_calls(data)
+                        if expired:
+                            remaining = [
+                                c for c in data.pending_deferred_calls
+                                if c.tool_call_id not in {e.tool_call_id for e in expired}
+                            ]
+                            updated = data.model_copy(
+                                update={"pending_deferred_calls": remaining}
+                            )
+                            await self.store.save(updated)
+                            logger.info(
+                                "Removed expired deferred calls",
+                                session_id=session_id,
+                                count=len(expired),
+                            )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Deferred call cleanup loop failed")
+
 
 class TurnRunner:
     """Manages turn lifecycle and auto-resume.
@@ -1202,7 +1380,7 @@ class TurnRunner:
         )
         _session = self.sessions.get_session(session_id)
 
-        from agentpool.agents.base_agent import _bypass_session_pool, _current_run_ctx_var
+        from agentpool.agents.base_agent import _in_turn_context, _current_run_ctx_var
         from agentpool.orchestrator.run import RunHandle, RunStatus
 
         run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
@@ -1276,7 +1454,9 @@ class TurnRunner:
         stream_kwargs = dict(kwargs)
         if input_provider is not None and (has_var_keyword or "input_provider" in stream_params):
             stream_kwargs["input_provider"] = input_provider
-        _bypass_session_pool.set(True)
+        if _session is not None:
+            _session._turn_owner_task = asyncio.current_task()
+        _in_turn_context.set(True)
         try:
             try:
                 # Process prompts and handle injections/queued prompts
@@ -1302,6 +1482,7 @@ class TurnRunner:
                 if run_handle is not None and run_handle.status not in (
                     RunStatus.completed,
                     RunStatus.failed,
+                    RunStatus.checkpointed,
                 ):
                     run_handle.fail(exception=exc, event_bus=self.event_bus)
                 raise
@@ -1320,7 +1501,9 @@ class TurnRunner:
 
             self._runs.pop(run_ctx.run_id, None)
             _current_run_ctx_var.set(None)
-            _bypass_session_pool.set(False)
+            if _session is not None:
+                _session._turn_owner_task = None
+            _in_turn_context.set(False)
 
             # Cancel the event consumer task
             event_consumer.cancel()
@@ -1334,8 +1517,15 @@ class TurnRunner:
 
             # Clean up RunHandle if we created it
             if created_run_handle and run_handle is not None:
-                if run_handle.status not in (RunStatus.completed, RunStatus.failed):
-                    run_handle.complete()
+                if run_handle.status not in (
+                    RunStatus.completed,
+                    RunStatus.failed,
+                    RunStatus.checkpointed,
+                ):
+                    if run_ctx.checkpointed:
+                        run_handle.checkpoint()
+                    else:
+                        run_handle.complete()
                 # Note: complete_event is NOT set here — it is deferred to
                 # run_loop() so that it covers the full run loop including
                 # auto-resume turns.  Per-request waiters (e.g. sync HTTP
@@ -1394,8 +1584,14 @@ class TurnRunner:
                 await self._process_queued_work(session_id, session, **kwargs)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.exception("Turn loop failed", session_id=session_id)
+                # Publish RunFailedEvent so protocol handlers can notify clients
+                run_id = session.current_run_id
+                if run_id is not None:
+                    run_handle = self.sessions._runs.get(run_id)
+                    if run_handle is not None:
+                        run_handle.fail(exception=exc, event_bus=self.event_bus)
                 await self._drain_post_turn_injections(session_id)
                 await self._drain_post_turn_prompts(session_id)
             finally:
@@ -1693,6 +1889,8 @@ class SessionPool:
         self._enable_auto_resume = enable_auto_resume
         self._enable_event_bus = enable_event_bus
         self._runs_lock: asyncio.Lock = asyncio.Lock()
+        self._resume_locks: dict[str, asyncio.Lock] = {}
+        self._resume_locks_lock = asyncio.Lock()
         self._message_cache: dict[str, list[ChatMessage[Any]]] = {}
 
     async def start(self) -> None:
@@ -1749,6 +1947,369 @@ class SessionPool:
         )
         return state
 
+    async def _get_resume_lock(self, session_id: str) -> asyncio.Lock:
+        """Get or create per-session lock for resume serialization.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            The per-session resume lock.
+        """
+        async with self._resume_locks_lock:
+            lock = self._resume_locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._resume_locks[session_id] = lock
+            return lock
+
+    @contextlib.asynccontextmanager
+    async def _with_resume_lock(
+        self, session_id: str
+    ) -> AsyncIterator[SessionState | None]:
+        """Acquire per-session resume lock with state validation.
+
+        Ensures only one resume runs per session at a time and that
+        the session is in a resumable state (no active run, persisted
+        status is ``"checkpointed"``).
+
+        Args:
+            session_id: Session to lock.
+
+        Yields:
+            The live ``SessionState``, or ``None`` if no live session exists.
+
+        Raises:
+            SessionBusyError: If the session has an active run or its
+                persisted status is not ``"checkpointed"``.
+        """
+        resume_lock = await self._get_resume_lock(session_id)
+        async with resume_lock:
+            session = self.sessions.get_session(session_id)
+            if session is not None and session.current_run_id is not None:
+                raise SessionBusyError(session_id, session.current_run_id)
+
+            if self.sessions.store is not None:
+                current_data = await self.sessions.store.load(session_id)
+                if current_data is not None and current_data.status != "checkpointed":
+                    raise SessionBusyError(session_id, current_data.status)
+
+            yield session
+
+    async def _load_checkpoint_data(
+        self, session_id: str
+    ) -> CheckpointData:
+        """Load checkpoint data for a session.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            Checkpoint data.
+
+        Raises:
+            SessionNotFoundError: If no checkpoint exists for the session.
+        """
+        from agentpool.agents.native_agent.checkpoint import CheckpointManager
+
+        storage = self.pool.storage
+        if storage is None:
+            raise SessionNotFoundError(session_id)
+
+        checkpoint_mgr = CheckpointManager(storage)
+        data = await checkpoint_mgr.load_checkpoint(session_id)
+        if data is None:
+            raise SessionNotFoundError(session_id)
+        return data
+
+    async def _reconstruct_native_agent(
+        self,
+        session_id: str,
+        agent_name: str,
+    ) -> Agent[Any, Any]:
+        """Reconstruct a native agent from config for session resume.
+
+        Args:
+            session_id: Session identifier.
+            agent_name: Name of the agent configuration to use.
+
+        Returns:
+            A reconstructed native agent instance.
+
+        Raises:
+            SessionNotFoundError: If the agent config is not found.
+        """
+        from agentpool.models.agents import NativeAgentConfig
+        from agentpool_config.context import ConfigContextManager
+
+        cfg = self.pool.manifest.agents.get(agent_name)
+        if cfg is None:
+            raise SessionNotFoundError(session_id)
+
+        if not isinstance(cfg, NativeAgentConfig):
+            raise SessionNotFoundError(session_id)
+
+        if cfg.name is None:
+            cfg = cfg.model_copy(update={"name": agent_name})
+
+        session = self.sessions.get_session(session_id)
+        input_provider = session.input_provider if session else None
+
+        with ConfigContextManager(self.pool._config_file_path):
+            agent: Agent[Any, Any] = cfg.get_agent(
+                input_provider=input_provider,
+                pool=self.pool,
+            )
+
+        # Add pool-level providers
+        if self.pool is not None:
+            agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
+            if self.pool.skills_instruction_provider:
+                agent.tools.add_provider(self.pool.skills_instruction_provider)
+            agent.tools.add_provider(self.pool.skills_tools_provider)
+
+        await agent.__aenter__()
+        return agent
+
+    async def _reconstruct_acp_agent(
+        self,
+        _session_id: str,
+        agent_name: str,
+    ) -> BaseAgent[Any, Any]:
+        """Reconstruct an ACP agent by reopening the subprocess.
+
+        Args:
+            session_id: Session identifier.
+            agent_name: Name of the agent configuration to use.
+
+        Returns:
+            A reconstructed ACP agent with reopened subprocess.
+        """
+        agent = self.pool.get_agent(agent_name)
+
+        # For ACP agents, reopen the subprocess via __aenter__
+        if hasattr(agent, "__aenter__"):
+            await agent.__aenter__()
+        return agent
+
+    async def _resume_native_agent(
+        self,
+        session_data: SessionData,
+        checkpoint: CheckpointData,
+        results: Any,
+    ) -> None:
+        """Resume a native agent from checkpoint with deferred results.
+
+        Loads message_history from checkpoint, reconstructs the agent from its
+        original config, and calls agent.run() with the restored history and
+        deferred results.
+
+        Args:
+            session_data: Persisted session data.
+            checkpoint: Checkpoint data with message_history and pending_calls.
+            results: DeferredToolResults for resolving pending deferred calls.
+
+        Raises:
+            SessionNotFoundError: If agent config is not found.
+            RuntimeError: If agent.run() fails (pending_calls remain uncleared).
+        """
+        agent = await self._reconstruct_native_agent(
+            session_data.session_id, session_data.agent_name
+        )
+
+        # Detect agent config drift between checkpoint and resume.
+        # The hash check is advisory: if we can't compute the current hash
+        # (e.g. agent has no tools attribute, or tools is a mock in tests),
+        # we skip the comparison and proceed with resume.
+        if session_data.agent_config_hash:
+            try:
+                from agentpool.agents.native_agent.checkpoint import (
+                    compute_agent_config_hash,
+                )
+
+                agent_tools = await agent.tools.get_tools()  # type: ignore[union-attr]
+                current_hash = compute_agent_config_hash(agent_tools)
+                if current_hash != session_data.agent_config_hash:
+                    logger.warning(
+                        "Agent config hash mismatch — tools may have changed since checkpoint",
+                        session_id=session_data.session_id,
+                        stored_hash=session_data.agent_config_hash,
+                        current_hash=current_hash,
+                    )
+            except Exception:
+                logger.debug(
+                    "Could not compute agent config hash for drift check",
+                    session_id=session_data.session_id,
+                    exc_info=True,
+                )
+
+        try:
+            message_history: list[Any] = list(checkpoint.message_history)
+            # deferred_tool_results is forwarded to pydantic-ai Agent.run()
+            # which accepts it natively; cast to Any since BaseAgent.run()
+            # doesn't declare this kwarg in its signature.
+            run_fn: Any = agent.run
+            await run_fn(
+                message_history=message_history,
+                deferred_tool_results=results,
+            )
+        finally:
+            await agent.__aexit__(None, None, None)
+
+    async def _resume_acp_agent(
+        self,
+        session_data: SessionData,
+        checkpoint: CheckpointData,
+        results: Any,
+    ) -> None:
+        """Resume an ACP agent by reopening the subprocess and sending session/resume.
+
+        Reopens the ACP subprocess and calls agent.run() to restart the
+        session with restored state.
+
+        Args:
+            session_data: Persisted session data.
+            checkpoint: Checkpoint data (used for metadata only; ACP agents
+                manage their own message history).
+            results: DeferredToolResults for resolving pending deferred calls.
+        """
+        agent = await self._reconstruct_acp_agent(
+            session_data.session_id, session_data.agent_name
+        )
+        try:
+            # ACP agents receive the resumed session context through run()
+            run_fn: Any = agent.run
+            await run_fn(
+                message_history=list(checkpoint.message_history),
+                deferred_tool_results=results,
+            )
+        finally:
+            if hasattr(agent, "__aexit__"):
+                await agent.__aexit__(None, None, None)  # type: ignore[union-attr]
+
+    async def resume_session(
+        self,
+        session_id: str,
+        deferred_tool_results: Any,
+        *,
+        source: str = "resume_prompt",
+    ) -> None:
+        """Resume a paused session with resolved deferred tool results.
+
+        Loads the persisted SessionData, validates that deferred_tool_results
+        cover all pending_deferred_calls (raising CheckpointMismatchError if not),
+        and resumes execution via the appropriate path:
+        - Native agent: load checkpoint → reconstruct agent from config →
+          agent.run(message_history=restored, deferred_tool_results=results)
+        - ACP agent: load session data → reopen subprocess →
+          agent.run(message_history=restored, deferred_tool_results=results)
+
+        Per-session resume_lock ensures only one resume at a time.
+        Emits SessionResumeEvent on success.
+
+        Args:
+            session_id: Session to resume.
+            deferred_tool_results: Results for pending deferred tool calls
+                (DeferredToolResults-compatible object with .calls dict).
+            source: Identifier for the entity triggering the resume.
+
+        Raises:
+            SessionNotFoundError: If the session does not exist in storage.
+            SessionBusyError: If the session has an active run.
+            CheckpointMismatchError: If results don't cover all pending calls.
+        """
+        store = self.sessions.store
+        if store is None:
+            raise SessionNotFoundError(session_id)
+
+        # Load persisted session data
+        data = await store.load(session_id)
+        if data is None:
+            raise SessionNotFoundError(session_id)
+
+        # Fast-path: check for active run in live sessions (before lock).
+        # The authoritative check is inside _with_resume_lock, but this
+        # early check avoids unnecessary store operations for busy sessions.
+        session = self.sessions.get_session(session_id)
+        if session is not None and session.current_run_id is not None:
+            raise SessionBusyError(session_id, session.current_run_id)
+
+        # Validate deferred_tool_results cover all pending_deferred_calls
+        pending_call_ids: set[str] = {
+            call.tool_call_id for call in data.pending_deferred_calls
+        }
+        provided_call_ids: set[str] = set(
+            getattr(deferred_tool_results, "calls", {}).keys()
+        )
+
+        missing = pending_call_ids - provided_call_ids
+        extra = provided_call_ids - pending_call_ids
+        if missing or extra:
+            raise CheckpointMismatchError(
+                session_id=session_id,
+                expected=pending_call_ids,
+                provided=provided_call_ids,
+                missing=missing,
+                extra=extra,
+            )
+
+        # Determine agent type
+        agent_type = data.metadata.get("agent_type", "native")
+
+        # Per-session resume lock with state validation (Decision 8, Task 19)
+        async with self._with_resume_lock(session_id) as session:
+            try:
+                # Load checkpoint data
+                checkpoint = await self._load_checkpoint_data(session_id)
+
+                # Mark session as resuming
+                data = data.model_copy(update={"status": "resuming"})
+                await store.save(data)
+
+                # Route to appropriate resume path
+                if agent_type == "acp":
+                    await self._resume_acp_agent(data, checkpoint, deferred_tool_results)
+                else:
+                    await self._resume_native_agent(data, checkpoint, deferred_tool_results)
+
+                # Clear pending_deferred_calls ONLY after agent.run() succeeds (Decision 8)
+                data = data.model_copy(
+                    update={
+                        "status": "active",
+                        "pending_deferred_calls": [],
+                    }
+                )
+                data.touch()
+                await store.save(data)
+
+                # Update live session if one exists
+                if session is not None:
+                    session.last_active_at = time.monotonic()
+
+                # Emit SessionResumeEvent
+                await self.event_bus.publish(
+                    session_id,
+                    SessionResumeEvent(
+                        session_id=session_id,
+                        resolved_call_count=len(pending_call_ids),
+                        source=source,
+                    ),
+                )
+
+                logger.info(
+                    "Session resumed successfully",
+                    session_id=session_id,
+                    agent_type=agent_type,
+                    resolved_calls=len(pending_call_ids),
+                )
+
+            except Exception:
+                # On failure, keep status as checkpointed and do NOT clear pending calls
+                data = data.model_copy(update={"status": "checkpointed"})
+                data.touch()
+                await store.save(data)
+                raise
+
     async def close_session(self, session_id: str) -> None:
         """Close a session.
 
@@ -1789,6 +2350,22 @@ class SessionPool:
                 self.turns._injection_locks.pop(session_id, None)
 
         self._message_cache.pop(session_id, None)
+
+    async def _await_inflight_checkpoints(self) -> None:
+        """Wait for any in-flight checkpoint operations to complete.
+
+        During normal operation, checkpoint-on-close happens synchronously
+        inside :meth:`close_session`, so there are no in-flight operations
+        to await. This method is a future-proof hook for graceful teardown:
+        if the checkpoint mechanism ever becomes asynchronous (e.g.,
+        background flush), this method ensures the shutdown waits for
+        completion.
+
+        Called from :meth:`AgentPool.__aexit__` during pool shutdown.
+        """
+        # Currently no-op: all checkpoint operations complete synchronously
+        # within SessionController.close_session() under its lock.
+        logger.debug("No in-flight checkpoint operations to await")
 
     async def process_prompt(
         self,

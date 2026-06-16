@@ -109,6 +109,9 @@ class AgentRunContext:
     terminal_tool_name: str | None = None
     """Name of the terminal tool that completed the run."""
 
+    checkpointed: bool = False
+    """Whether the run has been checkpointed (deferred tools pending)."""
+
 
 @dataclass(kw_only=True)
 class AgentContext[TDeps = Any](NodeContext[TDeps]):

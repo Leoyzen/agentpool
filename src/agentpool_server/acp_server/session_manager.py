@@ -246,6 +246,11 @@ class ACPSessionManager:
     async def close_session(self, session_id: str, *, delete: bool = False) -> None:
         """Close and optionally delete a session.
 
+        Checkpoint-aware close: when ``delete=True`` but the session has
+        pending deferred calls (``pending_deferred_calls`` is non-empty),
+        the session is preserved with ``status='checkpointed'`` instead of
+        being deleted.  This allows the session to be resumed later.
+
         Args:
             session_id: Session identifier to close
             delete: Whether to also delete from persistent storage
@@ -257,10 +262,22 @@ class ACPSessionManager:
             await session.close()
             logger.info("Closed ACP session", session_id=session_id)
 
-        if delete:
-            if self.session_store:
+        if delete and self.session_store:
+            # Checkpoint-aware: if the session has pending deferred calls,
+            # preserve it as "checkpointed" instead of deleting.
+            data = await self.session_store.load(session_id)
+            if data is not None and data.pending_deferred_calls:
+                data = data.model_copy(update={"status": "checkpointed"})
+                data.touch()
+                await self.session_store.save(data)
+                logger.info(
+                    "Session checkpointed before close (pending deferred calls)",
+                    session_id=session_id,
+                    pending_call_count=len(data.pending_deferred_calls),
+                )
+            else:
                 await self.session_store.delete(session_id)
-            logger.info("Deleted session from store", session_id=session_id)
+                logger.info("Deleted session from store", session_id=session_id)
 
     async def update_session_agent(self, session_id: str, agent_name: str) -> None:
         """Update the agent for a session and persist.

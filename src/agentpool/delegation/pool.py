@@ -351,6 +351,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 # Shutdown SessionPool
                 assert self._session_pool is not None
                 await self._session_pool.shutdown()
+                # Await any in-flight checkpoint operations before cleanup
+                await self._session_pool._await_inflight_checkpoints()
                 self._session_pool = None
                 # Remove MCP aggregating provider from all agents
                 aggregating_provider = self.mcp.get_aggregating_provider()

@@ -872,18 +872,18 @@ async def test_run_turn_passes_input_provider_to_agent(
 
 
 # ---------------------------------------------------------------------------
-# _bypass_session_pool ContextVar
+# _in_turn_context ContextVar
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_bypass_session_pool_set_during_run_turn(
+async def test_in_turn_context_set_during_run_turn(
     controller: SessionController,
     turn_runner: TurnRunner,
     mock_pool: MagicMock,
 ) -> None:
-    """SessionPool-internal _run_stream_once sees _bypass_session_pool=True."""
-    from agentpool.agents.base_agent import _bypass_session_pool
+    """SessionPool-internal _run_stream_once sees _in_turn_context=True."""
+    from agentpool.agents.base_agent import _in_turn_context
 
     seen_values: list[bool] = []
 
@@ -892,7 +892,7 @@ async def test_bypass_session_pool_set_during_run_turn(
         *prompts: Any,
         **kwargs: Any,
     ) -> AsyncIterator[RunStartedEvent]:
-        seen_values.append(_bypass_session_pool.get())
+        seen_values.append(_in_turn_context.get())
         yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
 
     agent = MagicMock()
@@ -903,73 +903,259 @@ async def test_bypass_session_pool_set_during_run_turn(
     await turn_runner.run_turn("sess-1", "hello")
 
     assert seen_values == [True], (
-        f"_bypass_session_pool should be True during TurnRunner turns, got {seen_values}"
+        f"_in_turn_context should be True during TurnRunner turns, got {seen_values}"
     )
 
 
 @pytest.mark.anyio
-async def test_bypass_session_pool_cleared_after_run_turn(
+async def test_in_turn_context_cleared_after_run_turn(
     controller: SessionController,
     turn_runner: TurnRunner,
     mock_pool: MagicMock,
     mock_agent: MagicMock,
 ) -> None:
-    """_bypass_session_pool is reset to False after run_turn completes."""
-    from agentpool.agents.base_agent import _bypass_session_pool
+    """_in_turn_context is reset to False after run_turn completes."""
+    from agentpool.agents.base_agent import _in_turn_context
 
     await _setup_session(controller, "sess-1", mock_agent, mock_pool)
     await turn_runner.run_turn("sess-1", "hello")
 
-    assert _bypass_session_pool.get() is False, (
-        "_bypass_session_pool should be reset after TurnRunner turn completes"
+    assert _in_turn_context.get() is False, (
+        "_in_turn_context should be reset after TurnRunner turn completes"
     )
 
 
-def test_bypass_session_pool_external_call() -> None:
-    """External calls (no ContextVar set, no AG-UI stack) do NOT bypass SessionPool."""
-    from agentpool.agents.base_agent import _should_bypass_session_pool
-
-    result = _should_bypass_session_pool()
-    assert result is False, (
-        "External calls should not bypass SessionPool when ContextVar is unset "
-        "and no AG-UI frames are in the stack"
-    )
+# ---------------------------------------------------------------------------
+# _should_route_via_sessionpool
+# ---------------------------------------------------------------------------
 
 
-def test_bypass_session_pool_contextvar_true() -> None:
-    """When _bypass_session_pool ContextVar is True, bypass is active."""
-    from agentpool.agents.base_agent import _bypass_session_pool, _should_bypass_session_pool
+@pytest.mark.unit
+async def test_should_route_via_sessionpool_in_turn_context_true() -> None:
+    """_in_turn_context True → returns False (child tasks within a turn)."""
+    from agentpool.agents.base_agent import _in_turn_context, _should_route_via_sessionpool
 
-    token = _bypass_session_pool.set(True)
+    token = _in_turn_context.set(True)
     try:
-        result = _should_bypass_session_pool()
-        assert result is True, (
-            "_should_bypass_session_pool should return True when ContextVar is set"
-        )
+        result = _should_route_via_sessionpool(MagicMock(), "sess-1")
+        assert result is False, "Should return False when _in_turn_context is True"
     finally:
-        _bypass_session_pool.reset(token)
+        _in_turn_context.reset(token)
 
 
-def test_bypass_session_pool_agui_stack_inspection() -> None:
-    """AG-UI callers still bypass via stack inspection (permanent — see docs/audit/agui-bypass-audit.md)."""
-    import types
-    from typing import Any
+@pytest.mark.unit
+async def test_should_route_via_sessionpool_session_pool_none() -> None:
+    """session_pool is None → returns False (no pool available)."""
+    from agentpool.agents.base_agent import _should_route_via_sessionpool
 
-    from agentpool.agents.base_agent import _should_bypass_session_pool
+    result = _should_route_via_sessionpool(None, "sess-1")
+    assert result is False, "Should return False when session_pool is None"
 
-    agui_module: Any = types.ModuleType("agui_test_module")
-    agui_module.__dict__["_should_bypass_session_pool"] = _should_bypass_session_pool
 
-    # Execute function definition inside the module so its f_globals are agui_module's
-    exec(
-        "def _check():\n    return _should_bypass_session_pool()\n",
-        agui_module.__dict__,
+@pytest.mark.unit
+async def test_should_route_via_sessionpool_session_none() -> None:
+    """Session doesn't exist → returns True (new session should route)."""
+    from agentpool.agents.base_agent import _should_route_via_sessionpool
+
+    session_pool = MagicMock()
+    session_pool.sessions.get_session.return_value = None
+
+    result = _should_route_via_sessionpool(session_pool, "sess-1")
+    assert result is True, "Should return True when session does not exist"
+
+
+@pytest.mark.unit
+async def test_should_route_via_sessionpool_same_task_as_turn_owner() -> None:
+    """Same task as turn owner → returns False (we ARE the turn owner)."""
+    from agentpool.agents.base_agent import _should_route_via_sessionpool
+
+    session = MagicMock()
+    session._turn_owner_task = asyncio.current_task()
+
+    session_pool = MagicMock()
+    session_pool.sessions.get_session.return_value = session
+
+    result = _should_route_via_sessionpool(session_pool, "sess-1")
+    assert result is False, "Should return False when current task is the turn owner"
+
+
+@pytest.mark.unit
+async def test_should_route_via_sessionpool_different_task() -> None:
+    """Different task from turn owner → returns True (should route via pool)."""
+    from agentpool.agents.base_agent import _should_route_via_sessionpool
+
+    different_task = MagicMock()
+    session = MagicMock()
+    session._turn_owner_task = different_task
+
+    session_pool = MagicMock()
+    session_pool.sessions.get_session.return_value = session
+
+    result = _should_route_via_sessionpool(session_pool, "sess-1")
+    assert result is True, "Should return True when current task differs from turn owner"
+
+
+# ---------------------------------------------------------------------------
+# _turn_owner_task tracking
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_turn_owner_set_during_run_turn(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """_turn_owner_task matches asyncio.current_task() during the turn."""
+    from agentpool.agents.base_agent import _in_turn_context
+
+    owner_tasks: list[asyncio.Task[Any] | None] = []
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        session = controller.get_session(kwargs.get("session_id", "default"))
+        assert session is not None, "Session should exist during turn"
+        owner_tasks.append(session._turn_owner_task)
+        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
+
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "hello")
+
+    assert len(owner_tasks) == 1, "Should have captured one owner task"
+    assert owner_tasks[0] is asyncio.current_task(), (
+        "_turn_owner_task should be the current task during the turn"
     )
 
-    check_fn = agui_module.__dict__["_check"]
-    result = check_fn()
-    assert result is True, (
-        "AG-UI stack inspection should bypass SessionPool (permanent — see docs/audit/agui-bypass-audit.md)"
+
+@pytest.mark.anyio
+async def test_turn_owner_cleared_after_run_turn(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+    mock_agent: MagicMock,
+) -> None:
+    """_turn_owner_task is reset to None after run_turn completes."""
+    await _setup_session(controller, "sess-1", mock_agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "hello")
+
+    session = controller.get_session("sess-1")
+    assert session is not None
+    assert session._turn_owner_task is None, (
+        "_turn_owner_task should be None after turn completes"
+    )
+
+
+@pytest.mark.anyio
+async def test_in_turn_context_propagates_to_child_task(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """_in_turn_context ContextVar propagates to child tasks created during a turn."""
+    from agentpool.agents.base_agent import _in_turn_context
+
+    child_seen_values: list[bool] = []
+
+    async def _child_check() -> None:
+        child_seen_values.append(_in_turn_context.get())
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        # Spawn a child task that reads _in_turn_context
+        task = asyncio.create_task(_child_check())
+        await task
+        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
+
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+    agent._run_stream_once = _fake_stream
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "hello")
+
+    assert child_seen_values == [True], (
+        f"Child task should see _in_turn_context=True, got {child_seen_values}"
+    )
+
+
+@pytest.mark.anyio
+async def test_child_task_deadlock_prevention(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """A child task calling agent.run_stream() during a turn does NOT deadlock.
+
+    This proves that _in_turn_context correctly causes child tasks to
+    bypass SessionPool and execute directly instead of waiting on turn_lock.
+    """
+    from agentpool.agents.events import StreamCompleteEvent
+    from agentpool.messaging import ChatMessage
+
+    child_task_events: list[str] = []
+
+    async def _child_run_stream(agent: Any) -> None:
+        # This runs inside _in_turn_context=True — should NOT deadlock
+        # because _should_route_via_sessionpool returns False.
+        async for _event in agent.run_stream("child prompt"):
+            pass
+        child_task_events.append("completed")
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        # Simulate a real agent: spawn a child task that calls run_stream()
+        agent = kwargs.get("_agent_self")
+        if agent is not None:
+            task = asyncio.create_task(_child_run_stream(agent))
+            # Give the child a chance to start (it should complete quickly)
+            await asyncio.sleep(0)
+        yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
+
+    # We need a semi-real agent so that run_stream() actually works.
+    # But we can mock _execute_direct to avoid going through the full pipeline.
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+
+    async def _fake_direct(
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        yield RunStartedEvent(session_id="child", run_id="child-run-1")
+
+    agent._execute_direct = _fake_direct  # type: ignore[method-assign]
+    agent.name = "test-agent"
+    agent.agent_pool = mock_pool  # Simulate having an AgentPool (bypass will skip it)
+
+    # Wire _run_stream_once to pass _agent_self via kwargs
+    async def _fake_stream_with_agent(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunStartedEvent]:
+        kwargs["_agent_self"] = agent
+        async for event in _fake_stream(run_ctx, *prompts, **kwargs):
+            yield event
+
+    agent._run_stream_once = _fake_stream_with_agent
+
+    await _setup_session(controller, "sess-1", agent, mock_pool)
+    await turn_runner.run_turn("sess-1", "hello")
+
+    assert child_task_events == ["completed"], (
+        f"Child task should complete without deadlock, got {child_task_events}"
     )
 
 

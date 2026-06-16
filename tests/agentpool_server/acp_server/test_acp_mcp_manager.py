@@ -189,7 +189,7 @@ async def test_connection_handle_client_message_routes_to_session(
     from mcp.shared.message import SessionMessage
 
     assert isinstance(received, SessionMessage)
-    assert received.message.root.method == "test"
+    assert received.message.root.method == "test"  # type: ignore[union-attr]
 
 
 async def test_connection_handle_client_message_not_opened_raises(
@@ -203,18 +203,40 @@ async def test_connection_handle_client_message_not_opened_raises(
         await conn.handle_client_message({"jsonrpc": "2.0", "method": "test"})
 
 
-async def test_connection_send_to_client_formats_message(
+async def test_connection_send_to_client_formats_request(
     server_config: AcpMcpServer,
     send_to_client: AsyncMock,
 ) -> None:
-    """send_to_client wraps the message with connectionId and forwards it."""
+    """send_to_client extracts method/params and sends flattened ACP format."""
     conn = AcpMcpConnection("conn-1", server_config, send_to_client)
-    message = {"jsonrpc": "2.0", "method": "test", "id": 1}
+    message = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}
 
     await conn.send_to_client(message)
 
     send_to_client.assert_awaited_once_with(
-        {"connectionId": "conn-1", "message": message}
+        {
+            "connectionId": "conn-1",
+            "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05"},
+        }
+    )
+
+
+async def test_connection_send_to_client_formats_notification(
+    server_config: AcpMcpServer,
+    send_to_client: AsyncMock,
+) -> None:
+    """send_to_client sends notification without id in flattened ACP format."""
+    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
+    message = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+    await conn.send_to_client(message)
+
+    send_to_client.assert_awaited_once_with(
+        {
+            "connectionId": "conn-1",
+            "method": "notifications/initialized",
+        }
     )
 
 
@@ -288,3 +310,80 @@ async def test_connection_from_session_receive_not_opened_raises(
 
     with pytest.raises(RuntimeError, match="Connection not opened"):
         _ = conn.from_session_receive
+
+
+async def test_connection_send_to_client_reconstructs_success_response(
+    server_config: AcpMcpServer,
+) -> None:
+    """send_to_client reconstructs JSON-RPC response from inner result payload."""
+    send_mock = AsyncMock(return_value={"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}})
+    conn = AcpMcpConnection("conn-1", server_config, send_mock)
+    await conn.open()
+    message = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(conn.send_to_client, message)
+        received = await conn.to_session.receive()
+
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received, SessionMessage)
+    assert received.message.root.result == {"protocolVersion": "2024-11-05", "serverInfo": {"name": "test"}}  # type: ignore[union-attr]
+
+
+async def test_connection_send_to_client_reconstructs_error_response(
+    server_config: AcpMcpServer,
+) -> None:
+    """send_to_client reconstructs JSON-RPC error from inner error payload."""
+    send_mock = AsyncMock(return_value={"error": {"code": -32600, "message": "Invalid Request"}})
+    conn = AcpMcpConnection("conn-1", server_config, send_mock)
+    await conn.open()
+    message = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(conn.send_to_client, message)
+        received = await conn.to_session.receive()
+
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received, SessionMessage)
+    assert received.message.root.error.code == -32600  # type: ignore[union-attr]
+    assert received.message.root.error.message == "Invalid Request"  # type: ignore[union-attr]
+
+
+async def test_connection_handle_client_message_flattened_format(
+    server_config: AcpMcpServer,
+    send_to_client: AsyncMock,
+) -> None:
+    """handle_client_message reconstructs JSON-RPC from flattened ACP format."""
+    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
+    await conn.open()
+    flattened = {"connectionId": "conn-1", "method": "tools/list", "params": {}}
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(conn.handle_client_message, flattened)
+        received = await conn.to_session.receive()
+
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received, SessionMessage)
+    assert received.message.root.method == "tools/list"  # type: ignore[union-attr]
+
+
+async def test_connection_handle_client_message_backward_compat(
+    server_config: AcpMcpServer,
+    send_to_client: AsyncMock,
+) -> None:
+    """handle_client_message still accepts raw JSON-RPC messages."""
+    conn = AcpMcpConnection("conn-1", server_config, send_to_client)
+    await conn.open()
+    message = {"jsonrpc": "2.0", "method": "test", "id": 1}
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(conn.handle_client_message, message)
+        received = await conn.to_session.receive()
+
+    from mcp.shared.message import SessionMessage
+
+    assert isinstance(received, SessionMessage)
+    assert received.message.root.method == "test"  # type: ignore[union-attr]

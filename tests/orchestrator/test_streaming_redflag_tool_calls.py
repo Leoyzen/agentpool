@@ -20,7 +20,7 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.base_agent import _bypass_session_pool
+from agentpool.agents.base_agent import _in_turn_context
 from agentpool.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
@@ -97,7 +97,7 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
         # Bypass SessionPool so the shared agent (with our registered tool) runs directly.
         # Without this, run_stream() delegates to SessionPool which creates a per-session
         # agent from the manifest config that lacks our dynamically registered tool.
-        _bypass_session_pool.set(True)
+        _in_turn_context.set(True)
         events = await _collect_events(agent.run_stream("delegate to general"))
 
     # Categorise events for analysis
@@ -184,7 +184,7 @@ async def test_tool_error_does_not_break_stream() -> None:
         )
 
         # Bypass SessionPool so the shared agent (with our registered tool) runs directly.
-        _bypass_session_pool.set(True)
+        _in_turn_context.set(True)
         events = await _collect_events(agent.run_stream("trigger broken tool"))
 
     event_types = [type(e).__name__ for e in events]

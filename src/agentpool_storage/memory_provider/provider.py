@@ -34,6 +34,7 @@ class MemoryStorageProvider(StorageProvider):
         self.commands: list[dict[str, Any]] = []
         self.projects: dict[str, ProjectData] = {}
         self.sessions: dict[str, SessionData] = {}
+        self._checkpoints: dict[str, dict[str, str]] = {}
 
     def cleanup(self) -> None:
         """Clear all stored data."""
@@ -42,6 +43,7 @@ class MemoryStorageProvider(StorageProvider):
         self.commands.clear()
         self.projects.clear()
         self.sessions.clear()
+        self._checkpoints.clear()
 
     async def filter_messages(self, query: SessionQuery) -> list[ChatMessage[str]]:
         """Filter messages from memory."""
@@ -423,6 +425,42 @@ class MemoryStorageProvider(StorageProvider):
         """Delete a session."""
         if session_id in self.sessions:
             del self.sessions[session_id]
+            return True
+        return False
+
+    # Checkpoint methods
+
+    async def save_checkpoint(
+        self,
+        session_id: str,
+        messages_json: str,
+        pending_calls_json: str,
+    ) -> None:
+        """Save checkpoint data atomically (overwrites if exists)."""
+        self._checkpoints[session_id] = {
+            "messages_json": messages_json,
+            "pending_calls_json": pending_calls_json,
+        }
+
+    async def load_checkpoint(self, session_id: str) -> tuple[str, str] | None:
+        """Load checkpoint data.
+
+        Returns:
+            Tuple of (messages_json, pending_calls_json) or None.
+        """
+        cp = self._checkpoints.get(session_id)
+        if cp is None:
+            return None
+        return cp["messages_json"], cp["pending_calls_json"]
+
+    async def delete_checkpoint(self, session_id: str) -> bool:
+        """Delete checkpoint data.
+
+        Returns:
+            True if checkpoint was deleted, False if not found.
+        """
+        if session_id in self._checkpoints:
+            del self._checkpoints[session_id]
             return True
         return False
 

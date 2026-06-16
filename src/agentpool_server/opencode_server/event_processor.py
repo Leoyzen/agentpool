@@ -29,6 +29,7 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
     TextContentItem,
     ToolCallCompleteEvent,
+    ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
@@ -154,6 +155,17 @@ class EventProcessor:
             ) if tool_call_id:
                 for e in self._process_tool_progress(
                     ctx, tool_call_id, title, items, tool_name, event_tool_input
+                ):
+                    yield e
+
+            case ToolCallDeferredEvent(
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                deferred_handle=deferred_handle,
+                deferred_strategy=strategy,
+            ):
+                for e in self._process_tool_deferred(
+                    ctx, tool_call_id, tool_name, deferred_handle, strategy
                 ):
                     yield e
 
@@ -410,6 +422,67 @@ class EventProcessor:
             ctx.add_tool_part(tool_call_id, tool_part)
             ctx.assistant_msg.parts.append(tool_part)
             yield PartUpdatedEvent.create(tool_part)
+
+    def _process_tool_deferred(
+        self,
+        ctx: EventProcessorContext,
+        tool_call_id: str,
+        tool_name: str,
+        deferred_handle: str,
+        strategy: str,
+    ) -> Iterator[Event]:
+        """Process a deferred tool call event.
+
+        Produces a ToolPart with state=ToolStateRunning and deferred metadata.
+        If a ToolPart for the given tool_call_id already exists with a completed
+        or error state, the event is deduplicated (skipped).
+
+        Args:
+            ctx: The event processor context.
+            tool_call_id: The unique identifier for the deferred tool call.
+            tool_name: The name of the tool that was deferred.
+            deferred_handle: Correlation ID for resolving the deferred call.
+            strategy: How the agent handles the deferral (block/continue/stream).
+
+        Yields:
+            PartUpdatedEvent for the created deferred tool part, or nothing
+            if the tool part already exists in a completed/error state.
+        """
+        # Deduplication: skip if ToolPart already exists and is completed/error
+        existing = ctx.get_tool_part(tool_call_id)
+        if existing is not None:
+            match existing.state:
+                case ToolStateCompleted() | ToolStateError():
+                    return  # Already finalized, skip replay
+                case _:
+                    pass  # Running or not yet in final state, continue
+
+        title = f"[Deferred] {tool_name}"
+        if strategy and strategy != "block":
+            title = f"[Deferred:{strategy}] {tool_name}"
+
+        ts = TimeStart(start=now_ms())
+        tool_state = ToolStateRunning(
+            time=ts,
+            input={},
+            title=title,
+        )
+        metadata: dict[str, Any] = {
+            "deferred": True,
+            "deferred_handle": deferred_handle,
+        }
+        tool_part = ToolPart(
+            id=identifier.ascending("part"),
+            message_id=ctx.assistant_msg_id,
+            session_id=ctx.session_id,
+            tool=tool_name,
+            call_id=tool_call_id,
+            state=tool_state,
+            metadata=metadata,
+        )
+        ctx.add_tool_part(tool_call_id, tool_part)
+        ctx.assistant_msg.parts.append(tool_part)
+        yield PartUpdatedEvent.create(tool_part)
 
     def _process_pydantic_tool_call(
         self,

@@ -187,7 +187,9 @@ class TestEventBusScopedSubscription:
         bus = EventBus()
         queue = await bus.subscribe("s1", scope="session")
         await bus.publish("s1", "event1")
-        assert await asyncio.wait_for(queue.get(), timeout=1.0) == "event1"
+        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+        assert envelope is not None
+        assert envelope.event == "event1"
 
     @pytest.mark.anyio
     async def test_session_scope_excludes_child_events(self) -> None:
@@ -206,7 +208,9 @@ class TestEventBusScopedSubscription:
         bus._session_tree = {"s1": ["s1.1"], "s1.1": []}
         queue = await bus.subscribe("s1", scope="descendants")
         await bus.publish("s1.1", "event1")
-        assert await asyncio.wait_for(queue.get(), timeout=1.0) == "event1"
+        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+        assert envelope is not None
+        assert envelope.event == "event1"
 
     @pytest.mark.anyio
     async def test_subtree_scope_receives_sibling_events(self) -> None:
@@ -214,7 +218,9 @@ class TestEventBusScopedSubscription:
         bus._session_tree = {"s1": ["s1.1", "s1.2"], "s1.1": [], "s1.2": []}
         queue = await bus.subscribe("s1.1", scope="subtree")
         await bus.publish("s1.2", "event1")
-        assert await asyncio.wait_for(queue.get(), timeout=1.0) == "event1"
+        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+        assert envelope is not None
+        assert envelope.event == "event1"
 
 
 # ============================================================================
@@ -588,15 +594,16 @@ async def test_run_failed_event_published_on_turn_exception(
     await turn_runner.event_bus.publish("sess-1", None)
     await consumer
 
-    failed_events = [e for e in events if isinstance(e, RunFailedEvent)]
+    failed_events = [e for e in events if isinstance(getattr(e, 'event', e), RunFailedEvent)]
     assert len(failed_events) == 1, (
         f"Expected 1 RunFailedEvent, got {len(failed_events)} "
         f"(total events: {len(events)})"
     )
-    assert failed_events[0].session_id == "sess-1"
-    assert isinstance(failed_events[0].exception, RuntimeError)
-    assert str(failed_events[0].exception) == "native agent boom"
-    assert failed_events[0].run_id is not None
+    failed = failed_events[0].event
+    assert failed.session_id == "sess-1"
+    assert isinstance(failed.exception, RuntimeError)
+    assert str(failed.exception) == "native agent boom"
+    assert failed.run_id is not None
 
 
 @pytest.mark.anyio
@@ -648,9 +655,9 @@ async def test_run_failed_event_includes_run_id(
     await turn_runner.event_bus.publish("sess-1", None)
     await consumer
 
-    failed_events = [e for e in events if isinstance(e, RunFailedEvent)]
+    failed_events = [e for e in events if isinstance(getattr(e, 'event', e), RunFailedEvent)]
     assert len(failed_events) == 1
-    assert failed_events[0].run_id == run_handle.run_id
+    assert failed_events[0].event.run_id == run_handle.run_id
 
 
 @pytest.mark.anyio
@@ -697,13 +704,14 @@ async def test_run_failed_event_published_via_receive_request(
     await tr.event_bus.publish("sess-2", None)
     await consumer
 
-    failed_events = [e for e in events if isinstance(e, RunFailedEvent)]
+    failed_events = [e for e in events if isinstance(getattr(e, 'event', e), RunFailedEvent)]
     assert len(failed_events) == 1, (
         f"Expected 1 RunFailedEvent via receive_request, got {len(failed_events)}"
     )
-    assert failed_events[0].session_id == "sess-2"
-    assert isinstance(failed_events[0].exception, RuntimeError)
-    assert str(failed_events[0].exception) == "receive_request boom"
+    failed = failed_events[0].event
+    assert failed.session_id == "sess-2"
+    assert isinstance(failed.exception, RuntimeError)
+    assert str(failed.exception) == "receive_request boom"
 
 
 @pytest.mark.anyio

@@ -42,6 +42,8 @@ class ToolCallState:
         title: str,
         kind: ToolCallKind,
         raw_input: dict[str, Any],
+        *,
+        deferred_handle: str | None = None,
     ) -> None:
         """Initialize tool call state.
 
@@ -52,6 +54,7 @@ class ToolCallState:
             title: Initial human-readable title
             kind: Category of tool (read, edit, execute, etc.)
             raw_input: Input parameters passed to the tool
+            deferred_handle: Correlation ID for deferred tool calls (for durable execution)
         """
         self._notifications = notifications
         self.tool_call_id = tool_call_id
@@ -61,11 +64,32 @@ class ToolCallState:
         self._raw_input = raw_input
         self._started = False
         self._has_content = False  # Track if content has been sent
+        self._deferred_handle = deferred_handle
 
     @property
     def has_content(self) -> bool:
         """Whether content has been sent for this tool call."""
         return self._has_content
+
+    @property
+    def deferred_handle(self) -> str | None:
+        """Correlation ID for deferred tool calls (durable execution)."""
+        return self._deferred_handle
+
+    # V2_EXTENSION: On ACP V2, this would emit a state_change session/update
+    # notification when the agent transitions between processing states
+    # (e.g., running -> idle). The method signature and call site are ready
+    # for V2 implementation. See ACP V2 spec: state_change notification.
+    def _on_state_change(self, state: str) -> None:
+        """Handle agent state transitions. No-op on ACP V1.
+
+        Args:
+            state: The new agent processing state (e.g., "running", "idle").
+
+        On ACP V1, this method intentionally does nothing. On ACP V2,
+        it would emit a session/update notification with state_change content.
+        """
+        pass
 
     async def start(self) -> None:
         """Send initial tool_call notification.

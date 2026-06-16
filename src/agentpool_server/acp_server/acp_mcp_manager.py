@@ -22,26 +22,9 @@ if TYPE_CHECKING:
 
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
-
+from pydantic import ValidationError
 
 logger = get_logger(__name__)
-
-
-def _sanitize_jsonrpc_error(response: dict[str, Any]) -> dict[str, Any]:
-    """Fix non-standard JSON-RPC error codes (e.g. string -> int)."""
-    error = response.get("error")
-    if isinstance(error, dict):
-        code = error.get("code")
-        if not isinstance(code, int):
-            code_map = {
-                "method_not_found": -32601,
-                "parse_error": -32700,
-                "invalid_request": -32600,
-                "invalid_params": -32602,
-                "internal_error": -32603,
-            }
-            error["code"] = code_map.get(str(code).lower(), -32603)
-    return response
 
 
 class AcpMcpConnection:
@@ -71,8 +54,6 @@ class AcpMcpConnection:
         self._to_session_receive: MemoryObjectReceiveStream[dict[str, Any]] | None = None
         self._from_session_send: MemoryObjectSendStream[dict[str, Any]] | None = None
         self._from_session_receive: MemoryObjectReceiveStream[dict[str, Any]] | None = None
-        self._pending_client_requests: dict[Any, asyncio.Future] = {}
-        self._pending_lock = asyncio.Lock()
         self._closed = False
 
     async def open(self) -> None:
@@ -90,11 +71,6 @@ class AcpMcpConnection:
         if self._closed:
             return
         self._closed = True
-        # Cancel any pending client-initiated requests
-        for future in list(self._pending_client_requests.values()):
-            if not future.done():
-                future.cancel()
-        self._pending_client_requests.clear()
         for stream in [
             self._to_session_send,
             self._to_session_receive,
@@ -105,77 +81,39 @@ class AcpMcpConnection:
                 await stream.aclose()
         logger.info("MCP-over-ACP connection closed", connection_id=self.connection_id)
 
-    async def register_pending_request(self, request_id: Any) -> asyncio.Future:
-        """Register a pending client-initiated request.
-
-        Args:
-            request_id: The JSON-RPC id of the pending request.
-
-        Returns:
-            A Future that will be fulfilled when the response arrives.
-
-        Raises:
-            RuntimeError: If a pending request with the same ID already exists.
-        """
-        async with self._pending_lock:
-            if request_id in self._pending_client_requests:
-                raise RuntimeError(f"Duplicate pending request ID: {request_id}")
-            future = asyncio.get_event_loop().create_future()
-            self._pending_client_requests[request_id] = future
-            return future
-
-    def fulfill_pending_request(self, request_id: Any, response: dict[str, Any]) -> bool:
-        """Fulfill a pending request with its response.
-
-        Args:
-            request_id: The JSON-RPC id of the response.
-            response: The full JSON-RPC response dict.
-
-        Returns:
-            True if the response was consumed (fulfilled or already-done).
-            False if no matching pending request was found.
-        """
-        future = self._pending_client_requests.pop(request_id, None)
-        if future is None:
-            return False
-        if future.done():
-            logger.warning(
-                "Late response for already-completed request",
-                connection_id=self.connection_id,
-                request_id=request_id,
-            )
-            return True
-        try:
-            future.set_result(response)
-        except asyncio.InvalidStateError:
-            logger.warning(
-                "InvalidStateError fulfilling pending request",
-                connection_id=self.connection_id,
-                request_id=request_id,
-            )
-        return True
-
-    def unregister_pending_request(self, request_id: Any) -> None:
-        """Remove a pending request from the registry without fulfilling it."""
-        self._pending_client_requests.pop(request_id, None)
-
     async def handle_client_message(self, message: dict[str, Any]) -> None:
         """Handle an incoming mcp/message from the client.
 
-        Routes the message to the MCP session's receive stream.
-        If the message is a plain dict (from JSON deserialization),
-        it is converted back to a SessionMessage before sending.
+        Accepts either the flattened ACP format (per MCP-over-ACP RFD) or a
+        raw JSON-RPC message dict, reconstructs a standard JSON-RPC message,
+        and routes it to the MCP session's receive stream.
         """
         if self._to_session_send is None:
             raise RuntimeError("Connection not opened")
         try:
             if isinstance(message, SessionMessage):
-                await self._to_session_send.send(message)
-            else:
-                session_msg = SessionMessage(
-                    message=JSONRPCMessage.model_validate(message)
-                )
-                await self._to_session_send.send(session_msg)
+                await self._to_session_send.send(message)  # type: ignore[arg-type]
+            elif isinstance(message, dict):
+                if "jsonrpc" in message:
+                    # Raw JSON-RPC message (backward compatibility)
+                    session_msg = SessionMessage(
+                        message=JSONRPCMessage.model_validate(message)
+                    )
+                    await self._to_session_send.send(session_msg)  # type: ignore[arg-type]
+                else:
+                    # Flattened ACP format: reconstruct JSON-RPC message
+                    method = message.get("method")
+                    params = message.get("params")
+                    jsonrpc_message: dict[str, Any] = {
+                        "jsonrpc": "2.0",
+                        "method": method,
+                    }
+                    if params is not None:
+                        jsonrpc_message["params"] = params
+                    session_msg = SessionMessage(
+                        message=JSONRPCMessage.model_validate(jsonrpc_message)
+                    )
+                    await self._to_session_send.send(session_msg)  # type: ignore[arg-type]
         except (anyio.ClosedResourceError, anyio.EndOfStream):
             logger.debug(
                 "Failed to route message: connection already closed",
@@ -184,6 +122,10 @@ class AcpMcpConnection:
 
     async def send_to_client(self, message: Any) -> Any:
         """Send an mcp/message to the client.
+
+        Converts the inner MCP JSON-RPC message to the flattened ACP format
+        (per the MCP-over-ACP RFD) and reconstructs JSON-RPC responses from
+        the inner result payload returned by the client.
 
         Args:
             message: MCP JSON-RPC message dict or SessionMessage.
@@ -196,95 +138,93 @@ class AcpMcpConnection:
                 by_alias=True, mode="json", exclude_none=True
             )
 
-        # NEW: Check if this is a response to a pending client-initiated request
-        if (
-            isinstance(message, dict)
-            and ("result" in message or "error" in message)
-            and message.get("id") is not None
-        ):
-            if self.fulfill_pending_request(message["id"], message):
-                return message  # Consumed, don't forward to ACP client
+        if not isinstance(message, dict):
             logger.warning(
-                "Dropping unmatched or duplicate JSON-RPC response",
+                "Unexpected message type in send_to_client",
+                type=type(message).__name__,
                 connection_id=self.connection_id,
-                request_id=message.get("id"),
             )
-            return message  # Dropped, don't forward to ACP client
+            return None
 
-        wrapped = {"connectionId": self.connection_id, "message": message}
-        result = await self._send_to_client(wrapped)
+        # Extract original message ID so we can correlate the response
+        original_id = message.get("id")
+        method = message.get("method")
+        params = message.get("params")
+
+        # Build flattened ACP mcp/message params (per MCP-over-ACP RFD)
+        wrapped: dict[str, Any] = {
+            "connectionId": self.connection_id,
+            "method": method,
+        }
+        if params is not None:
+            wrapped["params"] = params
+
+        try:
+            result = await self._send_to_client(wrapped)
+        except Exception as exc:
+            logger.exception(
+                "Error sending mcp/message to client",
+                connection_id=self.connection_id,
+                method=method,
+            )
+            # Reconstruct JSON-RPC error response for the MCP session
+            if original_id is not None and self._to_session_send is not None:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": original_id,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {exc}",
+                    },
+                }
+                try:
+                    await self._to_session_send.send(
+                        SessionMessage(
+                            message=JSONRPCMessage.model_validate(error_response)
+                        )  # type: ignore[arg-type]
+                    )
+                except anyio.BrokenResourceError:
+                    pass
+            return None
 
         # Forward ACP mcp/message response back to the MCP session so
         # ClientSession._receive_loop can process it.
-        if isinstance(result, dict) and self._to_session_send is not None:
-            if "jsonrpc" in result:
-                # Client returned standard JSON-RPC response
-                try:
-                    result = _sanitize_jsonrpc_error(result)
-                    session_msg = SessionMessage(
-                        message=JSONRPCMessage.model_validate(result)
-                    )
-                except Exception:
-                    logger.exception(
-                        "Invalid JSON-RPC response from mcp/message",
-                        connection_id=self.connection_id,
-                        response=result,
-                    )
-                    # Build a fallback error response so the session doesn't hang
-                    request_id = result.get("id", 0)
-                    fallback = {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {
-                            "code": -32603,
-                            "message": "Invalid JSON-RPC response from ACP client",
-                        },
-                    }
-                    session_msg = SessionMessage(
-                        message=JSONRPCMessage.model_validate(fallback)
-                    )
-                try:
-                    await self._to_session_send.send(session_msg)
-                except anyio.BrokenResourceError:
-                    logger.debug(
-                        "Cannot forward response: session stream already closed",
-                        connection_id=self.connection_id,
-                    )
-            elif isinstance(message, dict) and "id" in message:
-                # Client returned bare result; wrap as JSON-RPC response
-                wrapped_response = {
+        if (
+            original_id is not None
+            and self._to_session_send is not None
+            and isinstance(result, dict)
+        ):
+            if "error" in result:
+                # Client returned an error object as the result
+                response = {
                     "jsonrpc": "2.0",
-                    "id": message["id"],
+                    "id": original_id,
+                    "error": result["error"],
+                }
+            else:
+                # Client returned a successful result payload
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": original_id,
                     "result": result,
                 }
-                try:
-                    session_msg = SessionMessage(
-                        message=JSONRPCMessage.model_validate(wrapped_response)
-                    )
-                except Exception:
-                    logger.exception(
-                        "Invalid JSON-RPC response from mcp/message",
-                        connection_id=self.connection_id,
-                        response=wrapped_response,
-                    )
-                    fallback = {
-                        "jsonrpc": "2.0",
-                        "id": message["id"],
-                        "error": {
-                            "code": -32603,
-                            "message": "Invalid JSON-RPC response from ACP client",
-                        },
-                    }
-                    session_msg = SessionMessage(
-                        message=JSONRPCMessage.model_validate(fallback)
-                    )
-                try:
-                    await self._to_session_send.send(session_msg)
-                except anyio.BrokenResourceError:
-                    logger.debug(
-                        "Cannot forward response: session stream already closed",
-                        connection_id=self.connection_id,
-                    )
+            try:
+                await self._to_session_send.send(
+                    SessionMessage(
+                        message=JSONRPCMessage.model_validate(response)
+                    )  # type: ignore[arg-type]
+                )
+            except ValidationError:
+                logger.exception(
+                    "Invalid JSON-RPC response from mcp/message",
+                    response=response,
+                    connection_id=self.connection_id,
+                )
+            except anyio.BrokenResourceError:
+                logger.debug(
+                    "Cannot forward response: session stream already closed",
+                    connection_id=self.connection_id,
+                )
 
         return result
 

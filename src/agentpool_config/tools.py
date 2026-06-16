@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import ConfigDict, Field, ImportString
+from pydantic import ConfigDict, Field, ImportString, field_validator
 from schemez import Schema
+
+from agentpool.utils.parse_time import parse_time_period
 
 
 if TYPE_CHECKING:
@@ -81,6 +84,48 @@ class BaseToolConfig(Schema):
     )
     """Schema override for tool function definition."""
 
+    deferred: bool = Field(
+        default=False,
+        title="Deferred execution",
+    )
+    """Whether this tool uses deferred execution (runs in background)."""
+
+    deferred_kind: Literal["external", "unapproved"] = Field(
+        default="external",
+        title="Deferred kind",
+    )
+    """The reason for deferral: external (e.g., CI/CD) or unapproved (pending human approval)."""
+
+    deferred_strategy: Literal["block", "continue", "stream"] = Field(
+        default="block",
+        title="Deferred strategy",
+    )
+    """How to handle conversation while tool is deferred.
+    ``block`` pauses until tool completes, ``continue`` proceeds with placeholder,
+    ``stream`` emits placeholder as streaming token.
+    """
+
+    deferred_placeholder: str = Field(
+        default="This tool is processing in the background.",
+        title="Deferred placeholder",
+    )
+    """Message shown to user while deferred tool runs."""
+
+    deferred_timeout: timedelta | str | None = Field(
+        default=None,
+        title="Deferred timeout",
+        examples=["30s", "5m", "1h"],
+    )
+    """Maximum duration to wait for deferred tool. None means no timeout."""
+
+    @field_validator("deferred_timeout", mode="before")
+    @classmethod
+    def _parse_deferred_timeout(cls, v: timedelta | str | None) -> timedelta | None:
+        """Parse string timeout to timedelta."""
+        if v is None or isinstance(v, timedelta):
+            return v
+        return parse_time_period(v)
+
     model_config = ConfigDict(frozen=True)
 
     def get_tool(self) -> Tool:
@@ -137,4 +182,9 @@ class ImportToolConfig(BaseToolConfig):
             prepare=prepare_callable,
             function_schema=self.function_schema,
             schema_override=self.schema_override,
+            deferred=self.deferred,
+            deferred_kind=self.deferred_kind,
+            deferred_strategy=self.deferred_strategy,
+            deferred_placeholder=self.deferred_placeholder,
+            deferred_timeout=self.deferred_timeout,
         )

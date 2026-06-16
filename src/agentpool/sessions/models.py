@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal
 
 from pydantic import Field
 from schemez import Schema
@@ -101,6 +101,25 @@ class SessionData(Schema):
         - CLI: terminal_size, color_support
     """
 
+    pending_deferred_calls: list[PendingDeferredCall] = Field(default_factory=list)
+    """Unresolved deferred tool calls pending external resolution.
+    
+    Each entry represents a tool call that was deferred (external execution
+    or awaiting human approval). O(1) lookup of what's unresolved. When
+    results arrive, match by tool_call_id, build DeferredToolResults,
+    and clear the list.
+    """
+
+    status: str = "active"
+    """Session execution status: active, checkpointed, resuming, completed, failed."""
+
+    agent_config_hash: str | None = None
+    """Hash of the agent configuration used to start this session.
+    
+    Used to detect config changes between checkpoint and resume, ensuring
+    the resumed agent matches the original configuration.
+    """
+
     def touch(self) -> None:
         """Update last_active timestamp."""
         # Note: Schema is frozen by default, so we need to work around that
@@ -125,3 +144,31 @@ class SessionData(Schema):
     def updated_at(self) -> str | None:
         """ISO timestamp of last activity (for protocol compatibility)."""
         return self.last_active.isoformat() if self.last_active else None
+
+
+class PendingDeferredCall(Schema):
+    """A deferred tool call awaiting external or human resolution.
+
+    Stored on SessionData.pending_deferred_calls for O(1) lookup of
+    unresolved deferred calls. When results arrive, match by tool_call_id,
+    build DeferredToolResults, and clear from the list.
+    """
+
+    tool_call_id: str
+    """Unique identifier matching the pydantic-ai ToolCallPart.tool_call_id."""
+
+    tool_name: str
+    """Name of the tool that was deferred (e.g., 'bash', 'subagent')."""
+
+    deferred_kind: Literal["external", "unapproved"]
+    """Why the call was deferred: external execution or awaiting human approval."""
+
+    deferred_strategy: Literal["block", "continue", "stream"]
+    """How to continue: block (checkpoint), continue (placeholder), stream (incremental)."""
+
+    created_at: datetime = Field(default_factory=get_now)
+    """When the deferred call was created."""
+
+    timeout: timedelta | None = None
+    """Optional timeout after which the call expires."""
+

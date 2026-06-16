@@ -52,6 +52,8 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         client: ACP client for sending session update notifications.
         client_capabilities: Client capabilities for elicitation support
             gating. If None, falls back to legacy request_permission.
+        acp_agent: Reference to the ``AgentPoolACPAgent``, used for
+            session resume operations that need agent-level context.
     """
 
     def __init__(
@@ -61,6 +63,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         event_converter: ACPEventConverter,
         client: Client,
         client_capabilities: ClientCapabilities | None = None,
+        acp_agent: Any = None,
     ) -> None:
         """Initialize the protocol handler."""
         super().__init__()
@@ -70,6 +73,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self.client = client
         self.client_capabilities = client_capabilities
         self._converters: dict[str, ACPEventConverter] = {}
+        self.acp_agent = acp_agent
 
     @property
     def event_bus(self) -> EventBus:
@@ -248,17 +252,43 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             logger.error("SessionPool not available", session_id=session_id)
             return self._prompt_response("end_turn")
 
-        # Recover cwd from session_store for clients reconnecting after pool swaps
+        # Recover cwd from session_store for clients reconnecting after pool swaps.
+        # Also detect checkpointed sessions that need context restoration.
         cwd = "."
+        stored_data = None
         if self.session_manager.session_store is not None:
             try:
-                stored = await self.session_manager.session_store.load(session_id)
-                if stored and stored.cwd:
-                    cwd = stored.cwd
+                stored_data = await self.session_manager.session_store.load(session_id)
+                if stored_data is not None:
+                    if stored_data.cwd:
+                        cwd = stored_data.cwd
+                    # If session is checkpointed and not active, resume it.
+                    # Resuming restores the session wrapper without replaying
+                    # message history (the client already has the messages).
+                    if (
+                        stored_data.status == "checkpointed"
+                        and self.session_manager.get_session(session_id) is None
+                        and self.acp_agent is not None
+                    ):
+                        logger.info(
+                            "Resuming checkpointed session",
+                            session_id=session_id,
+                        )
+                        await self.session_manager.resume_session(
+                            session_id=session_id,
+                            client=self.client,
+                            acp_agent=self.acp_agent,
+                            client_capabilities=self.client_capabilities,
+                            client_info=self.acp_agent.client_info,
+                            subagent_display_mode=self.acp_agent.subagent_display_mode,
+                        )
+                        # Re-subscribe EventBus for resumed session
+                        await self._ensure_event_consumer(session_id)
             except Exception:  # noqa: BLE001
                 pass  # Use default cwd
 
-        # Ensure the session exists in the SessionPool (pass recovered cwd as metadata)
+        # Ensure the session exists in the SessionPool (pass recovered cwd as metadata).
+        # create_session is idempotent — no-op if the session already exists.
         await session_pool.create_session(session_id, cwd=cwd)
 
         # Add session MCP providers to SessionPool's per-session agent.

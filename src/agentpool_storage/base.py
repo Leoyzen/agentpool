@@ -571,3 +571,45 @@ class StorageProvider:
         """
         msg = f"{self.__class__.__name__} does not support session storage"
         raise NotImplementedError(msg)
+
+    # Checkpoint methods
+
+    async def save_checkpoint(
+        self,
+        session_id: str,
+        messages_json: str,
+        pending_calls_json: str,
+    ) -> None:
+        """Save checkpoint data atomically.
+
+        Stores serialized messages and pending deferred calls together
+        so they can be restored on resume.
+
+        Args:
+            session_id: Session identifier.
+            messages_json: JSON-serialized list of ModelMessage.
+            pending_calls_json: JSON-serialized list of PendingDeferredCall.
+        """
+        msg = f"{self.__class__.__name__} does not support checkpoints"
+        raise NotImplementedError(msg)
+
+    async def load_checkpoint(self, session_id: str) -> tuple[str, str] | None:
+        """Load checkpoint data.
+
+        Returns:
+            Tuple of (messages_json, pending_calls_json) or None if no checkpoint exists.
+        """
+        msg = f"{self.__class__.__name__} does not support checkpoints"
+        raise NotImplementedError(msg)
+
+    async def delete_checkpoint(self, session_id: str) -> bool:
+        """Delete checkpoint data.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            True if checkpoint was deleted, False if not found.
+        """
+        msg = f"{self.__class__.__name__} does not support checkpoints"
+        raise NotImplementedError(msg)

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
+import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
-import uuid
 
 import anyio
 
@@ -663,14 +664,79 @@ class AgentPoolACPAgent(ACPAgent):
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
 
-        # Delegate to SessionPool-backed handler when available
+        # Delegate to SessionPool-backed handler when feature flag is enabled
         if self._protocol_handler is not None:
-            return await self._protocol_handler.handle_prompt(
+            response = await self._protocol_handler.handle_prompt(
                 params.session_id,
                 params.prompt,
             )
+            if response is not None:
+                return response
+            # Per-agent canary flag is off — fall through to legacy path
 
-        raise RuntimeError("No protocol handler available")
+        logger.info("Processing prompt", session_id=params.session_id)
+        session = self.session_manager.get_session(params.session_id)
+        # Auto-recreate session if not found (e.g., after pool swap)
+        if not session:
+            logger.info("Session not found, recreating", session_id=params.session_id)
+            # Try to get cwd from stored session data
+            cwd = "."
+            try:
+                stored = (
+                    await self.session_manager.session_store.load(params.session_id)
+                    if self.session_manager.session_store
+                    else None
+                )
+                if stored and stored.cwd:
+                    cwd = stored.cwd
+            except Exception:  # noqa: BLE001
+                pass  # Use default cwd
+
+            try:
+                # Recreate session with same ID using default agent
+                await self.session_manager.create_session(
+                    agent=self.default_agent,
+                    cwd=cwd,
+                    client=self.client,
+                    acp_agent=self,
+                    session_id=params.session_id,
+                    client_capabilities=self.client_capabilities,
+                    client_info=self.client_info,
+                    subagent_display_mode=self.subagent_display_mode,
+                )
+                if session := self.session_manager.get_session(params.session_id):
+                    # Initialize session extras
+                    self.tasks.create_task(session.send_available_commands_update())
+                    self.tasks.create_task(session.agent.load_rules(session.cwd))
+            except Exception:
+                logger.exception("Failed to recreate session", session_id=params.session_id)
+                return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
+
+        try:
+            if not session:
+                raise ValueError(f"Session {params.session_id} not found")  # noqa: TRY301
+            stop_reason = await session.process_prompt(params.prompt)
+            # Return the actual stop reason from the session
+        except Exception as e:
+            logger.exception("Failed to process prompt", session_id=params.session_id)
+            msg = f"Error processing prompt: {e}"
+            if session:
+                # Send error as toast instead of polluting chat history
+                await session._send_toast(
+                    message=msg,
+                    level="error",
+                )
+                await anyio.sleep(0.05)  # Allow network buffers to flush
+
+            return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
+        else:
+            response = PromptResponse(
+                stop_reason=stop_reason,
+                user_message_id=params.message_id,
+                usage=session.last_usage,
+            )
+            logger.info("Returning PromptResponse", stop_reason=stop_reason)
+            return response
 
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         """Stop an active session and free its resources.
@@ -678,12 +744,25 @@ class AgentPoolACPAgent(ACPAgent):
         Cancels any ongoing work (like session/cancel) and then
         closes the session and releases all associated resources.
         """
-        # Delegate to SessionPool-backed handler when available
+        # Delegate to SessionPool-backed handler when feature flag is enabled
         if self._protocol_handler is not None:
             await self._protocol_handler.close_session(params.session_id)
-            return CloseSessionResponse()
+            # Handler returns early when per-agent canary is off;
+            # legacy cleanup below still runs for those agents.
+            if self.default_agent.metadata.get("use_session_pool", False):
+                return CloseSessionResponse()
 
-        raise RuntimeError("No protocol handler available")
+        logger.info("Stopping session", session_id=params.session_id)
+        try:
+            # Cancel ongoing work first
+            if session := self.session_manager.get_session(params.session_id):
+                await session.cancel()
+            # Close and release session resources
+            await self.session_manager.close_session(params.session_id)
+            logger.info("Session stopped", session_id=params.session_id)
+        except Exception:
+            logger.exception("Failed to stop session", session_id=params.session_id)
+        return CloseSessionResponse()
 
     async def cancel(self, params: CancelNotification) -> None:
         """Cancel operations for a session."""
@@ -724,53 +803,6 @@ class AgentPoolACPAgent(ACPAgent):
             raise RequestError.invalid_params({"id": params.id}) from e
         return DisableProvidersResponse()
 
-    async def _handle_mcp_elicitation(
-        self, message: dict[str, Any], connection_id: str
-    ) -> dict[str, Any]:
-        """Handle server-initiated elicitation/create via input provider.
-
-        Called when an MCP server sends elicitation/create without an inner id.
-        The correlation registry can't match responses without an id, so we
-        handle it directly via the input provider.
-        """
-        msg_params = message.get("params", {})
-        mode = msg_params.get("mode", "form")
-        input_provider = getattr(self.default_agent, "_input_provider", None)
-        if input_provider is None:
-            logger.warning(
-                "No input provider available for elicitation; declining",
-                connection_id=connection_id,
-            )
-            return {"action": "decline"}
-        try:
-            from mcp import types as mcp_types
-
-            if mode == "url":
-                elicit_params: (
-                    mcp_types.ElicitRequestURLParams | mcp_types.ElicitRequestFormParams
-                ) = mcp_types.ElicitRequestURLParams(
-                    mode="url",
-                    message=msg_params.get("message", ""),
-                    url=msg_params.get("url", ""),
-                    elicitationId=msg_params.get("elicitationId", "")
-                    or str(uuid.uuid4()),
-                )
-            else:
-                form_params: dict[str, Any] = {
-                    "mode": "form",
-                    "message": msg_params.get("message", ""),
-                    "requestedSchema": msg_params.get("requestedSchema") or {},
-                }
-                elicit_params = mcp_types.ElicitRequestFormParams(**form_params)
-            result = await input_provider.get_elicitation(elicit_params)
-            if isinstance(result, mcp_types.ElicitResult):
-                return result.model_dump()
-            if isinstance(result, mcp_types.ErrorData):
-                return result.model_dump()
-        except Exception:
-            logger.exception("Failed to handle elicitation")
-        return {"action": "decline"}
-
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Handle extension methods.
 
@@ -783,112 +815,21 @@ class AgentPoolACPAgent(ACPAgent):
         """
         match method:
             case "mcp/message":
-                from acp.exceptions import RequestError
-
                 connection_id = params.get("connectionId", "")
-                message = params.get("message", {})
-
-                # Handle flat format where MCP message fields are directly in params
-                # (some ACP clients send {"connectionId": ..., "method": ..., "params": ...}
-                #  instead of {"connectionId": ..., "message": {"method": ...}})
-                if not message and "method" in params:
-                    message = {
-                        "jsonrpc": params.get("jsonrpc", "2.0"),
-                        "method": params["method"],
-                    }
-                    if "id" in params:
-                        message["id"] = params["id"]
-                    if "params" in params:
-                        message["params"] = params["params"]
-                    if "result" in params:
-                        message["result"] = params["result"]
-                    if "error" in params:
-                        message["error"] = params["error"]
-
                 conn = self._mcp_manager.get_connection(connection_id)
-                if conn is None:
+                if conn is not None:
+                    # Pass the full flattened ACP params to handle_client_message.
+                    # handle_client_message will reconstruct the inner JSON-RPC
+                    # message from the flattened format (per MCP-over-ACP RFD).
+                    self.tasks.create_task(conn.handle_client_message(params))
+                else:
                     logger.warning(
                         "Received MCP message for unknown connection",
                         connection_id=connection_id,
                     )
-                    return {}
-
-                if (
-                    isinstance(message, dict)
-                    and "method" in message
-                    and message.get("id") is not None
-                ):
-                    # Client-initiated REQUEST: correlate and await response
-                    future = await conn.register_pending_request(message["id"])
-                    try:
-                        with anyio.fail_after(300):
-                            await conn.handle_client_message(message)
-                        response = await asyncio.wait_for(future, timeout=300)
-                        if "error" in response:
-                            error = response["error"]
-                            from agentpool_server.acp_server.acp_mcp_manager import (
-                                _sanitize_jsonrpc_error,
-                            )
-
-                            sanitized = _sanitize_jsonrpc_error({"error": error})
-                            error = sanitized["error"]
-                            raise RequestError(
-                                error.get("code", -32603),
-                                error.get("message", "Unknown MCP error"),
-                                error.get("data"),
-                            )
-                        result = response.get("result", {})
-                        return result if isinstance(result, dict) else {}
-                    except TimeoutError:
-                        raise RequestError(
-                            -32000,
-                            "MCP request timed out",
-                        ) from None
-                    except asyncio.CancelledError:
-                        raise RequestError(
-                            -32001,
-                            "Connection closed while awaiting MCP response",
-                        ) from None
-                    finally:
-                        conn.unregister_pending_request(message["id"])
-                elif isinstance(message, dict) and message.get("method") == "elicitation/create":
-                    # Server-initiated elicitation request (no inner id)
-                    return await self._handle_mcp_elicitation(message, connection_id)
-                else:
-                    # NOTIFICATION (no id, or id is null, or no method): fire-and-forget
-                    self.tasks.create_task(conn.handle_client_message(message))
-                    return {}
+                return {}
             case _:
                 return {}
-
-    async def _handle_server_to_client_message(
-        self, message: dict[str, Any], connection_id: str
-    ) -> Any:
-        """Handle messages from MCP server to ACP client.
-
-        Intercepts server-initiated elicitation/create requests and handles
-        them via the input provider instead of forwarding to the ACP client
-        (which would return {} and cause the MCP server to reject the response).
-
-        For elicitation, the response is sent directly back to the MCP server
-        via the connection's to_session, rather than being forwarded to the
-        ClientSession's read stream (which would cause ID mismatch errors).
-        """
-        inner = message.get("message", {})
-        if isinstance(inner, dict) and inner.get("method") == "elicitation/create":
-            result = await self._handle_mcp_elicitation(inner, connection_id)
-            response = {
-                "jsonrpc": "2.0",
-                "id": inner.get("id", f"elicit-{uuid.uuid4().hex[:8]}"),
-                "result": result,
-            }
-            # Send response directly back to MCP server, not to ClientSession
-            conn = self._mcp_manager.get_connection(connection_id)
-            if conn is not None:
-                await conn.handle_client_message(response)
-            return None  # Tell send_to_client not to forward to _to_session_send
-        with anyio.fail_after(300):
-            return await self.client.send_request("mcp/message", message)
 
     async def connect_acp_mcp_server(self, server: AcpMcpServer) -> str:
         """Connect to an ACP-transport MCP server by requesting connection from client.
@@ -918,7 +859,10 @@ class AgentPoolACPAgent(ACPAgent):
             raise ValueError(msg)
 
         async def send_to_client(message: dict[str, Any]) -> Any:
-            return await self._handle_server_to_client_message(message, connection_id)
+            # message is already wrapped as {"connectionId": conn_id, "message": mcp_msg}
+            # by AcpMcpConnection.send_to_client. Pass through directly.
+            with anyio.fail_after(30):
+                return await self.client.send_request("mcp/message", message)
 
         await self._mcp_manager.create_connection(
             connection_id, server, send_to_client

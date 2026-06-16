@@ -878,6 +878,81 @@ class SQLModelProvider(StorageProvider):
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    async def save_checkpoint(
+        self,
+        session_id: str,
+        messages_json: str,
+        pending_calls_json: str,
+    ) -> None:
+        """Save checkpoint data atomically for a session.
+
+        Stores serialized messages and pending deferred calls together
+        in the ``checkpoint_data`` JSON column so they can be restored on resume.
+
+        Args:
+            session_id: Session identifier
+            messages_json: JSON-serialized list of ModelMessage
+            pending_calls_json: JSON-serialized list of PendingDeferredCall
+
+        Raises:
+            ValueError: If no session exists with the given ID
+        """
+        async with AsyncSession(self.engine) as session:
+            result = await session.execute(
+                select(Conversation).where(Conversation.id == session_id)
+            )
+            conv = result.scalar_one_or_none()
+            if conv is None:
+                msg = f"Session not found: {session_id}"
+                raise ValueError(msg)
+            conv.checkpoint_data = {
+                "messages_json": messages_json,
+                "pending_calls": pending_calls_json,
+            }
+            session.add(conv)
+            await session.commit()
+            logger.debug("Saved checkpoint", session_id=session_id)
+
+    async def load_checkpoint(self, session_id: str) -> tuple[str, str] | None:
+        """Load checkpoint data from the database.
+
+        Returns:
+            Tuple of (messages_json, pending_calls_json) or None if no checkpoint exists.
+        """
+        async with AsyncSession(self.engine) as session:
+            result = await session.execute(
+                select(Conversation.checkpoint_data).where(Conversation.id == session_id)
+            )
+            checkpoint_data = result.scalar_one_or_none()
+            if checkpoint_data is None:
+                return None
+            return (
+                checkpoint_data.get("messages_json", "[]"),
+                checkpoint_data.get("pending_calls", "[]"),
+            )
+
+    async def delete_checkpoint(self, session_id: str) -> bool:
+        """Delete checkpoint data for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            ``True`` if checkpoint was deleted, ``False`` if not found
+        """
+        async with AsyncSession(self.engine) as session:
+            result = await session.execute(
+                select(Conversation).where(Conversation.id == session_id)
+            )
+            conv = result.scalar_one_or_none()
+            if conv is None or conv.checkpoint_data is None:
+                return False
+            conv.checkpoint_data = None
+            session.add(conv)
+            await session.commit()
+            logger.debug("Deleted checkpoint", session_id=session_id)
+            return True
+
     async def load_sessions_batch(
         self,
         session_ids: list[str],

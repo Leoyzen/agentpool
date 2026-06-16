@@ -771,7 +771,26 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     hooks_capability, run_ctx.event_bus
                 ).as_capability()
             tool_capabilities.append(hooks_capability)
-        # 3. Approval bridge: routes pydantic-ai deferred approvals to InputProvider
+        # 3. Deferred tool bridge: intercepts deferred tool calls before
+        #    approval_bridge can resolve them. Block-strategy calls are
+        #    excluded from returned results so they remain unresolved for
+        #    CheckpointManager (Task 13).
+        from agentpool.agents.native_agent.deferred_bridge import (
+            create_deferred_bridge_capability,
+        )
+
+        # Collect tools with deferred=True for the deferred bridge
+        deferred_tools: dict[str, str] = {}
+        try:
+            all_tools = await self.tools.get_tools()
+            for tool in all_tools:
+                if tool.deferred:
+                    deferred_tools[tool.name] = tool.deferred_strategy
+        except Exception:
+            logger.exception("Failed to collect deferred tools — using empty dict")
+
+        tool_capabilities.append(create_deferred_bridge_capability(deferred_tools))
+        # 4. Approval bridge: routes pydantic-ai deferred approvals to InputProvider
         from agentpool.agents.native_agent.approval_bridge import (
             create_approval_bridge_capability,
         )

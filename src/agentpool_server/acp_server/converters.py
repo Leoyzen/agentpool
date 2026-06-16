@@ -196,11 +196,15 @@ def to_session_config_option(category: ModeCategory) -> SessionConfigOption:
 
 
 def to_session_info(session_data: SessionData) -> SessionInfo:
+    meta: dict[str, object] | None = None
+    if session_data.status == "checkpointed":
+        meta = {"state": "idle"}
     return SessionInfo(
         session_id=session_data.session_id,
         cwd=session_data.cwd or "",
         title=session_data.title,
         updated_at=session_data.updated_at,
+        meta=meta,
     )
 
 

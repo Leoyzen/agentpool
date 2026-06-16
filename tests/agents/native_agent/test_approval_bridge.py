@@ -342,6 +342,7 @@ class TestGetAgentletIntegration:
             bridge_caps = [
                 cap for cap in capabilities if isinstance(cap, HandleDeferredToolCalls)
             ]
-            assert len(bridge_caps) == 1, (
-                "Expected exactly one HandleDeferredToolCalls capability"
+            assert len(bridge_caps) == 2, (
+                "Expected two HandleDeferredToolCalls capabilities "
+                "(DeferredToolBridge + ApprovalBridge)"
             )

@@ -1,0 +1,300 @@
+
+tests/orchestrator/test_turn_runner.py::test_run_turn_creates_run_handle_when_called_directly[asyncio] PASSED [  2%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_uses_existing_run_handle_from_receive_request[asyncio] PASSED [  4%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_sets_and_clears_current_run_id[asyncio] PASSED [  6%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_completes_run_handle_on_success[asyncio] PASSED [  8%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_fails_run_handle_on_exception[asyncio] PASSED [ 10%]
+tests/orchestrator/test_turn_runner.py::test_inject_prompt_triggers_second_iteration[asyncio] PASSED [ 12%]
+tests/orchestrator/test_turn_runner.py::test_run_loop_creates_run_handle_for_initial_turn[asyncio] PASSED [ 14%]
+tests/orchestrator/test_turn_runner.py::test_run_loop_uses_existing_run_handle_from_receive_request[asyncio] PASSED [ 16%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_serializes_per_session[asyncio] PASSED [ 18%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_skips_closing_session[asyncio] PASSED [ 20%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_publishes_events[asyncio] PASSED [ 22%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_records_timing[asyncio] PASSED [ 25%]
+tests/orchestrator/test_turn_runner.py::test_run_loop_processes_queued_injections[asyncio] PASSED [ 27%]
+tests/orchestrator/test_turn_runner.py::test_run_loop_processes_queued_prompts[asyncio] PASSED [ 29%]
+tests/orchestrator/test_turn_runner.py::test_run_loop_drains_on_exception[asyncio] 
+-------------------------------- live log call ---------------------------------
+2026-06-15 13:26:01 ERROR [error    ] Turn loop failed               session_id=sess-1
+[31m╭─[0m[31m────────────────────[0m[31m [0m[1;31mTraceback [0m[1;2;31m(most recent call last)[0m[31m [0m[31m─────────────────────[0m[31m─╮[0m
+[31m│[0m [2m/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/orche[0m [31m│[0m
+[31m│[0m [2mstrator/[0m[1mcore.py[0m:1583 in run_loop                                             [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m   [2m1580 [0m[2m│   │   │   │   [0m[94mreturn[0m                                                [31m│[0m
+[31m│[0m   [2m1581 [0m[2m│   │   │   [0m                                                          [31m│[0m
+[31m│[0m   [2m1582 [0m[2m│   │   │   [0m[94mtry[0m:                                                      [31m│[0m
+[31m│[0m [31m❱ [0m1583 [2m│   │   │   │   [0m[94mawait[0m [96mself[0m._run_turn_unlocked(session_id, *initial_pr [31m│[0m
+[31m│[0m   [2m1584 [0m[2m│   │   │   │   [0m[94mawait[0m [96mself[0m._process_queued_work(session_id, session,  [31m│[0m
+[31m│[0m   [2m1585 [0m[2m│   │   │   [0m[94mexcept[0m asyncio.CancelledError:                            [31m│[0m
+[31m│[0m   [2m1586 [0m[2m│   │   │   │   [0m[94mraise[0m                                                 [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m [34m╭─[0m[34m────────────────────────────────[0m[34m locals [0m[34m────────────────────────────────[0m[34m─╮[0m [31m│[0m
+[31m│[0m [34m│[0m    [3;33m_was_created[0m[31m =[0m [3;91mFalse[0m                                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m             [3;33mexc[0m[31m =[0m [1;35mRuntimeError[0m[1m([0m[32m'boom'[0m[1m)[0m                                   [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m [3;33minitial_prompts[0m[31m =[0m [1m([0m[32m'initial'[0m,[1m)[0m                                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [3;33mkwargs[0m[31m =[0m [1m{[0m[1m}[0m                                                     [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m            [3;33mself[0m[31m =[0m [1m<[0m[1;95magentpool.orchestrator.core.TurnRunner[0m[39m object at [0m     [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [1;36m0x10da15e60[0m[1m>[0m                                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m         [3;33msession[0m[31m =[0m [1;35mSessionState[0m[1m([0m                                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33msession_id[0m=[32m'sess-1'[0m,                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33magent_name[0m=[32m'main-agent'[0m,                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33magent[0m=[1m<[0m[1;95mMagicMock[0m[39m [0m[33mname[0m[39m=[0m[32m'mock.get_agent[0m[32m([0m[32m)[0m[32m'[0m[39m [0m          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [33mid[0m[39m=[0m[32m'4524346064'[0m[39m>,[0m                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mmetadata[0m[39m=[0m[1;39m{[0m[1;39m}[0m[39m,[0m                                       [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mcreated_at[0m[39m=[0m[1;36m780076[0m[1;36m.060905916[0m[39m,[0m                       [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mlast_active_at[0m[39m=[0m[1;36m780076[0m[1;36m.061170416[0m[39m,[0m                   [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mclosed_at[0m[39m=[0m[3;35mNone[0m[39m,[0m                                    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mis_per_session_agent[0m[39m=[0m[3;91mFalse[0m[39m,[0m                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mturn_lock[0m[39m=<asyncio.locks.Lock object at [0m           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [1;36m0x10daa8290[0m[39m [0m[1;39m[[0m[39mlocked, waiters:[0m[1;36m2[0m[1;39m][0m[39m>,[0m                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mis_closing[0m[39m=[0m[3;91mFalse[0m[39m,[0m                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mparent_session_id[0m[39m=[0m[3;35mNone[0m[39m,[0m                            [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mlifecycle_policy[0m[39m=[0m[32m'cascade'[0m[39m,[0m                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mcurrent_run_id[0m[39m=[0m[3;35mNone[0m[39m,[0m                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33m_request_lock[0m[39m=<asyncio.locks.Lock object at [0m       [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [1;36m0x10daa82f0[0m[39m [0m[1;39m[[0m[39munlocked[0m[1;39m][0m[1m>[0m,                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33m_turn_owner_task[0m=[3;35mNone[0m,                             [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33minput_provider[0m=[3;35mNone[0m,                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [2;32m│   [0m[33mpending_questions[0m=[1m{[0m[1m}[0m                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                   [1m)[0m                                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m      [3;33msession_id[0m[31m =[0m [32m'sess-1'[0m                                               [34m│[0m [31m│[0m
+[31m│[0m [34m╰──────────────────────────────────────────────────────────────────────────╯[0m [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m [2m/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/orche[0m [31m│[0m
+[31m│[0m [2mstrator/[0m[1mcore.py[0m:1464 in _run_turn_unlocked                                   [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m   [2m1461 [0m[2m│   │   │   [0m[94mtry[0m:                                                      [31m│[0m
+[31m│[0m   [2m1462 [0m[2m│   │   │   │   [0m[2m# Process prompts and handle injections/queued prompt[0m [31m│[0m
+[31m│[0m   [2m1463 [0m[2m│   │   │   │   [0m[2m# like BaseAgent.run_stream() does.[0m                   [31m│[0m
+[31m│[0m [31m❱ [0m1464 [2m│   │   │   │   [0m[94masync[0m [94mfor[0m event [95min[0m agent._run_stream_once(            [31m│[0m
+[31m│[0m   [2m1465 [0m[2m│   │   │   │   │   [0mrun_ctx, *prompts, session_id=session_id, **strea [31m│[0m
+[31m│[0m   [2m1466 [0m[2m│   │   │   │   [0m):                                                    [31m│[0m
+[31m│[0m   [2m1467 [0m[2m│   │   │   │   │   [0m[94mawait[0m [96mself[0m._publish_event(session_id, event)      [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m [34m╭─[0m[34m────────────────────────────────[0m[34m locals [0m[34m────────────────────────────────[0m[34m─╮[0m [31m│[0m
+[31m│[0m [34m│[0m [3;33m_current_run_ctx_var[0m[31m =[0m [1m<[0m[1;95mContextVar[0m[39m [0m[33mname[0m[39m=[0m[32m'_current_run_ctx_var'[0m[39m [0m          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mdefault[0m[39m=[0m[3;35mNone[0m[39m at [0m[1;36m0x10c0d8a40[0m[1m>[0m                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m     [3;33m_in_turn_context[0m[31m =[0m [1m<[0m[1;95mContextVar[0m[39m [0m[33mname[0m[39m=[0m[32m'_in_turn_context'[0m[39m [0m[33mdefault[0m[39m=[0m[3;91mFalse[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [39mat [0m[1;36m0x10c6549f0[0m[1m>[0m                                   [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m             [3;33m_session[0m[31m =[0m [1;35mSessionState[0m[1m([0m                                     [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33msession_id[0m=[32m'sess-1'[0m,                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33magent_name[0m=[32m'main-agent'[0m,                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33magent[0m=[1m<[0m[1;95mMagicMock[0m[39m [0m[33mname[0m[39m=[0m[32m'mock.get_agent[0m[32m([0m[32m)[0m[32m'[0m[39m [0m     [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mid[0m[39m=[0m[32m'4524346064'[0m[39m>,[0m                                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mmetadata[0m[39m=[0m[1;39m{[0m[1;39m}[0m[39m,[0m                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcreated_at[0m[39m=[0m[1;36m780076[0m[1;36m.060905916[0m[39m,[0m                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mlast_active_at[0m[39m=[0m[1;36m780076[0m[1;36m.061170416[0m[39m,[0m              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mclosed_at[0m[39m=[0m[3;35mNone[0m[39m,[0m                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mis_per_session_agent[0m[39m=[0m[3;91mFalse[0m[39m,[0m                   [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mturn_lock[0m[39m=<asyncio.locks.Lock object at [0m      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1;36m0x10daa8290[0m[39m [0m[1;39m[[0m[39mlocked, waiters:[0m[1;36m2[0m[1;39m][0m[39m>,[0m                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mis_closing[0m[39m=[0m[3;91mFalse[0m[39m,[0m                             [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mparent_session_id[0m[39m=[0m[3;35mNone[0m[39m,[0m                       [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mlifecycle_policy[0m[39m=[0m[32m'cascade'[0m[39m,[0m                   [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcurrent_run_id[0m[39m=[0m[3;35mNone[0m[39m,[0m                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33m_request_lock[0m[39m=<asyncio.locks.Lock object at [0m  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1;36m0x10daa82f0[0m[39m [0m[1;39m[[0m[39munlocked[0m[1;39m][0m[1m>[0m,                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33m_turn_owner_task[0m=[3;35mNone[0m,                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33minput_provider[0m=[3;35mNone[0m,                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mpending_questions[0m=[1m{[0m[1m}[0m                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1m)[0m                                                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                [3;33magent[0m[31m =[0m [1m<[0m[1;95mMagicMock[0m[39m [0m[33mname[0m[39m=[0m[32m'mock.get_agent[0m[32m([0m[32m)[0m[32m'[0m[39m [0m               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mid[0m[39m=[0m[32m'4524346064'[0m[1m>[0m                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m           [3;33magent_type[0m[31m =[0m [32m'unknown'[0m                                         [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m   [3;33mcreated_run_handle[0m[31m =[0m [3;92mTrue[0m                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m       [3;33mevent_consumer[0m[31m =[0m [1m<[0m[1;95mTask[0m[39m cancelled [0m[33mname[0m[39m=[0m[32m'event_consumer_sess-1'[0m[39m [0m     [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mcoro[0m[39m=<TurnRunner._run_turn_unlocked.<locals>[0m[1;35m._co…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [39mdone, defined at [0m                                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [35m/Users/yuchen.liu/src/yilab/iroot-llm/packages/a…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m      [3;33mhas_var_keyword[0m[31m =[0m [3;92mTrue[0m                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m       [3;33minput_provider[0m[31m =[0m [3;35mNone[0m                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m               [3;33mkwargs[0m[31m =[0m [1m{[0m[1m}[0m                                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m              [3;33mprompts[0m[31m =[0m [1m([0m[32m'initial'[0m,[1m)[0m                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m              [3;33mrun_ctx[0m[31m =[0m [1;35mAgentRunContext[0m[1m([0m                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcancelled[0m=[3;92mTrue[0m,                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mrun_id[0m=[32m'4f27a81761eb47ebb63174ee47eab3aa'[0m,    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcurrent_task[0m=[1m<[0m[1;95mTask[0m[39m pending [0m[33mname[0m[39m=[0m[32m'Task-49'[0m[39m [0m    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mcoro[0m[39m=<[0m[1;35mtest_run_loop_drains_on_exception[0m[1;39m([0m[1;39m)[0m[39m running[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [39mat [0m                                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [35m/Users/yuchen.liu/src/yilab/iroot-llm/packages/a…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mcb[0m[39m=[0m[1;39m[[0m[1;35m_run_until_complete_cb[0m[1;39m([0m[1;39m)[0m[39m at [0m                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [35m/opt/homebrew/Cellar/[0m[95mpython[0m[39m@[0m[1;36m3.13[0m[39m/[0m[1;36m3.13[0m[39m.13_1/Frame…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mdepth[0m[39m=[0m[1;36m0[0m[39m,[0m                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mevent_queue[0m[39m=<Queue at [0m[1;36m0x10da75700[0m[39m [0m[33mmaxsize[0m[39m=[0m[1;36m0[0m[39m>,[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mevent_bus[0m[39m=<agentpool.orchestrator.core.EventBus [0m  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [39mobject at [0m[1;36m0x10da17520[0m[1m>[0m,                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33minjection_manager[0m=[1;35mPromptInjectionManager[0m[1m([0m[33mpending[0m… [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mqueued[0m=[1;36m0[0m[1m)[0m,                                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33msession_id[0m=[32m'sess-1'[0m,                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mdeps[0m=[3;35mNone[0m,                                    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mstart_time[0m=[1;36m780076[0m[1;36m.061204166[0m,                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcompleted[0m=[3;92mTrue[0m,                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcheckpointed[0m=[3;91mFalse[0m                            [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1m)[0m                                                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m           [3;33mrun_handle[0m[31m =[0m [1;35mRunHandle[0m[1m([0m                                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mrun_id[0m=[32m'4f27a81761eb47ebb63174ee47eab3aa'[0m,    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33msession_id[0m=[32m'sess-1'[0m,                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33magent_type[0m=[32m'unknown'[0m,                         [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mstatus[0m=[1m<[0m[1;95mRunStatus.failed:[0m[39m [0m[1;36m4[0m[39m>,[0m                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mrun_ctx[0m[39m=[0m[1;35mAgentRunContext[0m[1;39m([0m                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mcancelled[0m[39m=[0m[3;92mTrue[0m[39m,[0m                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m                                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mrun_id[0m[39m=[0m[32m'4f27a81761eb47ebb63174ee47eab3aa'[0m[39m,[0m        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mcurrent_task[0m[39m=<Task pending [0m[33mname[0m[39m=[0m[32m'Task-49'[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mcoro[0m[39m=<[0m[1;35mtest_run_loop_drains_on_exception[0m[1;39m([0m[1;39m)[0m[39m running[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [39mat [0m                                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [35m/Users/yuchen.liu/src/yilab/iroot-llm/packages/a…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mcb[0m[39m=[0m[1;39m[[0m[1;35m_run_until_complete_cb[0m[1;39m([0m[1;39m)[0m[39m at [0m                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [35m/opt/homebrew/Cellar/[0m[95mpython[0m[39m@[0m[1;36m3.13[0m[39m/[0m[1;36m3.13[0m[39m.13_1/Frame…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mdepth[0m[39m=[0m[1;36m0[0m[39m,[0m                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mevent_queue[0m[39m=<Queue at [0m[1;36m0x10da75700[0m[39m [0m        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mmaxsize[0m[39m=[0m[1;36m0[0m[39m>,[0m                                       [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m                                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mevent_bus[0m[39m=<agentpool.orchestrator.core.EventBus [0m  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [39mobject at [0m[1;36m0x10da17520[0m[39m>,[0m                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m                                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33minjection_manager[0m[39m=[0m[1;35mPromptInjectionManager[0m[1;39m([0m[33mpending[0m[39m…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [33mqueued[0m[39m=[0m[1;36m0[0m[1;39m)[0m[39m,[0m                                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33msession_id[0m[39m=[0m[32m'sess-1'[0m[39m,[0m                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mdeps[0m[39m=[0m[3;35mNone[0m[39m,[0m                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mstart_time[0m[39m=[0m[1;36m780076[0m[1;36m.061204166[0m[39m,[0m              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mcompleted[0m[39m=[0m[3;92mTrue[0m[39m,[0m                           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   │   [0m[33mcheckpointed[0m[39m=[0m[3;91mFalse[0m                        [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[1;39m)[0m[39m,[0m                                            [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33mcomplete_event[0m[39m=<asyncio.locks.Event object at[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1;36m0x10db00b30[0m[39m [0m[1;39m[[0m[39mset[0m[1;39m][0m[1m>[0m,                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33m_cleanup_callback[0m=[3;35mNone[0m,                       [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [2;32m│   [0m[33m_native_run_ref[0m=[3;35mNone[0m                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1m)[0m                                                 [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m               [3;33mrun_id[0m[31m =[0m [32m'4f27a81761eb47ebb63174ee47eab3aa'[0m                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m      [3;33mrun_id_override[0m[31m =[0m [3;35mNone[0m                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                 [3;33mself[0m[31m =[0m [1m<[0m[1;95magentpool.orchestrator.core.TurnRunner[0m[39m object at[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [1;36m0x10da15e60[0m[1m>[0m                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m           [3;33msession_id[0m[31m =[0m [32m'sess-1'[0m                                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                  [3;33msig[0m[31m =[0m [1m<[0m[1;95mSignature[0m[39m [0m[1;39m([0m[39m*args: [0m[32m'Any'[0m[39m, **kwargs: [0m[32m'Any'[0m[1;39m)[0m[39m -> [0m    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m                        [32m'AsyncIterator[0m[32m[[0m[32mAny[0m[32m][0m[32m'[0m[1m>[0m                             [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m        [3;33mstream_kwargs[0m[31m =[0m [1m{[0m[1m}[0m                                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m        [3;33mstream_params[0m[31m =[0m [1m{[0m[32m'args'[0m, [32m'kwargs'[0m[1m}[0m                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m             [3;33mturn_end[0m[31m =[0m [1;36m780076.061301166[0m                                  [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m           [3;33mturn_start[0m[31m =[0m [1;36m780076.0612105[0m                                    [34m│[0m [31m│[0m
+[31m│[0m [34m╰──────────────────────────────────────────────────────────────────────────╯[0m [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m [2m/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests/orchestrator/[0m [31m│[0m
+[31m│[0m [1mtest_turn_runner.py[0m:506 in broken_stream                                     [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m   [2m 503 [0m[2m│   [0magent.get_active_run_context.return_value = [94mNone[0m                  [31m│[0m
+[31m│[0m   [2m 504 [0m[2m│   [0m                                                                  [31m│[0m
+[31m│[0m   [2m 505 [0m[2m│   [0m[94masync[0m [94mdef[0m[90m [0m[92mbroken_stream[0m(*args: Any, **kwargs: Any) -> AsyncIterat [31m│[0m
+[31m│[0m [31m❱ [0m 506 [2m│   │   [0m[1;4;94mraise[0m[1;4m [0m[1;4;96mRuntimeError[0m[1;4m([0m[1;4;33m"[0m[1;4;33mboom[0m[1;4;33m"[0m[1;4m)[0m                                    [31m│[0m
+[31m│[0m   [2m 507 [0m[2m│   │   [0m[94myield[0m  [2m# make it an async generator[0m                           [31m│[0m
+[31m│[0m   [2m 508 [0m[2m│   [0m                                                                  [31m│[0m
+[31m│[0m   [2m 509 [0m[2m│   [0magent._run_stream_once = broken_stream                            [31m│[0m
+[31m│[0m                                                                              [31m│[0m
+[31m│[0m [34m╭─[0m[34m────────────────────────────────[0m[34m locals [0m[34m────────────────────────────────[0m[34m─╮[0m [31m│[0m
+[31m│[0m [34m│[0m   [3;33margs[0m[31m =[0m [1m([0m                                                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   [0m[1;35mAgentRunContext[0m[1m([0m                                            [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mcancelled[0m=[3;92mTrue[0m,                                         [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mrun_id[0m=[32m'4f27a81761eb47ebb63174ee47eab3aa'[0m,              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mcurrent_task[0m=[1m<[0m[1;95mTask[0m[39m pending [0m[33mname[0m[39m=[0m[32m'Task-49'[0m[39m [0m              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [33mcoro[0m[39m=<[0m[1;35mtest_run_loop_drains_on_exception[0m[1;39m([0m[1;39m)[0m[39m running at [0m           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [35m/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [33mcb[0m[39m=[0m[1;39m[[0m[1;35m_run_until_complete_cb[0m[1;39m([0m[1;39m)[0m[39m at [0m                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [35m/opt/homebrew/Cellar/[0m[95mpython[0m[39m@[0m[1;36m3.13[0m[39m/[0m[1;36m3.13[0m[39m.13_1/Frameworks/Python.f…[0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mdepth[0m[39m=[0m[1;36m0[0m[39m,[0m                                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mevent_queue[0m[39m=<Queue at [0m[1;36m0x10da75700[0m[39m [0m[33mmaxsize[0m[39m=[0m[1;36m0[0m[39m>,[0m           [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mevent_bus[0m[39m=<agentpool.orchestrator.core.EventBus object [0m [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [39mat [0m[1;36m0x10da17520[0m[1m>[0m,                                                [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33minjection_manager[0m=[1;35mPromptInjectionManager[0m[1m([0m[33mpending[0m=[1;36m0[0m,     [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [33mqueued[0m=[1;36m0[0m[1m)[0m,                                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33msession_id[0m=[32m'sess-1'[0m,                                    [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mdeps[0m=[3;35mNone[0m,                                              [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mstart_time[0m=[1;36m780076[0m[1;36m.061204166[0m,                            [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mcompleted[0m=[3;92mTrue[0m,                                         [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   │   [0m[33mcheckpointed[0m=[3;91mFalse[0m                                      [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   [0m[1m)[0m,                                                          [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [2;32m│   [0m[32m'initial'[0m                                                   [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m          [1m)[0m                                                               [34m│[0m [31m│[0m
+[31m│[0m [34m│[0m [3;33mkwargs[0m[31m =[0m [1m{[0m[32m'session_id'[0m: [32m'sess-1'[0m[1m}[0m                                        [34m│[0m [31m│[0m
+[31m│[0m [34m╰──────────────────────────────────────────────────────────────────────────╯[0m [31m│[0m
+[31m╰──────────────────────────────────────────────────────────────────────────────╯[0m
+[1;91mRuntimeError: [0mboom
+Traceback (most recent call last):
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/orchestrator/core.py", line 1583, in run_loop
+    await self._run_turn_unlocked(session_id, *initial_prompts, **kwargs)
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/orchestrator/core.py", line 1464, in _run_turn_unlocked
+    async for event in agent._run_stream_once(
+    ...<2 lines>...
+        await self._publish_event(session_id, event)
+  File "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/tests/orchestrator/test_turn_runner.py", line 506, in broken_stream
+    raise RuntimeError("boom")
+RuntimeError: boom
+PASSED                                                                   [ 31%]
+tests/orchestrator/test_turn_runner.py::test_inject_prompt_into_active_turn[asyncio] PASSED [ 33%]
+tests/orchestrator/test_turn_runner.py::test_inject_prompt_queues_when_idle[asyncio] PASSED [ 35%]
+tests/orchestrator/test_turn_runner.py::test_inject_prompt_returns_false_for_missing_session[asyncio] PASSED [ 37%]
+tests/orchestrator/test_turn_runner.py::test_inject_prompt_returns_false_for_closing_session[asyncio] PASSED [ 39%]
+tests/orchestrator/test_turn_runner.py::test_queue_prompt_into_active_turn[asyncio] PASSED [ 41%]
+tests/orchestrator/test_turn_runner.py::test_queue_prompt_stores_when_idle[asyncio] PASSED [ 43%]
+tests/orchestrator/test_turn_runner.py::test_queue_prompt_returns_false_for_missing_session[asyncio] PASSED [ 45%]
+tests/orchestrator/test_turn_runner.py::test_auto_resume_trigger_processes_queued_work[asyncio] PASSED [ 47%]
+tests/orchestrator/test_turn_runner.py::test_auto_resume_trigger_noop_when_locked[asyncio] PASSED [ 50%]
+tests/orchestrator/test_turn_runner.py::test_auto_resume_trigger_noop_when_disabled[asyncio] PASSED [ 52%]
+tests/orchestrator/test_turn_runner.py::test_auto_resume_trigger_noop_for_closing_session[asyncio] PASSED [ 54%]
+tests/orchestrator/test_turn_runner.py::test_turn_cancellation_stops_current_turn[asyncio] PASSED [ 56%]
+tests/orchestrator/test_turn_runner.py::test_run_loop_cancellation[asyncio] PASSED [ 58%]
+tests/orchestrator/test_turn_runner.py::test_max_auto_resume_limits_iterations[asyncio] PASSED [ 60%]
+tests/orchestrator/test_turn_runner.py::test_drain_post_turn_injections_is_atomic[asyncio] PASSED [ 62%]
+tests/orchestrator/test_turn_runner.py::test_drain_post_turn_prompts_is_atomic[asyncio] PASSED [ 64%]
+tests/orchestrator/test_turn_runner.py::test_drain_returns_empty_for_unknown_session[asyncio] PASSED [ 66%]
+tests/orchestrator/test_turn_runner.py::test_run_turn_passes_input_provider_to_agent[asyncio] PASSED [ 68%]
+tests/orchestrator/test_turn_runner.py::test_in_turn_context_set_during_run_turn[asyncio] PASSED [ 70%]
+tests/orchestrator/test_turn_runner.py::test_in_turn_context_cleared_after_run_turn[asyncio] PASSED [ 72%]
+tests/orchestrator/test_turn_runner.py::test_publish_event_wraps_in_event_envelope[asyncio] PASSED [ 75%]
+tests/orchestrator/test_turn_runner.py::test_publish_event_preserves_original_event_unmodified[asyncio] PASSED [ 77%]
+tests/orchestrator/test_turn_runner.py::test_publish_event_wraps_objects_without_session_id[asyncio] PASSED [ 79%]
+tests/orchestrator/test_turn_runner.py::test_publish_event_wraps_pydantic_ai_events[asyncio] PASSED [ 81%]
+tests/orchestrator/test_turn_runner.py::test_stream_event_emitter_wraps_subagent_event_in_envelope[asyncio] PASSED [ 83%]
+tests/orchestrator/test_turn_runner.py::test_should_route_via_sessionpool_in_turn_context_true PASSED [ 85%]
+tests/orchestrator/test_turn_runner.py::test_should_route_via_sessionpool_session_pool_none PASSED [ 87%]
+tests/orchestrator/test_turn_runner.py::test_should_route_via_sessionpool_session_none PASSED [ 89%]
+tests/orchestrator/test_turn_runner.py::test_should_route_via_sessionpool_same_task_as_turn_owner PASSED [ 91%]
+tests/orchestrator/test_turn_runner.py::test_should_route_via_sessionpool_different_task PASSED [ 93%]
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_tool_call_only_response_has_no_text_deltas PASSED [ 95%]
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_tool_error_does_not_break_stream PASSED [ 97%]
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_text_response_yields_deltas PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/orchestrator/test_turn_runner.py::test_run_turn_creates_run_handle_when_called_directly[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/lib/python3.13/site-packages/llmling_models/models/input_model/model.py:81: GenericBeforeBaseModelWarning: Classes should inherit from `BaseModel` before generic classes (e.g. `typing.Generic[T]`) for pydantic generics to work properly.
+    class InputModel(Model, Schema):
+
+tests/orchestrator/test_turn_runner.py::test_run_turn_creates_run_handle_when_called_directly[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolCallPart` is deprecated, use `pydantic_ai.NativeToolCallPart` instead.
+    from pydantic_ai import (
+
+tests/orchestrator/test_turn_runner.py::test_run_turn_creates_run_handle_when_called_directly[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/lib/python3.13/site-packages/llmling_models/models/claude_code_model.py:13: PydanticAIDeprecationWarning: `pydantic_ai.BuiltinToolReturnPart` is deprecated, use `pydantic_ai.NativeToolReturnPart` instead.
+    from pydantic_ai import (
+
+tests/orchestrator/test_turn_runner.py::test_run_turn_creates_run_handle_when_called_directly[asyncio]
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/.venv/lib/python3.13/site-packages/llmling_models/builtin_tools.py:30: PydanticAIDeprecationWarning: `pydantic_ai.builtin_tools.AbstractBuiltinTool` is deprecated, use `pydantic_ai.native_tools.AbstractNativeTool` instead.
+    from pydantic_ai.builtin_tools import AbstractBuiltinTool
+
+tests/orchestrator/test_turn_runner.py::test_run_turn_creates_run_handle_when_called_directly[asyncio]
+  <frozen abc>:106: PydanticAIDeprecationWarning: ClaudeCodeModel overrides `supported_builtin_tools()`, which is deprecated — override `supported_native_tools()` instead.
+
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_tool_call_only_response_has_no_text_deltas
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_tool_error_does_not_break_stream
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_text_response_yields_deltas
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/skills/manager.py:164: DeprecationWarning: get_effective_paths() is deprecated; paths are now resolved automatically via ConfigPath
+    paths = config.get_effective_paths(config_file_path)
+
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_tool_call_only_response_has_no_text_deltas
+tests/orchestrator/test_streaming_redflag_tool_calls.py::test_tool_error_does_not_break_stream
+  /Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src/agentpool/agents/native_agent/helpers.py:62: DeprecationWarning: `result` is deprecated, use `part` instead.
+    | FunctionToolResultEvent(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 48 passed, 10 warnings in 1.98s ========================

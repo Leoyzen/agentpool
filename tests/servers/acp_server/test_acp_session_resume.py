@@ -121,14 +121,32 @@ async def test_resume_session_agent_load_fails(mock_acp_agent, mock_session, res
 
 @pytest.mark.unit
 async def test_resume_session_creates_session_if_not_found(mock_acp_agent, mock_session, resume_session_request):
-    """Test that resume_session creates a new session wrapper if session not found."""
-    mock_acp_agent.session_manager.get_session = MagicMock(side_effect=[None, mock_session])
-    mock_acp_agent.session_manager.create_session = AsyncMock(return_value="test-session-id")
+    """Test that resume_session returns empty response for non-existent session.
+
+    Previously, resume would create a new session when the session wasn't found.
+    Now it returns an error/empty response because resuming a non-existent
+    session doesn't make sense — the client should use session/new instead.
+    """
+    mock_acp_agent.session_manager.get_session = MagicMock(return_value=None)
+    mock_acp_agent.session_manager.create_session = AsyncMock()
     mock_acp_agent._initialized = True
+    mock_acp_agent._protocol_handler = None
 
-    await mock_acp_agent.resume_session(resume_session_request)
+    # Mock session_store to return None (session not in persistent store)
+    mock_store = MagicMock()
+    mock_store.load = AsyncMock(return_value=None)
+    mock_store.list_sessions = AsyncMock(return_value=[])
+    with patch.object(
+        type(mock_acp_agent.session_manager),
+        "session_store",
+        new_callable=lambda: property(lambda self: mock_store),
+    ):
+        response = await mock_acp_agent.resume_session(resume_session_request)
 
-    mock_acp_agent.session_manager.create_session.assert_awaited_once()
+    # Non-existent session should return empty response (no models)
+    assert response.models is None
+    # create_session should NOT be called
+    mock_acp_agent.session_manager.create_session.assert_not_called()
 
 
 @pytest.mark.unit
