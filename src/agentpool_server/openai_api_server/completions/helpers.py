@@ -12,20 +12,24 @@ from agentpool.log import get_logger
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, AsyncIterator
 
-    from agentpool.common_types import SupportsRunStream
     from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
 
 logger = get_logger(__name__)
 
 
 async def stream_response(
-    agent: SupportsRunStream[Any],
-    content: str,
+    events: AsyncIterator[Any],
     request: ChatCompletionRequest,
 ) -> AsyncGenerator[str]:
-    """Generate streaming response chunks."""
+    """Generate streaming response chunks from an async event iterator.
+
+    Args:
+        events: An async iterator yielding agent stream events
+            (e.g. from ``SessionPool.run_stream()``).
+        request: The original chat completion request for model metadata.
+    """
     response_id = f"chatcmpl-{int(time.time() * 1000)}"
     created = int(time.time())
 
@@ -40,7 +44,7 @@ async def stream_response(
             "choices": [choice],
         }
         yield f"data: {anyenv.dump_json(first_chunk)}\n\n"
-        async for event in agent.run_stream(content):
+        async for event in events:
             match event:
                 case PartDeltaEvent(delta=TextPartDelta(content_delta=chunk)):
                     # Skip empty chunks

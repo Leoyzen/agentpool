@@ -40,7 +40,7 @@ from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import AsyncIterator, Callable, Sequence
 
     from pydantic_ai import UserContent
     from slashed import BaseCommand
@@ -614,82 +614,72 @@ class ACPSession:
             )
             self._current_converter = converter  # Track for cancellation
 
-            try:  # Use the session's persistent input provider
-                # Staged content is automatically injected by run_stream
-                # Inject session-level MCP providers for this run.
-                # We use add_provider/remove_provider instead of with_session_providers
-                # because NativeAgent.run_stream() may delegate to SessionPool, which
-                # re-enters agent.run_stream() in a different async context where
-                # with_session_providers() is no longer active.
-                #
-                # CRITICAL: SessionPool creates per-session agents via
-                # get_or_create_session_agent() which returns a fresh agent instance.
-                # We must add providers to BOTH the local agent and the SessionPool
-                # session agent to ensure tools are available regardless of which
-                # execution path is taken.
-                for provider in self.session_mcp_providers:
-                    self.agent.tools.add_provider(provider)
-
-                # Also add to SessionPool's per-session agent if SessionPool is active
-                session_pool_agent = None
-                agent_pool = getattr(self.agent, "agent_pool", None)
-                if agent_pool is not None and agent_pool.session_pool is not None:
-                    try:
-                        sp = agent_pool.session_pool.sessions
-                        session_pool_agent = await sp.get_or_create_session_agent(
-                            self.session_id
+            # Route through SessionPool for unified session management.
+            # MCP providers are added once to the session agent and persist
+            # for the session lifetime (cleaned up in close()).
+            agent_pool_ref = getattr(self.agent, "agent_pool", None)
+            session_pool = agent_pool_ref.session_pool if agent_pool_ref is not None else None
+            try:
+                if session_pool is not None:
+                    # Ensure MCP providers are on the session agent (one-time setup per session)
+                    if self.session_mcp_providers:
+                        session_agent = await session_pool.sessions.get_or_create_session_agent(
+                            self.session_id, input_provider=self.input_provider
                         )
                         for provider in self.session_mcp_providers:
-                            session_pool_agent.tools.add_provider(provider)
-                    except Exception:
-                        self.log.exception(
-                            "Failed to add MCP providers to SessionPool agent"
-                        )
+                            if provider not in session_agent.tools.external_providers:
+                                session_agent.tools.add_provider(provider)
 
-                try:
-                    async for event in self.agent.run_stream(
+                    stream = session_pool.run_stream(
+                        self.session_id,
                         *non_command_content,
                         input_provider=self.input_provider,
                         deps=self,
-                        session_id=self.session_id,  # Tie agent conversation to ACP session
-                    ):
-                        if self._cancelled:
-                            self.log.info("Cancelled during event loop, cleaning up tool calls")
-                            # Send cancellation notifications for any pending tool calls
-                            # This happens in the same async context as the converter
-                            async for cancel_update in converter.cancel_pending_tools():
-                                await self.notifications.send_update(cancel_update)
-                            # CRITICAL: Allow time for client to process tool completion notifications
-                            # before sending PromptResponse. Without this delay, the client may receive
-                            # and process the PromptResponse before the tool notifications, causing UI
-                            # state desync where subsequent prompts appear stuck/unresponsive.
-                            # This is needed because even though send() awaits the write, the client
-                            # may process messages asynchronously or out of order.
-                            await anyio.sleep(0.05)
-                            self._current_converter = None
-                            return "cancelled"
-
-                        event_count += 1
-                        async for update in converter.convert(event):
-                            await self.notifications.send_update(update)
-                        # Yield control to allow notifications to be sent immediately
-                        await anyio.sleep(0.01)
-                    self.log.info("Streaming finished", events_processed=event_count)
-                finally:
-                    from contextlib import suppress
-
-                    # Remove session-level MCP providers so they don't leak into other sessions
-                    # or persist after this run.
+                    )
+                else:
+                    # Fallback: no SessionPool (e.g., tests without pool.__aenter__)
                     for provider in self.session_mcp_providers:
-                        with suppress(ValueError):
-                            self.agent.tools.remove_provider(provider)
+                        self.agent.tools.add_provider(provider)
 
-                    # Also remove from SessionPool's per-session agent
-                    if session_pool_agent is not None:
-                        for provider in self.session_mcp_providers:
-                            with suppress(ValueError):
-                                session_pool_agent.tools.remove_provider(provider)
+                    async def _cleanup_stream() -> AsyncIterator[Any]:
+                        try:
+                            async for event in self.agent.run_stream(
+                                *non_command_content,
+                                input_provider=self.input_provider,
+                                deps=self,
+                                session_id=self.session_id,
+                            ):
+                                yield event
+                        finally:
+                            for provider in self.session_mcp_providers:
+                                with suppress(ValueError):
+                                    self.agent.tools.remove_provider(provider)
 
+                    stream = _cleanup_stream()
+
+                async for event in stream:
+                    if self._cancelled:
+                        self.log.info("Cancelled during event loop, cleaning up tool calls")
+                        # Send cancellation notifications for any pending tool calls
+                        # This happens in the same async context as the converter
+                        async for cancel_update in converter.cancel_pending_tools():
+                            await self.notifications.send_update(cancel_update)
+                        # CRITICAL: Allow time for client to process tool completion notifications
+                        # before sending PromptResponse. Without this delay, the client may receive
+                        # and process the PromptResponse before the tool notifications, causing UI
+                        # state desync where subsequent prompts appear stuck/unresponsive.
+                        # This is needed because even though send() awaits the write, the client
+                        # may process messages asynchronously or out of order.
+                        await anyio.sleep(0.05)
+                        self._current_converter = None
+                        return "cancelled"
+
+                    event_count += 1
+                    async for update in converter.convert(event):
+                        await self.notifications.send_update(update)
+                    # Yield control to allow notifications to be sent immediately
+                    await anyio.sleep(0.01)
+                self.log.info("Streaming finished", events_processed=event_count)
             except asyncio.CancelledError:
                 # Task was cancelled (e.g., via interrupt()) - return proper stop reason
                 # This is critical: CancelledError doesn't inherit from Exception,

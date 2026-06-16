@@ -1453,6 +1453,7 @@ class TurnRunner:
             except asyncio.CancelledError:
                 pass
 
+        event_consumer: asyncio.Task[None] | None = None
         if agent_type != "native":
             event_consumer = asyncio.create_task(
                 _consume_event_queue(),
@@ -1533,9 +1534,10 @@ class TurnRunner:
             _in_turn_context.set(False)
 
             # Cancel the event consumer task
-            event_consumer.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await event_consumer
+            if event_consumer is not None:
+                event_consumer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await event_consumer
 
             turn_end = time.monotonic()
             self._turn_timings.append((turn_start, turn_end))

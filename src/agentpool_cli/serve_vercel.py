@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import os
 from typing import TYPE_CHECKING, Annotated, Any
+import uuid
 
 import anyenv
 import typer as t
@@ -133,8 +134,13 @@ def vercel_command(  # noqa: PLR0915
         if not user_text:
             return JSONResponse({"error": "No user text found"}, status_code=400)
 
-        # Determine which agent to use
-        selected_agent = pool.get_agent(agent_name) if agent_name else pool.main_agent
+        # Determine which agent to use and create a per-request session
+        # Vercel protocol is stateless — new session per HTTP request
+        effective_agent_name = agent_name or pool.main_agent.name
+        session_id = uuid.uuid4().hex
+        session_pool = pool.session_pool
+        assert session_pool is not None, "SessionPool must be initialized"
+        await session_pool.create_session(session_id, agent_name=effective_agent_name)
 
         async def generate_stream() -> AsyncIterator[str]:
             """Generate Vercel AI Data Stream Protocol events.
@@ -145,7 +151,7 @@ def vercel_command(  # noqa: PLR0915
             - Done: d:{"finishReason":"stop"}
             """
             try:
-                async for event in selected_agent.run_stream(user_text):
+                async for event in session_pool.run_stream(session_id, user_text):
                     # Handle pydantic-ai streaming events
                     match event:
                         case PartStartEvent(part=TextPart() as part):
