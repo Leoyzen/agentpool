@@ -7,7 +7,7 @@ Covers 8 edge cases:
 4. RunHandle cleanup on UndrainedPendingMessagesError: active_agent_run cleared
 5. Session close during steer race: TOCTOU-safe — no crash
 6. Tool result augmentation preserved: injection_manager.consume() still works
-7. _run_agentlet_core() non-event_bus branch: merge_queue_into_iterator path
+7. RunExecutor non-event_bus branch: uniform event production
 8. ACP snapshot regression: verified via `uv run pytest -m acp_snapshot -v`
 """
 

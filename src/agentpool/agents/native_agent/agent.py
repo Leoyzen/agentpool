@@ -51,7 +51,6 @@ from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.result_utils import to_type
-from agentpool.utils.streams import merge_queue_into_iterator
 
 
 if TYPE_CHECKING:

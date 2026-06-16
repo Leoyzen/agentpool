@@ -547,7 +547,7 @@ async def test_redflag_tool_complete_race_condition_dropped_event(
 ) -> None:
     """RED FLAG: ToolCallCompleteEvent may be dropped if it arrives before start event.
 
-    In SessionPool mode, _run_agentlet_core has a dual-path event architecture:
+    Before consolidation to RunExecutor, _run_agentlet_core had a dual-path event architecture:
     1. FunctionToolCallEvent flows through local event_queue -> consumer -> EventBus
     2. ToolCallCompleteEvent is published DIRECTLY to EventBus by process_tool_event
 
