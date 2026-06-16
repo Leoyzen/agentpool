@@ -1,11 +1,10 @@
-"""TDD tests for _run_agentlet_core() next() loop migration.
+"""TDD tests for RunExecutor next() loop behavior.
 
-Validates that _run_agentlet_core() fires after_node_run hooks so
-PendingMessageDrainCapability can drain when_idle messages.
+Validates that RunExecutor drives agent_run with ``agent_run.next(node)``
+so PendingMessageDrainCapability can drain when_idle messages.
 
-The fix replaces `async for node in agent_run:` with an explicit
-`while True: node = await agent_run.next(node)` loop, mirroring
-RunExecutor.execute().
+The fix uses RunExecutor.execute() which always uses explicit
+``while True: node = await agent_run.next(node)`` loop.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.orchestrator.run_executor import RunExecutor
 
 # Import at module level for type annotation resolution in test functions
 try:
@@ -62,16 +62,16 @@ def _make_mock_stream() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# GREEN: _run_agentlet_core() uses next() and drains when_idle messages
+# GREEN: RunExecutor uses next() and drains when_idle messages
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_run_agentlet_core_uses_next_loop() -> None:
-    """GREEN: _run_agentlet_core() uses next() to drive agent_run.
+    """GREEN: RunExecutor uses next() to drive agent_run.
 
-    After the fix, _run_agentlet_core() should call agent_run.next(node)
+    After the fix, RunExecutor.execute() calls agent_run.next(node)
     instead of using bare `async for`. This test verifies the next() calls
     by mocking agent_run and checking that next() is invoked.
     """
@@ -124,22 +124,23 @@ async def test_run_agentlet_core_uses_next_loop() -> None:
     run_ctx = AgentRunContext(session_id="test-session")
     user_msg = ChatMessage.user_prompt(message="test prompt")
     message_history = MessageHistory()
-    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+
+    executor = RunExecutor(agent)
+    events: list[Any] = []
+    response_msg: ChatMessage[Any] | None = None
 
     with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-        response_msg = await agent._run_agentlet_core(
+        async for event in executor.execute(
             prompts=["test"],
             run_ctx=run_ctx,
             user_msg=user_msg,
             message_history=message_history,
             message_id="msg-1",
             session_id="test-session",
-            parent_id=None,
-            input_provider=None,
-            deps=None,
-            event_queue=event_queue,
-            start_time=0.0,
-        )
+        ):
+            events.append(event)
+            if isinstance(event, StreamCompleteEvent):
+                response_msg = event.message
 
     assert response_msg is not None
     assert response_msg.content == "final_result"
@@ -147,7 +148,7 @@ async def test_run_agentlet_core_uses_next_loop() -> None:
     # GREEN: next() should have been called (twice: model_request_node, then End)
     assert mock_agent_run.next.call_count == 2, (
         f"Expected next() to be called twice, got {mock_agent_run.next.call_count}. "
-        "The fix should use explicit next() loop instead of async for."
+        "RunExecutor should use explicit next() loop instead of async for."
     )
 
     # Verify next() was called with the correct nodes
@@ -186,11 +187,11 @@ async def test_basic_streaming_still_works() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_next_loop_drains_when_idle_messages() -> None:
-    """GREEN: after the fix, when_idle messages are drained via next().
+    """GREEN: when_idle messages are drained via next() in RunExecutor.
 
     This test validates the expected behavior using pydantic-ai
-    Agent directly (which uses next() correctly). After the fix,
-    _run_agentlet_core() should exhibit the same behavior.
+    Agent directly (which uses next() correctly). RunExecutor
+    exhibits the same behavior.
     """
     from pydantic_ai import Agent as PydanticAIAgent
     from pydantic_ai.tools import Tool as PydanticTool

@@ -22,6 +22,7 @@ from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import SessionController, TurnRunner
 from agentpool.orchestrator.run import RunHandle, RunStatus
@@ -513,17 +514,17 @@ async def test_tool_result_augmentation_flush_to_queue() -> None:
 
 
 # =============================================================================
-# Test 7: _run_agentlet_core() non-event_bus branch — merge_queue_into_iterator
+# Test 7: RunExecutor non-event_bus branch — uniform event production
 # =============================================================================
 
 
 @pytest.mark.anyio
 async def test_run_agentlet_core_non_event_bus_branch() -> None:
-    """_run_agentlet_core() non-event_bus branch uses merge_queue_into_iterator.
+    """RunExecutor works correctly when event_bus is None.
 
-    Edge case: When run_ctx.event_bus is None, the code takes the
-    merge_queue_into_iterator path instead of the event_bus path.
-    Both paths should work correctly with the next() loop.
+    Edge case: When run_ctx.event_bus is None, RunExecutor still produces
+    events through the same process_tool_event path. Both event_bus and
+    non-event_bus modes work identically with RunExecutor.
     """
     agent = Agent(
         name="non-eventbus-test",
@@ -532,47 +533,41 @@ async def test_run_agentlet_core_non_event_bus_branch() -> None:
 
     run_ctx = AgentRunContext(
         session_id="sess-non-eventbus",
-        event_bus=None,  # Explicitly None → non-event_bus branch
+        event_bus=None,  # Explicitly None → RunExecutor still works
     )
     user_msg = ChatMessage.user_prompt("test prompt")
     message_history = MessageHistory()
-    event_queue: asyncio.Queue[Any] = asyncio.Queue()
 
-    # Call _run_agentlet_core directly with event_bus=None
-    response_msg = await agent._run_agentlet_core(
+    executor = RunExecutor(agent)
+    events: list[Any] = []
+    response_msg: Any = None
+    async for event in executor.execute(
         prompts=["test prompt"],
         run_ctx=run_ctx,
         user_msg=user_msg,
         message_history=message_history,
         message_id="msg-non-eb",
         session_id="sess-non-eventbus",
-        parent_id=None,
-        input_provider=None,
-        deps=None,
-        event_queue=event_queue,
-        start_time=0.0,
-    )
+    ):
+        events.append(event)
+        if isinstance(event, StreamCompleteEvent):
+            response_msg = event.message
 
     assert response_msg is not None, "Response message should not be None"
     assert "response from non-eventbus path" in str(response_msg.content), (
         f"Expected model response in content, got: {response_msg.content}"
     )
 
-    # Events should have been pushed to the event_queue
-    events: list[Any] = []
-    while not event_queue.empty():
-        events.append(event_queue.get_nowait())
-
-    assert len(events) > 0, "Event queue should have events from non-event_bus path"
+    # Events should have been yielded by RunExecutor
+    assert len(events) > 0, "RunExecutor should yield events from non-event_bus path"
 
 
 @pytest.mark.anyio
 async def test_run_agentlet_core_non_event_bus_branch_streaming() -> None:
-    """_run_agentlet_core() non-event_bus branch supports streaming via run_stream().
+    """RunExecutor-based streaming works standalone (no SessionPool/EventBus).
 
     Edge case: When an agent is used standalone (no SessionPool/EventBus),
-    run_stream() should work correctly through the non-event_bus branch
-    of _run_agentlet_core().
+    run_stream() should work correctly through RunExecutor.
     """
     agent = Agent(
         name="standalone-stream-test",
@@ -582,8 +577,6 @@ async def test_run_agentlet_core_non_event_bus_branch_streaming() -> None:
     events: list[Any] = []
     async for event in agent.run_stream("hello standalone"):
         events.append(event)
-
-    from agentpool.agents.events import StreamCompleteEvent
 
     complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
     assert len(complete_events) == 1, (
