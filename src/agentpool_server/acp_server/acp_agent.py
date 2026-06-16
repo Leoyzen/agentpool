@@ -760,13 +760,13 @@ class AgentPoolACPAgent(ACPAgent):
 
         Raises:
             ValueError: If the client does not return a connectionId.
-            TimeoutError: If the client does not respond to mcp/connect within 10s.
+            TimeoutError: If the client does not respond to mcp/connect within 300s.
         """
         params = {
             "server": server.model_dump(by_alias=True, exclude_none=True),
             "acpId": server.id,
         }
-        with anyio.fail_after(10):
+        with anyio.fail_after(300):
             response = await self.client.send_request("mcp/connect", params)
         connection_id = str(response.get("connectionId", ""))
         if not connection_id:
@@ -776,7 +776,7 @@ class AgentPoolACPAgent(ACPAgent):
         async def send_to_client(message: dict[str, Any]) -> Any:
             # message is already wrapped as {"connectionId": conn_id, "message": mcp_msg}
             # by AcpMcpConnection.send_to_client. Pass through directly.
-            with anyio.fail_after(30):
+            with anyio.fail_after(300):
                 return await self.client.send_request("mcp/message", message)
 
         await self._mcp_manager.create_connection(
