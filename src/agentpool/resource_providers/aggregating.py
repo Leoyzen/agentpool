@@ -8,10 +8,10 @@ from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvi
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from pydantic_ai import ModelRequestPart
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.prompts.prompts import BasePrompt
     from agentpool.resource_providers.resource_info import ResourceInfo

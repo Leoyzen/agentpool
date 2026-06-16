@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, get_type_hints
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.messages import ModelMessage
 
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 

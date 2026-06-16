@@ -209,6 +209,7 @@ class MCPManager:
             configured and enabled server with a supported transport.
         """
         from pydantic_ai.capabilities import MCP
+
         from agentpool_config.mcp_server import (
             AcpMCPServerConfig,
             SSEMCPServerConfig,

@@ -116,6 +116,8 @@ class StreamingToolBase(ABC):
         agent = ctx.native_agent
         fork_history = _create_forked_history(agent)
         prompt = self.build_prompt(description, **kwargs)
+        # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
+        # Use SessionPool.run_stream() with message_history support.
         stream = agent.run_stream(prompt, message_history=fork_history, store_history=False)
         chunk_stream = _create_chunk_stream(stream)
         return await self.process_stream(ctx, chunk_stream, **kwargs)
@@ -161,6 +163,8 @@ def streaming_tool(
             else:
                 prompt = _build_default_prompt(description, **kwargs)
             # Stream using the same agent with forked history
+            # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
+            # Use SessionPool.run_stream() with message_history support.
             stream = agent.run_stream(prompt, message_history=fork_history, store_history=False)
             chunk_stream = _create_chunk_stream(stream)
             return await fn(ctx, chunk_stream, **kwargs)  # type: ignore[no-any-return]

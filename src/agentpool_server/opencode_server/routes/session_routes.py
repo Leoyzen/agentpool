@@ -2023,7 +2023,7 @@ async def execute_command(  # noqa: PLR0915
                         if run_handle is not None:
                             run_handles = getattr(state, "_run_handles", {})
                             run_handles[session_id] = run_handle
-                            setattr(state, "_run_handles", run_handles)
+                            state._run_handles = run_handles
                             # Wait for the background run to complete before finalizing
                             try:
                                 await asyncio.wait_for(

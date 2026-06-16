@@ -17,12 +17,12 @@ from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEP
 
 
 __all__ = [
+    "MAX_DELEGATION_DEPTH",
     "ACPAgent",
     "Agent",
     "AgentContext",
     "DelegationDepthError",
     "Interactions",
-    "MAX_DELEGATION_DEPTH",
     "PromptInjectionManager",
     "SystemPrompts",
     "detailed_print_handler",

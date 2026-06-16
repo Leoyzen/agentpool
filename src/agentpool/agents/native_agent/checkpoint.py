@@ -20,6 +20,7 @@ from agentpool.storage.serialization import (
     messages_adapter,
 )
 
+
 if TYPE_CHECKING:
     from agentpool.storage.manager import StorageManager
 

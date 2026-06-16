@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from acp.schema.providers import ProviderCurrentConfig, ProviderInfo, ProviderStatus
+from acp.schema.providers import ProviderCurrentConfig, ProviderInfo
 from agentpool.log import get_logger
 from agentpool_server.shared.model_utils import _extract_provider
 

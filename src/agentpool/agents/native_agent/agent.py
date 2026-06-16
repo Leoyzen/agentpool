@@ -8,20 +8,15 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 import inspect
 from pathlib import Path
-import time
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
 from uuid import uuid4
 import warnings
 
 import logfire
 from pydantic_ai import (
-    BaseToolCallPart,
-    FunctionToolCallEvent,
-    PartStartEvent,
+    Agent as PydanticAgent,
 )
-from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
-from pydantic_graph import End
 
 
 try:
@@ -37,19 +32,15 @@ except ImportError:
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import (
-    RunStartedEvent,
     StreamCompleteEvent,
-    ToolCallStartEvent,
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
-from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run_executor import RunExecutor
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
-from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.result_utils import to_type
 
 
@@ -58,7 +49,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import AgentBuiltinTool, BaseToolCallPart, UsageLimits, UserContent
+    from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.settings import ModelSettings

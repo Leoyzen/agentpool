@@ -19,9 +19,9 @@ from agentpool.skills.skill import Skill
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from types import TracebackType
 
+    from pydantic_ai.capabilities import AbstractCapability
     from upathtools import JoinablePathLike
 
 

@@ -30,10 +30,10 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     from fastmcp.client.sampling import SamplingHandler
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.mcp_server.registries.official_registry_client import RegistryServer
     from agentpool.tools.base import Tool

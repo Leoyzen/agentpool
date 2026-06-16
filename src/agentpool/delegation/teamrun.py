@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 from uuid import uuid4
 
 import anyio
+from pydantic_graph import GraphBuilder, Step, StepContext
+from pydantic_graph.id_types import NodeID
 
 from agentpool.common_types import SupportsRunStream
 from agentpool.delegation.base_team import BaseTeam
@@ -17,9 +19,6 @@ from agentpool.messaging import AgentResponse, ChatMessage, TeamResponse
 from agentpool.messaging.processing import finalize_message, prepare_prompts
 from agentpool.talk.talk import Talk, TeamTalk
 from agentpool.utils.time_utils import get_now
-
-from pydantic_graph import GraphBuilder, Step, StepContext
-from pydantic_graph.id_types import NodeID
 
 
 if TYPE_CHECKING:

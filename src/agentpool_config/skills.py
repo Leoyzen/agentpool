@@ -151,4 +151,4 @@ class SkillsConfig(Schema):
         if self.include_default:
             result.extend(DEFAULT_SKILLS_PATHS)
 
-        return result   
+        return result

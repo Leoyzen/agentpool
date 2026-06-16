@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from agentpool_server.opencode_server.models.parts import (
-    Part,
     ReasoningPart,
     TextPart,
     ToolPart,

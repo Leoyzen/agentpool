@@ -224,7 +224,7 @@ class ACPEventConverter:
         Args:
             state: The new processing state (e.g. ``"idle"``, ``"running"``).
         """
-        pass  # V2_EXTENSION: emit state_change session/update in ACP V2
+        # V2_EXTENSION: emit state_change session/update in ACP V2
 
     def _on_out_of_turn_update(self) -> None:
         """Handle out-of-turn content updates.
@@ -233,7 +233,7 @@ class ACPEventConverter:
         # outside of an active turn (e.g. background notifications,
         # deferred tool completions). On V1 this is a no-op.
         """
-        pass  # V2_EXTENSION: deliver out-of-turn content in ACP V2
+        # V2_EXTENSION: deliver out-of-turn content in ACP V2
 
     async def cancel_pending_tools(self) -> AsyncIterator[ToolCallProgress]:
         """Cancel all pending tool calls.

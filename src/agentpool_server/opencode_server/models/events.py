@@ -16,7 +16,7 @@ from agentpool_server.opencode_server.models.question import (  # noqa: TC001
     QuestionInfo,
     QuestionToolInfo,
 )
-from agentpool_server.opencode_server.models.session import (  # noqa: TC001
+from agentpool_server.opencode_server.models.session import (
     Session,
     SessionStatus,
     SessionStatusType,

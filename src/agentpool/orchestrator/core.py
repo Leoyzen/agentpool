@@ -10,7 +10,6 @@ import asyncio
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
-import copy
 from dataclasses import dataclass, field
 from datetime import datetime
 import inspect
@@ -23,7 +22,7 @@ from agentpool.agents.events import SessionResumeEvent
 from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
-from agentpool.models.pending_interaction import PendingPermission, PendingQuestion
+from agentpool.models.pending_interaction import PendingPermission
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models.session_info import SessionInfo
@@ -1398,7 +1397,7 @@ class TurnRunner:
         )
         _session = self.sessions.get_session(session_id)
 
-        from agentpool.agents.base_agent import _in_turn_context, _current_run_ctx_var
+        from agentpool.agents.base_agent import _current_run_ctx_var, _in_turn_context
         from agentpool.orchestrator.run import RunHandle, RunStatus
 
         run_id_override = self.sessions._pending_run_ids.pop(session_id, None)

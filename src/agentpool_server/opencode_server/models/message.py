@@ -8,14 +8,14 @@ from pydantic import Field, model_validator
 
 from agentpool.utils import identifiers as identifier
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
-from agentpool_server.opencode_server.models.common import (  # noqa: TC001
+from agentpool_server.opencode_server.models.common import (
     FileDiff,
     ModelRef,
     TextSpan,
     TimeCreated,
     Tokens,
 )
-from agentpool_server.opencode_server.models.parts import (  # noqa: TC001
+from agentpool_server.opencode_server.models.parts import (
     AgentPart,
     APIErrorInfo,
     FilePart,

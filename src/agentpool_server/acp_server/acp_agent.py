@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
-import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import anyio

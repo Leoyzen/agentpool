@@ -202,21 +202,20 @@ async def load_skill(  # noqa: PLR0911
                 instructions = ref_content
             except Exception as e:  # noqa: BLE001
                 return f"Failed to load reference {ref_path!r}: {e}"
-        else:
-            # Full skill loading: get main instructions
-            # For virtual paths (PurePosixPath), fetch from provider
-            if isinstance(skill.skill_path, PurePosixPath):
-                if ctx.pool.skill_provider is not None:
-                    try:
-                        instructions = await ctx.pool.skill_provider.get_skill_instructions(
-                            skill.name
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        return f"Failed to load skill instructions for {skill.name!r}: {e}"
-                else:
-                    instructions = ""
+        # Full skill loading: get main instructions
+        # For virtual paths (PurePosixPath), fetch from provider
+        elif isinstance(skill.skill_path, PurePosixPath):
+            if ctx.pool.skill_provider is not None:
+                try:
+                    instructions = await ctx.pool.skill_provider.get_skill_instructions(
+                        skill.name
+                    )
+                except Exception as e:  # noqa: BLE001
+                    return f"Failed to load skill instructions for {skill.name!r}: {e}"
             else:
-                instructions = skill.load_instructions()
+                instructions = ""
+        else:
+            instructions = skill.load_instructions()
     else:
         # Bare skill name - use skill_resolver to search across all providers
         # This supports dynamic skill discovery from MCP servers with proper priority

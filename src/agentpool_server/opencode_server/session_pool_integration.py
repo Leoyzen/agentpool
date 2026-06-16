@@ -525,7 +525,6 @@ def _reconstruct_tool_parts_from_checkpoint(
 
     from agentpool.utils import identifiers as identifier
     from agentpool.utils.time_utils import now_ms
-
     from agentpool_server.opencode_server.models.parts import (
         TimeStart,
         ToolPart,

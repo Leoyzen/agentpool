@@ -15,7 +15,6 @@ import os
 import subprocess
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 import uuid
-import warnings
 
 import anyio
 from anyio.abc import ByteReceiveStream, ByteSendStream

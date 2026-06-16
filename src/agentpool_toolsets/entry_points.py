@@ -12,8 +12,9 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
+
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
 

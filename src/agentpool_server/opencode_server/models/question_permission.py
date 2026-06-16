@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from agentpool.models.pending_interaction import PendingPermission, PendingQuestion
-
 
 @dataclass
 class OpenCodePendingQuestion:
