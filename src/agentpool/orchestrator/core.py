@@ -1453,10 +1453,11 @@ class TurnRunner:
             except asyncio.CancelledError:
                 pass
 
-        event_consumer = asyncio.create_task(
-            _consume_event_queue(),
-            name=f"event_consumer_{session_id}",
-        )
+        if agent_type != "native":
+            event_consumer = asyncio.create_task(
+                _consume_event_queue(),
+                name=f"event_consumer_{session_id}",
+            )
 
         turn_start = time.monotonic()
         # Filter kwargs to only include parameters _run_stream_once accepts.

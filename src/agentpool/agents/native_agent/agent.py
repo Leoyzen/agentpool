@@ -45,6 +45,7 @@ from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.orchestrator.run_executor import RunExecutor
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
@@ -1041,8 +1042,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Detects graph context via *_state* in kwargs (injected by
         :class:`~agentpool.messaging.graph_adapter.MessageNodeStep`) and
-        runs the core streaming logic, pushing events to the state's event
-        queue for the parent graph to drain.
+        delegates execution to :class:`~agentpool.orchestrator.run_executor.RunExecutor`,
+        forwarding all events to the state's event queue for the parent graph
+        to drain.
 
         Args:
             *prompts: Input prompts passed from the graph.
@@ -1054,6 +1056,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Raises:
             RuntimeError: If ``_state`` or required sub-keys are missing.
+            RuntimeError: If ``RunExecutor`` completes without a
+                ``StreamCompleteEvent``.
         """
         from agentpool.messaging.graph_adapter import AgentPoolState
 
@@ -1069,23 +1073,32 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if run_ctx is None:
             raise RuntimeError("run_ctx required in state.kwargs for graph execution")
 
-        result = await self._run_agentlet_core(
+        executor = RunExecutor(self)
+        result: ChatMessage[Any] | None = None
+        async for event in executor.execute(
             prompts=list(prompts),
             run_ctx=run_ctx,
             user_msg=kw["user_msg"],
             message_history=kw["message_history"],
             message_id=kw.get("message_id") or str(uuid4()),
             session_id=kw["session_id"],
-            parent_id=kw.get("parent_id"),
+            _parent_id=kw.get("parent_id"),
             input_provider=kw.get("input_provider"),
             deps=kw.get("deps"),
-            event_queue=state.event_queue,
-            start_time=kw.get("start_time", time.perf_counter()),
-        )
+        ):
+            await state.event_queue.put(event)
+            if isinstance(event, StreamCompleteEvent):
+                result = event.message
+
+        if result is None:
+            raise RuntimeError(
+                "RunExecutor.execute() completed without a StreamCompleteEvent"
+            )
+
         state.result = result
         return result
 
-    async def _stream_events(  # noqa: PLR0915
+    async def _stream_events(
         self,
         run_ctx: AgentRunContext,
         prompts: list[UserContent],
@@ -1102,125 +1115,47 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
-        """Stream agent events in real-time using direct iteration.
+        """Stream agent events in real-time using RunExecutor.
 
-        This is the **standalone agent streaming path**. It spawns a background
-        task that calls `_run_agentlet_core()` directly, pushing events into an
-        async queue as they are produced. The consumer drains the queue and
-        yields events immediately, preserving real-time streaming behavior.
+        Delegates to :class:`~agentpool.orchestrator.run_executor.RunExecutor`
+        which drives the PydanticAI agent run loop with ``agent_run.next(node)``,
+        yielding fine-grained streaming events including ``RunStartedEvent``,
+        ``PartStartEvent``, ``ToolCallStartEvent``, and ``StreamCompleteEvent``.
 
         !!! note "Dual-path architecture"
             There are two execution paths for native agents:
 
             | Path | Entry Point | Mechanism | Streaming Granularity |
             |---|---|---|---|
-            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` | Fine-grained (real-time) |
+            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` → `RunExecutor.execute()` | Fine-grained (real-time) |
             | **Graph** | `MessageNode.run()` / `run_stream()` | `MessageNodeStep._execute()` → `_execute_node()` | Coarse-grained (per-step) |
 
-            Both paths share `_run_agentlet_core()` as the streaming core.
-            The graph path wraps agent execution inside a pydantic-graph Step,
-            where Step-internal events are invisible until the Step boundary
-            is crossed. This method bypasses graph wrapping entirely to avoid
-            that buffering.
+            Both paths use :class:`RunExecutor` for event production.
+            The graph path buffers events into the state event queue; the
+            standalone path streams them directly to the caller.
         """
         message_id = message_id or str(uuid4())
-        run_id = str(uuid4())
-        start_time = time.perf_counter()
         assert session_id is not None  # Initialized by BaseAgent.run_stream()
 
-        yield RunStartedEvent(
+        executor = RunExecutor(self)
+
+        async for event in executor.execute(
+            prompts=list(prompts),
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id=message_id,
             session_id=session_id,
-            run_id=run_id,
-            agent_name=self.name,
-            parent_session_id=parent_session_id,
-        )
-
-        response_msg: ChatMessage[Any] | None = None
-        event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
-        iteration_done = asyncio.Event()
-        iteration_error: BaseException | None = None
-
-        async def agent_iteration_task() -> None:
-            """Background task that runs agent iteration and feeds events to queue."""
-            nonlocal iteration_error, response_msg
-            try:
-                response_msg = await self._run_agentlet_core(
-                    prompts=list(prompts),
-                    run_ctx=run_ctx,
-                    user_msg=user_msg,
-                    message_history=message_history,
-                    message_id=message_id,
-                    session_id=session_id,
-                    parent_id=parent_id,
-                    input_provider=input_provider,
-                    deps=deps,
-                    event_queue=event_queue,
-                    start_time=start_time,
-                )
-            except asyncio.CancelledError:
-                self.log.info("Agent iteration task cancelled")
-            except BaseException as e:
-                iteration_error = e
-            finally:
-                await event_queue.put(None)
-
-        iteration_task = asyncio.create_task(agent_iteration_task())
-        if self._iteration_task is not None and not self._iteration_task.done():
-            self.log.warning(
-                "Starting new stream while iteration_task is still active — "
-                "concurrent runs on a shared agent instance are not safe"
-            )
-        self._iteration_task = iteration_task
-
-        try:
-            while True:
-                try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-                    if event is None:
-                        break
-                    yield event
-                except TimeoutError:
-                    current = asyncio.current_task()
-                    if current is not None and current.cancelling() > 0:
-                        raise asyncio.CancelledError() from None
-                    if run_ctx.cancelled:
-                        break
-                    continue
-
-        finally:
-            iteration_done.set()
-            if iteration_task.cancelled():
-                run_ctx.cancelled = True
-            if not iteration_task.done():
-                iteration_task.cancel()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(iteration_task),
-                        timeout=2.0,
-                    )
-                except (TimeoutError, asyncio.CancelledError):
-                    pass
-            self._iteration_task = None
-
-        if iteration_error is not None:
-            raise iteration_error
-
-        # If the stream was cancelled before producing a response, create a
-        # minimal empty message so the caller always receives StreamCompleteEvent.
-        if response_msg is None:
-            response_time = time.perf_counter() - start_time
-            response_msg = ChatMessage(
-                content="",
-                role="assistant",
-                name=self.name,
-                message_id=message_id,
-                session_id=session_id,
-                parent_id=user_msg.message_id,
-                response_time=response_time,
-                finish_reason="stop",
-            )
-
-        yield StreamCompleteEvent(message=response_msg)
+            _parent_id=parent_session_id,
+            input_provider=input_provider,
+            deps=deps,
+        ):
+            # Wire iteration_task for _interrupt() compatibility.
+            # executor._iteration_task becomes non-None after the first
+            # event (RunStartedEvent) is yielded.
+            if executor._iteration_task is not None and self._iteration_task is None:
+                self._iteration_task = executor._iteration_task
+            yield event
 
     def register_worker(
         self,
