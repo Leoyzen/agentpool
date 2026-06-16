@@ -938,25 +938,12 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                             )
                     return
 
-        # Direct execution path for AG-UI bypass and standalone mode.
-        # AG-UI requires direct agent access for protocol-specific event
-        # transformation (AGUIEventStream). Standalone agents run without
-        # an AgentPool / SessionPool.
-        async for event in self._execute_direct(
-            *prompts,
-            store_history=store_history,
-            message_id=message_id,
-            session_id=session_id,
-            parent_session_id=parent_session_id,
-            parent_id=parent_id,
-            message_history=message_history,
-            input_provider=input_provider,
-            wait_for_connections=wait_for_connections,
-            deps=deps,
-            event_handlers=event_handlers,
-            depth=depth,
-        ):
-            yield event
+        # After Wave 4, all standalone callers route through SessionPool.
+        # Direct execution without SessionPool is no longer supported.
+        raise RuntimeError(
+            "SessionPool is required for agent streaming. "
+            "Ensure the agent is part of an AgentPool."
+        )
 
     async def _execute_direct(
         self,
