@@ -17,6 +17,9 @@ def mock_node() -> MagicMock:
     node = MagicMock()
     node.name = "parent_agent"
     node.session_id = "ses_parent_abc123"
+    # Real nodes store session_id on _events (EventManager); mocks
+    # must mirror this so create_child_session can read the parent.
+    node._events.session_id = "ses_parent_abc123"
     node.agent_pool = None  # Will be set per-test
     return node
 
@@ -142,6 +145,7 @@ async def test_create_child_session_no_pool(mock_node: MagicMock) -> None:
 async def test_create_child_session_no_node_session_id(mock_node: MagicMock) -> None:
     """When node has no session_id and no explicit parent, fallback to generate_session_id."""
     mock_node.session_id = None
+    mock_node._events.session_id = None
     store = MemorySessionStore()
     mock_pool = MagicMock()
     mock_pool.manifest.name = "test_pool"

@@ -836,6 +836,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         deps: TDeps | None = None,
         event_handlers: Sequence[AnyEventHandlerType] | None = None,
         depth: int = 0,
+        _run_ctx: AgentRunContext | None = None,
+        _skip_pool: bool = False,
     ) -> AsyncIterator[RichAgentStreamEvent[TResult]]:
         """Run agent with streaming output (the react loop).
 
@@ -878,7 +880,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # directly to avoid deadlock on turn_lock (the parent turn already
         # holds it).
         if (
-            self.agent_pool is not None
+            not _skip_pool
+            and self.agent_pool is not None
             and self.agent_pool.session_pool is not None
             and not _in_turn_context.get()
         ):
@@ -919,21 +922,27 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         # --- Path B: Standalone / in-turn react loop ---
         # Creates a lightweight per-run context and processes prompts without
         # SessionPool / EventBus.  Session history is still logged.
-        effective_session_id = session_id or generate_session_id()
+        # When _run_ctx is provided (from SessionPool), the existing run
+        # context is reused and session logging is skipped.
+        if _run_ctx is not None:
+            run_ctx = _run_ctx
+            effective_session_id = session_id or run_ctx.session_id
+        else:
+            effective_session_id = session_id or generate_session_id()
 
-        user_prompts = [str(p) for p in prompts if isinstance(p, str)]
-        initial_prompt = user_prompts[-1] if user_prompts else None
+            user_prompts = [str(p) for p in prompts if isinstance(p, str)]
+            initial_prompt = user_prompts[-1] if user_prompts else None
 
-        await self.log_session(
-            session_id=effective_session_id,
-            initial_prompt=initial_prompt,
-            model=self.model_name,
-            parent_session_id=parent_session_id,
-        )
+            await self.log_session(
+                session_id=effective_session_id,
+                initial_prompt=initial_prompt,
+                model=self.model_name,
+                parent_session_id=parent_session_id,
+            )
 
-        # Create per-run context for state isolation
-        run_ctx = AgentRunContext(deps=deps, depth=depth)
-        # Reset cancellation state and track current task
+            # Create per-run context for state isolation
+            run_ctx = AgentRunContext(deps=deps, depth=depth)
+            # Reset cancellation state and track current task
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
@@ -1147,9 +1156,14 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     session_id=session_id,
                 )
 
-            # Emit signal (always - for event handlers)
-            # Skip when running through session pool; run()/run_stream() will emit
-            if not _in_turn_context.get():
+            # Emit signal (always - for event handlers).
+            # Skip when run_ctx has an event_bus (SessionPool-managed runs);
+            # the Path A wrapper in run_stream() handles emission in that case.
+            # We check event_bus rather than _in_turn_context because
+            # _in_turn_context remains True for nested route_message calls
+            # triggered by Talk, but the outer Path A wrapper won't emit for
+            # those nested agents.
+            if run_ctx.event_bus is None:
                 await self.message_sent.emit(final_message)
             # Route to connected agents (always - they decide what to do with it)
             await self.connections.route_message(final_message, wait=wait_for_connections)

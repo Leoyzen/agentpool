@@ -1051,10 +1051,21 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         from agentpool.agents.base_agent import BaseAgent
 
-        base = agent if isinstance(agent, BaseAgent) else self.get_agents()[agent]
+        if isinstance(agent, BaseAgent):
+            base = agent
+        else:
+            # Try agents first, then nodes (which includes teams)
+            agents = self.get_agents()
+            if agent in agents:
+                base = agents[agent]
+            elif agent in self.nodes:
+                base = self.nodes[agent]  # type: ignore[assignment]
+            else:
+                raise KeyError(agent)
         # Use custom deps if provided, otherwise use shared deps
         # base.context.data = deps if deps is not None else self.shared_deps
-        base.deps_type = deps_type
+        if isinstance(base, BaseAgent):
+            base.deps_type = deps_type
         base.agent_pool = self
         if isinstance(base, SupportsStructuredOutput):
             base.to_structured(output_type)
