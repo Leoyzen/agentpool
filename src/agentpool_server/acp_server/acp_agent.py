@@ -954,6 +954,14 @@ class AgentPoolACPAgent(ACPAgent):
             manifest = getattr(agent_pool, "manifest", None) if agent_pool else None
             if manifest and manifest.model_variants:
                 valid_model_ids.update(manifest.model_variants.keys())
+                # Also include resolved identifiers from StringModelConfig variants,
+                # since configOptions sends resolved identifiers (e.g., "openai-chat:svc/glm-4.7")
+                # while model_variants.keys() are variant names (e.g., "glm47").
+                from llmling_models_config import StringModelConfig
+
+                for config in manifest.model_variants.values():
+                    if isinstance(config, StringModelConfig):
+                        valid_model_ids.add(config.identifier)
 
             # Validate the requested model
             if params.model_id not in valid_model_ids:
