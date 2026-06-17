@@ -345,6 +345,12 @@ async def _serve_websocket(
 
         heartbeat_task: asyncio.Task[None] | None = None
         if ping_interval is not None:
+            logger.info(
+                "Starting WebSocket heartbeat with interval=%s, timeout=%s, max_missed=%s",
+                ping_interval,
+                pong_timeout,
+                max_missed_pongs,
+            )
             heartbeat_task = asyncio.create_task(
                 _websocket_heartbeat(
                     websocket,
@@ -403,11 +409,16 @@ async def _websocket_heartbeat(
     import websockets
 
     missed_pongs = 0
+    ping_count = 0
+    logger.info("WebSocket heartbeat started")
     while True:
         await asyncio.sleep(ping_interval)
+        ping_count += 1
+        logger.debug("Sending WebSocket ping #%d", ping_count)
         try:
             pong_waiter: Awaitable[float] = await websocket.ping()
             await asyncio.wait_for(pong_waiter, timeout=pong_timeout)
+            logger.debug("Pong #%d received in time", ping_count)
             if missed_pongs:
                 logger.info(
                     "WebSocket heartbeat recovered after %d missed pong(s)",
