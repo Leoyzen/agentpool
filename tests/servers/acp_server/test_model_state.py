@@ -74,7 +74,7 @@ class TestBuildModelStateForAcp:
         """Configured variants take priority over tokonomics."""
         pool = MockPool(manifest=manifest_with_variants)
         toko_models = [create_toko_model("openai:gpt-4o", "GPT-4o")]
-        agent = MockAgent(model_name="fast_gpt", pool=pool, toko_models=toko_models)
+        agent = MockAgent(model_name="openai:gpt-4o-mini", pool=pool, toko_models=toko_models)
         router = ProviderRouter(manifest_with_variants)  # type: ignore[arg-type]
 
         state = await build_model_state_for_acp(agent, router)  # type: ignore[arg-type]
@@ -82,8 +82,13 @@ class TestBuildModelStateForAcp:
         assert state is not None
         assert isinstance(state, SessionModelState)
         model_ids = {m.model_id for m in state.available_models}
-        assert "fast_gpt" in model_ids
-        assert "smart" in model_ids
+        # model_id should be resolved identifiers, not variant names
+        assert "openai:gpt-4o-mini" in model_ids
+        assert "anthropic:claude-sonnet-4-5" in model_ids
+        # name should be the variant name (alias)
+        names = {m.name for m in state.available_models}
+        assert "fast_gpt" in names
+        assert "smart" in names
         # Tokonomics models should NOT appear when configured variants exist
         assert "openai:gpt-4o" not in model_ids
 
@@ -148,13 +153,14 @@ class TestBuildModelStateForAcp:
     async def test_current_model_in_configured(self, manifest_with_variants):
         """Current model is set correctly when in configured list."""
         pool = MockPool(manifest=manifest_with_variants)
-        agent = MockAgent(model_name="smart", pool=pool)
+        # model_name should be the resolved identifier to match model_id
+        agent = MockAgent(model_name="anthropic:claude-sonnet-4-5", pool=pool)
         router = ProviderRouter(manifest_with_variants)  # type: ignore[arg-type]
 
         state = await build_model_state_for_acp(agent, router)  # type: ignore[arg-type]
 
         assert state is not None
-        assert state.current_model_id == "smart"
+        assert state.current_model_id == "anthropic:claude-sonnet-4-5"
 
     async def test_current_model_not_in_list(self, manifest_with_variants):
         """Current model is inserted when not in configured variants."""
@@ -168,7 +174,7 @@ class TestBuildModelStateForAcp:
         # Current model should be inserted at the front for IDE visibility
         assert state.current_model_id == "unknown-model"
         assert state.available_models[0].model_id == "unknown-model"
-        # Configured variants should still be present
+        # Configured variants should still be present with resolved identifiers
         model_ids = {m.model_id for m in state.available_models}
-        assert "fast_gpt" in model_ids
-        assert "smart" in model_ids
+        assert "openai:gpt-4o-mini" in model_ids
+        assert "anthropic:claude-sonnet-4-5" in model_ids
