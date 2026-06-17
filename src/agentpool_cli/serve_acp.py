@@ -82,7 +82,7 @@ def acp_command(  # noqa: PLR0915
         t.Option(
             "--skills/--no-skills",
             help="Load client-side skills from .claude/skills directory. "
-                 "Defaults to the manifest's skills.include_default setting.",
+            "Defaults to the manifest's skills.include_default setting.",
         ),
     ] = None,
     transport: Annotated[
@@ -123,6 +123,27 @@ def acp_command(  # noqa: PLR0915
             help="WebSocket port (only used with --transport websocket, deprecated)",
         ),
     ] = 8765,
+    ws_ping_interval: Annotated[
+        float,
+        t.Option(
+            "--ws-ping-interval",
+            help="Seconds between WebSocket ping frames for WebSocket transports",
+        ),
+    ] = 60.0,
+    ws_pong_timeout: Annotated[
+        float,
+        t.Option(
+            "--ws-pong-timeout",
+            help="Seconds to wait for each WebSocket pong",
+        ),
+    ] = 30.0,
+    ws_max_missed_pongs: Annotated[
+        int,
+        t.Option(
+            "--ws-max-missed-pongs",
+            help="Consecutive missed WebSocket pongs before disconnecting",
+        ),
+    ] = 3,
     mcp_config: Annotated[
         str | None,
         t.Option(
@@ -177,14 +198,26 @@ def acp_command(  # noqa: PLR0915
 
     # Build transport config
     if transport == "streamable-http":
-        transport_config: Transport = ACPWebSocketTransport(host=host, port=port)
+        transport_config: Transport = ACPWebSocketTransport(
+            host=host,
+            port=port,
+            ping_interval=ws_ping_interval,
+            pong_timeout=ws_pong_timeout,
+            max_missed_pongs=ws_max_missed_pongs,
+        )
     elif transport == "websocket":
         warnings.warn(
             "--transport websocket is deprecated; use --transport streamable-http instead",
             DeprecationWarning,
             stacklevel=2,
         )
-        transport_config = WebSocketTransport(host=ws_host, port=ws_port)
+        transport_config = WebSocketTransport(
+            host=ws_host,
+            port=ws_port,
+            ping_interval=ws_ping_interval,
+            pong_timeout=ws_pong_timeout,
+            max_missed_pongs=ws_max_missed_pongs,
+        )
     elif transport == "stdio":
         transport_config = StdioTransport()
 
