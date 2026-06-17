@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import html
-import json
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from upathtools import UPath
+
 
 # Type for skill paths - can be UPath (for local filesystem skills)
 # or PurePosixPath (for virtual skill:// URIs from MCP providers)
@@ -22,7 +22,6 @@ SPEC_SYNCED_COMMIT = "f019a02dbbb1302217c4b4a14557d6384d9ace9a"
 MAX_SKILL_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
 MAX_COMPATIBILITY_LENGTH = 500
-_REVIEWER_SKILL_CATALOG_PLACEHOLDER = "{{ reviewer_skill_catalog }}"
 
 
 class Skill(BaseModel):
@@ -118,11 +117,7 @@ class Skill(BaseModel):
             if skill_file.exists():
                 content = skill_file.read_text(encoding="utf-8")
                 parts = content.split("---", 2)
-                instructions = parts[2].strip() if len(parts) >= 3 else ""  # noqa: PLR2004
-                self.instructions = _render_dynamic_skill_placeholders(
-                    instructions,
-                    self.skill_path,
-                )
+                self.instructions = parts[2].strip() if len(parts) >= 3 else ""  # noqa: PLR2004
             else:
                 self.instructions = ""
         return self.instructions
@@ -214,97 +209,6 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         raise TypeError("SKILL.md frontmatter must be a YAML mapping")
 
     return metadata, parts[2].strip()
-
-
-def _render_dynamic_skill_placeholders(instructions: str, skill_path: SkillPathType) -> str:
-    """Render optional dynamic placeholders in local skill instructions."""
-    if _REVIEWER_SKILL_CATALOG_PLACEHOLDER not in instructions:
-        return instructions
-    if type(skill_path) is PurePosixPath:
-        return instructions
-
-    catalog = _build_reviewer_skill_catalog(skill_path)
-    return instructions.replace(_REVIEWER_SKILL_CATALOG_PLACEHOLDER, catalog)
-
-
-def _build_reviewer_skill_catalog(skill_path: SkillPathType) -> str:
-    """Build a reviewer-to-skill catalog from sibling skill frontmatter."""
-    if type(skill_path) is PurePosixPath:
-        return "- No reviewer skills discovered."
-
-    skills_root = skill_path.parent
-    records: list[dict[str, str]] = []
-    try:
-        siblings = list(skills_root.iterdir())
-    except OSError:
-        siblings = []
-
-    for sibling in siblings:
-        skill_file = sibling / "SKILL.md"
-        try:
-            if sibling == skill_path or not sibling.is_dir() or not skill_file.exists():
-                continue
-            metadata, _body = parse_frontmatter(skill_file.read_text(encoding="utf-8"))
-        except (OSError, TypeError, ValueError):
-            continue
-
-        nested_metadata = metadata.get("metadata")
-        if not isinstance(nested_metadata, dict):
-            continue
-        reviewer = str(nested_metadata.get("reviewer") or "").strip()
-        if not reviewer:
-            continue
-        name = str(metadata.get("name") or "").strip()
-        description = str(metadata.get("description") or "").strip()
-        review_team = str(nested_metadata.get("review_team") or "").strip()
-        if name and description:
-            records.append({
-                "reviewer": reviewer,
-                "skill": name,
-                "description": description,
-                "review_team": review_team,
-            })
-
-    if not records:
-        return "- No reviewer skills discovered."
-
-    records.sort(key=lambda item: (item["review_team"], item["reviewer"], item["skill"]))
-    lines = [
-        "| reviewer | skill | description |",
-        "|---|---|---|",
-        *[
-            "| "
-            f"`{_escape_markdown_table_cell(record['reviewer'])}` | "
-            f"`{_escape_markdown_table_cell(record['skill'])}` | "
-            f"{_escape_markdown_table_cell(record['description'])} |"
-            for record in records
-        ],
-    ]
-
-    content_review_skills = {
-        record["reviewer"]: [record["skill"]]
-        for record in records
-        if record["review_team"] == "fta_content_review_team"
-    }
-    if content_review_skills:
-        lines.extend([
-            "",
-            "Required `run_content_review` `reviewer_skills` payload for "
-            "`fta_content_review_team`:",
-            "",
-            "```json",
-            json.dumps(
-                {"reviewer_skills": content_review_skills},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            "```",
-        ])
-    return "\n".join(lines)
-
-
-def _escape_markdown_table_cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ").strip()
 
 
 def to_prompt(skills: list[Skill]) -> str:

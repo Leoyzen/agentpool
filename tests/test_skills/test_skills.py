@@ -8,6 +8,7 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
+from upathtools import UPath
 
 from agentpool.skills.registry import SkillsRegistry
 from agentpool.skills.skill import Skill
@@ -61,15 +62,11 @@ def isolated_registry(temp_skills_dir):
         SkillsRegistry.DEFAULT_SKILL_PATHS = original_paths
 
 
-def test_skill_load_instructions_renders_reviewer_skill_catalog(tmp_path: Path) -> None:
+def test_skill_load_instructions_preserves_domain_placeholders(tmp_path: Path) -> None:
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     fta_review_dir = skills_dir / "fta-review"
     fta_review_dir.mkdir()
-    causal_dir = skills_dir / "fta-causal-path-review"
-    causal_dir.mkdir()
-    evidence_dir = skills_dir / "fta-evidence-review"
-    evidence_dir.mkdir()
 
     (fta_review_dir / "SKILL.md").write_text(
         dedent("""
@@ -84,39 +81,8 @@ def test_skill_load_instructions_renders_reviewer_skill_catalog(tmp_path: Path) 
         """).strip(),
         encoding="utf-8",
     )
-    (causal_dir / "SKILL.md").write_text(
-        dedent("""
-        ---
-        name: fta-causal-path-review
-        description: Review causal paths
-        metadata:
-          reviewer: root_cause_reviewer
-          review_team: fta_content_review_team
-        ---
 
-        # Causal
-        """).strip(),
-        encoding="utf-8",
-    )
-    (evidence_dir / "SKILL.md").write_text(
-        dedent("""
-        ---
-        name: fta-evidence-review
-        description: Review evidence
-        metadata:
-          reviewer: evidence_reviewer
-          review_team: fta_content_review_team
-        ---
+    instructions = Skill.from_skill_dir(UPath(fta_review_dir)).load_instructions()
 
-        # Evidence
-        """).strip(),
-        encoding="utf-8",
-    )
-
-    instructions = Skill.from_skill_dir(fta_review_dir).load_instructions()
-
-    assert "{{ reviewer_skill_catalog }}" not in instructions
-    assert "`root_cause_reviewer`" in instructions
-    assert "`fta-causal-path-review`" in instructions
-    assert "\"root_cause_reviewer\": [\n      \"fta-causal-path-review\"" in instructions
-    assert "\"evidence_reviewer\": [\n      \"fta-evidence-review\"" in instructions
+    assert "{{ reviewer_skill_catalog }}" in instructions
+    assert "fta-causal-path-review" not in instructions
