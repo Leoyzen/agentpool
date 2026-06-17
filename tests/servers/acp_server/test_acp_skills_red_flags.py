@@ -235,14 +235,14 @@ class TestSkillsIncludeDefault:
         custom_skills_dir.mkdir()
         skill_dir = custom_skills_dir / "custom-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# Custom Skill")
+        (skill_dir / "SKILL.md").write_text("---\nname: custom-skill\ndescription: A custom test skill\n---\n# Custom Skill")
 
         # Create a default skill directory with one skill
         default_skills_dir = tmp_path / ".claude" / "skills"
         default_skills_dir.mkdir(parents=True)
         default_skill_dir = default_skills_dir / "default-skill"
         default_skill_dir.mkdir()
-        (default_skill_dir / "SKILL.md").write_text("# Default Skill")
+        (default_skill_dir / "SKILL.md").write_text("---\nname: default-skill\ndescription: A default test skill\n---\n# Default Skill")
 
         # Create SkillsManager with include_default=False
         config = SkillsConfig(
