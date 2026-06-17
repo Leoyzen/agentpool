@@ -724,11 +724,41 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         # Collect capabilities from all sources
         tool_capabilities: list[Any] = []
-        # 1. Tool providers
+        direct_tools: list[Any] = []
+        # Reference to the MCP aggregating provider — its tools are handled
+        # separately via self.mcp.as_capability() to avoid duplicate
+        # registration (once as direct tools, once as MCP capabilities).
+        mcp_aggregating = self.mcp.aggregating_provider
+        # 1. Tool providers — collect capabilities or fall back to direct tools
         for provider in self.tools.providers:
+            # Skip the MCP aggregating provider: its tools are registered
+            # via self.mcp.as_capability() below. Including it here would
+            # register the same tools twice (once as direct tools, once as
+            # MCP capabilities), causing pydantic-ai UserError.
+            if provider is mcp_aggregating:
+                continue
             cap = provider.as_capability()
             if cap is not None:
                 tool_capabilities.append(cap)
+            else:
+                # Provider not yet migrated to capability system — register
+                # tools directly via the legacy `tools` parameter
+                try:
+                    provider_tools = await provider.get_tools()
+                    for tool in provider_tools:
+                        from agentpool.agents.native_agent.tool_wrapping import wrap_tool
+                        context_for_tools = self.get_context(
+                            input_provider=input_provider, run_ctx=run_ctx
+                        )
+                        wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
+                        direct_tools.append(
+                            tool.to_pydantic_ai(function_override=wrapped)
+                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to register tools from provider",
+                        provider=provider.name,
+                    )
         # 2. Hooks — skip adding as capability when old mechanism is active
         #    to avoid double-firing. Old base_agent.py hook mechanism handles
         #    pre_run/post_run/pre_tool_use/post_tool_use directly.
@@ -842,6 +872,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             "end_strategy": self._end_strategy,
             "deps_type": AgentContext[TDeps],
             "output_type": cast(Any, final_type),
+            "tools": list(direct_tools),
             "capabilities": tool_capabilities if tool_capabilities else None,
         }
         if AgentRetries is None and self._output_retries is not None:
