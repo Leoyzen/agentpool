@@ -332,7 +332,18 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
 @pytest.fixture
 def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     """Create a server state for testing."""
-    state = ServerState(working_dir=str(tmp_project_dir), agent=mock_agent)
+    # Extract session_controller from mock pool so _event_generator can
+    # subscribe to the EventBus and receive events broadcast via event_bridge.
+    session_controller = None
+    session_pool = getattr(mock_agent.agent_pool, "session_pool", None)
+    if session_pool is not None:
+        session_controller = getattr(session_pool, "sessions", None)
+
+    state = ServerState(
+        working_dir=str(tmp_project_dir),
+        agent=mock_agent,
+        session_controller=session_controller,
+    )
     # Initialize backward-compat dicts removed from ServerState dataclass
     # so tests and helper fallbacks can access them.
     state.messages = {}
@@ -340,7 +351,9 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     state.todos = {}
     state.input_providers = {}
     state.pending_questions = {}
-    # Initialize event_bridge if not already set by __post_init__
+    # event_bridge is automatically set up by __post_init__ when
+    # session_controller is present, but ensure it's initialized for cases
+    # where the mock pool's event_bus isn't available at construction time.
     if state.event_bridge is None and state._pool is not None:
         from agentpool_server.opencode_server.event_bridge import OpenCodeEventBridge
 
