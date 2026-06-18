@@ -429,15 +429,13 @@ async def test_store_first_marks_session_idle(mock_state: ServerState) -> None:
     with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
         await ensure_session(mock_state, session_id)
 
-    # Status should be idle
-    assert session_id in mock_state.session_status
-    assert mock_state.session_status[session_id].type == "idle"
-
-    # Should have idle events
+    # Should have idle events.
+    # Status is now broadcast via set_session_status() + mark_session_idle()
+    # instead of stored in the in-memory session_status dict.
     broadcast_events = [call.args[0] for call in mock_broadcast.await_args_list]
     status_events = [e for e in broadcast_events if isinstance(e, SessionStatusEvent)]
     idle_events = [e for e in broadcast_events if isinstance(e, SessionIdleEvent)]
-    assert len(status_events) == 1
+    assert len(status_events) == 2  # set_session_status() + mark_session_idle() explicit broadcast
     assert len(idle_events) == 1
 
 

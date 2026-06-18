@@ -6,6 +6,7 @@ staged_content so that the agent runs instead of returning end_turn.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
@@ -25,6 +26,8 @@ from agentpool_server.opencode_server.skill_bridge import create_skill_command
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
+    from unittest.mock import MagicMock
+
     pool = AgentPool()
 
     def simple_callback(message: str) -> str:
@@ -32,6 +35,19 @@ def agent_pool_with_skill() -> AgentPool:
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
     pool.register("test_agent", agent)
+
+    # Provide a mock SessionPool so process_prompt can route through it
+    mock_session_pool = MagicMock()
+    mock_session_pool.sessions = MagicMock()
+    mock_session_pool.event_bus = MagicMock()
+    mock_session_pool.event_bus.subscribe = AsyncMock()
+    mock_session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
+    # run_stream must return an async iterable
+    async def _empty_stream(*args: Any, **kwargs: Any) -> Any:
+        return
+        yield  # pragma: no cover
+    mock_session_pool.run_stream = _empty_stream
+    pool._session_pool = mock_session_pool  # type: ignore[reportPrivateUsage]
 
     # Create and register a skill command
     skill = Skill(
@@ -128,23 +144,25 @@ async def test_skill_command_with_staged_content_triggers_agent_run(
 
     content_block = TextContentBlock(text="/test-skill")
 
-    # Track whether agent.run_stream was called
+    # Track whether session_pool.run_stream was called
     run_stream_called = False
-    original_run_stream = agent.run_stream
+    session_pool = agent_pool_with_skill._session_pool  # type: ignore[reportPrivateUsage]
 
-    async def tracked_run_stream(*args, **kwargs):
+    def tracked_run_stream(*args: Any, **kwargs: Any) -> Any:
         nonlocal run_stream_called
         run_stream_called = True
-        # Yield nothing - the test only checks if run_stream was called
-        return
-        yield
+        async def _empty() -> Any:
+            return
+            yield  # pragma: no cover
+        return _empty()
 
-    agent.run_stream = tracked_run_stream  # type: ignore[method-assign]
+    original_run_stream = session_pool.run_stream
+    session_pool.run_stream = tracked_run_stream  # type: ignore[method-assign]
 
     try:
         result = await session.process_prompt([content_block])
     finally:
-        agent.run_stream = original_run_stream  # type: ignore[method-assign]
+        session_pool.run_stream = original_run_stream  # type: ignore[method-assign]
 
     assert run_stream_called, (
         "agent.run_stream should be called when skill command "

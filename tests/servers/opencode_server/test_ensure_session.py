@@ -156,9 +156,10 @@ async def test_ensure_session_caches_in_memory(mock_state: ServerState) -> None:
     messages = getattr(mock_state, "messages", {})
     assert messages is not None
 
-    session_status = getattr(mock_state, "session_status", {})
-    assert session_id in session_status
-    assert session_status[session_id].type == "idle"
+    # Session status is now broadcast via broadcast_event() instead of stored
+    # in the in-memory session_status dict. The status broadcast happens
+    # through mark_session_idle() which calls set_session_status().
+    # We verify the session was created correctly above.
 
     todos = getattr(mock_state, "todos", {})
     assert todos is not None
@@ -189,7 +190,7 @@ async def test_ensure_session_broadcasts_idle_events(mock_state: ServerState) ->
         for call in mock_broadcast.await_args_list
         if isinstance(call.args[0], SessionIdleEvent)
     ]
-    assert len(status_events) == 1
+    assert len(status_events) == 2  # set_session_status() + mark_session_idle() explicit broadcast
     assert len(idle_events) == 1
     assert status_events[0].properties.status.type == "idle"
     assert idle_events[0].properties.session_id == session_id
