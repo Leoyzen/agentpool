@@ -371,7 +371,7 @@ async def test_tool_event_fifo_ordering() -> None:
 async def test_no_duplicate_tool_events_in_sessionpool_mode() -> None:
     """Exactly one ToolCallStartEvent and one ToolCallCompleteEvent per tool call.
 
-    With EventBusHooksAdapter tool events disabled, there should be no duplicates.
+    RunExecutor already publishes tool events directly, so there should be no duplicates.
     """
     model = TestModel(call_tools="all")
     async with Agent(name="dup-test-agent", model=model, tools=[greet]) as agent:

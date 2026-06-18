@@ -652,7 +652,7 @@ async def _process_message_locked(  # noqa: PLR0915
                 [chat_msg], extend_last=True
             )
     finally:
-        # Session-scoped resources (EventBus consumer, SessionStatusBridge)
+        # Session-scoped resources (EventBus consumer)
         # are managed by OpenCodeSessionPoolIntegration and are NOT torn
         # down here.  They outlive individual HTTP requests so that auto-
         # resume events are still streamed to the frontend.

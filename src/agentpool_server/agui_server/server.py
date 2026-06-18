@@ -53,6 +53,9 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
         ```
     """
 
+    # AG-UI is stateless HTTP; events are not consumed here.
+    _skip_event_processing = True
+
     def __init__(
         self,
         pool: AgentPool,

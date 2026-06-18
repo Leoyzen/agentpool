@@ -25,7 +25,6 @@ from agentpool.agents.events import (
     FileContentItem,
     LocationContentItem,
     RunErrorEvent,
-    RunStartedEvent,
     StreamCompleteEvent,
     TextContentItem,
     ToolCallCompleteEvent,
@@ -46,7 +45,6 @@ from agentpool_server.opencode_server.models import (
     PartDeltaEvent,
     PartUpdatedEvent,
     SessionErrorEvent,
-    SessionStatusEvent,
     TokenCache,
     Tokens,
 )
@@ -180,12 +178,6 @@ class EventProcessor:
             case StreamCompleteEvent(message=msg) if msg:
                 for e in self._process_stream_complete(ctx, msg):
                     yield e
-
-            case RunStartedEvent() as run_started_event:
-                yield SessionStatusEvent.create(
-                    session_id=run_started_event.session_id,
-                    status_type="busy",
-                )
 
             case RunErrorEvent() as run_error_event:
                 yield SessionErrorEvent.create(

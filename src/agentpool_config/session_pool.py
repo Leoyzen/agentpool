@@ -143,7 +143,7 @@ class OpenCodeConfig(Schema):
         default_factory=lambda: _env_flag("AGENTPOOL_USE_SESSION_POOL_FOR_STATUS"),
         title="Use session pool for status",
     )
-    """Whether to use SessionController/SessionStatusBridge as the exclusive source
+    """Whether to use SessionController as the exclusive source
     of truth for session status.
 
     Defaults to True. Set to False to fall back to ServerState in-memory dictionaries

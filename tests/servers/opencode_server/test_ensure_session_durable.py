@@ -378,7 +378,6 @@ async def test_route_message_replays_deferred_results(mock_state: ServerState) -
 
     # Patch internal methods that spawn background tasks
     with (
-        patch.object(integration, "_start_status_bridge", new=AsyncMock()),
         patch.object(integration, "_start_event_consumer", new=AsyncMock()),
         patch.object(mock_state, "broadcast_event", new=AsyncMock()),
     ):
@@ -412,7 +411,6 @@ async def test_route_message_skips_resume_when_not_checkpointed(
     integration = OpenCodeSessionPoolIntegration(sp, mock_state)
 
     with (
-        patch.object(integration, "_start_status_bridge", new=AsyncMock()),
         patch.object(integration, "_start_event_consumer", new=AsyncMock()),
         patch.object(mock_state, "broadcast_event", new=AsyncMock()),
     ):
