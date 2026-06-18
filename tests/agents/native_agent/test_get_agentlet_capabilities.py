@@ -146,19 +146,23 @@ async def test_get_agentlet_creates_hooks_capability(
 
 
 # ---------------------------------------------------------------------------
-# Test: EventBusHooksAdapter wraps hooks when event_bus available
+# Test: HookManager capability used directly (no adapter wrapping)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_get_agentlet_wraps_hooks_with_eventbus_adapter(
+async def test_get_agentlet_uses_hook_manager_capability_directly(
     mock_agent: Agent[Any],
     mock_hook_manager: MagicMock,
 ) -> None:
-    """EventBusHooksAdapter wraps hooks when event_bus available."""
+    """HookManager.as_capability() is used directly when event_bus is available.
+
+    RunExecutor already publishes RunStartedEvent, ToolCallStartEvent,
+    and ToolCallCompleteEvent, so no adapter wrapping is needed.
+    """
     mock_agent._hook_manager = mock_hook_manager
 
-    # Create run_ctx with event_bus
+    # Create run_ctx with event_bus (previously triggered adapter wrapping)
     event_bus = EventBus()
     run_ctx = AgentRunContext(session_id="test-session", event_bus=event_bus)
 
@@ -169,18 +173,12 @@ async def test_get_agentlet_wraps_hooks_with_eventbus_adapter(
         # Verify hook_manager.as_capability was called
         mock_hook_manager.as_capability.assert_called_once()
 
-        # Verify the hooks capability passed is from EventBusHooksAdapter
+        # The raw hook_manager capability should be used directly (no adapter wrapping)
         call_kwargs = mock_pydantic_agent.call_args.kwargs
         capabilities = call_kwargs.get("capabilities", []) or []
-
-        # The wrapped capability should be in the list
-        # Since EventBusHooksAdapter wraps the original hooks, we check
-        # that the capability is a Hooks instance (the adapter returns Hooks)
         hooks_cap = mock_hook_manager.as_capability.return_value
-        # After wrapping with EventBusHooksAdapter, the result is still a Hooks instance
-        # but not the same object reference
-        assert any(cap is not hooks_cap for cap in capabilities), (
-            "Hooks capability should be wrapped by EventBusHooksAdapter"
+        assert hooks_cap in capabilities, (
+            "Raw HookManager capability should be used directly (no adapter wrapping)"
         )
 
 
