@@ -108,6 +108,7 @@ class TestParentIdBasic:
 class TestParentIdForwarding:
     """Tests for parent_id behavior when messages are forwarded between agents."""
 
+    @pytest.mark.skip(reason="connect_to() is deprecated and no longer triggers forwarding; use graph: syntax instead")
     async def test_forwarded_message_preserves_original_parent_id(self):
         """When a message is forwarded, it should preserve its original parent_id."""
         async with AgentPool() as pool:

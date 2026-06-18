@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from importlib.util import find_spec
+
 from evented.event_data import EventData
 from evented_config import TimeEventConfig
 import pytest
 
 from agentpool.messaging import EventManager
 from agentpool.utils.time_utils import get_now
+
+# Timed event tests require croniter (optional dependency)
+_requires_croniter = pytest.mark.skipif(not find_spec("croniter"), reason="croniter not installed")
 
 
 @pytest.fixture
@@ -97,6 +102,7 @@ async def test_event_manager_remove_callback(event_manager: EventManager):
     assert counter == 1  # Shouldn't have increased
 
 
+@_requires_croniter
 async def test_timed_event_basic(event_manager: EventManager):
     """Test basic timed event setup."""
     events_received = []
@@ -134,6 +140,7 @@ async def test_event_callback_receives_prompt():
     assert received_prompts[0] == "Test"
 
 
+@_requires_croniter
 async def test_event_manager_cleanup(event_manager: EventManager):
     """Test cleanup of event manager."""
     # Add a simple event source

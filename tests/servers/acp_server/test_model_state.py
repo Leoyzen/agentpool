@@ -16,6 +16,7 @@ class MockManifest:
 
     def __init__(self, model_variants=None):
         self.model_variants = model_variants or {}
+        self.acp = None
 
 
 class MockPool:

@@ -17,11 +17,6 @@ from agentpool_server.opencode_server.converters import (
     opencode_to_chat_message,
 )
 from agentpool_server.opencode_server.dependencies import StateDep
-from agentpool_server.opencode_server.session_pool_integration import (
-    append_message_to_session,
-    get_messages_for_session,
-    set_session_status,
-)
 from agentpool_server.opencode_server.models import (
     AgentPartInput,
     AssistantMessage,
@@ -49,7 +44,9 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.routes.session_routes import get_or_load_session
 from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
     get_messages_for_session,
+    set_session_status,
 )
 from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 

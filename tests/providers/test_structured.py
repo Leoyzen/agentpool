@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
+from pydantic_ai.models.test import TestModel
 
-from agentpool import AgentPool, AgentsManifest
+from agentpool import Agent
 
 
 class Result(BaseModel):
@@ -11,17 +12,15 @@ class Result(BaseModel):
     is_positive: bool
 
 
-AGENT_CONFIG = """
-agents:
-    summarizer:
-        model: {default_model}
-        system_prompt: Summarize text in a structured way.
-"""
-
-
-async def test_structured_response(default_model: str):
-    manifest = AgentsManifest.from_yaml(AGENT_CONFIG.format(default_model=default_model))
-    async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("summarizer", output_type=Result)
-        result = await agent.run("I love this new feature!")
-        assert result.data.is_positive
+async def test_structured_response():
+    """Test that structured output_type produces typed result.data."""
+    agent = Agent(
+        name="summarizer",
+        model=TestModel(seed=1),
+        system_prompt="Summarize text in a structured way.",
+        output_type=Result,
+    )
+    result = await agent.run("I love this new feature!")
+    assert isinstance(result.data, Result)
+    # TestModel(seed=1) should produce is_positive=True for boolean fields
+    assert result.data.is_positive is True

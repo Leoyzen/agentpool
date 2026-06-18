@@ -165,6 +165,9 @@ class WorkersTools(ResourceProvider):
 
             try:
                 input_provider = ctx.get_input_provider() if ctx.input_provider else None
+                # Prefer node-level input_provider if session provider was resolved
+                if input_provider is None and isinstance(worker, BaseAgent):
+                    input_provider = getattr(worker, "_input_provider", None)
                 final_content = ""
                 async for event in session_pool.run_stream(
                     child_session_id, prompt, input_provider=input_provider

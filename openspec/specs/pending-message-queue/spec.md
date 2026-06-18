@@ -2,7 +2,37 @@
 
 ### Requirement: SessionController receives and routes all requests with agent-type awareness
 The system SHALL route all session-bound requests through `SessionController.receive_request()`. `receive_request()` SHALL be fire-and-forget, returning `None`. Protocol handlers SHALL continue consuming events via `EventBus` subscription before calling `receive_request()`. `receive_request()` SHALL inspect the session's agent type and route accordingly:
-- **Native agents (Phase 1)**: acquire `SessionState._request_lock`, then check `SessionState.current_run_id`. If idle, create a `RunHandle` and start execution via existing `TurnRunner`. If active, enqueue via `TurnRunner.inject_prompt()` / `queue_prompt()`.
+- **Native agents (Phase 2)**: acquire `SessionState._request_lock`, then check `SessionState.current_run_id`. If idle, create a `RunHandle` with PydanticAI `AgentRun` and start execution via `RunExecutor`. If active, call `TurnRunner.steer()` or `TurnRunner.followup()` based on priority.
+- **Non-native agents**: delegate to `TurnRunner.inject_prompt()` / `queue_prompt()` compatibility layer.
+
+**Note**: Phase 1 (legacy `TurnRunner` without `steer()`/`followup()`) is removed. Native agents always use Phase 2 routing with `steer()`/`followup()`.
+
+#### Phase 2 Scenario: Idle native session receives new request
+- **WHEN** `receive_request()` is called on a native session with `current_run_id` equal to `None`
+- **THEN** the system acquires `_request_lock`, verifies `current_run_id` is still `None`
+- **AND** creates a new `RunHandle` with PydanticAI `AgentRun`
+- **AND** adds the `RunHandle` to `SessionPool._runs`
+- **AND** sets `SessionState.current_run_id` while still holding `_request_lock`
+- **AND** releases `_request_lock`
+- **AND** initiates turn execution via `RunExecutor`
+
+#### Phase 2 Scenario: Active native session receives steering request
+- **WHEN** `receive_request()` is called with `priority="steer"` (or `"asap"`) on a native session with an active run
+- **THEN** the system calls `TurnRunner.steer(message)`
+- **AND** `steer()` calls `pydantic_ai_run.enqueue(message, priority='asap')`
+- **AND** the message is injected before the next LLM call
+
+#### Phase 2 Scenario: Active native session receives followup request
+- **WHEN** `receive_request()` is called with `priority="followup"` (or `"when_idle"`) on a native session with an active run
+- **THEN** the system calls `TurnRunner.followup(message)`
+- **AND** `followup()` calls `pydantic_ai_run.enqueue(message, priority='when_idle')`
+- **AND** the message is processed when the agent would otherwise terminate
+
+#### Scenario: Non-native session receives request (Phase 2)
+- **WHEN** `receive_request()` is called on a non-native session
+- **THEN** the system delegates to `TurnRunner.inject_prompt()` or `queue_prompt()`
+- **AND** `TurnRunner` acquires `SessionState.turn_lock` for turn serialization
+- **AND** existing non-native queue behavior is preserved
 - **Native agents (Phase 2)**: acquire `SessionState._request_lock`, then check `SessionState.current_run_id`. If idle, create a `RunHandle` with PydanticAI `AgentRun` and start execution via `RunExecutor`. If active, call `pydantic_ai_run.enqueue(..., priority)`.
 - **Non-native agents**: delegate to `LegacyTurnRunner.inject_prompt()` / `queue_prompt()` compatibility layer.
 

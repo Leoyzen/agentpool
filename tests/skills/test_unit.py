@@ -359,13 +359,13 @@ class TestSkillCommandWrapperInit:
         assert wrapper._skill_cmd == sample_command
 
     def test_wrapper_exposes_skill_name(self, sample_command: SkillCommand) -> None:
-        """Test that wrapper exposes command name with prefix."""
+        """Test that wrapper exposes command name (no prefix - matches OpenCode protocol)."""
         from agentpool_server.opencode_server.skill_bridge import SkillCommandWrapper
 
         wrapper = SkillCommandWrapper(sample_command)
 
         assert "test-cmd" in wrapper.name
-        assert wrapper.name == "skill:test-cmd"
+        assert wrapper.name == "test-cmd"
 
     def test_wrapper_exposes_description(self, sample_command: SkillCommand) -> None:
         """Test that wrapper exposes description."""

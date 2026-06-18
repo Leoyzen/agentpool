@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
+
 from anyenv.signals import Signal
 
 from agentpool.log import get_logger

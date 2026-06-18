@@ -807,8 +807,15 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 raw_data = yamling.load_yaml_file(path_for_loading, resolve_inherit=True)
             except (OSError, ValueError):
                 return
+            # Extract only the 'graph' section from the YAML, not the entire file.
+            # The top-level YAML may contain 'agents', 'skills', etc. that are
+            # not valid GraphConfig fields.
+            graph_data = raw_data.get("graph") if isinstance(raw_data, dict) else None
+            if graph_data is None:
+                # No graph section in config - that's fine, use defaults
+                return
             try:
-                self._graph_config = GraphConfig.model_validate(raw_data)
+                self._graph_config = GraphConfig.model_validate(graph_data)
             except Exception as exc:
                 config_str = str(path_for_loading)
                 raise ValueError(
@@ -1053,10 +1060,21 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         from agentpool.agents.base_agent import BaseAgent
 
-        base = agent if isinstance(agent, BaseAgent) else self.get_agents()[agent]
+        if isinstance(agent, BaseAgent):
+            base = agent
+        else:
+            # Try agents first, then nodes (which includes teams)
+            agents = self.get_agents()
+            if agent in agents:
+                base = agents[agent]
+            elif agent in self.nodes:
+                base = self.nodes[agent]  # type: ignore[assignment]
+            else:
+                raise KeyError(agent)
         # Use custom deps if provided, otherwise use shared deps
         # base.context.data = deps if deps is not None else self.shared_deps
-        base.deps_type = deps_type
+        if isinstance(base, BaseAgent):
+            base.deps_type = deps_type
         base.agent_pool = self
         if isinstance(base, SupportsStructuredOutput):
             base.to_structured(output_type)

@@ -20,7 +20,6 @@ from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
 from agentpool.agents.events.events import SpawnSessionStart
 from agentpool.log import get_logger
-from agentpool.resource_providers.base import ResourceProvider
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin

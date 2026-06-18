@@ -29,6 +29,7 @@ class FakeManifest:
     def __init__(self, config_file_path: str | None = None) -> None:
         self.config_file_path = config_file_path
         self.agents: dict[str, Any] = {}
+        self.acp = None
 
 
 class FakePool:

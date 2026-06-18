@@ -12,13 +12,13 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from contextlib import AbstractAsyncContextManager
     from types import TracebackType
 
     from mcp import ClientSession
     from mcp.types import CallToolResult
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
 

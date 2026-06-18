@@ -13,10 +13,10 @@ from agentpool.resource_providers import ResourceProvider
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     import httpx
+    from pydantic_ai.capabilities import AbstractCapability
     from upathtools import JoinablePathLike
 
     from agentpool.tools.base import Tool

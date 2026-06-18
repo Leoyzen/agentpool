@@ -316,6 +316,27 @@ def _create_mock_agentlet_from_caps(
                     model=MagicMock(),
                     usage=MagicMock(),
                 )
+                # next_node: first node for explicit next() loop.
+                # Use a simple sentinel that isn't End/ModelRequestNode/CallToolsNode
+                # so the loop body is skipped and next() is called immediately.
+                self.next_node = MagicMock()
+
+            async def next(self, node: Any) -> End[Any]:  # type: ignore[override]
+                """Run capabilities then return End to break the loop."""
+                for cap in cap_instances:
+                    run_ctx = RunContext(
+                        deps=deps,
+                        model=MagicMock(),
+                        usage=MagicMock(),
+                    )
+                    result = await cap.handle_deferred_tool_calls(
+                        run_ctx, requests=deferred_requests
+                    )
+                    # None means "pass through to next capability"
+                    # DeferredToolResults means "handled, stop chaining"
+                    if result is not None:
+                        break
+                return End(data=final_text)
 
             def __aiter__(self) -> Any:
                 return self

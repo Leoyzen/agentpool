@@ -204,7 +204,7 @@ async def test_before_tool_execute_is_transparent_passthrough(
     """before_tool_execute should be a transparent passthrough (no EventBus publish).
 
     ToolCallStartEvent is now produced by the stream path in
-    NativeAgent._run_agentlet_core() and RunExecutor.
+    RunExecutor.
     """
     capability = _adapt(Hooks(), event_bus)
 
@@ -1100,7 +1100,7 @@ async def test_adapter_run_and_tool_events_with_actual_agent(
     """Adapter publishes only run events during actual agent execution.
 
     Tool events are now produced by the stream path in
-    NativeAgent._run_agentlet_core() and RunExecutor, not by the hooks adapter.
+    RunExecutor, not by the hooks adapter.
     """
     from pydantic_ai import Agent as PydanticAgent
     from pydantic_ai.models.test import TestModel

@@ -9,8 +9,6 @@ from agentpool.messaging import MessageNode
 
 
 if TYPE_CHECKING:
-    from mcp.types import ElicitRequestParams, ElicitResult, ErrorData
-    from upathtools.filesystems import IsolatedMemoryFileSystem, OverlayFileSystem
 
     from agentpool import AgentPool
     from agentpool.agents.base_agent import BaseAgent

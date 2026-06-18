@@ -128,8 +128,7 @@ class EventBusHooksAdapter:
     def _wrap_before_tool_execute(self):
         """Wrap before_tool_execute hook as transparent passthrough.
 
-        ToolCallStartEvent is now produced by the stream path in
-        NativeAgent._run_agentlet_core() and RunExecutor, making
+        ToolCallStartEvent is now produced by RunExecutor, making
         EventBus publication here redundant.
         """
         original = self._hooks.before_tool_execute

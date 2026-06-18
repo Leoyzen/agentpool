@@ -18,7 +18,7 @@ from pydantic_ai import (
     ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
-    RunContext,  # noqa: TC002
+    RunContext,
     TextPart,
     TextPartDelta,
     ToolCallPart,
@@ -54,12 +54,12 @@ from agentpool_toolsets.fsspec_toolset.streaming_diff_parser import (
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
 
     import fsspec
     from fsspec.asyn import AsyncFileSystem
     from pydantic_ai import ModelRequest
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import ModelType
@@ -1307,6 +1307,8 @@ class FSSpecTools(ResourceProvider):
         pending_new_text: list[str] = []
         current_match_range = None
 
+        # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
+        # Use SessionPool.run_stream() with message_history support.
         async for node in agent.run_stream(
             prompt,
             message_history=fork_history,
@@ -1435,6 +1437,8 @@ class FSSpecTools(ResourceProvider):
         pending_old_text: list[str] = []
         pending_new_text: list[str] = []
 
+        # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
+        # Use SessionPool.run_stream() with message_history support.
         async for node in agent.run_stream(
             prompt,
             message_history=fork_history,
@@ -1521,6 +1525,8 @@ class FSSpecTools(ResourceProvider):
         """
         streamed_content = ""
 
+        # FIXME: agent.run_stream() requires SessionPool after migrate-to-runexecutor migration.
+        # Use SessionPool.run_stream() with message_history support.
         async for node in agent.run_stream(
             prompt,
             message_history=fork_history,

@@ -188,6 +188,7 @@ class ACPSessionManager:
         client_capabilities: ClientCapabilities | None = None,
         client_info: Implementation | None = None,
         subagent_display_mode: Literal["inline", "tool_box"] = "tool_box",
+        mcp_servers: Sequence[McpServer] | None = None,
     ) -> ACPSession | None:
         """Resume a session from storage.
 
@@ -198,6 +199,7 @@ class ACPSessionManager:
             client_capabilities: Client capabilities
             client_info: Client implementation info (name, version)
             subagent_display_mode: Display mode for subagent outputs
+            mcp_servers: MCP server configurations to (re-)initialize
 
         Returns:
             Resumed ACPSession if found, None otherwise
@@ -226,7 +228,7 @@ class ACPSessionManager:
                 agent=session_agent,
                 cwd=data.cwd or "",
                 client=client,
-                mcp_servers=None,  # MCP servers would need to be re-provided
+                mcp_servers=mcp_servers,
                 acp_agent=acp_agent,
                 client_capabilities=client_capabilities or ClientCapabilities(),
                 client_info=client_info,
@@ -235,11 +237,13 @@ class ACPSessionManager:
             )
             session.register_update_callback(self._on_commands_updated)
             await session.initialize()
+            await session.initialize_mcp_servers()
             self._active[session_id] = session
             logger.info("Resumed ACP session", session_id=session_id)
 
             # Load conversation history into the per-session agent
-            await session.agent.load_session(session_id)
+            if not await session.agent.load_session(session_id):
+                logger.warning("Agent failed to load session state", session_id=session_id)
 
             return session
 

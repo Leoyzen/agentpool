@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from pydantic_ai import ModelRequestPart, RunContext
-    from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.tools import ToolDefinition
     from schemez import OpenAIFunctionDefinition
 
@@ -424,6 +423,6 @@ class ResourceProvider(ABC):
             SkillNotFoundError: If skill not found
             ReferenceNotFoundError: If reference file not found
         """
-        from agentpool.skills.exceptions import ReferenceNotFoundError, SkillNotFoundError
+        from agentpool.skills.exceptions import SkillNotFoundError
 
         raise SkillNotFoundError(skill_name)

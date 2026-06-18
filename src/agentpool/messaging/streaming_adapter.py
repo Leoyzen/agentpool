@@ -51,6 +51,7 @@ from agentpool.agents.events import (
 from agentpool.log import get_logger
 from agentpool.messaging.messages import ChatMessage
 
+
 logger = get_logger(__name__)
 
 StateT = TypeVar("StateT")
@@ -102,9 +103,9 @@ class StepEventCollector:
                 child_session_id=self._adapter.session_id,
                 parent_session_id=self._adapter.session_id,
             )
-            await self._adapter._event_queue.put(wrapped)  # noqa: SLF001
+            await self._adapter._event_queue.put(wrapped)
         else:
-            await self._adapter._event_queue.put(event)  # noqa: SLF001
+            await self._adapter._event_queue.put(event)
 
     async def emit_text_delta(self, index: int, content: str) -> None:
         """Convenience helper to emit a text ``PartDeltaEvent``."""

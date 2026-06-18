@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
+import math
 from typing import TYPE_CHECKING
 
 from agentpool.log import get_logger

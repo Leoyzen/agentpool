@@ -926,76 +926,6 @@ async def test_in_turn_context_cleared_after_run_turn(
 
 
 # ---------------------------------------------------------------------------
-# _should_route_via_sessionpool
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_should_route_via_sessionpool_in_turn_context_true() -> None:
-    """_in_turn_context True → returns False (child tasks within a turn)."""
-    from agentpool.agents.base_agent import _in_turn_context, _should_route_via_sessionpool
-
-    token = _in_turn_context.set(True)
-    try:
-        result = _should_route_via_sessionpool(MagicMock(), "sess-1")
-        assert result is False, "Should return False when _in_turn_context is True"
-    finally:
-        _in_turn_context.reset(token)
-
-
-@pytest.mark.unit
-async def test_should_route_via_sessionpool_session_pool_none() -> None:
-    """session_pool is None → returns False (no pool available)."""
-    from agentpool.agents.base_agent import _should_route_via_sessionpool
-
-    result = _should_route_via_sessionpool(None, "sess-1")
-    assert result is False, "Should return False when session_pool is None"
-
-
-@pytest.mark.unit
-async def test_should_route_via_sessionpool_session_none() -> None:
-    """Session doesn't exist → returns True (new session should route)."""
-    from agentpool.agents.base_agent import _should_route_via_sessionpool
-
-    session_pool = MagicMock()
-    session_pool.sessions.get_session.return_value = None
-
-    result = _should_route_via_sessionpool(session_pool, "sess-1")
-    assert result is True, "Should return True when session does not exist"
-
-
-@pytest.mark.unit
-async def test_should_route_via_sessionpool_same_task_as_turn_owner() -> None:
-    """Same task as turn owner → returns False (we ARE the turn owner)."""
-    from agentpool.agents.base_agent import _should_route_via_sessionpool
-
-    session = MagicMock()
-    session._turn_owner_task = asyncio.current_task()
-
-    session_pool = MagicMock()
-    session_pool.sessions.get_session.return_value = session
-
-    result = _should_route_via_sessionpool(session_pool, "sess-1")
-    assert result is False, "Should return False when current task is the turn owner"
-
-
-@pytest.mark.unit
-async def test_should_route_via_sessionpool_different_task() -> None:
-    """Different task from turn owner → returns True (should route via pool)."""
-    from agentpool.agents.base_agent import _should_route_via_sessionpool
-
-    different_task = MagicMock()
-    session = MagicMock()
-    session._turn_owner_task = different_task
-
-    session_pool = MagicMock()
-    session_pool.sessions.get_session.return_value = session
-
-    result = _should_route_via_sessionpool(session_pool, "sess-1")
-    assert result is True, "Should return True when current task differs from turn owner"
-
-
-# ---------------------------------------------------------------------------
 # _turn_owner_task tracking
 # ---------------------------------------------------------------------------
 
@@ -1096,8 +1026,10 @@ async def test_child_task_deadlock_prevention(
 ) -> None:
     """A child task calling agent.run_stream() during a turn does NOT deadlock.
 
-    This proves that _in_turn_context correctly causes child tasks to
-    bypass SessionPool and execute directly instead of waiting on turn_lock.
+    run_stream() is the self-contained react loop — it never delegates
+    to SessionPool, so there is no turn_lock reentrancy risk.
+    The _in_turn_context guard ensures message_sent emission is
+    suppressed inside a turn context.
     """
     from agentpool.agents.events import StreamCompleteEvent
     from agentpool.messaging import ChatMessage
@@ -1106,7 +1038,7 @@ async def test_child_task_deadlock_prevention(
 
     async def _child_run_stream(agent: Any) -> None:
         # This runs inside _in_turn_context=True — should NOT deadlock
-        # because _should_route_via_sessionpool returns False.
+        # because run_stream() is the self-contained react loop.
         async for _event in agent.run_stream("child prompt"):
             pass
         child_task_events.append("completed")
@@ -1125,19 +1057,11 @@ async def test_child_task_deadlock_prevention(
         yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
 
     # We need a semi-real agent so that run_stream() actually works.
-    # But we can mock _execute_direct to avoid going through the full pipeline.
+    # run_stream() is the self-contained react loop so no delegation needed.
     agent = MagicMock()
     agent.get_active_run_context.return_value = None
-
-    async def _fake_direct(
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[RunStartedEvent]:
-        yield RunStartedEvent(session_id="child", run_id="child-run-1")
-
-    agent._execute_direct = _fake_direct  # type: ignore[method-assign]
     agent.name = "test-agent"
-    agent.agent_pool = mock_pool  # Simulate having an AgentPool (bypass will skip it)
+    agent.agent_pool = mock_pool  # Agent is pool-managed but child task runs directly
 
     # Wire _run_stream_once to pass _agent_self via kwargs
     async def _fake_stream_with_agent(

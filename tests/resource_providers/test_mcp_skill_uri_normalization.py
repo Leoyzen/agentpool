@@ -101,9 +101,7 @@ async def test_resource_skills_stores_original_name_in_metadata(
     mcp_provider.get_resources = AsyncMock(return_value=[mock_resource])
     mcp_provider._get_skill_manifest = AsyncMock(return_value=None)
 
-    with patch("agentpool.resource_providers.mcp_provider.UPath") as mock_upath:
-        mock_upath.return_value = UPath("/tmp/test-skill")
-        skills = await mcp_provider._get_resource_skills()
+    skills = await mcp_provider._get_resource_skills()
 
     assert len(skills) == 1
     # Skill model normalizes name to kebab-case
@@ -125,9 +123,7 @@ async def test_resource_skills_hyphenated_name_original_name_matches(
     mcp_provider.get_resources = AsyncMock(return_value=[mock_resource])
     mcp_provider._get_skill_manifest = AsyncMock(return_value=None)
 
-    with patch("agentpool.resource_providers.mcp_provider.UPath") as mock_upath:
-        mock_upath.return_value = UPath("/tmp/test-skill")
-        skills = await mcp_provider._get_resource_skills()
+    skills = await mcp_provider._get_resource_skills()
 
     assert len(skills) == 1
     assert skills[0].name == "code-review"
@@ -346,22 +342,19 @@ async def test_full_flow_underscored_uri_discovery_and_load(
 
     mcp_provider.read_resource = AsyncMock(side_effect=read_resource_selective)
 
-    with patch("agentpool.resource_providers.mcp_provider.UPath") as mock_upath:
-        mock_upath.return_value = UPath("/tmp/test-skill")
+    # Step 3: discover skills (this populates the cache)
+    skills = await mcp_provider.get_skills()
 
-        # Step 3: discover skills (this populates the cache)
-        skills = await mcp_provider.get_skills()
+    assert len(skills) == 1
+    # Skill model normalizes name to kebab-case
+    assert skills[0].name == "systematic-troubleshooting"
+    # Original name preserved in metadata
+    assert skills[0].metadata["original_name"] == "systematic_troubleshooting"
 
-        assert len(skills) == 1
-        # Skill model normalizes name to kebab-case
-        assert skills[0].name == "systematic-troubleshooting"
-        # Original name preserved in metadata
-        assert skills[0].metadata["original_name"] == "systematic_troubleshooting"
-
-        # Step 4: load instructions using the normalized name
-        # get_skill_instructions uses metadata["original_name"] internally
-        # to construct the correct URI for the MCP server
-        instructions = await mcp_provider.get_skill_instructions("systematic-troubleshooting")
+    # Step 4: load instructions using the normalized name
+    # get_skill_instructions uses metadata["original_name"] internally
+    # to construct the correct URI for the MCP server
+    instructions = await mcp_provider.get_skill_instructions("systematic-troubleshooting")
 
     assert "Systematic Troubleshooting" in instructions
 

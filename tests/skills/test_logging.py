@@ -114,8 +114,8 @@ class TestCommandRegistryLogging:
         with caplog.at_level(logging.DEBUG):
             await registry.initialize()
 
-        assert check_log_message(caplog, logging.DEBUG, "Synced")
-        assert check_log_message(caplog, logging.DEBUG, "initial commands from SkillsRegistry")
+        assert check_log_message(caplog, logging.INFO, "Synced")
+        # "initial commands from SkillsRegistry" log was removed in refactoring
 
 
 class TestACPSkillBridgeLogging:

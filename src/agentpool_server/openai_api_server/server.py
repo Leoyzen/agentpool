@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Any
+import uuid
 
 import anyenv
 from fastapi import Header
 
 from agentpool.log import get_logger
-from agentpool.orchestrator.core import EventEnvelope
 from agentpool_server import BaseServer
 from agentpool_server.mixins import ProtocolEventConsumerMixin
 from agentpool_server.openai_api_server.completions.helpers import stream_response
 from agentpool_server.openai_api_server.completions.models import (
     ChatCompletionRequest,
-    CompletionUsage,
     ChatCompletionResponse,
     Choice,
+    CompletionUsage,
     OpenAIMessage,
     OpenAIModelInfo,
 )
@@ -31,7 +31,9 @@ if TYPE_CHECKING:
     from fastapi import Response
 
     from agentpool import AgentPool
-    from agentpool.orchestrator.core import EventBus
+    from agentpool.orchestrator.core import EventBus, EventEnvelope
+
+
 logger = get_logger(__name__)
 
 
@@ -175,19 +177,23 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         from fastapi import HTTPException, Response
         from fastapi.responses import StreamingResponse
 
-        try:
-            agent = self.pool.all_agents[request.model]
-        except KeyError:
-            raise HTTPException(404, f"Model {request.model} not found") from None
+        if request.model not in self.pool.all_agents:
+            raise HTTPException(404, f"Model {request.model} not found")
 
-        # Just take the last message content - let agent handle history
+        session_pool = self.pool.session_pool
+        if session_pool is None:
+            raise HTTPException(500, "SessionPool not available")
+
         content = request.messages[-1].content or ""
         if request.stream:
+            session_id = f"openai-{uuid.uuid4()}"
+            await session_pool.create_session(session_id, agent_name=request.model)
             return StreamingResponse(
-                stream_response(agent, content, request),
+                stream_response(session_pool.run_stream(session_id, content), request),
                 media_type="text/event-stream",
             )
         try:
+            agent = self.pool.all_agents[request.model]
             response = await agent.run(content)
             message = OpenAIMessage(role="assistant", content=str(response.content))
             completion_response = ChatCompletionResponse(

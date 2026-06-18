@@ -89,7 +89,6 @@ class ToolCallState:
         On ACP V1, this method intentionally does nothing. On ACP V2,
         it would emit a session/update notification with state_change content.
         """
-        pass
 
     async def start(self) -> None:
         """Send initial tool_call notification.

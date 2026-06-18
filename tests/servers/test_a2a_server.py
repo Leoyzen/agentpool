@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
+
 import pytest
 
 from agentpool import Agent, AgentPool
 from agentpool_server.a2a_server import A2AServer
+
+
+pytestmark = pytest.mark.skipif(not find_spec("fasta2a"), reason="fasta2a not installed")
 
 
 # Test constants

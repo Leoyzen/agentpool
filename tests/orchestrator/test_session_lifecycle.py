@@ -42,9 +42,29 @@ pytestmark = pytest.mark.unit
 class MockAgent:
     """Simple mock agent for testing."""
 
+    AGENT_TYPE: str = "native"
+
     def __init__(self) -> None:
         self._stream_impl: Any = None
         self.get_active_run_context = MagicMock(return_value=None)
+
+    async def run_stream(
+        self,
+        *prompts: Any,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Mock run_stream that delegates to _stream_impl via _run_stream_once."""
+        if self._stream_impl is None:
+            raise RuntimeError("No stream impl set")
+        run_ctx = MagicMock()
+        if inspect.isasyncgenfunction(self._stream_impl):
+            async for event in self._stream_impl(run_ctx, *prompts, **kwargs):
+                yield event
+        else:
+            await self._stream_impl(run_ctx, *prompts, **kwargs)
+        # Yield at least one event so TurnRunner doesn't hang
+        yield RunStartedEvent(session_id=session_id or "", run_id="run-mock")
 
     async def _run_stream_once(
         self,

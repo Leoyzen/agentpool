@@ -281,7 +281,7 @@ def wrap_tool[TReturn](  # noqa: PLR0915
 
 async def _handle_deferred_exception(
     exc: CallDeferred | ApprovalRequired,
-    tool: Tool[Any],  # noqa: ARG001 — reserved for Task 12 DeferredToolBridge integration
+    tool: Tool[Any],
 ) -> ToolReturn:
     """Handle a deferred execution exception raised during resume re-execution.
 

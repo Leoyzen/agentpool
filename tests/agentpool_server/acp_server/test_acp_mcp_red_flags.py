@@ -6,6 +6,7 @@ that can silently break tool discovery and all MCP operations.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import anyio
@@ -130,119 +131,153 @@ async def test_no_double_wrap_on_mcp_message_forwarding(
     )
 
 
-async def test_elicitation_passthrough_returns_correct_result() -> None:
-    """Regression test: response to pending request is returned directly.
+async def test_send_to_client_forwards_response_to_session() -> None:
+    """Regression test: send_to_client forwards client response to session stream.
 
-    When a client-initiated request is pending, the response should be
-    fulfilled via the correlation registry instead of being forwarded
-    through _send_to_client.
+    When a request (message with `id`) is sent to the client and the client
+    returns a response, that response must be forwarded back to the MCP
+    session stream so ClientSession can process it.
     """
-    mock_send = AsyncMock()
+    mock_send = AsyncMock(return_value={"tools": []})
     server_cfg = AcpMcpServer(name="test", id="test-id")
-    conn = AcpMcpConnection("conn-passthrough", server_cfg, mock_send)
+    conn = AcpMcpConnection("conn-fwd", server_cfg, mock_send)
     await conn.open()
 
-    future = await conn.register_pending_request(3)
-    response = {"jsonrpc": "2.0", "id": 3, "result": {"action": "accept"}}
-    result = await conn.send_to_client(response)
+    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 
-    assert result == response
-    assert future.done()
-    assert future.result() == response
-    mock_send.assert_not_awaited()
+    # Use task group to read from session stream concurrently
+    # (unbuffered stream requires a receiver before send can complete)
+    received_messages: list[Any] = []
+
+    async with anyio.create_task_group() as tg:
+
+        async def receiver() -> None:
+            msg = await conn.to_session.receive()
+            received_messages.append(msg)
+
+        tg.start_soon(receiver)
+        await anyio.sleep(0)  # Let receiver start
+
+        result = await conn.send_to_client(request)
+
+    # _send_to_client was called with flattened ACP format
+    mock_send.assert_awaited_once()
+    call_args = mock_send.call_args[0][0]
+    assert call_args["connectionId"] == "conn-fwd"
+    assert call_args["method"] == "tools/list"
+
+    # Result from client is returned
+    assert result == {"tools": []}
+
+    # Response was forwarded to session stream as SessionMessage
+    from mcp.shared.message import SessionMessage
+
+    assert len(received_messages) == 1
+    assert isinstance(received_messages[0], SessionMessage)
 
     await conn.close()
 
 
-async def test_late_response_after_timeout_is_dropped() -> None:
-    """Regression test: late response after timeout must be dropped.
+async def test_send_to_client_error_forwards_error_to_session() -> None:
+    """Regression test: send_to_client errors are forwarded to session stream.
 
-    If a pending request times out (future is cancelled), any late
-    response for that request should be dropped, not forwarded.
+    When _send_to_client raises an exception, an error response must be
+    forwarded to the session stream so ClientSession can handle it.
     """
-    mock_send = AsyncMock()
+    mock_send = AsyncMock(side_effect=RuntimeError("Connection lost"))
     server_cfg = AcpMcpServer(name="test", id="test-id")
-    conn = AcpMcpConnection("conn-timeout", server_cfg, mock_send)
+    conn = AcpMcpConnection("conn-err", server_cfg, mock_send)
     await conn.open()
 
-    future = await conn.register_pending_request(1)
-    future.cancel()  # Simulate timeout cancellation
+    request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
 
-    response = {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
-    await conn.send_to_client(response)
+    # Use task group to read from session stream concurrently
+    received_messages: list[Any] = []
 
-    mock_send.assert_not_awaited()
+    async with anyio.create_task_group() as tg:
+
+        async def receiver() -> None:
+            msg = await conn.to_session.receive()
+            received_messages.append(msg)
+
+        tg.start_soon(receiver)
+        await anyio.sleep(0)  # Let receiver start
+
+        result = await conn.send_to_client(request)
+
+    # Returns None on error
+    assert result is None
+
+    # Error response was forwarded to session stream as SessionMessage
+    from mcp.shared.message import SessionMessage
+
+    assert len(received_messages) == 1
+    assert isinstance(received_messages[0], SessionMessage)
 
     await conn.close()
 
 
-async def test_unmatched_response_is_dropped() -> None:
-    """Regression test: unmatched response must be dropped with a warning.
+async def test_send_to_client_notification_no_session_forward() -> None:
+    """Regression test: notifications (no id) don't forward to session stream.
 
-    Responses for request IDs that were never registered should not
-    be forwarded to the client.
+    When a message has no `id` (notification), the response from the client
+    should NOT be forwarded to the session stream, since notifications are
+    fire-and-forget.
     """
-    mock_send = AsyncMock()
+    mock_send = AsyncMock(return_value=None)
     server_cfg = AcpMcpServer(name="test", id="test-id")
-    conn = AcpMcpConnection("conn-unmatched", server_cfg, mock_send)
+    conn = AcpMcpConnection("conn-notif", server_cfg, mock_send)
     await conn.open()
 
-    response = {"jsonrpc": "2.0", "id": 99, "result": {}}
+    notification = {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}}
+    result = await conn.send_to_client(notification)
 
-    with patch("agentpool_server.acp_server.acp_mcp_manager.logger.warning") as mock_warn:
-        await conn.send_to_client(response)
-        mock_send.assert_not_awaited()
-        mock_warn.assert_called_once()
+    # Notification sent to client
+    mock_send.assert_awaited_once()
 
-    await conn.close()
-
-
-async def test_response_fulfillment_prevents_fake_response_injection() -> None:
-    """Regression test: fulfilled response must not reach _to_session_send.
-
-    When a response is consumed by the correlation registry, it should
-    NOT be injected back into the MCP session stream.
-    """
-    mock_send = AsyncMock()
-    server_cfg = AcpMcpServer(name="test", id="test-id")
-    conn = AcpMcpConnection("conn-no-inject", server_cfg, mock_send)
-    await conn.open()
-
-    await conn.register_pending_request(2)
-    response = {"jsonrpc": "2.0", "id": 2, "result": {"status": "ok"}}
-    await conn.send_to_client(response)
-
-    mock_send.assert_not_awaited()
-    # Verify _to_session_send received nothing
+    # No message forwarded to session stream (no id)
     with pytest.raises(anyio.WouldBlock):
         conn.to_session.receive_nowait()
 
     await conn.close()
 
 
-async def test_duplicate_response_invalid_state_handled_gracefully() -> None:
-    """Regression test: duplicate response must not crash or leak.
+async def test_send_to_client_non_dict_returns_none() -> None:
+    """Regression test: non-dict, non-SessionMessage returns None.
 
-    If two responses arrive for the same request ID, the second must
-    be dropped without raising exceptions or calling _send_to_client.
+    If send_to_client receives a message that is neither a dict nor a
+    SessionMessage, it should return None without calling _send_to_client.
     """
     mock_send = AsyncMock()
     server_cfg = AcpMcpServer(name="test", id="test-id")
-    conn = AcpMcpConnection("conn-duplicate", server_cfg, mock_send)
+    conn = AcpMcpConnection("conn-nondict", server_cfg, mock_send)
     await conn.open()
 
-    future = await conn.register_pending_request(5)
-    response1 = {"jsonrpc": "2.0", "id": 5, "result": {"first": True}}
-    response2 = {"jsonrpc": "2.0", "id": 5, "result": {"second": True}}
+    result = await conn.send_to_client("not a valid message")
 
-    # First response fulfills the pending request
-    await conn.send_to_client(response1)
-    assert future.done()
-    assert future.result() == response1
-
-    # Second response should be dropped gracefully
-    await conn.send_to_client(response2)
-
+    assert result is None
     mock_send.assert_not_awaited()
+
+    await conn.close()
+
+
+async def test_send_to_client_closed_stream_handled_gracefully() -> None:
+    """Regression test: BrokenResourceError when session stream is closed.
+
+    If the session stream is already closed when trying to forward a
+    response, the error should be handled gracefully without crashing.
+    """
+    mock_send = AsyncMock(return_value={"result": "ok"})
+    server_cfg = AcpMcpServer(name="test", id="test-id")
+    conn = AcpMcpConnection("conn-closed", server_cfg, mock_send)
+    await conn.open()
+
+    # Close the session receive stream to simulate broken pipe
+    await conn._to_session_receive.aclose()
+
+    request = {"jsonrpc": "2.0", "id": 3, "method": "ping"}
+    # Should not raise even though stream is closed
+    result = await conn.send_to_client(request)
+    assert result == {"result": "ok"}
 
     await conn.close()

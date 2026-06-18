@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass, field
 from importlib.metadata import version as _version
-import sys
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import anyio
@@ -276,7 +274,7 @@ class AgentPoolACPAgent(ACPAgent):
         # Initialize SessionPool-backed protocol handler if feature flag is enabled
         if (
             self.agent_pool
-            and self.agent_pool.manifest.acp.use_session_pool
+            and (self.agent_pool.manifest.acp and self.agent_pool.manifest.acp.use_session_pool)
         ):
             from agentpool_server.acp_server.event_converter import ACPEventConverter
             from agentpool_server.acp_server.handler import ACPProtocolHandler
@@ -491,29 +489,21 @@ class AgentPoolACPAgent(ACPAgent):
             raise RuntimeError("Agent not initialized")
 
         try:
-            # Get or create an active session wrapper
+            # Get or resume session from storage
             session = self.session_manager.get_session(params.session_id)
             if not session:
-                session_id = await self.session_manager.create_session(
-                    agent=self.default_agent,
-                    cwd=params.cwd or "",
+                session = await self.session_manager.resume_session(
+                    session_id=params.session_id,
                     client=self.client,
                     acp_agent=self,
                     mcp_servers=params.mcp_servers,
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
-                    session_id=params.session_id,
                     subagent_display_mode=self.subagent_display_mode,
                 )
-                session = self.session_manager.get_session(session_id)
 
             if not session:
-                logger.error("Failed to create session")
-                return LoadSessionResponse()
-
-            # Load session via agent - this populates agent.conversation
-            if not await session.agent.load_session(params.session_id):
-                logger.warning("Agent failed to load session", session_id=params.session_id)
+                logger.error("Failed to load session")
                 return LoadSessionResponse()
 
             # Replay loaded conversation to client via ACP notifications
@@ -619,31 +609,21 @@ class AgentPoolACPAgent(ACPAgent):
             raise RuntimeError("Agent not initialized")
 
         try:
-            # Get or create session wrapper
             session = self.session_manager.get_session(params.session_id)
             if not session:
-                session_id = await self.session_manager.create_session(
-                    agent=self.default_agent,
-                    cwd=params.cwd or "",
+                session = await self.session_manager.resume_session(
+                    session_id=params.session_id,
                     client=self.client,
                     acp_agent=self,
                     mcp_servers=params.mcp_servers,
                     client_capabilities=self.client_capabilities,
                     client_info=self.client_info,
-                    session_id=params.session_id,
                     subagent_display_mode=self.subagent_display_mode,
                 )
-                session = self.session_manager.get_session(session_id)
 
             if not session:
-                logger.error("Failed to create session for resume")
+                logger.error("Failed to resume session")
                 return ResumeSessionResponse()
-
-            # Load session state in the agent (populates conversation) but don't replay to client
-            # This restores the agent's internal state so it can continue the conversation
-            if not await session.agent.load_session(params.session_id):
-                logger.warning("Agent failed to load session state", session_id=params.session_id)
-                # Continue anyway - session wrapper is created, agent may still work
 
             # Schedule post-resume tasks
             self.tasks.create_task(session.send_available_commands_update())

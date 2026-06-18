@@ -197,6 +197,63 @@ def test_global_event_factory_wrap_returns_string() -> None:
 # =============================================================================
 
 
+class _MockEventBus:
+    """Minimal EventBus stub that supports subscribe/unsubscribe.
+
+    Supports scope="all" subscriptions which receive events from any session_id,
+    matching the real EventBus._should_receive behavior.
+    """
+
+    def __init__(self) -> None:
+        self._queues: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
+
+    async def subscribe(
+        self, session_id: str, scope: str = "session"
+    ) -> asyncio.Queue[Any]:
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        self._queues.setdefault(session_id, []).append((queue, scope))
+        return queue
+
+    async def unsubscribe(self, session_id: str, queue: asyncio.Queue[Any]) -> None:
+        queues = self._queues.get(session_id, [])
+        self._queues[session_id] = [(q, s) for q, s in queues if q is not queue]
+        if not self._queues[session_id]:
+            del self._queues[session_id]
+
+    async def publish(self, session_id: str, event: Any) -> None:
+        from agentpool.orchestrator.core import EventEnvelope
+
+        envelope = EventEnvelope(source_session_id=session_id, event=event)
+        for subscriber_sid, subscribers in self._queues.items():
+            for queue, scope in subscribers:
+                if scope == "all" or subscriber_sid == session_id:
+                    try:
+                        queue.put_nowait(envelope)
+                    except asyncio.QueueFull:
+                        pass
+
+
+class _MockSessionPool:
+    """Minimal SessionPool stub providing event_bus."""
+
+    def __init__(self, event_bus: _MockEventBus) -> None:
+        self.event_bus = event_bus
+
+
+class _MockPool:
+    """Minimal pool stub providing session_pool."""
+
+    def __init__(self, session_pool: _MockSessionPool) -> None:
+        self.session_pool = session_pool
+
+
+class _MockSessionController:
+    """Minimal session controller stub."""
+
+    def cancel_all_pending_questions(self) -> list[str]:
+        return []
+
+
 class _MockState:
     """Minimal ServerState-like object for _event_generator tests."""
 
@@ -206,7 +263,11 @@ class _MockState:
         self._event_factory: GlobalEventFactory | None = None
         self._first_subscriber_triggered = False
         self.on_first_subscriber: Any = None
-        self.session_controller: Any = None
+        # Provide EventBus-based infrastructure so _event_generator uses
+        # the EventBus path instead of the heartbeat-only fallback.
+        self._mock_event_bus = _MockEventBus()
+        self.session_controller = _MockSessionController()
+        self.pool = _MockPool(_MockSessionPool(self._mock_event_bus))
 
     def get_event_factory(self) -> GlobalEventFactory:
         if self._event_factory is None:
@@ -240,10 +301,9 @@ async def _collect_events(
     # Get the initial connected event
     item = await gen.__anext__()
     results.append(json.loads(item["data"]))
-    # Send additional events through the queue
-    queue = state.event_subscribers[-1]
+    # Send additional events through the mock EventBus
     for event in events_to_send:
-        await queue.put(event)
+        await state._mock_event_bus.publish("__global_sse__", event)
         item = await gen.__anext__()
         results.append(json.loads(item["data"]))
     return results
@@ -403,9 +463,8 @@ async def test_event_endpoint_unicode_preserved() -> None:
     gen = _event_generator(state, wrap_payload=False)
     # Consume connected event
     await gen.__anext__()
-    # Send unicode session event
-    queue = state.event_subscribers[-1]
-    await queue.put(session_evt)
+    # Send unicode session event via mock EventBus
+    await state._mock_event_bus.publish("__global_sse__", session_evt)
     item = await gen.__anext__()
     raw_data = item["data"]
     assert "会话测试" in raw_data
@@ -652,9 +711,9 @@ async def test_disconnect_events_not_delivered() -> None:
     assert queue1 not in state.event_subscribers
     assert queue2 in state.event_subscribers
 
-    # Put an event directly — only queue2 should receive it
+    # Put an event via mock EventBus — only gen2 should receive it
     event = SessionStatusEvent.create(session_id="disc1", status_type="busy")
-    await queue2.put(event)
+    await state._mock_event_bus.publish("__global_sse__", event)
     item = await gen2.__anext__()
     data = json.loads(item["data"])
     assert data["type"] == "session.status"
@@ -1094,12 +1153,9 @@ async def test_concurrent_two_subscribers_both_receive_events() -> None:
 
     assert len(state.event_subscribers) == 2
 
-    # Broadcast event to both subscribers via their queues
+    # Broadcast event to both subscribers via mock EventBus
     event = SessionStatusEvent.create(session_id="s_concurrent", status_type="busy")
-    queue1 = state.event_subscribers[0]
-    queue2 = state.event_subscribers[1]
-    await queue1.put(event)
-    await queue2.put(event)
+    await state._mock_event_bus.publish("__global_sse__", event)
 
     item1 = await gen1.__anext__()
     item2 = await gen2.__anext__()
@@ -1125,10 +1181,7 @@ async def test_concurrent_subscribers_receive_same_content() -> None:
     await gen2.__anext__()
 
     event = SessionStatusEvent.create(session_id="s_same", status_type="idle")
-    queue1 = state.event_subscribers[0]
-    queue2 = state.event_subscribers[1]
-    await queue1.put(event)
-    await queue2.put(event)
+    await state._mock_event_bus.publish("__global_sse__", event)
 
     item1 = await gen1.__anext__()
     item2 = await gen2.__anext__()
@@ -1153,9 +1206,6 @@ async def test_concurrent_event_ordering_preserved() -> None:
     await gen1.__anext__()
     await gen2.__anext__()
 
-    queue1 = state.event_subscribers[0]
-    queue2 = state.event_subscribers[1]
-
     events = [
         SessionStatusEvent.create(session_id="ord1", status_type="busy"),
         SessionStatusEvent.create(session_id="ord2", status_type="idle"),
@@ -1163,8 +1213,7 @@ async def test_concurrent_event_ordering_preserved() -> None:
     ]
 
     for ev in events:
-        await queue1.put(ev)
-        await queue2.put(ev)
+        await state._mock_event_bus.publish("__global_sse__", ev)
 
     # Collect all 3 events from each subscriber
     received1 = [json.loads((await gen1.__anext__())["data"]) for _ in range(3)]
@@ -1195,10 +1244,9 @@ async def test_concurrent_subscriber_receives_after_another_disconnects() -> Non
     await gen_a.aclose()
     assert len(state.event_subscribers) == 1
 
-    # Send event only to remaining subscriber B's queue
+    # Send event via mock EventBus — remaining subscriber B should receive it
     event = SessionStatusEvent.create(session_id="s_survive", status_type="busy")
-    queue_b = state.event_subscribers[0]
-    await queue_b.put(event)
+    await state._mock_event_bus.publish("__global_sse__", event)
 
     item_b = await gen_b.__anext__()
     data_b = json.loads(item_b["data"])
@@ -1235,101 +1283,56 @@ async def test_concurrent_all_get_server_connected() -> None:
 
 def _make_broadcast_state() -> ServerState:
     """Create a ServerState with a minimal mock agent for broadcast_event tests."""
+    from unittest.mock import AsyncMock, Mock
+
+    mock_env = Mock()
+    mock_env.get_fs = Mock(return_value=Mock())
+    mock_agent = Mock()
+    mock_agent.env = mock_env
+    state = ServerState(working_dir="/test", agent=mock_agent)
+    # Set up event_bridge mock so broadcast_event has a destination
+    state.event_bridge = Mock()
+    state.event_bridge.publish = AsyncMock()
+    return state
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_delegates_to_bridge() -> None:
+    """Broadcast delegates event to event_bridge.publish."""
+    state = _make_broadcast_state()
+
+    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
+    await state.broadcast_event(event)
+
+    state.event_bridge.publish.assert_called_once_with(event)
+
+
+@pytest.mark.anyio
+async def test_broadcast_event_no_bridge_no_error() -> None:
+    """Broadcast with no event_bridge does not raise."""
     from unittest.mock import Mock
 
     mock_env = Mock()
     mock_env.get_fs = Mock(return_value=Mock())
     mock_agent = Mock()
     mock_agent.env = mock_env
-    return ServerState(working_dir="/test", agent=mock_agent)
-
-
-@pytest.mark.anyio
-async def test_broadcast_event_single_subscriber() -> None:
-    """Broadcast delivers event to one subscriber queue."""
-    state = _make_broadcast_state()
-    queue: asyncio.Queue[Event] = asyncio.Queue()
-    state.event_subscribers.append(queue)
-
-    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
-    await state.broadcast_event(event)
-
-    received = queue.get_nowait()
-    assert received is event
-
-
-@pytest.mark.anyio
-async def test_broadcast_event_multiple_subscribers() -> None:
-    """Broadcast delivers event to all subscriber queues."""
-    state = _make_broadcast_state()
-    queue1: asyncio.Queue[Event] = asyncio.Queue()
-    queue2: asyncio.Queue[Event] = asyncio.Queue()
-    queue3: asyncio.Queue[Event] = asyncio.Queue()
-    state.event_subscribers.extend([queue1, queue2, queue3])
-
-    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
-    await state.broadcast_event(event)
-
-    assert queue1.get_nowait() is event
-    assert queue2.get_nowait() is event
-    assert queue3.get_nowait() is event
-
-
-@pytest.mark.anyio
-async def test_broadcast_event_no_subscribers() -> None:
-    """Broadcast with no subscribers does not raise."""
-    state = _make_broadcast_state()
-    assert state.event_subscribers == []
+    state = ServerState(working_dir="/test", agent=mock_agent)
+    assert state.event_bridge is None
 
     event = SessionStatusEvent.create(session_id="abc", status_type="busy")
     await state.broadcast_event(event)  # Should not raise
 
 
 @pytest.mark.anyio
-async def test_broadcast_event_exception_isolation() -> None:
-    """Subscriber whose queue raises is removed; other subscribers still receive."""
+async def test_broadcast_event_bridge_error_propagates() -> None:
+    """If event_bridge.publish raises, broadcast_event propagates the error."""
     state = _make_broadcast_state()
-
-    good_queue: asyncio.Queue[Event] = asyncio.Queue()
-    state.event_subscribers.append(good_queue)
-
-    # Create a mock queue that raises on put_nowait
-    bad_queue = MagicMock(spec=asyncio.Queue)
-    bad_queue.put_nowait.side_effect = RuntimeError("queue broken")
-    state.event_subscribers.append(bad_queue)
+    state.event_bridge.publish.side_effect = RuntimeError("bridge broken")
 
     event = SessionStatusEvent.create(session_id="abc", status_type="busy")
-    await state.broadcast_event(event)
-
-    # Good queue should still have received the event
-    assert good_queue.get_nowait() is event
-    # Bad queue should have been removed from subscribers
-    assert bad_queue not in state.event_subscribers
-    assert good_queue in state.event_subscribers
-
-
-@pytest.mark.anyio
-async def test_broadcast_event_queue_full_dropped() -> None:
-    """Full queue has event dropped; other subscribers still receive."""
-    state = _make_broadcast_state()
-
-    # Queue with maxsize=1, already full
-    full_queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=1)
-    full_queue.put_nowait(ServerHeartbeatEvent())  # Fill the queue
-    state.event_subscribers.append(full_queue)
-
-    good_queue: asyncio.Queue[Event] = asyncio.Queue()
-    state.event_subscribers.append(good_queue)
-
-    event = SessionStatusEvent.create(session_id="abc", status_type="busy")
-    await state.broadcast_event(event)
-
-    # Full queue should still have only the original item (event dropped)
-    assert full_queue.qsize() == 1
-    assert not isinstance(full_queue.get_nowait(), SessionStatusEvent)
-
-    # Good queue should have received the event
-    assert good_queue.get_nowait() is event
+    # The error propagates since broadcast_event does not catch it
+    with pytest.raises(RuntimeError, match="bridge broken"):
+        await state.broadcast_event(event)
 
 
 # =============================================================================

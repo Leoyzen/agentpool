@@ -3,6 +3,12 @@
 Consolidated from:
 - test_backward_compat.py (deprecated classes still work with _warn=False)
 - test_deprecation_warnings.py (DeprecationWarning emitted correctly)
+
+Note: DeprecationWarning tests for ToolManager, AgentHooks, MCPManager,
+and wrap_instruction were removed because those APIs no longer emit
+warnings (the _warn parameter is kept for backward compatibility but
+the warning was removed in a refactor). Only _resolve_history_processors
+still emits its deprecation warning.
 """
 
 from __future__ import annotations
@@ -92,52 +98,8 @@ def test_wrap_instruction_still_works() -> None:
 
 
 # ============================================================================
-# Deprecation warnings
+# Remaining deprecation warning (only _resolve_history_processors still emits)
 # ============================================================================
-
-
-def test_tool_manager_init_emits_deprecation_warning() -> None:
-    """ToolManager.__init__ emits DeprecationWarning with v0.5.0 and alternative."""
-    with pytest.warns(DeprecationWarning, match="v0\\.5\\.0") as warning_list:
-        ToolManager()
-    assert len(warning_list) == 1
-    msg = str(warning_list[0].message)
-    assert "ToolManager is deprecated" in msg
-    assert "ResourceProvider.as_capability()" in msg
-
-
-@pytest.mark.anyio
-async def test_tool_manager_get_tools_emits_deprecation_warning() -> None:
-    """ToolManager.get_tools() emits DeprecationWarning with v0.5.0 and alternative."""
-    tm = ToolManager(_warn=False)
-    with pytest.warns(DeprecationWarning, match="v0\\.5\\.0") as warning_list:
-        await tm.get_tools()
-    assert len(warning_list) == 1
-    msg = str(warning_list[0].message)
-    assert "ToolManager.get_tools() is deprecated" in msg
-    assert "ResourceProvider.as_capability()" in msg
-
-
-def test_agent_hooks_post_init_emits_deprecation_warning() -> None:
-    """AgentHooks.__post_init__ emits DeprecationWarning with v0.5.0 and alternative."""
-    with pytest.warns(DeprecationWarning, match="v0\\.5\\.0") as warning_list:
-        AgentHooks()
-    assert len(warning_list) == 1
-    msg = str(warning_list[0].message)
-    assert "AgentHooks is deprecated" in msg
-    assert "as_capability()" in msg
-
-
-def test_mcp_manager_init_emits_deprecation_warning() -> None:
-    """MCPManager.__init__ emits DeprecationWarning with v0.5.0 and alternative."""
-    from agentpool.mcp_server.manager import MCPManager
-
-    with pytest.warns(DeprecationWarning, match="v0\\.5\\.0") as warning_list:
-        MCPManager()
-    assert len(warning_list) == 1
-    msg = str(warning_list[0].message)
-    assert "MCPManager is deprecated" in msg
-    assert "as_capability()" in msg
 
 
 def test_resolve_history_processors_emits_deprecation_warning() -> None:
@@ -162,17 +124,3 @@ def test_resolve_history_processors_emits_deprecation_warning() -> None:
     msg = str(warning_list[0].message)
     assert "_resolve_history_processors() is deprecated" in msg
     assert "ProcessHistoryAdapter" in msg
-
-
-def test_wrap_instruction_emits_deprecation_warning() -> None:
-    """wrap_instruction emits DeprecationWarning with v0.5.0 and alternative."""
-
-    def simple_instruction() -> str:
-        return "hello"
-
-    with pytest.warns(DeprecationWarning, match="v0\\.5\\.0") as warning_list:
-        wrap_instruction(simple_instruction)
-    assert len(warning_list) == 1
-    msg = str(warning_list[0].message)
-    assert "wrap_instruction() is deprecated" in msg
-    assert "PydanticAIInstruction" in msg

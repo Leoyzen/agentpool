@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from exxec import ExecutionEnvironment
+    from pydantic_ai.capabilities.abstract import ValidatedToolArgs
 
     from agentpool.hooks.base import Hook
-    from pydantic_ai.capabilities.abstract import ValidatedToolArgs
 
 
 logger = get_logger(__name__)

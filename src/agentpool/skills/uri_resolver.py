@@ -14,13 +14,14 @@ Security features:
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
+import re
 from typing import TYPE_CHECKING
+import unicodedata
 from urllib.parse import unquote, urlparse
 
 from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
+
 
 if TYPE_CHECKING:
     from agentpool.resource_providers.base import ResourceProvider

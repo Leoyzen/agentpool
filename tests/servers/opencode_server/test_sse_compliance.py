@@ -67,6 +67,66 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
+import contextlib
+
+
+class _MockEventBus:
+    """Minimal EventBus stub that supports subscribe/unsubscribe.
+
+    Supports scope="all" subscriptions which receive events from any session_id,
+    matching the real EventBus._should_receive behavior.
+    """
+
+    def __init__(self) -> None:
+        self._queues: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
+
+    async def subscribe(
+        self, session_id: str, scope: str = "session"
+    ) -> asyncio.Queue[Any]:
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        self._queues.setdefault(session_id, []).append((queue, scope))
+        return queue
+
+    async def unsubscribe(self, session_id: str, queue: asyncio.Queue[Any]) -> None:
+        queues = self._queues.get(session_id, [])
+        self._queues[session_id] = [(q, s) for q, s in queues if q is not queue]
+        if not self._queues[session_id]:
+            del self._queues[session_id]
+
+    async def publish(self, session_id: str, event: Any) -> None:
+        from agentpool.orchestrator.core import EventEnvelope
+
+        envelope = EventEnvelope(source_session_id=session_id, event=event)
+        for subscriber_sid, subscribers in self._queues.items():
+            for queue, scope in subscribers:
+                if scope == "all" or subscriber_sid == session_id:
+                    try:
+                        queue.put_nowait(envelope)
+                    except asyncio.QueueFull:
+                        pass
+
+
+class _MockSessionPool:
+    """Minimal SessionPool stub providing event_bus."""
+
+    def __init__(self, event_bus: _MockEventBus) -> None:
+        self.event_bus = event_bus
+
+
+class _MockPool:
+    """Minimal pool stub providing session_pool."""
+
+    def __init__(self, session_pool: _MockSessionPool) -> None:
+        self.session_pool = session_pool
+
+
+class _MockSessionController:
+    """Minimal session controller stub."""
+
+    def cancel_all_pending_questions(self) -> list[str]:
+        return []
+
+
 class _MockState:
     """Minimal ServerState-like object for _event_generator tests."""
 
@@ -76,6 +136,11 @@ class _MockState:
         self._event_factory: GlobalEventFactory | None = None
         self._first_subscriber_triggered = False
         self.on_first_subscriber: Any = None
+        # Provide EventBus-based infrastructure so _event_generator uses
+        # the EventBus path instead of the heartbeat-only fallback.
+        self._mock_event_bus = _MockEventBus()
+        self.session_controller = _MockSessionController()
+        self.pool = _MockPool(_MockSessionPool(self._mock_event_bus))
 
     def get_event_factory(self) -> GlobalEventFactory:
         if self._event_factory is None:
@@ -109,10 +174,9 @@ async def _collect_events(
     # Get the initial connected event
     item = await gen.__anext__()
     results.append(json.loads(item["data"]))
-    # Send additional events through the queue
-    queue = state.event_subscribers[-1]
+    # Send additional events through the mock EventBus
     for event in events_to_send:
-        await queue.put(event)
+        await state._mock_event_bus.publish("__global_sse__", event)
         item = await gen.__anext__()
         results.append(json.loads(item["data"]))
     return results

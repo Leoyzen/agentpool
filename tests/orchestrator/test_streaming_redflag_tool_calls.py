@@ -131,11 +131,11 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
         f"got {len(text_deltas_before_tool_complete)}. Frontend has nothing to render until tool completes."
     )
 
-    # Tool call lifecycle: complete event is emitted, but start event is NOT
-    # when running outside SessionPool (pre-existing NativeAgent bug).
-    assert len(tool_call_starts) == 0, (
-        "ToolCallStartEvent is NOT emitted when event_bus is None — "
-        "NativeAgent only maps tool events when event_bus is present."
+    # Tool call lifecycle: RunExecutor now emits ToolCallStartEvent for
+    # FunctionToolCallEvent / PartStartEvent with BaseToolCallPart, even
+    # when running outside SessionPool.
+    assert len(tool_call_starts) == 1, (
+        "ToolCallStartEvent should be emitted by RunExecutor for tool-call-only responses."
     )
     assert len(tool_call_completes) >= 1, "ToolCallCompleteEvent should be emitted"
 

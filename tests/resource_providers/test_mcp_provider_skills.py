@@ -288,10 +288,7 @@ async def test_get_resource_skills_detects_skill_resources(mcp_provider):
     )
     mcp_provider._get_skill_manifest = AsyncMock(return_value=None)
 
-    # Patch UPath to avoid "Unsupported filesystem: 'skill'" error
-    with patch("agentpool.resource_providers.mcp_provider.UPath") as mock_upath:
-        mock_upath.return_value = UPath("/tmp/test-skill")
-        resource_skills = await mcp_provider._get_resource_skills()
+    resource_skills = await mcp_provider._get_resource_skills()
 
     # Should find test-skill and another-skill (not regular-resource)
     skill_names = {s.name for s in resource_skills}
@@ -318,19 +315,16 @@ async def test_get_resource_skills_ignores_non_skill_resources(mcp_provider):
 
 @pytest.mark.asyncio
 async def test_get_resource_skills_reads_manifest(mcp_provider):
-    """Test that _get_resource_skills() reads manifest for description."""
+    """Test that _get_resource_skills() uses description from _get_skill_description."""
     mock_resource = MagicMock()
     mock_resource.name = "test-skill-manifest"
     mock_resource.uri = "skill://test-skill/_manifest"
     mock_resource.description = "Test skill"
 
     mcp_provider.get_resources = AsyncMock(return_value=[mock_resource])
-    mcp_provider._get_skill_manifest = AsyncMock(return_value={"description": "From manifest"})
+    mcp_provider._get_skill_description = AsyncMock(return_value="From manifest")
 
-    # Patch UPath to avoid "Unsupported filesystem: 'skill'" error
-    with patch("agentpool.resource_providers.mcp_provider.UPath") as mock_upath:
-        mock_upath.return_value = UPath("/tmp/test-skill")
-        resource_skills = await mcp_provider._get_resource_skills()
+    resource_skills = await mcp_provider._get_resource_skills()
 
     assert len(resource_skills) == 1
     assert resource_skills[0].description == "From manifest"

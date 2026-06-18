@@ -1,0 +1,950 @@
+# serializer version: 1
+# name: TestInlineModeSnapshots.test_long_text[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **writer**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'This is a long message that gets streamed in multi',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'ple chunks. Each chunk should be a separate delta ',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'event. The header should only be emitted once. Sub',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'sequent deltas should have no prefix repetition.',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_mixed_events[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': 'Need to analyze',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **analyzer**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Let me check',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`analyzer`] Using tool: ``grep``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`analyzer`] `grep`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' - all good!',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_nested_subagents[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coordinator**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Delegating to researcher',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Searching',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+              - 🔧 [`researcher`] Using tool: ``search``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+              - ✅ [`researcher`] `search`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+              ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_text_stream[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **assistant**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Hello',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' world',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '!',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_thinking_stream[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': 'Analyzing',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' the',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' problem',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_tool_call[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coder**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': "I'll search for files",
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`coder`] Using tool: ``search``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`coder`] `search`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestInlineModeSnapshots.test_tool_call_error[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **executor**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Executing command',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`executor`] Using tool: ``bash``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ❌ [`executor`] `bash`: `Build failed: missing dependency
+          
+          Fix the errors and try again.`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestLegacyModeSnapshots.test_text_stream[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **assistant**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Hello',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' world',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '!',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestLegacyModeSnapshots.test_tool_call[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coder**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': "I'll search for files",
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`coder`] Using tool: ``search``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`coder`] `search`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_long_text[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **writer**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'This is a long message that gets streamed in multi',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'ple chunks. Each chunk should be a separate delta ',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'event. The header should only be emitted once. Sub',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'sequent deltas should have no prefix repetition.',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_mixed_events[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': 'Need to analyze',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **analyzer**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Let me check',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`analyzer`] Using tool: ``grep``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`analyzer`] `grep`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' - all good!',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_nested_subagents[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coordinator**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Delegating to researcher',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Searching',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+              - 🔧 [`researcher`] Using tool: ``search``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+              - ✅ [`researcher`] `search`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+              ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_text_stream[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **assistant**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Hello',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' world',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '!',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_thinking_stream[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': 'Analyzing',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' the',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': ' problem',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_thought_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_tool_call[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **coder**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': "I'll search for files",
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`coder`] Using tool: ``search``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ✅ [`coder`] `search`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---
+# name: TestToolBoxModeSnapshots.test_tool_call_error[asyncio]
+  list([
+    dict({
+      'content': dict({
+        'text': '''
+          
+            🤖 **executor**: 
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': 'Executing command',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            - 🔧 [`executor`] Using tool: ``bash``
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+            - ❌ [`executor`] `bash`: `Build failed: missing dependency
+          
+          Fix the errors and try again.`
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+    dict({
+      'content': dict({
+        'text': '''
+          
+            ---
+  
+        ''',
+        'type': 'text',
+      }),
+      'message_id': 'test-message-id',
+      'session_update': 'agent_message_chunk',
+    }),
+  ])
+# ---

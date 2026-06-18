@@ -8,10 +8,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from agentpool.agents.events.events import RichAgentStreamEvent, SpawnSessionStart
-
+from agentpool.agents.events.events import SpawnSessionStart
 
 
 if TYPE_CHECKING:

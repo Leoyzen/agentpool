@@ -12,6 +12,7 @@ from agentpool.resource_providers.local import LocalResourceProvider
 from agentpool.skills.registry import SkillsRegistry
 from agentpool_config.skills import SkillsConfig  # noqa: TC001
 
+
 if TYPE_CHECKING:
     from fsspec import AbstractFileSystem
 

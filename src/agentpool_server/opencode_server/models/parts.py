@@ -9,9 +9,9 @@ from pydantic import Field
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models.base import OpenCodeBaseModel
 from agentpool_server.opencode_server.models.common import (
-    ModelRef,  # noqa: TC001
+    ModelRef,
     TextSpan,
-    TimeCreated,  # noqa: TC001
+    TimeCreated,
     Tokens,
 )
 

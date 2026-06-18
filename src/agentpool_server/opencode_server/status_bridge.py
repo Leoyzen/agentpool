@@ -12,11 +12,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
 from agentpool.log import get_logger
+from agentpool.orchestrator.core import EventEnvelope
 from agentpool_server.opencode_server.models import SessionStatus, SessionStatusEvent
 from agentpool_server.opencode_server.models.events import SessionErrorEvent
-
-
-from agentpool.orchestrator.core import EventEnvelope
 
 
 if TYPE_CHECKING:

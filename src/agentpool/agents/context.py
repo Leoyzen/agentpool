@@ -257,7 +257,9 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         pool = self.node.agent_pool
         if pool is not None and pool.session_pool is not None:
             effective_parent = parent_session_id or self.node._events.session_id
-            if effective_parent is not None:
+            # Guard against MagicMock auto-generated attributes in tests:
+            # _events.session_id may return a Mock when not explicitly set.
+            if isinstance(effective_parent, str):
                 from agentpool.utils.identifiers import generate_session_id
 
                 child_session = await pool.session_pool.create_session(

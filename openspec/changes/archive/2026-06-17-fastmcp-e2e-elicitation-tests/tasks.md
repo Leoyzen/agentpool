@@ -32,4 +32,4 @@
 - [x] 5.2 Run existing MCP tests to verify no regressions: `pytest tests/agentpool_server/acp_server/test_acp_mcp_*.py -v`
 - [x] 5.3 Verify fast CI path skips slow tests: `pytest tests/agentpool_server/acp_server/ -m "not slow" -v`
 - [x] 5.4 Run lint: `ruff check tests/agentpool_server/acp_server/test_acp_mcp_fastmcp_integration.py`
-- [ ] 5.5 Remove dead code at lines 213-219 in `acp_mcp_manager.py` if confirmed unreachable (separate micro-change)
+- [x] 5.5 Reviewed lines 213-219 in `acp_mcp_manager.py` — reachable code (JSON-RPC response validation error handling), not dead code. No removal needed.

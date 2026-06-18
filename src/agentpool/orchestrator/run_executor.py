@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from pydantic_ai import CallToolsNode, FunctionToolCallEvent, ModelRequestNode
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
-from pydantic_ai.messages import BaseToolCallPart, ToolCallPart
+from pydantic_ai.messages import BaseToolCallPart, PartStartEvent, ToolCallPart
 from pydantic_graph import End
 
 from agentpool.agents.events import (
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.native_agent.agent import Agent
+    from agentpool.orchestrator.run import RunHandle
 
 
 logger = get_logger(__name__)
@@ -58,8 +59,9 @@ class RunExecutor:
         agent: The native Agent instance whose agentlet will be executed.
     """
 
-    def __init__(self, agent: Agent[Any, Any]) -> None:
+    def __init__(self, agent: Agent[Any, Any], run_handle: RunHandle | None = None) -> None:
         self._agent = agent
+        self._run_handle = run_handle
         self._iteration_task: asyncio.Task[Any] | None = None
 
     async def execute(  # noqa: PLR0915
@@ -107,12 +109,20 @@ class RunExecutor:
         """
         import time
 
+        if self._iteration_task is not None and not self._iteration_task.done():
+            logger.warning(
+                "Concurrent RunExecutor.execute() call detected — "
+                "a previous execution is still in progress"
+            )
+
         run_id = str(uuid4())
         start_time = time.perf_counter()
 
         yield RunStartedEvent(
             run_id=run_id,
             agent_name=self._agent.name,
+            session_id=session_id,
+            parent_session_id=_parent_id,
         )
 
         # Build agentlet from current agent state
@@ -140,6 +150,17 @@ class RunExecutor:
         iteration_error: BaseException | None = None
         response_msg: ChatMessage[Any] | None = None
 
+        # Drain any events already pending in run_ctx.event_queue (e.g. from
+        # tool-initialization progress reports that fired before the executor
+        # was started) and forward them to the local event_queue.
+        while not run_ctx.event_queue.empty():
+            try:
+                ctx_event = run_ctx.event_queue.get_nowait()
+                if ctx_event is not None:
+                    await event_queue.put(ctx_event)
+            except asyncio.QueueEmpty:
+                break
+
         async def agent_iteration_task() -> None:
             """Background task that drives ``agentlet.iter()`` with ``next()``.
 
@@ -148,6 +169,17 @@ class RunExecutor:
             """
             nonlocal iteration_error, response_msg
             pending_tcs: dict[str, BaseToolCallPart] = {}
+            emitted_tool_starts: set[str] = set()
+
+            # Pre-compute tool kind lookup for ToolCallStartEvent
+            _tool_kind_map: dict[str, str] = {}
+            try:
+                all_agent_tools = await self._agent.tools.get_tools()
+                for t in all_agent_tools:
+                    if t.category:
+                        _tool_kind_map[t.name] = t.category
+            except Exception:
+                logger.debug("Failed to build tool kind map", exc_info=True)
 
             try:
                 async with agentlet.iter(
@@ -156,6 +188,8 @@ class RunExecutor:
                     message_history=history,
                     usage_limits=self._agent._default_usage_limits,
                 ) as agent_run:
+                    if self._run_handle is not None:
+                        self._run_handle.active_agent_run = agent_run
                     node = agent_run.next_node
 
                     while True:
@@ -176,11 +210,34 @@ class RunExecutor:
                                     if isinstance(event, FunctionToolCallEvent):
                                         tool_part = event.part
                                         if isinstance(tool_part, ToolCallPart):
+                                            if tool_part.tool_call_id not in emitted_tool_starts:
+                                                emitted_tool_starts.add(tool_part.tool_call_id)
+                                                tool_kind = _tool_kind_map.get(tool_part.tool_name, "other")
+                                                await event_queue.put(
+                                                    ToolCallStartEvent(
+                                                        tool_call_id=tool_part.tool_call_id,
+                                                        tool_name=tool_part.tool_name,
+                                                        title=f"Executing: {tool_part.tool_name}",
+                                                        kind=tool_kind,  # type: ignore[arg-type]
+                                                        raw_input=safe_args_as_dict(
+                                                            tool_part,
+                                                            default={},
+                                                        ),
+                                                    )
+                                                )
+                                    elif isinstance(event, PartStartEvent) and isinstance(
+                                        event.part, BaseToolCallPart
+                                    ):
+                                        tool_part = event.part
+                                        if tool_part.tool_call_id not in emitted_tool_starts:
+                                            emitted_tool_starts.add(tool_part.tool_call_id)
+                                            tool_kind = _tool_kind_map.get(tool_part.tool_name, "other")
                                             await event_queue.put(
                                                 ToolCallStartEvent(
                                                     tool_call_id=tool_part.tool_call_id,
                                                     tool_name=tool_part.tool_name,
                                                     title=f"Executing: {tool_part.tool_name}",
+                                                    kind=tool_kind,  # type: ignore[arg-type]
                                                     raw_input=safe_args_as_dict(
                                                         tool_part,
                                                         default={},
@@ -251,12 +308,30 @@ class RunExecutor:
                 logger.exception("Agent iteration failed")
                 iteration_error = exc
             finally:
+                if self._run_handle is not None:
+                    self._run_handle.active_agent_run = None
                 await event_queue.put(None)
 
         self._iteration_task = asyncio.create_task(agent_iteration_task())
 
         try:
+            iteration_done = False
             while True:
+                # Drain any pending context events from run_ctx.event_queue
+                # (e.g., ToolCallProgressEvent from report_progress).
+                # These are produced asynchronously by tool execution and
+                # must be yielded to callers so event_handlers see them.
+                try:
+                    while True:
+                        ctx_event = run_ctx.event_queue.get_nowait()
+                        if ctx_event is not None:
+                            yield ctx_event
+                except asyncio.QueueEmpty:
+                    pass
+
+                if iteration_done:
+                    break
+
                 try:
                     event = await asyncio.wait_for(
                         event_queue.get(),
@@ -271,7 +346,10 @@ class RunExecutor:
                     continue
 
                 if event is None:
-                    break
+                    # Main iteration task done; loop once more to drain any
+                    # remaining context events before exiting.
+                    iteration_done = True
+                    continue
                 yield event
 
         finally:
@@ -283,6 +361,19 @@ class RunExecutor:
                         timeout=2.0,
                     )
             self._iteration_task = None
+
+        # Fallback: when cancelled before any response was produced
+        if response_msg is None:
+            response_msg = ChatMessage(
+                content="[Interrupted]",
+                role="assistant",
+                name=self._agent.name,
+                message_id=message_id,
+                session_id=session_id,
+                parent_id=user_msg.message_id,
+                response_time=time.perf_counter() - start_time,
+                finish_reason="stop",
+            )
 
         if iteration_error is not None:
             raise iteration_error

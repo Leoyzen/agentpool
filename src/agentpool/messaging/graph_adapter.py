@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic_graph import GraphBuilder, StepContext, Step
+from pydantic_graph import GraphBuilder, Step, StepContext
 from pydantic_graph.graph_builder import Graph
 from pydantic_graph.id_types import NodeID
 

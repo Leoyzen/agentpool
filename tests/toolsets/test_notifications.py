@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from unittest.mock import MagicMock
 
 import pytest
+
+pytestmark = pytest.mark.skipif(not find_spec("apprise"), reason="apprise not installed")
 
 from agentpool_config.toolsets import NotificationsToolsetConfig
 from agentpool_toolsets.notifications import NotificationsTools

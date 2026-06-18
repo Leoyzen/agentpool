@@ -7,7 +7,6 @@ import asyncio
 import pytest
 from llmling_models_config import StringModelConfig
 
-from acp.schema.providers import ProviderStatus
 from agentpool_server.acp_server.provider_router import ProviderRouter
 
 
@@ -16,6 +15,7 @@ class MockManifest:
 
     def __init__(self, model_variants=None):
         self.model_variants = model_variants or {}
+        self.acp = None
 
 
 @pytest.fixture
@@ -49,8 +49,7 @@ class TestProviderRouter:
 
         for p in providers:
             assert p.id
-            assert p.name
-            assert p.protocol
+            assert p.current is not None
 
     def test_empty_manifest_no_providers(self, empty_manifest):
         """ProviderRouter with empty manifest should return no providers."""
@@ -72,7 +71,8 @@ class TestProviderRouter:
 
         provider = router.get_provider("openai")
         assert provider is not None
-        assert provider.base_url == "https://custom.openai.com"
+        assert provider.current is not None
+        assert provider.current.base_url == "https://custom.openai.com"
 
     def test_set_provider_override_api_key_id(self, manifest_with_variants):
         """ProviderRouter should support overriding provider api_key_id."""
@@ -82,7 +82,8 @@ class TestProviderRouter:
 
         provider = router.get_provider("openai")
         assert provider is not None
-        assert provider.api_key_id == "my_key"
+        # api_key_id override is stored internally
+        assert router._overrides.get("openai", {}).get("api_key_id") == "my_key"
 
     def test_set_provider_override_unknown_raises(self, manifest_with_variants):
         """Setting override for unknown provider should raise ValueError."""
@@ -100,7 +101,7 @@ class TestProviderRouter:
         assert router.is_provider_disabled("openai") is True
         provider = router.get_provider("openai")
         assert provider is not None
-        assert provider.status == ProviderStatus.disabled
+        assert provider.current is None  # disabled provider has no current config
 
     def test_disable_provider_unknown_silently(self, manifest_with_variants):
         """Disabling unknown provider should silently succeed (for tokonomics providers)."""
@@ -141,7 +142,7 @@ class TestProviderRouter:
 
         openai_provider = next((p for p in providers if p.id == "openai"), None)
         assert openai_provider is not None
-        assert openai_provider.status == ProviderStatus.disabled
+        assert openai_provider.current is None  # disabled provider has no current config
 
     async def test_concurrent_override(self, manifest_with_variants):
         """Concurrent override calls should not corrupt state."""
@@ -154,6 +155,7 @@ class TestProviderRouter:
 
         provider = router.get_provider("openai")
         assert provider is not None
+        assert provider.current is not None
         # One of the overrides should have won
-        assert provider.base_url is not None
-        assert provider.base_url.startswith("https://url")
+        assert provider.current.base_url is not None
+        assert provider.current.base_url.startswith("https://url")

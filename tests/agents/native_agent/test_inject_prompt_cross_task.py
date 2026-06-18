@@ -115,6 +115,12 @@ def _mock_session_pool(agent: Agent, run_ctx: AgentRunContext) -> None:
     session_pool.sessions = session_controller
     session_pool.get_run.return_value = run_handle
     session_pool.receive_request = AsyncMock()
+    # Mock turns with AsyncMock for steer/followup delegation
+    turns = MagicMock()
+    turns.steer = AsyncMock(return_value=True)
+    turns.followup = AsyncMock(return_value=True)
+    turns.queue_prompt = AsyncMock(return_value=True)
+    session_pool.turns = turns
     agent_pool = MagicMock()
     agent_pool.session_pool = session_pool
     agent_pool.storage = MagicMock()
@@ -162,10 +168,11 @@ async def test_inject_prompt_from_different_task_with_session_pool(
     # Call inject_prompt from THIS task (different from run_stream's task)
     slow_agent.inject_prompt("Background task completed", session_id="test-session")
 
-    # Verify the injection reached the injection manager via SessionPool fallback
-    assert run_ctx.injection_manager.has_pending(), (
-        "inject_prompt() from a different task MUST deliver the message to "
-        "the active run's injection_manager via SessionPool fallback."
+    # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
+    # Verify the delegation happened correctly.
+    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool.turns.steer.assert_called_once_with(  # type: ignore[attr-defined]
+        "test-session", "Background task completed"
     )
 
     # Clean up
@@ -211,9 +218,11 @@ async def test_queue_prompt_from_different_task_with_session_pool(
     # Queue a prompt from a different task
     slow_agent.queue_prompt("Follow-up prompt", session_id="test-session")
 
-    assert run_ctx.injection_manager.has_queued(), (
-        "queue_prompt() from a different task MUST deliver the prompt to "
-        "the active run's injection_manager via SessionPool fallback."
+    # After deprecation, queue_prompt() delegates to turns.followup() for native agents.
+    # Verify the delegation happened correctly.
+    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool.turns.followup.assert_called_once_with(  # type: ignore[attr-defined]
+        "test-session", "Follow-up prompt"
     )
 
     await slow_agent.interrupt(session_id="test-session")
@@ -411,9 +420,11 @@ async def test_inject_prompt_triggers_continuation(slow_agent: Agent[None]) -> N
     # Inject from a different task
     slow_agent.inject_prompt("Follow-up from different task", session_id="test-session")
 
-    # The injection should be in the pending list
-    assert run_ctx.injection_manager.has_pending(), (
-        "Injection from different task must reach injection_manager via SessionPool fallback"
+    # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
+    # Verify the delegation happened correctly.
+    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool.turns.steer.assert_called_with(  # type: ignore[attr-defined]
+        "test-session", "Follow-up from different task"
     )
 
     await slow_agent.interrupt(session_id="test-session")
@@ -517,19 +528,20 @@ async def test_hook_manager_consumes_cross_task_injection_with_session_pool(
     # Inject from a different task (simulates BackgroundTaskProvider._on_task_completed)
     slow_agent.inject_prompt("Background task result notice", session_id="test-session")
 
-    # Verify the hook manager can find the injection via SessionPool fallback
+    # After deprecation, inject_prompt() delegates to turns.steer() for native agents.
+    # Verify the delegation happened correctly.
+    session_pool = slow_agent.agent_pool.session_pool  # type: ignore[union-attr]
+    session_pool.turns.steer.assert_called_with(  # type: ignore[attr-defined]
+        "test-session", "Background task result notice"
+    )
+
+    # The hook manager should still be able to find the run_ctx via SessionPool fallback
     hook_mgr = slow_agent._hook_manager
     assert isinstance(hook_mgr, NativeAgentHookManager)
 
-    # The hook manager should be able to access the injection_manager
-    # via the SessionPool fallback
     active_run_ctx = slow_agent.get_active_run_context(session_id="test-session")
     assert active_run_ctx is not None, (
         "Hook manager must find run_ctx via SessionPool fallback"
-    )
-    assert active_run_ctx.injection_manager.has_pending(), (
-        "Injection from different task must be visible via SessionPool fallback "
-        "so the hook manager can consume it"
     )
 
     await slow_agent.interrupt(session_id="test-session")

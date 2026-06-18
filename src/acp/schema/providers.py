@@ -27,6 +27,9 @@ class ProviderCurrentConfig(AnnotatedObject):
     base_url: str
     """Base URL for the provider API."""
 
+    headers: dict[str, str] | None = None
+    """Optional custom headers for the provider API."""
+
 
 class ProviderInfo(AnnotatedObject):
     """Information about a configurable LLM provider.

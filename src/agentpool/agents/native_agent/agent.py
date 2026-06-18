@@ -8,20 +8,15 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
 import inspect
 from pathlib import Path
-import time
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, cast, overload
 from uuid import uuid4
 import warnings
 
 import logfire
 from pydantic_ai import (
-    BaseToolCallPart,
-    FunctionToolCallEvent,
-    PartStartEvent,
+    Agent as PydanticAgent,
 )
-from pydantic_ai import Agent as PydanticAgent, CallToolsNode, ModelRequestNode
 from pydantic_ai.models import Model
-from pydantic_graph import End
 
 
 try:
@@ -37,20 +32,16 @@ except ImportError:
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.context import AgentContext
 from agentpool.agents.events import (
-    RunStartedEvent,
     StreamCompleteEvent,
-    ToolCallStartEvent,
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
-from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.orchestrator.run_executor import RunExecutor
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
-from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 from agentpool.utils.result_utils import to_type
-from agentpool.utils.streams import merge_queue_into_iterator
 
 
 if TYPE_CHECKING:
@@ -58,7 +49,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import AgentBuiltinTool, BaseToolCallPart, UsageLimits, UserContent
+    from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.settings import ModelSettings
@@ -173,6 +164,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         providers: Sequence[ProviderType] | None = None,
         commands: Sequence[BaseCommand] | None = None,
         metadata: dict[str, Any] | None = None,
+        history_processors: Sequence[Callable[..., Any]] | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -316,6 +308,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         )
         self._default_usage_limits = usage_limits
         self._providers = list(providers) if providers else None  # model discovery
+        self._direct_history_processors = list(history_processors) if history_processors else None
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
 
     def _validate_processor_signature(self, processor: Callable[..., Any]) -> None:
@@ -753,11 +746,41 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         # Collect capabilities from all sources
         tool_capabilities: list[Any] = []
-        # 1. Tool providers
+        direct_tools: list[Any] = []
+        # Reference to the MCP aggregating provider — its tools are handled
+        # separately via self.mcp.as_capability() to avoid duplicate
+        # registration (once as direct tools, once as MCP capabilities).
+        mcp_aggregating = self.mcp.aggregating_provider
+        # 1. Tool providers — collect capabilities or fall back to direct tools
         for provider in self.tools.providers:
+            # Skip the MCP aggregating provider: its tools are registered
+            # via self.mcp.as_capability() below. Including it here would
+            # register the same tools twice (once as direct tools, once as
+            # MCP capabilities), causing pydantic-ai UserError.
+            if provider is mcp_aggregating:
+                continue
             cap = provider.as_capability()
             if cap is not None:
                 tool_capabilities.append(cap)
+            else:
+                # Provider not yet migrated to capability system — register
+                # tools directly via the legacy `tools` parameter
+                try:
+                    provider_tools = await provider.get_tools()
+                    for tool in provider_tools:
+                        from agentpool.agents.native_agent.tool_wrapping import wrap_tool
+                        context_for_tools = self.get_context(
+                            input_provider=input_provider, run_ctx=run_ctx
+                        )
+                        wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
+                        direct_tools.append(
+                            tool.to_pydantic_ai(function_override=wrapped)
+                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to register tools from provider",
+                        provider=provider.name,
+                    )
         # 2. Hooks — skip adding as capability when old mechanism is active
         #    to avoid double-firing. Old base_agent.py hook mechanism handles
         #    pre_run/post_run/pre_tool_use/post_tool_use directly.
@@ -871,6 +894,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             "end_strategy": self._end_strategy,
             "deps_type": AgentContext[TDeps],
             "output_type": cast(Any, final_type),
+            "tools": list(direct_tools),
             "capabilities": tool_capabilities if tool_capabilities else None,
         }
         if AgentRetries is None and self._output_retries is not None:
@@ -878,220 +902,14 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         return PydanticAgent(**agent_kwargs)
 
-    async def _run_agentlet_core(
-        self,
-        *,
-        prompts: list[Any],
-        run_ctx: Any,
-        user_msg: ChatMessage[Any],
-        message_history: MessageHistory,
-        message_id: str,
-        session_id: str,
-        parent_id: str | None,
-        input_provider: Any | None,
-        deps: Any | None,
-        event_queue: asyncio.Queue[Any],
-        start_time: float,
-    ) -> ChatMessage[Any]:
-        """Run agentlet.iter() and feed events to *event_queue*.
-
-        This is the core streaming logic extracted from the former
-        ``agent_iteration_task`` closure.  It is reused both when the agent
-        runs standalone (via :meth:`_stream_events`) and when it executes as
-        a pydantic-graph step (via :meth:`_execute_node`).
-
-        Args:
-            prompts: Pre-converted pydantic-ai UserContent prompts.
-            run_ctx: Per-run context with cancellation state.
-            user_msg: The original user message.
-            message_history: Conversation history.
-            message_id: Message ID for the response.
-            session_id: Session ID for the response.
-            parent_id: Parent message ID.
-            input_provider: Optional input provider.
-            deps: Optional user dependencies.
-            event_queue: Queue to push streaming events onto.
-            start_time: perf_counter() at stream start.
-
-        Returns:
-            The final response ChatMessage.
-        """
-        from agentpool.agents.native_agent.helpers import extract_text_from_messages
-        from agentpool.tools.base import is_terminal_tool
-
-        history_list = message_history.get_history()
-        if history_list and history_list[-1] is user_msg:
-            history_list = history_list[:-1]
-
-        agentlet = await self.get_agentlet(None, self._output_type, input_provider, run_ctx)
-        agent_deps = self.get_context(input_provider=input_provider, run_ctx=run_ctx)
-        if deps is not None:
-            agent_deps.data = deps
-
-        terminal_tool_names = {
-            tool.name
-            for tool in await self.tools.get_tools(state="enabled")
-            if is_terminal_tool(tool)
-        }
-        history = [m for run in history_list for m in run.to_pydantic_ai()]
-        response_msg: ChatMessage[Any] | None = None
-
-        try:
-            async with agentlet.iter(
-                prompts,
-                deps=agent_deps,
-                message_history=history,
-                usage_limits=self._default_usage_limits,
-            ) as agent_run:
-                pending_tcs: dict[str, BaseToolCallPart] = {}
-                emitted_tool_starts: set[str] = set()
-                async for node in agent_run:
-                    if run_ctx.cancelled:
-                        self.log.info("Stream cancelled by user")
-                        break
-                    if run_ctx.terminal_tool_name is not None:
-                        self.log.info(
-                            "Stream completed by terminal tool",
-                            tool_name=run_ctx.terminal_tool_name,
-                        )
-                        break
-                    if isinstance(node, End):
-                        break
-
-                    if isinstance(node, ModelRequestNode | CallToolsNode):
-                        async with node.stream(agent_run.ctx) as stream:
-                            if run_ctx.event_bus is not None:
-                                async for event in stream:
-                                    if run_ctx.cancelled:
-                                        break
-
-                                    # Map tool call start events to ToolCallStartEvent
-                                    if isinstance(event, FunctionToolCallEvent):
-                                        tool_part = event.part
-                                        if tool_part.tool_call_id not in emitted_tool_starts:
-                                            emitted_tool_starts.add(tool_part.tool_call_id)
-                                            await event_queue.put(
-                                                ToolCallStartEvent(
-                                                    tool_call_id=tool_part.tool_call_id,
-                                                    tool_name=tool_part.tool_name,
-                                                    title=f"Executing: {tool_part.tool_name}",
-                                                    raw_input=safe_args_as_dict(
-                                                        tool_part,
-                                                        default={},
-                                                    ),
-                                                )
-                                            )
-                                    elif isinstance(event, PartStartEvent) and isinstance(
-                                        event.part, BaseToolCallPart
-                                    ):
-                                        tool_part = event.part
-                                        if tool_part.tool_call_id not in emitted_tool_starts:
-                                            emitted_tool_starts.add(tool_part.tool_call_id)
-                                            await event_queue.put(
-                                                ToolCallStartEvent(
-                                                    tool_call_id=tool_part.tool_call_id,
-                                                    tool_name=tool_part.tool_name,
-                                                    title=f"Executing: {tool_part.tool_name}",
-                                                    raw_input=safe_args_as_dict(
-                                                        tool_part,
-                                                        default={},
-                                                    ),
-                                                )
-                                            )
-
-                                    await event_queue.put(event)
-                                    if combined := await process_tool_event(
-                                        self.name,
-                                        event,  # type: ignore[arg-type]
-                                        pending_tcs,
-                                        message_id,
-                                        run_ctx,
-                                    ):
-                                        await event_queue.put(combined)
-                                        if combined.tool_name in terminal_tool_names:
-                                            run_ctx.terminal_tool_name = combined.tool_name
-                                            run_ctx.terminal_tool_result = combined.tool_result
-                                            break
-                                if run_ctx.terminal_tool_name is not None:
-                                    break
-                            else:
-                                async with merge_queue_into_iterator(
-                                    stream, run_ctx.event_queue
-                                ) as merged:  # type: ignore[arg-type]
-                                    async for event in merged:
-                                        if run_ctx.cancelled:
-                                            break
-                                        await event_queue.put(event)  # type: ignore[arg-type]
-                                        if combined := await process_tool_event(
-                                            self.name,
-                                            event,  # type: ignore[arg-type]
-                                            pending_tcs,
-                                            message_id,
-                                            run_ctx,
-                                        ):
-                                            await event_queue.put(combined)
-                                            if combined.tool_name in terminal_tool_names:
-                                                run_ctx.terminal_tool_name = combined.tool_name
-                                                run_ctx.terminal_tool_result = combined.tool_result
-                                                break
-                                if run_ctx.terminal_tool_name is not None:
-                                    break
-
-            response_time = time.perf_counter() - start_time
-            if run_ctx.cancelled:
-                partial_content = extract_text_from_messages(
-                    agent_run.all_messages(), include_interruption_note=True
-                )
-                response_msg = ChatMessage(
-                    content=partial_content,
-                    role="assistant",
-                    name=self.name,
-                    message_id=message_id,
-                    session_id=session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=response_time,
-                    finish_reason="stop",
-                )
-                await event_queue.put(StreamCompleteEvent(message=response_msg))
-            elif run_ctx.terminal_tool_name is not None:
-                response_msg = ChatMessage(
-                    content=str(run_ctx.terminal_tool_result or ""),
-                    role="assistant",
-                    name=self.name,
-                    message_id=message_id,
-                    session_id=session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=response_time,
-                    finish_reason="stop",
-                )
-            elif agent_run.result:
-                response_msg = await ChatMessage.from_run_result(
-                    agent_run.result,
-                    agent_name=self.name,
-                    message_id=message_id,
-                    session_id=session_id,
-                    parent_id=user_msg.message_id,
-                    response_time=time.perf_counter() - start_time,
-                    metadata=None,
-                )
-            else:
-                raise RuntimeError("Stream completed without producing a result")
-        except asyncio.CancelledError:
-            self.log.info("Agent iteration cancelled")
-            raise
-        except BaseException:
-            self.log.exception("Agent iteration failed")
-            raise
-
-        return response_msg
-
     async def _execute_node(self, *prompts: Any, **kwargs: Any) -> ChatMessage[Any]:
         """Execute agent as a pydantic-graph step node.
 
         Detects graph context via *_state* in kwargs (injected by
         :class:`~agentpool.messaging.graph_adapter.MessageNodeStep`) and
-        runs the core streaming logic, pushing events to the state's event
-        queue for the parent graph to drain.
+        delegates execution to :class:`~agentpool.orchestrator.run_executor.RunExecutor`,
+        forwarding all events to the state's event queue for the parent graph
+        to drain.
 
         Args:
             *prompts: Input prompts passed from the graph.
@@ -1103,6 +921,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Raises:
             RuntimeError: If ``_state`` or required sub-keys are missing.
+            RuntimeError: If ``RunExecutor`` completes without a
+                ``StreamCompleteEvent``.
         """
         from agentpool.messaging.graph_adapter import AgentPoolState
 
@@ -1118,23 +938,32 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if run_ctx is None:
             raise RuntimeError("run_ctx required in state.kwargs for graph execution")
 
-        result = await self._run_agentlet_core(
+        executor = RunExecutor(self)
+        result: ChatMessage[Any] | None = None
+        async for event in executor.execute(
             prompts=list(prompts),
             run_ctx=run_ctx,
             user_msg=kw["user_msg"],
             message_history=kw["message_history"],
             message_id=kw.get("message_id") or str(uuid4()),
             session_id=kw["session_id"],
-            parent_id=kw.get("parent_id"),
+            _parent_id=kw.get("parent_session_id"),
             input_provider=kw.get("input_provider"),
             deps=kw.get("deps"),
-            event_queue=state.event_queue,
-            start_time=kw.get("start_time", time.perf_counter()),
-        )
+        ):
+            await state.event_queue.put(event)
+            if isinstance(event, StreamCompleteEvent):
+                result = event.message
+
+        if result is None:
+            raise RuntimeError(
+                "RunExecutor.execute() completed without a StreamCompleteEvent"
+            )
+
         state.result = result
         return result
 
-    async def _stream_events(  # noqa: PLR0915
+    async def _stream_events(
         self,
         run_ctx: AgentRunContext,
         prompts: list[UserContent],
@@ -1151,131 +980,47 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
-        """Stream agent events in real-time using direct iteration.
+        """Stream agent events in real-time using RunExecutor.
 
-        This is the **standalone agent streaming path**. It spawns a background
-        task that calls `_run_agentlet_core()` directly, pushing events into an
-        async queue as they are produced. The consumer drains the queue and
-        yields events immediately, preserving real-time streaming behavior.
+        Delegates to :class:`~agentpool.orchestrator.run_executor.RunExecutor`
+        which drives the PydanticAI agent run loop with ``agent_run.next(node)``,
+        yielding fine-grained streaming events including ``RunStartedEvent``,
+        ``PartStartEvent``, ``ToolCallStartEvent``, and ``StreamCompleteEvent``.
 
         !!! note "Dual-path architecture"
             There are two execution paths for native agents:
 
             | Path | Entry Point | Mechanism | Streaming Granularity |
             |---|---|---|---|
-            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` | Fine-grained (real-time) |
+            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` → `RunExecutor.execute()` | Fine-grained (real-time) |
             | **Graph** | `MessageNode.run()` / `run_stream()` | `MessageNodeStep._execute()` → `_execute_node()` | Coarse-grained (per-step) |
 
-            Both paths share `_run_agentlet_core()` as the streaming core.
-            The graph path wraps agent execution inside a pydantic-graph Step,
-            where Step-internal events are invisible until the Step boundary
-            is crossed. This method bypasses graph wrapping entirely to avoid
-            that buffering.
+            Both paths use :class:`RunExecutor` for event production.
+            The graph path buffers events into the state event queue; the
+            standalone path streams them directly to the caller.
         """
         message_id = message_id or str(uuid4())
-        run_id = str(uuid4())
-        start_time = time.perf_counter()
         assert session_id is not None  # Initialized by BaseAgent.run_stream()
 
-        yield RunStartedEvent(
+        executor = RunExecutor(self)
+
+        async for event in executor.execute(
+            prompts=list(prompts),
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id=message_id,
             session_id=session_id,
-            run_id=run_id,
-            agent_name=self.name,
-            parent_session_id=parent_session_id,
-        )
-
-        response_msg: ChatMessage[Any] | None = None
-        event_queue: asyncio.Queue[RichAgentStreamEvent[OutputDataT] | None] = asyncio.Queue()
-        iteration_done = asyncio.Event()
-        iteration_error: BaseException | None = None
-
-        async def agent_iteration_task() -> None:
-            """Background task that runs agent iteration and feeds events to queue."""
-            nonlocal iteration_error, response_msg
-            try:
-                response_msg = await self._run_agentlet_core(
-                    prompts=list(prompts),
-                    run_ctx=run_ctx,
-                    user_msg=user_msg,
-                    message_history=message_history,
-                    message_id=message_id,
-                    session_id=session_id,
-                    parent_id=parent_id,
-                    input_provider=input_provider,
-                    deps=deps,
-                    event_queue=event_queue,
-                    start_time=start_time,
-                )
-            except asyncio.CancelledError:
-                self.log.info("Agent iteration task cancelled")
-            except BaseException as e:
-                self.log.warning(
-                    "Agent iteration failed",
-                    agent=self.name,
-                    error_type=type(e).__name__,
-                    error=str(e),
-                )
-                iteration_error = e
-            finally:
-                await event_queue.put(None)
-
-        iteration_task = asyncio.create_task(agent_iteration_task())
-        if self._iteration_task is not None and not self._iteration_task.done():
-            self.log.warning(
-                "Starting new stream while iteration_task is still active — "
-                "concurrent runs on a shared agent instance are not safe"
-            )
-        self._iteration_task = iteration_task
-
-        try:
-            while True:
-                try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
-                    if event is None:
-                        break
-                    yield event
-                except TimeoutError:
-                    current = asyncio.current_task()
-                    if current is not None and current.cancelling() > 0:
-                        raise asyncio.CancelledError() from None
-                    if run_ctx.cancelled:
-                        break
-                    continue
-
-        finally:
-            iteration_done.set()
-            if iteration_task.cancelled():
-                run_ctx.cancelled = True
-            if not iteration_task.done():
-                iteration_task.cancel()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(iteration_task),
-                        timeout=2.0,
-                    )
-                except (TimeoutError, asyncio.CancelledError):
-                    pass
-            self._iteration_task = None
-
-        if iteration_error is not None:
-            raise iteration_error
-
-        # If the stream was cancelled before producing a response, create a
-        # minimal empty message so the caller always receives StreamCompleteEvent.
-        if response_msg is None:
-            response_time = time.perf_counter() - start_time
-            response_msg = ChatMessage(
-                content="",
-                role="assistant",
-                name=self.name,
-                message_id=message_id,
-                session_id=session_id,
-                parent_id=user_msg.message_id,
-                response_time=response_time,
-                finish_reason="stop",
-            )
-
-        yield StreamCompleteEvent(message=response_msg)
+            _parent_id=parent_session_id,
+            input_provider=input_provider,
+            deps=deps,
+        ):
+            # Wire iteration_task for _interrupt() compatibility.
+            # executor._iteration_task becomes non-None after the first
+            # event (RunStartedEvent) is yielded.
+            if executor._iteration_task is not None and self._iteration_task is None:
+                self._iteration_task = executor._iteration_task
+            yield event
 
     def register_worker(
         self,

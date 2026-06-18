@@ -14,10 +14,10 @@ from acp import (
 )
 from acp.schema import (
     AuthenticateResponse,
+    CloseSessionResponse,
     ForkSessionResponse,
     ListSessionsResponse,
     ResumeSessionResponse,
-    CloseSessionResponse,
 )
 
 
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from acp.schema import (
         AuthenticateRequest,
         CancelNotification,
+        CloseSessionRequest,
         ForkSessionRequest,
         InitializeRequest,
         ListSessionsRequest,
@@ -35,7 +36,6 @@ if TYPE_CHECKING:
         ResumeSessionRequest,
         SetSessionConfigOptionRequest,
         SetSessionModelRequest,
-        CloseSessionRequest,
     )
 
 

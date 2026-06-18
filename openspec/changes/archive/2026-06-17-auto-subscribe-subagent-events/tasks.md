@@ -60,7 +60,7 @@
 
 ## 5. Future Work (Out of Scope for This Change)
 
-- [ ] 5.1 Adopt `ProtocolEventConsumerMixin` in OpenCode handler (`session_pool_integration.py`)
-- [ ] 5.2 Adopt `ProtocolEventConsumerMixin` in AG-UI handler
-- [ ] 5.3 Adopt `ProtocolEventConsumerMixin` in OpenAI API handler
-- [ ] 5.4 BackgroundTaskProvider simplification (parent repo `../xeno-agent`)
+- [x] 5.1 Adopt `ProtocolEventConsumerMixin` in OpenCode handler (`session_pool_integration.py`) — implemented at line 604
+- [x] 5.2 Adopt `ProtocolEventConsumerMixin` in AG-UI handler — implemented at line 35
+- [x] 5.3 Adopt `ProtocolEventConsumerMixin` in OpenAI API handler — implemented at line 36
+- [~] 5.4 BackgroundTaskProvider simplification (parent repo `../xeno-agent`) — out of scope

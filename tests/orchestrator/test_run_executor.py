@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+import contextlib
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import MagicMock
@@ -235,6 +236,57 @@ async def test_raw_tool_events_still_present(
 
     assert len(raw_calls) >= 1, "Raw FunctionToolCallEvent should still be present"
     assert len(raw_results) >= 1, "Raw FunctionToolResultEvent should still be present"
+
+
+# ---------------------------------------------------------------------------
+# Concurrent run warning
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_concurrent_run_warning(
+    test_agent: Agent[None],
+    message_history: MessageHistory,
+) -> None:
+    """Calling execute() while a previous execution is in progress logs a WARNING."""
+    from unittest.mock import patch
+
+    from agentpool.orchestrator import run_executor as run_executor_module
+
+    executor = RunExecutor(test_agent)
+
+    # Simulate a previous execution still running
+    async def _long_running_task() -> None:
+        await asyncio.sleep(3600)
+
+    dummy_task = asyncio.create_task(_long_running_task())
+    executor._iteration_task = dummy_task
+
+    run_ctx = AgentRunContext()
+    user_msg = ChatMessage.user_prompt("Test concurrent warning")
+
+    with patch.object(run_executor_module, "logger") as mock_logger:
+        events = await _collect_events(
+            executor,
+            prompts=["Test concurrent warning"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+        )
+
+    # Clean up the dummy task
+    dummy_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await dummy_task
+
+    # Verify warning was logged
+    mock_logger.warning.assert_called_once_with(
+        "Concurrent RunExecutor.execute() call detected — "
+        "a previous execution is still in progress"
+    )
+
+    # Second execution should still complete normally
+    assert isinstance(events[-1], StreamCompleteEvent)
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +531,7 @@ async def test_run_started_event_always_first(
 
     assert len(events) > 0
     assert isinstance(events[0], RunStartedEvent)
-    assert events[0].session_id == ""
+    assert events[0].session_id == "test-session"
     assert events[0].agent_name == test_agent.name
 
 
@@ -667,4 +719,192 @@ async def test_tool_call_complete_event_lacks_session_id(
         )
 
 
+@pytest.mark.anyio
+async def test_tool_call_start_dedup(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """Only one ToolCallStartEvent emitted when both FunctionToolCallEvent
+    and PartStartEvent(BaseToolCallPart) fire for the same tool_call_id."""
+    from contextlib import asynccontextmanager
+    from unittest.mock import MagicMock
+
+    from pydantic_ai import CallToolsNode
+    from pydantic_ai.messages import ToolCallPart
+    from pydantic_graph import End
+
+    tool_call_id = "dedup-tool-call-1"
+
+    # Create mock tool_part that passes isinstance checks for both
+    # ToolCallPart (FunctionToolCallEvent branch) and BaseToolCallPart (PartStartEvent branch)
+    mock_tool_part = MagicMock()
+    mock_tool_part.tool_call_id = tool_call_id
+    mock_tool_part.tool_name = "dedup_tool"
+    mock_tool_part.args = "{}"
+    mock_tool_part.__class__ = ToolCallPart
+
+    func_call_event = FunctionToolCallEvent(part=mock_tool_part)
+    part_start_event = PartStartEvent(index=0, part=mock_tool_part)
+
+    # Async iterator that yields both event types
+    class _EventIter:
+        def __init__(self, items: list[Any]) -> None:
+            self._items = list(items)
+            self._idx = 0
+
+        def __aiter__(self) -> "_EventIter":
+            return self
+
+        async def __anext__(self) -> Any:
+            if self._idx < len(self._items):
+                item = self._items[self._idx]
+                self._idx += 1
+                return item
+            raise StopAsyncIteration
+
+    @asynccontextmanager
+    async def _mock_stream(ctx: Any) -> Any:  # noqa: ARG001
+        yield _EventIter([func_call_event, part_start_event])
+
+    mock_node = MagicMock()
+    mock_node.__class__ = CallToolsNode
+    mock_node.stream = _mock_stream
+
+    class MockIter:
+        """Mock agent run with a CallToolsNode that yields both event types."""
+
+        def __init__(self) -> None:
+            self.ctx = MagicMock()
+            self.next_node = mock_node
+            # Build a realistic-enough result mock so from_run_result
+            # can compute costs without hitting Decimal conversion errors.
+            result_mock = MagicMock()
+            result_mock.usage = MagicMock()
+            result_mock.response = MagicMock()
+            result_mock.response.usage = MagicMock()
+            result_mock.response.provider_details = {}
+            self.result = result_mock
+
+        async def __aenter__(self) -> "MockIter":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def next(self, node: Any) -> End[Any]:  # noqa: ARG002
+            return End(data=MagicMock())
+
+        def all_messages(self) -> list[Any]:
+            return []
+
+    original_get_agentlet = test_agent.get_agentlet
+
+    async def mock_get_agentlet(*args: Any, **kwargs: Any) -> Any:
+        agentlet = await original_get_agentlet(*args, **kwargs)
+        agentlet.iter = lambda *a, **kw: MockIter()  # type: ignore[method-assign]
+        return agentlet
+
+    test_agent.get_agentlet = mock_get_agentlet  # type: ignore[method-assign]
+
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Call tool")
+
+    try:
+        events = await _collect_events(
+            executor,
+            prompts=["Call tool"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+        )
+    finally:
+        test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
+
+    # Verify only one ToolCallStartEvent for the deduplicated tool_call_id
+    tool_starts = [
+        e for e in events
+        if isinstance(e, ToolCallStartEvent) and e.tool_call_id == tool_call_id
+    ]
+    assert len(tool_starts) == 1, (
+        f"Expected exactly 1 ToolCallStartEvent for {tool_call_id}, "
+        f"got {len(tool_starts)}"
+    )
+    assert tool_starts[0].tool_name == "dedup_tool"
+
+
+@pytest.mark.anyio
+async def test_run_started_event_session_fields(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """RunStartedEvent carries session_id and parent_session_id from execute()."""
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Test session fields")
+
+    events: list[Any] = []
+    async for event in executor.execute(
+        prompts=["Test session fields"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+        message_id="msg-1",
+        session_id="custom-session-id",
+        _parent_id="custom-parent-id",
+    ):
+        events.append(event)
+
+    assert len(events) > 0
+    assert isinstance(events[0], RunStartedEvent)
+    assert events[0].session_id == "custom-session-id"
+    assert events[0].parent_session_id == "custom-parent-id"
+    assert events[0].agent_name == test_agent.name
+
+
+# ---------------------------------------------------------------------------
+# Cancelled before response fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_cancelled_before_response_fallback(
+    slow_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """When run_ctx.cancelled is set before the model responds, a fallback
+    StreamCompleteEvent with ``[Interrupted]`` content is yielded."""
+    executor = RunExecutor(slow_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    collected: list[Any] = []
+
+    async def collect() -> None:
+        async for event in executor.execute(
+            prompts=["Say hello"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id="msg-1",
+            session_id="sess-1",
+        ):
+            collected.append(event)
+
+    task = asyncio.create_task(collect())
+    await asyncio.sleep(0.05)  # Let iteration start before model responds
+    run_ctx.cancelled = True
+    await task
+
+    # Verify StreamCompleteEvent was yielded with fallback message
+    complete_events = [e for e in collected if isinstance(e, StreamCompleteEvent)]
+    assert len(complete_events) == 1, (
+        f"Expected exactly 1 StreamCompleteEvent, got {len(complete_events)}"
+    )
+    msg = complete_events[0].message
+    assert msg is not None
+    assert msg.content == "[Interrupted]"
+    assert msg.finish_reason == "stop"
+    assert msg.role == "assistant"
+    assert msg.name == slow_agent.name
 

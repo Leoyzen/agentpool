@@ -11,9 +11,10 @@ from agentpool.utils.time_utils import datetime_to_ms
 
 
 if TYPE_CHECKING:
-    from pydantic_ai.capabilities import AbstractCapability
     from collections.abc import Sequence
     from types import TracebackType
+
+    from pydantic_ai.capabilities import AbstractCapability
 
     from agentpool.tools.base import Tool
     from agentpool_bot.cron.cron_types import CronSchedule

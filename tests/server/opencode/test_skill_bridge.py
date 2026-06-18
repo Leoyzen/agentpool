@@ -123,10 +123,9 @@ class TestSkillCommandWrapper:
     def test_wrapper_has_correct_name_format(
         self, sample_wrapper: SkillCommandWrapper, sample_command: SkillCommand
     ) -> None:
-        """Verify wrapper name has skill:{name} format."""
-        expected_name = f"skill:{sample_command.name}"
-        assert sample_wrapper.name == expected_name
-        assert sample_wrapper.name.startswith("skill:")
+        """Verify wrapper name matches the skill command name (no prefix)."""
+        assert sample_wrapper.name == sample_command.name
+        assert sample_wrapper.name == "test-skill"
 
     def test_wrapper_stores_underlying_skill(
         self, sample_wrapper: SkillCommandWrapper, sample_command: SkillCommand
@@ -148,11 +147,6 @@ class TestSkillCommandWrapper:
         """Verify wrapper exposes command category."""
         assert sample_wrapper.category == sample_command.category
         assert sample_wrapper.category == "testing"
-
-    def test_wrapper_name_includes_prefix(self, sample_wrapper: SkillCommandWrapper) -> None:
-        """Verify wrapper name includes skill: prefix."""
-        assert "skill:" in sample_wrapper.name
-        assert sample_wrapper.name == "skill:test-skill"
 
     def test_wrapper_with_different_categories(self, sample_skill: Skill) -> None:
         """Test wrapper correctly exposes different categories."""
@@ -184,7 +178,7 @@ class TestOpenCodeSkillBridge:
 
         commands = sample_bridge.get_commands()
         assert len(commands) == 1
-        assert commands[0].name == "skill:test-skill"
+        assert commands[0].name == "test-skill"
 
     def test_handle_change_removes_command(
         self, sample_bridge: OpenCodeSkillBridge, sample_command: SkillCommand
@@ -255,18 +249,18 @@ class TestOpenCodeSkillBridge:
         assert len(commands) == len(multiple_commands)
 
         names = {cmd.name for cmd in commands}
-        expected_names = {f"skill:{cmd.name}" for cmd in multiple_commands}
+        expected_names = {cmd.name for cmd in multiple_commands}
         assert names == expected_names
 
     def test_get_command_with_prefix(
         self, sample_bridge: OpenCodeSkillBridge, sample_command: SkillCommand
     ) -> None:
-        """Test get_command finds command with skill: prefix."""
+        """Test get_command finds command with skill: prefix (backward compat lookup)."""
         sample_bridge.handle_change("test-skill", sample_command)
 
         cmd = sample_bridge.get_command("skill:test-skill")
         assert cmd is not None
-        assert cmd.name == "skill:test-skill"
+        assert cmd.name == "test-skill"
 
     def test_get_command_without_prefix(
         self, sample_bridge: OpenCodeSkillBridge, sample_command: SkillCommand
@@ -276,7 +270,7 @@ class TestOpenCodeSkillBridge:
 
         cmd = sample_bridge.get_command("test-skill")
         assert cmd is not None
-        assert cmd.name == "skill:test-skill"
+        assert cmd.name == "test-skill"
 
     def test_get_command_returns_none_for_missing(self, sample_bridge: OpenCodeSkillBridge) -> None:
         """Test get_command returns None for non-existent command."""
@@ -334,10 +328,9 @@ class TestCreateSkillCommand:
         assert isinstance(cmd, SlashedCommand)
 
     def test_command_has_correct_name_format(self, sample_command: SkillCommand) -> None:
-        """Test created command has skill: prefix in name."""
+        """Test created command name matches the skill command name (no prefix)."""
         cmd = create_skill_command(sample_command)
-        assert cmd.name == "skill:test-skill"
-        assert cmd.name.startswith("skill:")
+        assert cmd.name == "test-skill"
 
     def test_command_has_correct_description(self, sample_command: SkillCommand) -> None:
         """Test created command has correct description."""
@@ -479,7 +472,7 @@ class TestBridgeIntegration:
         # Bridge should receive it
         commands = bridge.get_commands()
         assert len(commands) == 1
-        assert commands[0].name == "skill:test-skill"
+        assert commands[0].name == "test-skill"
 
     def test_bridge_receives_remove_events(self, sample_command: SkillCommand) -> None:
         """Test bridge receives remove events from registry."""

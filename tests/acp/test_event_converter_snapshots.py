@@ -65,6 +65,7 @@ def tool_box_converter() -> Generator[ACPEventConverter]:
     os.environ["ACP_SUBAGENT_DISPLAY_MODE"] = "tool_box"
     try:
         converter = ACPEventConverter()
+        converter._current_message_id = "test-message-id"
         yield converter
     finally:
         # Restore original value
@@ -84,6 +85,7 @@ def inline_converter() -> Generator[ACPEventConverter]:
     os.environ["ACP_SUBAGENT_DISPLAY_MODE"] = "inline"
     try:
         converter = ACPEventConverter()
+        converter._current_message_id = "test-message-id"
         yield converter
     finally:
         # Restore original value
@@ -103,6 +105,7 @@ def legacy_converter() -> Generator[ACPEventConverter]:
     os.environ["ACP_SUBAGENT_DISPLAY_MODE"] = "legacy"
     try:
         converter = ACPEventConverter()
+        converter._current_message_id = "test-message-id"
         yield converter
     finally:
         # Restore original value

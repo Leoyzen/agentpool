@@ -5,7 +5,7 @@ while the background iteration task is still running — not batched and release
 only after the iteration completes.
 
 This is a regression test for a bug where events were buffered inside
-_run_agentlet_core() via state.event_queue and only released at the end.
+RunExecutor via its internal event queue and only released at the end.
 The fix restored direct iteration so events flow to the consumer immediately.
 """
 
@@ -100,7 +100,7 @@ async def test_run_stream_yields_events_while_iteration_running(
     """PartDeltaEvent is yielded before the background iteration task completes.
 
     If events were batched at the end, the consumer would receive no model events
-    until _run_agentlet_core() finishes and dumps everything into the queue.
+    until RunExecutor finishes and dumps everything into the queue.
     With real-time streaming, each event is pushed to the queue as it arrives
     from node.stream(), so the consumer receives events while the iteration task
     is still active.
