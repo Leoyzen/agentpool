@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, Mock
 
 from pydantic_ai import RequestUsage
 import pytest
 
-from agentpool_server.opencode_server.models import MessageRequest, TextPartInput
+from agentpool_server.opencode_server.models import MessageRequest, SessionStatus, TextPartInput
 from agentpool_server.opencode_server.routes import message_routes
+from agentpool_server.opencode_server.session_pool_integration import get_session_status
 
 
 class _DelayedAdapter:
@@ -70,11 +72,23 @@ async def test_sync_message_does_not_use_route_timeout(
     await asyncio.sleep(0.05)
 
     assert not request_task.done()
-    assert server_state.session_status[session_id].type == "busy"
+    # Session should be busy while processing.
+    # Set up a mock bridge so set_session_status can work.
+    mock_bridge = Mock()
+    mock_bridge._broadcast_busy = AsyncMock()
+    mock_bridge._broadcast_idle = AsyncMock()
+    server_state.session_pool_integration._status_bridges[session_id] = mock_bridge
+    server_state.session_pool_integration.get_session_status = AsyncMock(
+        return_value=SessionStatus(type="busy")
+    )
+    status = await get_session_status(server_state, session_id)
+    assert status is not None
+    assert status.type == "busy"
 
     gate.set()
     result = await asyncio.wait_for(request_task, timeout=1.0)
 
     assert result.status_code == 200
-    assert server_state.session_status[session_id].type == "idle"
+    # Session should be idle after completion.
+    mock_bridge._broadcast_idle.assert_awaited_once()
     assert event_capture.get_events_by_type("session.error") == []

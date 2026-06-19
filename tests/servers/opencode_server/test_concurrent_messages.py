@@ -215,10 +215,11 @@ def concurrent_test_state(tmp_project_dir, slow_mock_agent):
     )
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}
-    state.session_status = {}
     state.todos = {}
     state.input_providers = {}
     state.pending_questions = {}
+    # No session_pool_integration — _process_message_locked will use the
+    # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
 
@@ -312,22 +313,24 @@ class TestConcurrentMessageHandling:
     ) -> None:
         """Test that session status correctly reflects busy state during processing.
 
-        This ensures that the session status is set to "busy" while a message is
-        being processed and reset to "idle" afterward.
+        This ensures that ``SessionStatusEvent`` with type "busy" is broadcast
+        while a message is being processed and "idle" afterward.
         """
+        from agentpool_server.opencode_server.models.events import SessionStatusEvent
+
         state = concurrent_test_state
         session_id = "test-session-status"
 
         # Create session
         await ensure_session(state, session_id)
 
-        # Track status changes
-        status_history = []
+        # Track SessionStatusEvent broadcasts
+        status_events: list[SessionStatusEvent] = []
         original_broadcast = state.broadcast_event
 
         async def tracking_broadcast(event):
-            if hasattr(event, "type"):
-                status_history.append((event.type, state.session_status.get(session_id)))
+            if isinstance(event, SessionStatusEvent):
+                status_events.append(event)
             await original_broadcast(event)
 
         state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
@@ -335,15 +338,17 @@ class TestConcurrentMessageHandling:
         # Process a message
         await _process_message(session_id, sample_message_request, state)
 
-        # Final status should be idle (set by set_session_status fallback)
-        final_status = state.session_status.get(session_id)
-        assert final_status is not None and final_status.type == "idle", (
-            f"Expected idle status after processing, got {final_status}"
+        # Final broadcast status should be idle
+        assert len(status_events) > 0, "Expected at least one SessionStatusEvent"
+        assert status_events[-1].properties.status.type == "idle", (
+            f"Expected idle status event at end, got {status_events[-1].properties.status.type}"
         )
 
         # Verify status transitioned through busy
-        status_types = [s.type for s in state.session_status.values() if s is not None]
-        assert "busy" in status_types or any("busy" in str(h) for h in status_history)
+        status_types = [e.properties.status.type for e in status_events]
+        assert "busy" in status_types, (
+            f"Expected a 'busy' status event in {status_types}"
+        )
 
     @pytest.mark.asyncio
     async def test_different_sessions_run_concurrently_with_per_session_agents(

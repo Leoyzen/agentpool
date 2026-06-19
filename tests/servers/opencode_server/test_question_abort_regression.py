@@ -403,10 +403,7 @@ def _setup_session(state: ServerState, session_id: str) -> None:
     # Dynamically add fallback dicts for helpers that use getattr
     if not hasattr(state, "messages"):
         state.messages = {}
-    if not hasattr(state, "session_status"):
-        state.session_status = {}
     state.messages[session_id] = []
-    state.session_status[session_id] = SessionStatus(type="idle")
     state.agent.session_id = session_id
 
 
@@ -582,6 +579,38 @@ class TestRunAbortedErrorCorruptsConversation:
         """
         state = aborted_test_state
         session_id = "test-abort-idle"
+
+        # Set up session_pool_integration mock so set_session_status /
+        # get_session_status work. The old state.session_status fallback
+        # was removed in the SessionPool single-path cleanup.
+        _session_statuses: dict[str, Any] = {}
+
+        class _MockBridge:
+            def __init__(self, sid: str) -> None:
+                self.sid = sid
+
+            async def _broadcast_busy(self) -> None:
+                from agentpool_server.opencode_server.models import SessionStatus
+                _session_statuses[self.sid] = SessionStatus(type="busy")
+
+            async def _broadcast_idle(self) -> None:
+                from agentpool_server.opencode_server.models import SessionStatus
+                _session_statuses[self.sid] = SessionStatus(type="idle")
+
+        async def _mock_get_status(sid: str) -> Any:
+            return _session_statuses.get(sid)
+
+        integration = AsyncMock()
+        integration._status_bridges = {}
+        integration.create_session = AsyncMock(return_value=Mock())
+        integration.get_session_status = AsyncMock(side_effect=_mock_get_status)
+
+        async def _mock_create_session(sid: str, *args: Any, **kw: Any) -> Any:
+            integration._status_bridges[sid] = _MockBridge(sid)
+            return Mock()
+
+        integration.create_session = AsyncMock(side_effect=_mock_create_session)
+        state.session_pool_integration = integration
 
         _setup_session(state, session_id)
         user_msg_id, user_msg_with_parts = _create_user_message(session_id, sample_message_request)
