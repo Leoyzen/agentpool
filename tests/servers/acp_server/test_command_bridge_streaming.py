@@ -163,6 +163,7 @@ async def test_immediate_send_error_handling(caplog: pytest.LogCaptureFixture):
 
     # Collect all messages
     sent_messages = []
+    toast_messages = []
 
     async def capture_message(
         message: str,
@@ -173,7 +174,12 @@ async def test_immediate_send_error_handling(caplog: pytest.LogCaptureFixture):
     ):
         sent_messages.append(message)
 
+    async def capture_ext_notification(method: str, params: dict):
+        if method == "_agentpool/toast":
+            toast_messages.append(params.get("message", ""))
+
     session.notifications.send_agent_text = capture_message  # type: ignore[method-assign]
+    session.notifications.send_ext_notification = capture_ext_notification  # type: ignore[method-assign]
     # Execute failing command
     await session.execute_slash_command("/fail")
 
@@ -181,14 +187,15 @@ async def test_immediate_send_error_handling(caplog: pytest.LogCaptureFixture):
     if created_tasks:
         await asyncio.gather(*created_tasks, return_exceptions=True)
 
-    # Should get the initial output plus error message
-    min_expected_messages = 2
-    assert len(sent_messages) >= min_expected_messages
+    # Should get the initial output (text) plus error message (toast)
+    assert len(sent_messages) >= 1, "Expected initial output via send_agent_text"
+    assert len(toast_messages) >= 1, "Expected error via toast notification"
 
     # Check that we got both normal output and error
     message_text = " ".join(sent_messages)
     assert "Starting..." in message_text
-    assert "Command error:" in message_text
+    toast_text = " ".join(toast_messages)
+    assert "Command error:" in toast_text
 
 
 if __name__ == "__main__":

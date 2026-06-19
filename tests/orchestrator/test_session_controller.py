@@ -64,8 +64,8 @@ def mock_turn_runner() -> MagicMock:
         await run_loop_event.wait()
 
     tr.run_loop = AsyncMock(side_effect=_run_loop)
-    tr.inject_prompt = AsyncMock(return_value=True)
-    tr.queue_prompt = AsyncMock(return_value=False)
+    tr.steer = AsyncMock(return_value=None)
+    tr.followup = AsyncMock(return_value=None)
     tr._run_loop_event = run_loop_event
     return tr
 
@@ -553,7 +553,7 @@ async def test_receive_request_enqueues_for_active_session(
     controller: SessionController,
     mock_turn_runner: MagicMock,
 ) -> None:
-    """receive_request delegates to queue_prompt when a run is already active."""
+    """receive_request delegates to followup when a run is already active."""
     controller._turn_runner = mock_turn_runner
     await controller.get_or_create_session("sess-1", agent_name="agent-a")
 
@@ -565,7 +565,7 @@ async def test_receive_request_enqueues_for_active_session(
     await controller.receive_request("sess-1", "second message")
     await asyncio.sleep(0.01)
 
-    mock_turn_runner.queue_prompt.assert_awaited_once_with("sess-1", "second message")
+    mock_turn_runner.followup.assert_awaited_once_with("sess-1", "second message")
     mock_turn_runner.run_loop.assert_not_awaited()
 
 
@@ -574,7 +574,7 @@ async def test_receive_request_injects_for_active_session_with_asap(
     controller: SessionController,
     mock_turn_runner: MagicMock,
 ) -> None:
-    """receive_request delegates to inject_prompt when priority is asap."""
+    """receive_request delegates to steer when priority is asap."""
     controller._turn_runner = mock_turn_runner
     await controller.get_or_create_session("sess-1", agent_name="agent-a")
 
@@ -585,7 +585,7 @@ async def test_receive_request_injects_for_active_session_with_asap(
     await controller.receive_request("sess-1", "urgent", priority="asap")
     await asyncio.sleep(0.01)
 
-    mock_turn_runner.inject_prompt.assert_awaited_once_with("sess-1", "urgent")
+    mock_turn_runner.steer.assert_awaited_once_with("sess-1", "urgent")
 
 
 @pytest.mark.anyio

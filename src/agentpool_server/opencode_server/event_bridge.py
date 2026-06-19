@@ -49,22 +49,29 @@ class OpenCodeEventBridge:
         self._event_bus = event_bus
 
     async def publish(self, event: Event) -> None:
-        """Publish an event to the EventBus.
+        """Publish an event to SSE subscribers and the EventBus.
 
         Steps:
-        1. Extract ``session_id`` from the event properties.
-        2. If a session_id is found, wrap the event in a
+        1. Push to SSE subscribers for backward compatibility.
+        2. Extract ``session_id`` from the event properties.
+        3. If a session_id is found, wrap the event in a
            :class:`CustomEvent` and publish it to the EventBus.
 
         Args:
             event: An OpenCode protocol event (e.g. ``SessionStatusEvent``,
                 ``PartUpdatedEvent``, ``MessageUpdatedEvent``).
         """
+        # Step 0: Push to SSE subscribers (backward compatibility)
+        import asyncio
+        for subscriber in self._state.event_subscribers:
+            try:
+                subscriber.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
         # Step 1: extract session_id
         session_id = self._extract_session_id(event)
         if session_id is None:
-            # Global events (server.heartbeat, vcs.branch.updated, etc.)
-            # have no session scope and are not republished to the EventBus.
             return
 
         # Step 2: wrap and republish to EventBus

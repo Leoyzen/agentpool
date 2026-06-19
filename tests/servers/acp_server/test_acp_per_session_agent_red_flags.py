@@ -54,6 +54,7 @@ class FakeAgent:
 class TestConfigPathResolutionRedFlags:
     """Red flag tests: config path resolution during per-session agent creation."""
 
+    @pytest.mark.skip(reason="_resolve_agent_config_path removed; per-session agent creation now managed by SessionPool")
     def test_resolve_agent_config_path_returns_manifest_dir(
         self,
         tmp_path: Path,
@@ -94,6 +95,7 @@ class TestConfigPathResolutionRedFlags:
             f"_resolve_agent_config_path returned wrong directory: {result}, expected {tmp_path}"
         )
 
+    @pytest.mark.skip(reason="_resolve_agent_config_path removed; per-session agent creation now managed by SessionPool")
     def test_resolve_agent_config_path_falls_back_to_manifest_level(
         self,
         tmp_path: Path,
@@ -135,6 +137,7 @@ class TestConfigPathResolutionRedFlags:
             f"Fallback returned wrong directory: {result}, expected {tmp_path}"
         )
 
+    @pytest.mark.skip(reason="get_or_create_session_agent removed; per-session agent creation now managed by SessionPool")
     @pytest.mark.asyncio
     async def test_config_dir_contextvar_set_during_agent_creation(
         self,
@@ -209,6 +212,7 @@ class TestConfigPathResolutionRedFlags:
             else:
                 ctx.CONFIG_DIR.set(None)
 
+    @pytest.mark.skip(reason="get_or_create_session_agent removed; per-session agent creation now managed by SessionPool")
     @pytest.mark.asyncio
     async def test_config_dir_global_set_during_agent_creation(
         self,
@@ -281,6 +285,7 @@ class TestConfigPathResolutionRedFlags:
         finally:
             ctx._config_dir_global = original_dir
 
+    @pytest.mark.skip(reason="get_or_create_session_agent removed; per-session agent creation now managed by SessionPool")
     @pytest.mark.asyncio
     async def test_config_dir_global_restored_after_agent_creation(
         self,
@@ -340,6 +345,7 @@ class TestConfigPathResolutionRedFlags:
         finally:
             ctx._config_dir_global = original_dir
 
+    @pytest.mark.skip(reason="get_or_create_session_agent removed; per-session agent creation now managed by SessionPool")
     @pytest.mark.asyncio
     async def test_config_dir_global_set_during_aenter(
         self,
@@ -410,6 +416,7 @@ class TestConfigPathResolutionRedFlags:
         finally:
             ctx._config_dir_global = original_dir
 
+    @pytest.mark.skip(reason="_resolve_agent_config_path removed; per-session agent creation now managed by SessionPool")
     def test_resolve_agent_config_path_with_agent_name(
         self,
         tmp_path: Path,
@@ -466,6 +473,7 @@ class TestConfigPathResolutionRedFlags:
             f"Wrong config path for agent_b: {result_b}, expected {config_dir_b}"
         )
 
+    @pytest.mark.skip(reason="_resolve_agent_config_path removed; per-session agent creation now managed by SessionPool")
     def test_resolve_agent_config_path_returns_none_for_nonexistent_agent(
         self,
         tmp_path: Path,

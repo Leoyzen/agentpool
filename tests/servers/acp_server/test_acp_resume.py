@@ -118,8 +118,8 @@ async def test_resume_uses_session_manager_resume_when_not_active(
     request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
     await mocked_acp_agent.resume_session(request)
 
-    # Should call create_session with the session_id to create a session wrapper
-    mocked_acp_agent.session_manager.create_session.assert_awaited_once()
+    # resume_session now routes through session_manager.resume_session(), not create_session()
+    mocked_acp_agent.session_manager.resume_session.assert_awaited_once()
 
 
 @pytest.mark.unit

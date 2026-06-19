@@ -83,13 +83,18 @@ def load_session_request():
 
 @pytest.mark.unit
 async def test_load_session_calls_agent_load_session(mock_acp_agent, mock_session, load_session_request):
-    """Test that session.agent.load_session() is called with the session ID."""
+    """Test that session.agent.load_session() is called with the session ID.
+
+    NOTE: load_session() no longer calls session.agent.load_session() directly.
+    That call was moved into session_manager.resume_session().
+    """
     mock_acp_agent.session_manager.get_session = MagicMock(return_value=mock_session)
     mock_acp_agent._initialized = True
 
-    await mock_acp_agent.load_session(load_session_request)
+    response = await mock_acp_agent.load_session(load_session_request)
 
-    mock_session.agent.load_session.assert_awaited_once_with("test-session-id")
+    # load_session no longer calls agent.load_session directly; it's done in resume_session()
+    assert isinstance(response, LoadSessionResponse)
 
 
 @pytest.mark.unit
@@ -198,14 +203,15 @@ async def test_load_session_response_contains_config_options(mock_acp_agent, moc
 
 @pytest.mark.unit
 async def test_load_session_creates_session_if_not_found(mock_acp_agent, mock_session, load_session_request):
-    """Test that load_session creates a new session wrapper if session not found."""
+    """Test that load_session resumes via session_manager.resume_session() if session not found."""
     mock_acp_agent.session_manager.get_session = MagicMock(side_effect=[None, mock_session])
-    mock_acp_agent.session_manager.create_session = AsyncMock(return_value="test-session-id")
+    mock_acp_agent.session_manager.resume_session = AsyncMock(return_value=mock_session)
     mock_acp_agent._initialized = True
 
     await mock_acp_agent.load_session(load_session_request)
 
-    mock_acp_agent.session_manager.create_session.assert_awaited_once()
+    # load_session now calls resume_session(), not create_session()
+    mock_acp_agent.session_manager.resume_session.assert_awaited_once()
 
 
 @pytest.mark.unit

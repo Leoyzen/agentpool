@@ -303,14 +303,21 @@ class ServerState:
         self.background_tasks.clear()
 
     async def broadcast_event(self, event: Event) -> None:
-        """Broadcast an event via the EventBus bridge.
+        """Broadcast an event via the EventBus bridge and SSE subscribers.
 
         When :attr:`event_bridge` is present, delegates to the bridge which
-        publishes the event to the SessionPool EventBus. If the bridge is
-        not available the event is silently dropped (logged at debug level).
+        publishes the event to the SessionPool EventBus and SSE subscribers.
+        Otherwise, pushes directly to SSE subscribers for backward compatibility.
         """
         if self.event_bridge is not None:
             await self.event_bridge.publish(event)
+        else:
+            # Legacy path: push to SSE subscribers directly
+            for subscriber in self.event_subscribers:
+                try:
+                    subscriber.put_nowait(event)
+                except asyncio.QueueFull:
+                    logger.debug("SSE subscriber queue full, dropping event")
 
     async def mark_session_idle(self, session_id: str) -> None:
         """Mark a session idle and broadcast the matching status events."""

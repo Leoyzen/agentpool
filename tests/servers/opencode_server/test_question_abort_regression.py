@@ -585,28 +585,25 @@ class TestRunAbortedErrorCorruptsConversation:
         # was removed in the SessionPool single-path cleanup.
         _session_statuses: dict[str, Any] = {}
 
-        class _MockBridge:
-            def __init__(self, sid: str) -> None:
-                self.sid = sid
-
-            async def _broadcast_busy(self) -> None:
-                from agentpool_server.opencode_server.models import SessionStatus
-                _session_statuses[self.sid] = SessionStatus(type="busy")
-
-            async def _broadcast_idle(self) -> None:
-                from agentpool_server.opencode_server.models import SessionStatus
-                _session_statuses[self.sid] = SessionStatus(type="idle")
-
         async def _mock_get_status(sid: str) -> Any:
             return _session_statuses.get(sid)
 
+        # Capture broadcasted SessionStatusEvents to populate _session_statuses
+        _original_broadcast = state.broadcast_event
+
+        async def _capturing_broadcast(event: Any) -> None:
+            from agentpool_server.opencode_server.models import SessionStatusEvent
+            if isinstance(event, SessionStatusEvent):
+                _session_statuses[event.properties.session_id] = event.properties.status
+            await _original_broadcast(event)
+
+        state.broadcast_event = _capturing_broadcast  # type: ignore[method-assign]
+
         integration = AsyncMock()
-        integration._status_bridges = {}
         integration.create_session = AsyncMock(return_value=Mock())
         integration.get_session_status = AsyncMock(side_effect=_mock_get_status)
 
         async def _mock_create_session(sid: str, *args: Any, **kw: Any) -> Any:
-            integration._status_bridges[sid] = _MockBridge(sid)
             return Mock()
 
         integration.create_session = AsyncMock(side_effect=_mock_create_session)

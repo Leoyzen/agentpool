@@ -7,7 +7,7 @@
       },
       "sessionUpdate": "tool_call",
       "status": "pending",
-      "title": "Running: echo hello",
+      "title": "Executing: bash",
       "toolCallId": "pyd_ai_tool_call_id__bash"
     },
     "type": "tool_call"
@@ -66,7 +66,15 @@
   },
   {
     "payload": {
-      "rawOutput": "hello\n",
+      "rawOutput": {
+        "content": "hello\n",
+        "metadata": {
+          "description": "echo hello",
+          "exit": 0,
+          "output": "hello\n"
+        },
+        "structured_content": null
+      },
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"

@@ -227,6 +227,8 @@ def mock_pool(
     pool.session_pool.close_session = AsyncMock(side_effect=_mock_close_session)
     pool.session_pool.sessions = Mock()
     pool.session_pool.sessions.cancel_run_for_session = Mock()
+    pool.session_pool.sessions.list_sessions = Mock(return_value=[])
+    pool.session_pool.sessions.get_session = Mock(return_value=None)
     _mock_session_agent = Mock()
     _mock_session_agent.name = "test-agent"
     _mock_session_agent.load_session = AsyncMock(return_value=None)
@@ -344,6 +346,13 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
         agent=mock_agent,
         session_controller=session_controller,
     )
+    # Wire list_sessions to return session IDs from the in-memory cache.
+    # This ensures GET /session returns sessions created via POST /session.
+    if session_controller is not None:
+        session_controller.list_sessions = lambda: [
+            type("SessionInfo", (), {"session_id": sid})()
+            for sid in state.sessions
+        ]
     # Initialize backward-compat dicts removed from ServerState dataclass
     # so tests and helper fallbacks can access them.
     state.messages = {}
@@ -355,7 +364,6 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:
     # AsyncMock is required because message_routes.py and other code await
     # integration.create_session(), integration.get_session_status(), etc.
     state.session_pool_integration = AsyncMock()
-    state.session_pool_integration._status_bridges = {}
     # create_session returns a mock session state that supports attribute assignment
     state.session_pool_integration.create_session = AsyncMock(return_value=Mock())
     state.session_pool_integration.get_session_status = AsyncMock(return_value=None)

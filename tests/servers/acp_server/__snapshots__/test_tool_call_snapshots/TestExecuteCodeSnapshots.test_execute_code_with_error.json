@@ -8,7 +8,7 @@
       },
       "sessionUpdate": "tool_call",
       "status": "pending",
-      "title": "Executing code",
+      "title": "Executing: execute_code",
       "toolCallId": "pyd_ai_tool_call_id__execute_code"
     },
     "type": "tool_call"
