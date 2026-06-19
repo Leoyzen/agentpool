@@ -45,10 +45,17 @@ def mock_state() -> ServerState:
     )
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}  # type: ignore[attr-defined]
-    state.session_status = {}  # type: ignore[attr-defined]
     state.todos = {}  # type: ignore[attr-defined]
     state.input_providers = {}  # type: ignore[attr-defined]
     state.pending_questions = {}  # type: ignore[attr-defined]
+    # Set up a mock session_pool_integration so set_session_status() and
+    # get_session_status() have the integration they expect.
+    from unittest.mock import AsyncMock, Mock
+
+    mock_integration = Mock()
+    mock_integration._status_bridges = {}
+    mock_integration.get_session_status = AsyncMock(return_value=None)
+    state.session_pool_integration = mock_integration  # type: ignore[attr-defined]
     return state
 
 
@@ -156,10 +163,9 @@ async def test_ensure_session_caches_in_memory(mock_state: ServerState) -> None:
     messages = getattr(mock_state, "messages", {})
     assert messages is not None
 
-    session_status = getattr(mock_state, "session_status", {})
-    assert session_id in session_status
-    assert session_status[session_id].type == "idle"
-
+    # Session status is now managed via session_pool_integration /
+    # SessionStatusBridge. The dedicated test
+    # test_ensure_session_broadcasts_idle_events verifies status events.
     todos = getattr(mock_state, "todos", {})
     assert todos is not None
 

@@ -127,11 +127,18 @@ def mock_state() -> ServerState:
     )
     # Initialize backward-compat dicts
     state.messages = {}  # type: ignore[attr-defined]
-    state.session_status = {}  # type: ignore[attr-defined]
     state.todos = {}  # type: ignore[attr-defined]
     state.input_providers = {}  # type: ignore[attr-defined]
     state.pending_questions = {}  # type: ignore[attr-defined]
     state.reverted_messages = {}  # type: ignore[attr-defined]
+    # Set up a mock session_pool_integration so set_session_status() and
+    # get_session_status() have the integration they expect.
+    from unittest.mock import AsyncMock, Mock
+
+    mock_integration = Mock()
+    mock_integration._status_bridges = {}
+    mock_integration.get_session_status = AsyncMock(return_value=None)
+    state.session_pool_integration = mock_integration  # type: ignore[attr-defined]
     return state
 
 
@@ -186,12 +193,21 @@ async def test_ensure_session_checkpointed_marks_idle(mock_state: ServerState) -
     mock_store.load = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
-    with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
+    with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
         await ensure_session(mock_state, session_id)
 
     # Should be idle even though status is checkpointed in storage
-    assert session_id in mock_state.session_status
-    assert mock_state.session_status[session_id].type == "idle"
+    # Session status is now managed via session_pool_integration /
+    # SessionStatusBridge. Verify via broadcast events.
+    from agentpool_server.opencode_server.models import SessionStatusEvent
+
+    status_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionStatusEvent)
+    ]
+    assert len(status_events) >= 1
+    assert status_events[0].properties.status.type == "idle"
 
 
 # ---------------------------------------------------------------------------
