@@ -7,8 +7,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from agentpool_config.session_pool import OpenCodeConfig
-
 
 if TYPE_CHECKING:
     from unittest.mock import MagicMock
@@ -21,13 +19,13 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.asyncio
 
 
-async def test_summarize_uses_session_pool_when_flag_enabled(
+async def test_summarize_uses_session_pool(
     async_client: AsyncClient,
     server_state: ServerState,
     mock_agent: Mock,
     mock_pool: Mock,
 ):
-    """When use_session_pool_for_summarize is True, endpoint uses SessionPool.run_stream."""
+    """Summarize always uses SessionPool.run_stream (no feature flag branching)."""
     from pydantic_ai import RequestUsage, TextPart, TextPartDelta
 
     from agentpool.agents.events import PartDeltaEvent, PartStartEvent, StreamCompleteEvent
@@ -57,19 +55,12 @@ async def test_summarize_uses_session_pool_when_flag_enabled(
         path=MessagePath(cwd=server_state.working_dir, root=server_state.working_dir),
         time=MessageTime(created=0),
     )
-    # Use fallback dict for bulk message setup (no bulk-set helper exists)
-    server_state.messages[session_id] = [
+    existing_messages = [
         MessageWithParts(
             info=user_msg,
             parts=[OpenCodeTextPart(id="p1", message_id="m1", session_id=session_id, text="hello")],
         )
     ]
-
-    # Enable the feature flag
-    mock_pool.manifest.opencode = OpenCodeConfig(
-        use_session_pool=True,
-        use_session_pool_for_summarize=True,
-    )
 
     # Track whether session_pool.run_stream was called
     run_stream_called = False
@@ -89,10 +80,16 @@ async def test_summarize_uses_session_pool_when_flag_enabled(
 
     mock_pool.session_pool.run_stream = mock_run_stream
 
-    # Mock compact_conversation to avoid real compaction logic
-    with patch(
-        "agentpool.messaging.compaction.compact_conversation",
-        new=AsyncMock(),
+    # Mock compact_conversation and get_messages_for_session
+    with (
+        patch(
+            "agentpool.messaging.compaction.compact_conversation",
+            new=AsyncMock(),
+        ),
+        patch(
+            "agentpool_server.opencode_server.routes.session_routes.get_messages_for_session",
+            return_value=existing_messages,
+        ),
     ):
         response = await async_client.post(f"/session/{session_id}/summarize")
 
@@ -142,7 +139,7 @@ async def test_summarize_routes_through_session_pool(
         path=MessagePath(cwd=server_state.working_dir, root=server_state.working_dir),
         time=MessageTime(created=0),
     )
-    server_state.messages[session_id] = [
+    existing_messages = [
         MessageWithParts(
             info=user_msg,
             parts=[OpenCodeTextPart(id="p1", message_id="m1", session_id=session_id, text="hello")],
@@ -150,7 +147,6 @@ async def test_summarize_routes_through_session_pool(
     ]
 
     # Mock session_pool.run_stream
-    from unittest.mock import AsyncMock
     mock_pool.session_pool.run_stream = AsyncMock(return_value=[
         PartStartEvent(index=0, part=TextPart(content="SessionPool summary")),
         PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" done")),
@@ -163,10 +159,16 @@ async def test_summarize_routes_through_session_pool(
         )
     ])
 
-    # Mock compact_conversation
-    with patch(
-        "agentpool.messaging.compaction.compact_conversation",
-        new=AsyncMock(),
+    # Mock compact_conversation and get_messages_for_session
+    with (
+        patch(
+            "agentpool.messaging.compaction.compact_conversation",
+            new=AsyncMock(),
+        ),
+        patch(
+            "agentpool_server.opencode_server.routes.session_routes.get_messages_for_session",
+            return_value=existing_messages,
+        ),
     ):
         response = await async_client.post(f"/session/{session_id}/summarize")
 

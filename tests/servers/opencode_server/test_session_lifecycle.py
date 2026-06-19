@@ -25,6 +25,7 @@ from agentpool_server.opencode_server.models.events import (
     SessionIdleEvent,
     SessionStatusEvent,
 )
+from agentpool_server.opencode_server.session_pool_integration import set_session_status
 
 
 if TYPE_CHECKING:
@@ -363,13 +364,19 @@ class TestSessionStatus:
         # Create a session
         response = await async_client.post("/session", json={"title": "Running Session"})
         session_id = response.json()["id"]
-        # Set status to busy (simulating running operation)
-        server_state.session_status[session_id] = SessionStatus(type="busy")
+        # Set status to busy (simulating running operation) via the mock integration.
+        mock_bridge = Mock()
+        mock_bridge._broadcast_busy = AsyncMock()
+        mock_bridge._broadcast_idle = AsyncMock()
+        server_state.session_pool_integration._status_bridges[session_id] = mock_bridge
+        await set_session_status(server_state, session_id, SessionStatus(type="busy"))
+        mock_bridge._broadcast_busy.assert_awaited_once()
         # Abort the session
         abort_response = await async_client.post(f"/session/{session_id}/abort")
         assert abort_response.status_code == 200
         assert abort_response.json() is True
-        assert server_state.session_status[session_id].type == "idle"
+        # Session should be idle after abort.
+        mock_bridge._broadcast_idle.assert_awaited_once()
 
     async def test_abort_session_delegates_to_session_pool(
         self,
@@ -381,11 +388,18 @@ class TestSessionStatus:
         session_id = response.json()["id"]
         server_state.agent.interrupt = AsyncMock()
 
+        # Set up a mock bridge so set_session_status can broadcast idle.
+        mock_bridge = Mock()
+        mock_bridge._broadcast_busy = AsyncMock()
+        mock_bridge._broadcast_idle = AsyncMock()
+        server_state.session_pool_integration._status_bridges[session_id] = mock_bridge
+
         abort_response = await async_client.post(f"/session/{session_id}/abort")
         assert abort_response.status_code == 200
         assert abort_response.json() is True
 
-        assert server_state.session_status[session_id].type == "idle"
+        # Session should be idle after abort.
+        mock_bridge._broadcast_idle.assert_awaited_once()
         server_state.agent.interrupt.assert_awaited_once()
         # Verify SessionPool cancel_run_for_session was called
         session_pool = server_state.agent.agent_pool.session_pool

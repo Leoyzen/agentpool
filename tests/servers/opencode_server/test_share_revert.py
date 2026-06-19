@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, Mock, patch
 
+from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.models import (
     AssistantMessage,
     MessagePath,
@@ -18,7 +19,9 @@ from agentpool_server.opencode_server.models import (
     TimeCreated,
     UserMessage,
 )
-from agentpool.utils.time_utils import now_ms
+from agentpool_server.opencode_server.session_pool_integration import (
+    append_message_to_session,
+)
 
 
 if TYPE_CHECKING:
@@ -75,12 +78,16 @@ def _make_assistant_message(
     return MessageWithParts(info=assistant_msg, parts=[part])
 
 
-def _add_messages_to_state(
+async def _add_messages_to_state(
     server_state: ServerState,
     session_id: str,
     count: int = 10,
 ) -> list[MessageWithParts]:
-    """Add N alternating user/assistant messages to a session."""
+    """Add N alternating user/assistant messages to a session.
+
+    Routes messages through :func:`append_message_to_session` so they are
+    stored in both the SessionPool mock and the in-memory ``state.messages``.
+    """
     messages: list[MessageWithParts] = []
     for i in range(count):
         msg_id = f"msg-{i:03d}"
@@ -91,7 +98,7 @@ def _add_messages_to_state(
                 session_id, msg_id, f"msg-{i - 1:03d}", f"Assistant response {i}"
             )
         messages.append(msg)
-    server_state.messages[session_id] = messages
+        await append_message_to_session(server_state, session_id, msg)
     return messages
 
 
@@ -115,7 +122,7 @@ class TestShareSession:
         session_id = create_response.json()["id"]
 
         # Add messages to the session
-        _add_messages_to_state(server_state, session_id, count=5)
+        await _add_messages_to_state(server_state, session_id, count=5)
 
         # Mock OpenCodeSharer to avoid external API calls
         mock_sharer = AsyncMock()
@@ -150,7 +157,7 @@ class TestShareSession:
         create_response = await async_client.post("/session", json={"title": "Limited Share"})
         session_id = create_response.json()["id"]
 
-        _add_messages_to_state(server_state, session_id, count=10)
+        await _add_messages_to_state(server_state, session_id, count=10)
 
         mock_sharer = AsyncMock()
         mock_sharer.__aenter__ = AsyncMock(return_value=mock_sharer)
@@ -201,7 +208,7 @@ class TestShareSession:
         create_response = await async_client.post("/session", json={"title": "API Share Test"})
         session_id = create_response.json()["id"]
 
-        _add_messages_to_state(server_state, session_id, count=3)
+        await _add_messages_to_state(server_state, session_id, count=3)
 
         # Configure session_pool.get_messages to return messages
         # so the route uses the SessionPool API path
@@ -247,7 +254,7 @@ class TestRevertSession:
         session_id = create_response.json()["id"]
 
         # Add 10 messages
-        messages = _add_messages_to_state(server_state, session_id, count=10)
+        messages = await _add_messages_to_state(server_state, session_id, count=10)
         revert_message_id = messages[4].info.id  # Revert to 5th message (index 4)
 
         # Call revert endpoint
@@ -275,7 +282,7 @@ class TestRevertSession:
         create_response = await async_client.post("/session", json={"title": "Single Revert"})
         session_id = create_response.json()["id"]
 
-        messages = _add_messages_to_state(server_state, session_id, count=1)
+        messages = await _add_messages_to_state(server_state, session_id, count=1)
         message_id = messages[0].info.id
 
         revert_response = await async_client.post(
@@ -313,7 +320,7 @@ class TestRevertSession:
         create_response = await async_client.post("/session", json={"title": "Bad Revert"})
         session_id = create_response.json()["id"]
 
-        _add_messages_to_state(server_state, session_id, count=3)
+        await _add_messages_to_state(server_state, session_id, count=3)
 
         revert_response = await async_client.post(
             f"/session/{session_id}/revert",
@@ -343,7 +350,7 @@ class TestRevertSession:
         create_response = await async_client.post("/session", json={"title": "Store Revert"})
         session_id = create_response.json()["id"]
 
-        messages = _add_messages_to_state(server_state, session_id, count=5)
+        messages = await _add_messages_to_state(server_state, session_id, count=5)
         revert_message_id = messages[2].info.id
 
         await async_client.post(
@@ -376,7 +383,7 @@ class TestForkSession:
         original_id = original_response.json()["id"]
 
         # Add messages
-        _add_messages_to_state(server_state, original_id, count=6)
+        await _add_messages_to_state(server_state, original_id, count=6)
 
         # Fork the session
         fork_response = await async_client.post(f"/session/{original_id}/fork")
@@ -404,7 +411,7 @@ class TestForkSession:
         original_response = await async_client.post("/session", json={"title": "Fork Point"})
         original_id = original_response.json()["id"]
 
-        messages = _add_messages_to_state(server_state, original_id, count=8)
+        messages = await _add_messages_to_state(server_state, original_id, count=8)
         fork_message_id = messages[3].info.id  # Fork at 4th message
 
         fork_response = await async_client.post(
@@ -449,7 +456,7 @@ class TestForkSession:
         original_response = await async_client.post("/session", json={"title": "API Fork"})
         original_id = original_response.json()["id"]
 
-        _add_messages_to_state(server_state, original_id, count=4)
+        await _add_messages_to_state(server_state, original_id, count=4)
 
         session_pool = cast(Mock, server_state.pool.session_pool)
         session_pool.get_messages.reset_mock()
@@ -482,7 +489,7 @@ class TestShareRevertEdgeCases:
         create_response = await async_client.post("/session", json={"title": "Share Revert"})
         session_id = create_response.json()["id"]
 
-        messages = _add_messages_to_state(server_state, session_id, count=4)
+        messages = await _add_messages_to_state(server_state, session_id, count=4)
 
         # Share first
         mock_sharer = AsyncMock()
@@ -518,7 +525,7 @@ class TestShareRevertEdgeCases:
         create_response = await async_client.post("/session", json={"title": "Revert Fork"})
         session_id = create_response.json()["id"]
 
-        messages = _add_messages_to_state(server_state, session_id, count=6)
+        messages = await _add_messages_to_state(server_state, session_id, count=6)
 
         # Revert to message 2
         revert_message_id = messages[2].info.id
