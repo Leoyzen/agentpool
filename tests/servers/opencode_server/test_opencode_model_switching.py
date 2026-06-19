@@ -526,9 +526,10 @@ def _make_mock_state_with_session_agent(
     # Initialize backward-compat dicts removed from ServerState dataclass
     # so tests and helper fallbacks can access them.
     state.messages = {}  # type: ignore[attr-defined]
-    state.session_status = {}  # type: ignore[attr-defined]
     state.todos = {}  # type: ignore[attr-defined]
     state.input_providers = {}  # type: ignore[attr-defined]
+    # No session_pool_integration — _process_message_locked will use the
+    # fallback path via session_pool.sessions.get_or_create_session.
 
     # Pre-populate sessions in state
     for session_id in session_agents:
@@ -546,7 +547,6 @@ def _make_mock_state_with_session_agent(
         )
         state.sessions[session_id] = session
         state.messages[session_id] = []  # type: ignore[attr-defined]
-        state.session_status[session_id] = SessionStatus(type="idle")  # type: ignore[attr-defined]
 
     return state, pool
 
