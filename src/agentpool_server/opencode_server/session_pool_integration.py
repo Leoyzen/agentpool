@@ -67,27 +67,11 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _use_session_pool_for_messages(state: ServerState) -> bool:
-    """Check if SessionPool should be used for messages."""
-    config = getattr(state, "config", None)
-    if config is None:
-        return True
-    return getattr(config, "use_session_pool_for_messages", True)
-
-
-def _use_session_pool_for_status(state: ServerState) -> bool:
-    """Check if SessionPool should be used for session status."""
-    config = getattr(state, "config", None)
-    if config is None:
-        return True
-    return getattr(config, "use_session_pool_for_status", True)
-
-
 async def get_messages_for_session(
     state: ServerState,
     session_id: str,
 ) -> list[MessageWithParts]:
-    """Get messages for a session from SessionPool or fall back to ServerState.
+    """Get messages for a session from SessionPool.
 
     For subagent/child sessions (identified by ``parent_id``), the in-memory
     ``state.messages`` cache is consulted first because streaming parts are
@@ -112,30 +96,30 @@ async def get_messages_for_session(
         if messages:
             return messages
 
-    if _use_session_pool_for_messages(state):
-        session_pool = getattr(state.pool, "session_pool", None)
-        if session_pool is not None:
-            try:
-                sp_messages = await session_pool.get_messages(session_id)
-            except (KeyError, TypeError):
-                sp_messages = []
-            if sp_messages:
-                agent = state.agent
-                with contextlib.suppress(Exception):
-                    agent = await session_pool.sessions.get_or_create_session_agent(session_id)
-                return [
-                    chat_message_to_opencode(
-                        chat_msg,
-                        session_id=session_id,
-                        working_dir=state.working_dir,
-                        agent_name=agent.name,
-                        model_id=getattr(chat_msg, "model_name", None) or "sonnet",
-                        provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
-                    )
-                    for chat_msg in sp_messages
-                ]
-    messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
-    return messages
+    session_pool = getattr(state.pool, "session_pool", None)
+    if session_pool is not None:
+        try:
+            sp_messages = await session_pool.get_messages(session_id)
+        except (KeyError, TypeError):
+            sp_messages = []
+        if sp_messages:
+            agent = state.agent
+            with contextlib.suppress(Exception):
+                agent = await session_pool.sessions.get_or_create_session_agent(session_id)
+            return [
+                chat_message_to_opencode(
+                    chat_msg,
+                    session_id=session_id,
+                    working_dir=state.working_dir,
+                    agent_name=agent.name,
+                    model_id=getattr(chat_msg, "model_name", None) or "sonnet",
+                    provider_id=getattr(chat_msg, "provider_name", None) or "claude-code",
+                )
+                for chat_msg in sp_messages
+            ]
+    # Fallback to in-memory messages (for tests and subagent sessions
+    # where SessionPool may not have the session yet).
+    return getattr(state, "messages", {}).get(session_id, []) or []
 
 
 async def append_message_to_session(
@@ -145,29 +129,28 @@ async def append_message_to_session(
 ) -> None:
     """Append a message to a session's history.
 
-    Writes to SessionPool when the feature flag is enabled.
+    Writes to SessionPool unconditionally.
     Also writes to the in-memory messages dict when present for
-    backward compatibility with tests and legacy code paths.
+    backward compatibility with tests and subagent streaming.
 
     Args:
         state: The OpenCode server state.
         session_id: The session ID to append to.
         msg: The OpenCode message to append.
     """
-    if _use_session_pool_for_messages(state):
-        session_pool = None
-        if hasattr(state, "pool") and state.pool is not None:
-            session_pool = getattr(state.pool, "session_pool", None)
-        if session_pool is not None:
-            chat_msg = opencode_to_chat_message(msg, session_id=session_id)
-            try:
-                await session_pool.append_message(session_id, chat_msg)
-            except (KeyError, TypeError):
-                logger.warning(
-                    "Failed to append message to SessionPool",
-                    session_id=session_id,
-                    exc_info=True,
-                )
+    session_pool = None
+    if hasattr(state, "pool") and state.pool is not None:
+        session_pool = getattr(state.pool, "session_pool", None)
+    if session_pool is not None:
+        chat_msg = opencode_to_chat_message(msg, session_id=session_id)
+        try:
+            await session_pool.append_message(session_id, chat_msg)
+        except (KeyError, TypeError):
+            logger.warning(
+                "Failed to append message to SessionPool",
+                session_id=session_id,
+                exc_info=True,
+            )
 
     # Always mirror to the in-memory dict when present for backward compatibility
     messages = getattr(state, "messages", None)
@@ -202,59 +185,45 @@ async def set_session_status(
     session_id: str,
     status: SessionStatus,
 ) -> None:
-    """Set the status of a session.
-
-    Uses SessionStatusBridge when the feature flag is enabled.
-    Falls back to the in-memory session_status dict for tests and
-    legacy code paths.
+    """Set the status of a session via SessionStatusBridge.
 
     Args:
         state: The OpenCode server state.
         session_id: The session to update.
         status: The new session status.
     """
-    if _use_session_pool_for_status(state):
-        integration = getattr(state, "session_pool_integration", None)
-        if integration is not None:
-            bridge = integration._status_bridges.get(session_id)
-            if bridge is not None:
-                if status.type == "busy":
-                    await bridge._broadcast_busy()
-                    return
-                if status.type == "idle":
-                    await bridge._broadcast_idle()
-                    return
-
-    # Fallback: write to the in-memory dict for backward compatibility
-    session_status = getattr(state, "session_status", None)
-    if session_status is not None:
-        session_status[session_id] = status
+    integration = getattr(state, "session_pool_integration", None)
+    if integration is not None:
+        bridge = integration._status_bridges.get(session_id)
+        if bridge is not None:
+            if status.type == "busy":
+                await bridge._broadcast_busy()
+                return
+            if status.type == "idle":
+                await bridge._broadcast_idle()
+                return
 
 
 async def get_session_status(
     state: ServerState,
     session_id: str,
 ) -> SessionStatus | None:
-    """Get the current status of a session.
-
-    Delegates to OpenCodeSessionPoolIntegration when the feature flag is
-    enabled, otherwise falls back to the ServerState in-memory dictionary.
+    """Get the current status of a session via OpenCodeSessionPoolIntegration.
 
     Args:
         state: The OpenCode server state.
         session_id: The session to look up.
 
     Returns:
-        The session status, or None if not found and the fallback is used.
+        The session status, or ``None`` if no integration is available.
     """
-    if _use_session_pool_for_status(state):
-        integration: OpenCodeSessionPoolIntegration | None = getattr(
-            state, "session_pool_integration", None
-        )
-        if integration is not None:
-            return await integration.get_session_status(session_id)
+    integration: OpenCodeSessionPoolIntegration | None = getattr(
+        state, "session_pool_integration", None
+    )
+    if integration is not None:
+        return await integration.get_session_status(session_id)
 
-    return getattr(state, "session_status", {}).get(session_id)
+    return None
 
 
 def _session_state_to_opencode(state: SessionState) -> Session:
