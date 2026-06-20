@@ -398,6 +398,7 @@ class TeamRun[TDeps, TResult](BaseTeam[TDeps, TResult]):
                         parent_session_id=parent_session_id,
                         agent_name=node.name,
                         agent_type=node.agent_type,
+                        generate_title=False,
                     )
                     child_sid = child_state.session_id
                 else:

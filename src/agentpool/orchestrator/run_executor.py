@@ -35,6 +35,7 @@ from agentpool.agents.native_agent.helpers import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.tools.base import is_terminal_tool
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
@@ -170,14 +171,18 @@ class RunExecutor:
             nonlocal iteration_error, response_msg
             pending_tcs: dict[str, BaseToolCallPart] = {}
             emitted_tool_starts: set[str] = set()
+            terminal_tool_completed = False
 
             # Pre-compute tool kind lookup for ToolCallStartEvent
             _tool_kind_map: dict[str, str] = {}
+            _terminal_tool_names: set[str] = set()
             try:
                 all_agent_tools = await self._agent.tools.get_tools()
                 for t in all_agent_tools:
                     if t.category:
                         _tool_kind_map[t.name] = t.category
+                    if is_terminal_tool(t):
+                        _terminal_tool_names.add(t.name)
             except Exception:
                 logger.debug("Failed to build tool kind map", exc_info=True)
 
@@ -258,6 +263,17 @@ class RunExecutor:
                                     )
                                     if combined is not None:
                                         await event_queue.put(combined)
+                                        if combined.tool_name in _terminal_tool_names:
+                                            run_ctx.terminal_tool_name = combined.tool_name
+                                            run_ctx.terminal_tool_result = combined.tool_result
+                                            terminal_tool_completed = True
+                                            break
+
+                                if terminal_tool_completed:
+                                    break
+
+                        if terminal_tool_completed:
+                            break
 
                         node = await agent_run.next(node)
 
@@ -272,6 +288,21 @@ class RunExecutor:
                     )
                     response_msg = ChatMessage(
                         content=partial_content,
+                        role="assistant",
+                        name=self._agent.name,
+                        message_id=message_id,
+                        session_id=session_id,
+                        parent_id=user_msg.message_id,
+                        response_time=time.perf_counter() - start_time,
+                        finish_reason="stop",
+                    )
+                elif run_ctx.terminal_tool_name:
+                    response_msg = ChatMessage(
+                        content=(
+                            str(run_ctx.terminal_tool_result)
+                            if run_ctx.terminal_tool_result is not None
+                            else ""
+                        ),
                         role="assistant",
                         name=self._agent.name,
                         message_id=message_id,

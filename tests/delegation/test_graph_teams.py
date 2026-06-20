@@ -341,6 +341,30 @@ async def test_parallel_team_execute_uses_scoped_child_sessions_by_default() -> 
         assert f"child:{agent_name}:{session_id}" in contents
 
 
+@pytest.mark.anyio
+async def test_teamrun_stream_uses_scoped_child_sessions_without_titles() -> None:
+    """TeamRun streaming child sessions should not request generated titles."""
+    agent_a = _make_echo_agent("alpha", "A")
+    agent_b = _make_echo_agent("beta", "B")
+    pool = _FakeAgentPool([agent_a, agent_b])
+    team = TeamRun([agent_a, agent_b], name="sequential_scoped", agent_pool=pool)  # type: ignore[arg-type]
+
+    events = [
+        event
+        async for event in team.run_stream(
+            "prompt",
+            session_id="parent-session",
+            parent_session_id="parent-session",
+        )
+    ]
+
+    spawn_events = [event for event in events if isinstance(event, SpawnSessionStart)]
+    assert len(spawn_events) == 2
+    assert {item["agent_name"] for item in pool.session_pool.created} == {"alpha", "beta"}
+    assert {item["parent_session_id"] for item in pool.session_pool.created} == {"parent-session"}
+    assert {item["generate_title"] for item in pool.session_pool.created} == {"False"}
+
+
 # ---------------------------------------------------------------------------
 # 2. Sequential team with 3 agents
 # ---------------------------------------------------------------------------

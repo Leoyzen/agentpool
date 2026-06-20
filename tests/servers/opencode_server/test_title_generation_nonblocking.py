@@ -60,6 +60,7 @@ def _make_state(tmp_path: Any) -> ServerState:
     pool = Mock()
     pool.storage = storage_mgr
     pool.manifest = Mock(model_variants={})
+    pool.all_agents = {}
 
     agent.agent_pool = pool
     agent.storage = storage_mgr
@@ -291,6 +292,24 @@ class TestTitleGenerationDoesNotBlockAgent:
 
 class TestTitleStillGeneratedAsynchronously:
     """Title must still be generated even when it doesn't block."""
+
+    async def test_maybe_generate_title_respects_session_metadata_disable(
+        self,
+        tmp_path: Any,
+    ) -> None:
+        """SessionPool metadata can disable title generation for child sessions."""
+        state = _make_state(tmp_path)
+        session_id = "ses_title_disabled"
+        _seed_session(state, session_id)
+
+        session_state = Mock(metadata={"generate_title": False})
+        state.pool.session_pool.sessions.get_session = Mock(return_value=session_state)
+
+        log_session = AsyncMock()
+        with patch.object(state.pool.storage, "log_session", log_session):
+            await _maybe_generate_title(state, session_id, ["hello"])
+
+        log_session.assert_not_awaited()
 
     async def test_title_eventually_appears(self, tmp_path: Any) -> None:
         """Title should appear in session after background generation completes."""

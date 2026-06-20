@@ -101,14 +101,13 @@ async def get_messages_for_session(
     Returns:
         List of MessageWithParts for the session.
     """
+    messages: list[MessageWithParts] = getattr(state, "messages", {}).get(session_id, []) or []
+
     # Fast-path: subagent sessions are streamed live into memory, so the
     # in-memory copy is always the most up-to-date.
     cached_session = state.sessions.get(session_id)
     is_subagent = cached_session is not None and cached_session.parent_id is not None
     if is_subagent:
-        messages: list[MessageWithParts] = (
-            getattr(state, "messages", {}).get(session_id, []) or []
-        )
         if messages:
             return messages
 

@@ -823,8 +823,8 @@ class StorageManager:
                 timeout=15.0,
             )
         except TimeoutError:
-            logger.warning(
-                "Title generation timed out (15s)",
+            logger.info(
+                "Session title generation exceeded background timeout",
                 session_id=session_id,
             )
             return None

@@ -33,6 +33,7 @@ from agentpool.agents.events import (
 )
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run_executor import RunExecutor
+from agentpool.tools.base import TERMINAL_TOOL_METADATA_KEY, Tool
 
 
 pytestmark = pytest.mark.unit
@@ -63,6 +64,26 @@ def tool_agent() -> Agent[None]:
         name="run-executor-tool-agent",
         model=model,
         tools=[hello_tool],
+    )
+
+
+@pytest.fixture
+def terminal_tool_agent() -> Agent[None]:
+    """Agent with a terminal tool for run completion tests."""
+
+    async def finish_tool() -> str:
+        """Finish the run."""
+        return "terminal_result"
+
+    finish = Tool.from_callable(
+        finish_tool,
+        metadata={TERMINAL_TOOL_METADATA_KEY: "true"},
+    )
+    model = TestModel(custom_output_text="model should not continue")
+    return Agent(
+        name="run-executor-terminal-agent",
+        model=model,
+        tools=[finish],
     )
 
 
@@ -211,6 +232,35 @@ async def test_tool_call_events_mapped(
     )
     assert tool_completes[0].tool_name == "hello_tool"
     assert tool_completes[0].tool_result == "hello_result"
+
+
+@pytest.mark.anyio
+async def test_terminal_tool_completion_ends_run(
+    terminal_tool_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """A terminal tool result is the final run result."""
+    executor = RunExecutor(terminal_tool_agent)
+    user_msg = ChatMessage.user_prompt("Finish the task")
+
+    events = await _collect_events(
+        executor,
+        prompts=["Finish the task"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+    )
+
+    tool_completes = [e for e in events if isinstance(e, ToolCallCompleteEvent)]
+    assert len(tool_completes) == 1
+    assert tool_completes[0].tool_name == "finish_tool"
+    assert tool_completes[0].tool_result == "terminal_result"
+    assert run_ctx.terminal_tool_name == "finish_tool"
+    assert run_ctx.terminal_tool_result == "terminal_result"
+
+    complete_event = next(e for e in events if isinstance(e, StreamCompleteEvent))
+    assert complete_event.message.content == "terminal_result"
 
 
 @pytest.mark.anyio
@@ -907,4 +957,3 @@ async def test_cancelled_before_response_fallback(
     assert msg.finish_reason == "stop"
     assert msg.role == "assistant"
     assert msg.name == slow_agent.name
-

@@ -63,6 +63,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _session_disables_title_generation(state: ServerState, session_id: str) -> bool:
+    """Return whether SessionPool metadata disables title generation."""
+    session_pool = state.pool.session_pool if state.pool else None
+    if session_pool is None:
+        return False
+
+    session_state = session_pool.sessions.get_session(session_id)
+    metadata = getattr(session_state, "metadata", None)
+    return isinstance(metadata, dict) and metadata.get("generate_title") is False
+
+
 def _resolve_message_agent_name(
     state: ServerState,
     session_id: str,
@@ -141,6 +152,9 @@ async def _maybe_generate_title(
         session_id: The session ID to check
         user_prompt: The user's prompt to use for title generation
     """
+    if _session_disables_title_generation(state, session_id):
+        return
+
     # Check if this is the first user message by looking at existing messages
     existing_messages = await get_messages_for_session(state, session_id)
 
