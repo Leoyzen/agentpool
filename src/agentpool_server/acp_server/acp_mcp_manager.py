@@ -221,6 +221,27 @@ class AcpMcpConnection:
                     response=response,
                     connection_id=self.connection_id,
                 )
+                # The upstream MCP server returned a non-standard response
+                # (e.g., error code as string instead of integer).  Construct
+                # a valid JSON-RPC error response and send it back so the
+                # MCP session's receive loop doesn't hang waiting forever.
+                if self._to_session_send is not None and original_id is not None:
+                    fallback = {
+                        "jsonrpc": "2.0",
+                        "id": original_id,
+                        "error": {
+                            "code": -32603,
+                            "message": f"Invalid upstream response: {result.get('error', result)}",
+                        },
+                    }
+                    try:
+                        await self._to_session_send.send(
+                            SessionMessage(
+                                message=JSONRPCMessage.model_validate(fallback)
+                            )  # type: ignore[arg-type]
+                        )
+                    except anyio.BrokenResourceError:
+                        pass
             except anyio.BrokenResourceError:
                 logger.debug(
                     "Cannot forward response: session stream already closed",
