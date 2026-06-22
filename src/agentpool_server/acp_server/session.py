@@ -399,8 +399,6 @@ class ACPSession:
     async def initialize(self) -> None:
         """Initialize async resources. Must be called after construction."""
         await self.acp_env.__aenter__()
-        # Send initial available commands update so clients receive skill commands
-        await self.send_available_commands_update()
 
     async def initialize_mcp_servers(self) -> None:
         """Initialize MCP servers if any are configured.
