@@ -4,6 +4,44 @@ AgentPool is a unified agent orchestration framework that enables YAML-based con
 
 **Core Philosophy**: Define once in YAML, expose through multiple protocols, enable seamless inter-agent collaboration.
 
+## Development Workflow
+
+### OpenSpec (Spec-Driven Change Management)
+
+All significant changes go through OpenSpec — a spec-driven workflow with 4 phases:
+
+```
+/opsx:explore  → Investigate problems, map codebase, compare options (no code)
+/opsx:propose  → Create proposal.md + design.md + specs/ + tasks.md
+/opsx:apply    → Implement tasks one-by-one, mark [ ] → [x] in tasks.md
+/opsx:archive  → Move completed change to openspec/changes/archive/
+```
+
+- **Location**: `openspec/` (24 capability specs, 34 archived changes)
+- **Config**: `openspec/config.yaml` (schema: spec-driven)
+- **Skills**: `.claude/skills/openspec-{explore,propose,apply-change,archive-change}/`
+- **CLI**: `openspec` v1.4+ (installed separately)
+
+Each change produces: `.openspec.yaml` (metadata), `proposal.md` (what/why), `design.md` (how), `specs/<capability>/spec.md` (formal requirements), `tasks.md` (checklist).
+
+### .omo (Task Orchestration & Evidence)
+
+OpenCode's Sisyphus workflow directory tracks structured development work:
+
+```
+.omo/
+├── boulder.json        # Active work registry (schema v2)
+├── plans/              # 24 structured implementation plans
+├── evidence/           # 185+ verification artifacts (test logs, QA reports)
+├── notepads/           # Per-work learnings, decisions, issues
+├── run-continuation/   # Session state for interrupted session resumption
+└── drafts/             # Reserved for future use
+```
+
+- **Gitignored** but ~156 evidence files force-tracked as documentation
+- Each plan links to an OpenSpec change in `openspec/changes/`
+- Notepads serve as persistent context across multi-session work
+
 ## Development Commands
 
 ### Installation & Setup
@@ -140,6 +178,54 @@ The codebase is organized into focused packages under `src/`:
   - `schema/` - Protocol schemas and types
   - `bridge/` - ACP bridge for connecting agents
   - `transports/` - Transport layer (stdio, websocket)
+
+### Skills System
+
+Skills are defined as `SKILL.md` files following the [Agent Skills Spec](https://github.com/agentskills/agentskills). They are discovered, loaded, and injected into agent prompts.
+
+**Skill Locations** (three tiers):
+- `~/.claude/skills/*/SKILL.md` — User-wide (default)
+- `.claude/skills/*/SKILL.md` — Project-wide (e.g., `openspec-*`)
+- `.agents/skills/*/SKILL.md` — Agent/workflow skills
+- MCP servers via `skill://` resource URIs
+
+**Key Files**:
+- `src/agentpool/skills/skill.py` — `Skill` model: YAML frontmatter parsing, lazy instruction loading
+- `src/agentpool/skills/registry.py` — `SkillsRegistry` auto-discovers SKILL.md files from configured paths
+- `src/agentpool/skills/manager.py` — `SkillsManager` pool-level lifecycle
+- `src/agentpool/skills/uri_resolver.py` — `skill://` URI scheme resolver
+- `src/agentpool/skills/command.py` — `SkillCommand` wraps skills as protocol-agnostic slash commands
+- `src/agentpool/resource_providers/skills_instruction.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes)
+
+**Injection Modes** (via YAML `skills.instruction`):
+- `off` — No injection
+- `metadata` — `<available-skills>` XML block (names + descriptions)
+- `full` — `<skill_content>` XML block with complete instructions + parameters
+
+### Resource Providers
+
+`ResourceProvider` (abstract base in `src/agentpool/resource_providers/base.py`) abstracts tool/prompt/resource/skill access. Providers produce pydantic-ai `Toolset` capabilities via `as_capability()`.
+
+| Provider | Purpose |
+|----------|---------|
+| `MCPResourceProvider` | Wraps MCP server (tools, prompts, resources, skills) |
+| `LocalResourceProvider` | Filesystem skill discovery via `SkillsRegistry` |
+| `PoolResourceProvider` | Exposes agents/teams as subagent delegation tools |
+| `StaticResourceProvider` | Pre-configured tools/prompts with `@tool` decorator |
+| `AggregatingResourceProvider` | Combines multiple providers, forwards change signals |
+| `FilteringResourceProvider` | Proxies another provider with tool filtering |
+| `CodeModeResourceProvider` | Wraps all tools into single Python execution meta-tool |
+| `PlanProvider` | Plan management tools (get/set plan entries) |
+
+### Hooks & Events System
+
+**Hooks** (`src/agentpool/hooks/`): Intercept agent lifecycle at 4 points: `pre_run`, `post_run`, `pre_tool_use`, `post_tool_use`. Three hook types: `CallableHook` (in-process), `CommandHook` (subprocess), `PromptHook` (LLM evaluation). Hooks run in parallel, results combined with priority: deny > ask > allow.
+
+**Event Types** (`src/agentpool/agents/events/events.py`): `RichAgentStreamEvent` union type covers streaming deltas, tool calls (start/progress/complete), run lifecycle (started/error/failed), subagent events, session resume, compaction, plan updates, and custom events.
+
+**EventBus** (`src/agentpool/orchestrator/core.py`): Cross-turn event streaming for protocol servers. Bounded async queues per session, replay buffers, scoped subscriptions (`"session"`, `"descendants"`, `"subtree"`, `"all"`).
+
+**Signal Architecture** (`anyenv.signals.Signal`): In-process type-safe pub/sub on `MessageNode` (`message_received`, `message_sent`) and `Talk` (`connection_processed`, `message_forwarded`). `SignalEmittingGraphRun` bridges pydantic-graph steps to signals.
 
 ### Key Architectural Patterns
 
@@ -747,9 +833,19 @@ The project uses entry points for extensibility:
 - `src/agentpool/delegation/pool.py` - AgentPool orchestration
 - `src/agentpool/agents/agent.py` - Native agent implementation
 - `src/agentpool/messaging/messagenode.py` - Base abstraction
+- `src/agentpool/messaging/graph_adapter.py` - pydantic-graph step wrapping
 - `src/agentpool/models/manifest.py` - Configuration schema
 - `src/agentpool/tools/tool.py` - Tool framework
+- `src/agentpool/orchestrator/core.py` - EventBus, SessionController, TurnRunner
+- `src/agentpool/skills/skill.py` - Skill model and parsing
+- `src/agentpool/skills/registry.py` - Skill discovery
+- `src/agentpool/resource_providers/base.py` - Resource provider interface
+- `src/agentpool/resource_providers/mcp_provider.py` - MCP server wrapping
+- `src/agentpool/resource_providers/skills_instruction.py` - Skill prompt injection
+- `src/agentpool/agents/events/events.py` - All event type definitions
+- `src/agentpool/hooks/agent_hooks.py` - Hook lifecycle management
 - `src/agentpool_server/acp_server/acp_agent.py` - ACP server agent wrapper
+- `src/agentpool_server/mixins.py` - ProtocolEventConsumerMixin
 - `src/acp/client/protocol.py` - ACP client interface
 - `src/acp/agent/protocol.py` - ACP agent interface
 
