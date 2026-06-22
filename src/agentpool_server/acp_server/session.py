@@ -431,7 +431,7 @@ class ACPSession:
                         )
 
                         transport = AcpMcpTransport(
-                            conn, timeout=getattr(server, "timeout", None) or 600.0
+                            conn, timeout=getattr(server, "timeout", None) or 120.0
                         )
                         cfg = convert_acp_mcp_server_to_config(server)
                         provider = MCPResourceProvider(

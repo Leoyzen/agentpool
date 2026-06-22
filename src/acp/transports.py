@@ -383,10 +383,20 @@ async def _serve_websocket(
         finally:
             if heartbeat_task is not None and not heartbeat_task.done():
                 heartbeat_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                try:
                     await heartbeat_task
-            connections.remove(conn)
-            await conn.close()
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Unexpected error during heartbeat task cleanup")
+            try:
+                connections.remove(conn)
+            except ValueError:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                logger.exception("Unexpected error closing WebSocket connection")
 
     logger.info("Starting WebSocket server on ws://%s:%d", host, port)
     async with websockets.serve(handle_client, host, port, ping_interval=None):
