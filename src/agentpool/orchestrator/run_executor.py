@@ -35,6 +35,7 @@ from agentpool.agents.native_agent.helpers import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
@@ -294,6 +295,10 @@ class RunExecutor:
                     msg = "Stream completed without producing a result"
                     raise RuntimeError(msg)  # noqa: TRY301
 
+            except RunAbortedError:
+                logger.debug("Run aborted by user — treating as graceful cancellation")
+                run_ctx.cancelled = True
+                # Do NOT set iteration_error — route to graceful completion path
             except asyncio.CancelledError:
                 logger.debug("Agent iteration task cancelled")
                 raise
