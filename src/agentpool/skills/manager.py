@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Self, cast, overload
 from upathtools import JoinablePathLike, UPath, to_upath
 
 from agentpool.log import get_logger
-from agentpool.resource_providers.local import LocalResourceProvider
 from agentpool.skills.registry import SkillsRegistry
 from agentpool_config.skills import SkillsConfig  # noqa: TC001
 
@@ -69,6 +68,8 @@ class SkillsManager:
             logger.info("Skills manager initialized", name=self.name, skill_count=count)
 
             # Create and enter LocalResourceProvider
+            from agentpool.resource_providers.local import LocalResourceProvider
+
             self._resource_provider = LocalResourceProvider(
                 name=self.name,
                 skills_dirs=cast(list[JoinablePathLike], self.registry.skills_dirs),
