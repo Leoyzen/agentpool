@@ -205,7 +205,7 @@ def _setup_mock_session(acp_agent: AgentPoolACPAgent, session_id: str) -> MagicM
     mock_session.agent.get_available_models = AsyncMock(return_value=None)
 
     # Inject into session manager
-    acp_agent.session_manager._active[session_id] = mock_session
+    acp_agent.session_manager._acp_sessions[session_id] = mock_session
     # Replace tasks with a mock to avoid type issues
     acp_agent.tasks = MagicMock()
     acp_agent.tasks.create_task = MagicMock(return_value=MagicMock())

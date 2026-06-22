@@ -294,19 +294,19 @@ class TestServerSessionLookupOpaque:
             # Lookup must return the same session
             assert state.sessions.get(sid) is session
 
-    def test_acp_session_manager_active_dict_opaque(self) -> None:
-        """ACP ACPSessionManager._active dict accepts any string key for lookups."""
+    def test_acp_session_manager_acp_sessions_dict_opaque(self) -> None:
+        """ACP ACPSessionManager._acp_sessions dict accepts any string key for lookups."""
         # We test the dict-based lookup pattern (get_session) conceptually.
-        # The _active dict maps session_id -> ACPSession using plain dict.get().
+        # The _acp_sessions dict maps session_id -> ACPSession using plain dict.get().
         # This test documents that the lookup is opaque.
         from agentpool_server.acp_server.session_manager import ACPSessionManager
 
-        # ACPSessionManager._active is a plain dict[str, ACPSession]
-        # get_session does: return self._active.get(session_id)
+        # ACPSessionManager._acp_sessions is a plain dict[str, ACPSession]
+        # get_session does: return self._acp_sessions.get(session_id)
         # This is opaque — any string works as a key.
         manager = ACPSessionManager.__new__(ACPSessionManager)
-        manager._active = {}  # type: ignore[attr-defined]
+        manager._acp_sessions = {}  # type: ignore[attr-defined]
 
         # Simulate opaque key usage
         test_id = "550e8400-e29b-41d4-a716-446655440000"
-        assert manager._active.get(test_id) is None  # no error, just None
+        assert manager._acp_sessions.get(test_id) is None  # no error, just None

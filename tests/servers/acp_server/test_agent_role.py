@@ -98,7 +98,7 @@ class TestSwapSessionAgent:
         session._task_lock = MagicMock()
         session._task_lock.locked.return_value = False
         session.switch_active_agent = AsyncMock()
-        acp_agent.session_manager._active = {"sess_1": session}
+        acp_agent.session_manager._acp_sessions = {"sess_1": session}
         acp_agent.session_manager.get_session = lambda sid: session
 
         result = await acp_agent._swap_session_agent("sess_1", "other")

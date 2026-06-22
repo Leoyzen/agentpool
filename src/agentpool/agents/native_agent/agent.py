@@ -784,15 +784,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # 2. Hooks — skip adding as capability when old mechanism is active
         #    to avoid double-firing. Old base_agent.py hook mechanism handles
         #    pre_run/post_run/pre_tool_use/post_tool_use directly.
+        #    EventBus events (RunStartedEvent, ToolCallStartEvent,
+        #    ToolCallCompleteEvent) are produced by RunExecutor, so the
+        #    removed EventBusHooksAdapter wrapping was redundant.
         if not self.hooks:
             hooks_capability = self._hook_manager.as_capability()
-            if run_ctx is not None and run_ctx.event_bus is not None:
-                from agentpool.agents.native_agent.eventbus_hooks_adapter import (
-                    EventBusHooksAdapter,
-                )
-                hooks_capability = EventBusHooksAdapter(
-                    hooks_capability, run_ctx.event_bus
-                ).as_capability()
             tool_capabilities.append(hooks_capability)
         # 3. Deferred tool bridge: intercepts deferred tool calls before
         #    approval_bridge can resolve them. Block-strategy calls are

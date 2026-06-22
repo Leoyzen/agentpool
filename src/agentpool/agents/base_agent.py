@@ -130,24 +130,10 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     - context property: Returns NodeContext for the agent
 
     Signals:
-        - run_failed: Emitted when agent execution fails with error details
     """
 
     # Abstract class variable - subclasses must define this
     AGENT_TYPE: ClassVar[AgentTypeLiteral]
-
-    @dataclass(frozen=True)
-    class RunFailedEvent:
-        """Event emitted when agent execution fails."""
-
-        agent_name: str
-        """Name of the agent that failed."""
-        message: str
-        """Error description."""
-        exception: Exception
-        """The exception that caused the failure."""
-        timestamp: Any = field(default_factory=get_now)  # datetime
-        """When the failure occurred."""
 
     @dataclass(frozen=True)
     class AgentReset:
@@ -164,8 +150,6 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         timestamp: datetime = field(default_factory=get_now)
 
     agent_reset = Signal[AgentReset]()
-    # Signal emitted when agent execution fails
-    run_failed: Signal[RunFailedEvent] = Signal()
     state_updated: Signal[StateUpdate] = Signal()
     # Signal emitted when agent is interrupted
     interrupted: Signal[InterruptEvent] = Signal()
@@ -1175,14 +1159,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 # Capture final message from StreamCompleteEvent
                 if isinstance(event, StreamCompleteEvent):
                     final_message = event.message
-        except Exception as e:
+        except Exception:
             self.log.exception("Agent stream failed")
-            failed_event = BaseAgent.RunFailedEvent(
-                agent_name=self.name,
-                message="Agent stream failed",
-                exception=e,
-            )
-            await self.run_failed.emit(failed_event)
             raise
 
         # Post-processing after stream completes

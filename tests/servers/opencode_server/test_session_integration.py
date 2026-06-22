@@ -48,7 +48,7 @@ def mock_agent_pool() -> Mock:
     pool.manifest.agents = {}
     pool._config_file_path = None
 
-    async def _mock_run_stream_once(*args: Any, **kwargs: Any) -> Any:
+    async def _mock_run_stream(*args: Any, **kwargs: Any) -> Any:
         """Yield a minimal run event sequence for testing."""
         session_id = kwargs.get("session_id", "unknown")
         run_id = "run-mock-001"
@@ -58,7 +58,7 @@ def mock_agent_pool() -> Mock:
         )
 
     mock_agent = Mock()
-    mock_agent._run_stream_once = _mock_run_stream_once
+    mock_agent.run_stream = _mock_run_stream
     mock_agent._input_provider = None
     mock_agent.conversation = Mock()
     mock_agent.conversation.add_chat_messages = Mock()
@@ -384,12 +384,12 @@ class TestSessionStatusSync:
     """Tests for session status synchronization (idle -> busy -> idle)."""
 
     @pytest.mark.asyncio
-    async def test_status_bridge_started_on_session_creation(
+    async def test_create_session_starts_event_consumer(
         self,
         session_pool: SessionPool,
         server_state: ServerState,
     ) -> None:
-        """Creating a session should start a SessionStatusBridge."""
+        """Creating a session should start the event consumer."""
         from agentpool_server.opencode_server.session_pool_integration import (
             OpenCodeSessionPoolIntegration,
         )
@@ -399,20 +399,13 @@ class TestSessionStatusSync:
             server_state=server_state,
         )
 
-        with patch(
-            "agentpool_server.opencode_server.session_pool_integration.SessionStatusBridge"
-        ) as mock_bridge_cls:
-            mock_bridge = Mock()
-            mock_bridge.start = AsyncMock()
-            mock_bridge_cls.return_value = mock_bridge
+        await integration.create_session(
+            session_id="test-session-008",
+            agent_name="test-agent",
+        )
 
-            await integration.create_session(
-                session_id="test-session-008",
-                agent_name="test-agent",
-            )
-
-            mock_bridge_cls.assert_called_once()
-            mock_bridge.start.assert_awaited_once()
+        # Event consumer should be started for the session
+        assert "test-session-008" in integration._consumer_tasks
 
     @pytest.mark.asyncio
     async def test_status_broadcasts_busy_on_run_start(
@@ -922,12 +915,16 @@ class TestEventSubscription:
             agent_name="test-agent",
         )
 
-        # Manually publish a RunStartedEvent to the EventBus
-        from agentpool.agents.events import RunStartedEvent
+        # Publish a RunErrorEvent which is converted to SessionErrorEvent by the adapter
+        from agentpool.agents.events import RunErrorEvent
 
         await session_pool.event_bus.publish(
             "test-session-017",
-            RunStartedEvent(session_id="test-session-017", run_id="run-001"),
+            RunErrorEvent(
+                run_id="run-001",
+                message="test error",
+                code="TEST_ERR",
+            ),
         )
 
         events = []

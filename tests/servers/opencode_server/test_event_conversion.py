@@ -460,20 +460,25 @@ class TestRunStartedEventConversion:
     """Tests for RunStartedEvent -> SessionStatusEvent (busy)."""
 
     @pytest.mark.asyncio
-    async def test_run_started_yields_session_status_busy(
+    async def test_run_started_does_not_yield_session_status(
         self,
         event_context,
     ) -> None:
-        """RunStartedEvent should yield SessionStatusEvent with type 'busy'."""
+        """RunStartedEvent should NOT yield SessionStatusEvent from the adapter.
+
+        Session status broadcasting is now handled by
+        OpenCodeSessionPoolIntegration._handle_event(), not the adapter.
+        """
         adapter = OpenCodeEventAdapter(context=event_context)
 
         event = RunStartedEvent(session_id="test-session", run_id="run-001")
         events = await _collect_events(adapter.convert_event(event))
 
         status_events = [e for e in events if isinstance(e, SessionStatusEvent)]
-        assert len(status_events) == 1
-        assert status_events[0].properties.status.type == "busy"
-        assert status_events[0].properties.session_id == "test-session"
+        assert len(status_events) == 0, (
+            "RunStartedEvent should not yield SessionStatusEvent from adapter; "
+            "status broadcasting is handled by OpenCodeSessionPoolIntegration._handle_event()"
+        )
 
 
 # =============================================================================
@@ -614,14 +619,14 @@ class TestConversionCompleteness:
         from agentpool.agents.events import (
             PartDeltaEvent,
             PartStartEvent,
-            RunStartedEvent,
             ToolCallCompleteEvent,
             ToolCallStartEvent,
         )
 
         adapter = OpenCodeEventAdapter(context=event_context)
 
-        # TODO: Add RunErrorEvent and RunFailedEvent when handlers are implemented
+        # RunStartedEvent intentionally excluded — status broadcasting is now
+        # handled by OpenCodeSessionPoolIntegration._handle_event(), not the adapter.
         required_events = [
             PartStartEvent.text(index=0, content="test"),
             PartDeltaEvent.text(index=0, content="test"),
@@ -636,7 +641,6 @@ class TestConversionCompleteness:
                 agent_name="agent",
                 message_id="msg",
             ),
-            RunStartedEvent(session_id="s", run_id="r"),
         ]
 
         for event in required_events:

@@ -637,25 +637,9 @@ class ACPSession:
                         deps=self,
                     )
                 else:
-                    # Fallback: no SessionPool (e.g., tests without pool.__aenter__)
-                    for provider in self.session_mcp_providers:
-                        self.agent.tools.add_provider(provider)
-
-                    async def _cleanup_stream() -> AsyncIterator[Any]:
-                        try:
-                            async for event in self.agent.run_stream(
-                                *non_command_content,
-                                input_provider=self.input_provider,
-                                deps=self,
-                                session_id=self.session_id,
-                            ):
-                                yield event
-                        finally:
-                            for provider in self.session_mcp_providers:
-                                with suppress(ValueError):
-                                    self.agent.tools.remove_provider(provider)
-
-                    stream = _cleanup_stream()
+                    raise RuntimeError(
+                        f"SessionPool is required for prompt processing in session {self.session_id}"
+                    )
 
                 async for event in stream:
                     if self._cancelled:

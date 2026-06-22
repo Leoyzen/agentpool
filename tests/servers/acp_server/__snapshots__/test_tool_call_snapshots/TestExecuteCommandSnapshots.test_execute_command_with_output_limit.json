@@ -8,7 +8,7 @@
       },
       "sessionUpdate": "tool_call",
       "status": "pending",
-      "title": "Running: cat bigfile",
+      "title": "Executing: bash",
       "toolCallId": "pyd_ai_tool_call_id__bash"
     },
     "type": "tool_call"
@@ -67,7 +67,15 @@
   },
   {
     "payload": {
-      "rawOutput": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
+      "rawOutput": {
+        "content": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n\n\n[output truncated]",
+        "metadata": {
+          "description": "cat bigfile",
+          "exit": 0,
+          "output": "...[truncated]\nline\nline\nline\nline\nline\nline\nline\nline\nline\nline\n"
+        },
+        "structured_content": null
+      },
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"

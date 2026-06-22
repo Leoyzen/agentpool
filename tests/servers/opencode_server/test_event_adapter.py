@@ -474,20 +474,26 @@ class TestRunStartedEventConversion:
     """Tests for RunStartedEvent -> SessionStatusEvent (busy)."""
 
     @pytest.mark.asyncio
-    async def test_run_started_yields_session_status_busy(
+    async def test_run_started_does_not_yield_session_status(
         self,
         adapter_context: EventProcessorContext,
     ) -> None:
-        """RunStartedEvent should yield SessionStatusEvent with type 'busy'."""
+        """RunStartedEvent should NOT yield SessionStatusEvent from the adapter.
+
+        Session status broadcasting is handled by
+        OpenCodeSessionPoolIntegration._handle_event(), not the adapter.
+        The adapter only handles content/streaming events.
+        """
         adapter = OpenCodeEventAdapter(context=adapter_context)
 
         event = RunStartedEvent(session_id="test-session", run_id="run-001")
         events = await _collect_events(adapter.convert_event(event))
 
         status_events = [e for e in events if isinstance(e, SessionStatusEvent)]
-        assert len(status_events) == 1
-        assert status_events[0].properties.status.type == "busy"
-        assert status_events[0].properties.session_id == "test-session"
+        assert len(status_events) == 0, (
+            "RunStartedEvent should not yield SessionStatusEvent from adapter; "
+            "status broadcasting is handled by OpenCodeSessionPoolIntegration._handle_event()"
+        )
 
 
 # =============================================================================
@@ -712,7 +718,11 @@ class TestConversionCompleteness:
         self,
         adapter_context: EventProcessorContext,
     ) -> None:
-        """Every required AgentPool event type should produce at least one OpenCode event."""
+        """Every required AgentPool event type should produce at least one OpenCode event.
+
+        Note: RunStartedEvent is intentionally excluded — session status broadcasting
+        is handled by OpenCodeSessionPoolIntegration._handle_event(), not the adapter.
+        """
         adapter = OpenCodeEventAdapter(context=adapter_context)
 
         required_events = [
@@ -729,7 +739,6 @@ class TestConversionCompleteness:
                 agent_name="agent",
                 message_id="msg",
             ),
-            RunStartedEvent(session_id="s", run_id="r"),
             RunErrorEvent(message="error", code="CODE"),
         ]
 

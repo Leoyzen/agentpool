@@ -208,7 +208,6 @@ class TestOpenCodeBridgeAutoEnable:
             mock_state.agent = mock_agent_with_pool
             mock_state.working_dir = "/test"
             mock_state.sessions = {}
-            mock_state.session_status = {}
             mock_state.messages = {}
             mock_state.reverted_messages = {}
             mock_state.todos = {}
@@ -245,7 +244,6 @@ class TestOpenCodeBridgeAutoEnable:
             mock_state.agent = mock_agent_no_skills
             mock_state.working_dir = "/test"
             mock_state.sessions = {}
-            mock_state.session_status = {}
             mock_state.messages = {}
             mock_state.reverted_messages = {}
             mock_state.todos = {}

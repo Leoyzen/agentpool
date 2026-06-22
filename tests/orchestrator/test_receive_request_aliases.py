@@ -41,20 +41,20 @@ def controller(mock_pool: MagicMock) -> SessionController:
 
 @pytest.fixture
 def mock_turn_runner() -> MagicMock:
-    """Return a mocked TurnRunner with inject_prompt and queue_prompt."""
+    """Return a mocked TurnRunner with steer and followup."""
     tr = MagicMock()
-    tr.inject_prompt = AsyncMock(return_value=True)
-    tr.queue_prompt = AsyncMock(return_value=False)
+    tr.steer = AsyncMock(return_value=None)
+    tr.followup = AsyncMock(return_value=None)
     return tr
 
 
 # ---------------------------------------------------------------------------
-# Alias: steer  →  asap  →  inject_prompt
+# Alias: steer  →  asap  →  steer()
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_receive_request_steer_routes_to_inject_prompt(
+async def test_receive_request_steer_routes_to_steer(
     controller: SessionController,
     mock_turn_runner: MagicMock,
 ) -> None:
@@ -69,18 +69,18 @@ async def test_receive_request_steer_routes_to_inject_prompt(
     await controller.receive_request("sess-1", "urgent", priority="steer")
     await controller.receive_request("sess-1", "urgent", priority="asap")
 
-    # Both steer and asap should route to inject_prompt
-    assert mock_turn_runner.inject_prompt.await_count == 2
-    mock_turn_runner.queue_prompt.assert_not_awaited()
+    # Both steer and asap should route to steer()
+    assert mock_turn_runner.steer.await_count == 2
+    mock_turn_runner.followup.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
-# Alias: followup  →  when_idle  →  queue_prompt
+# Alias: followup  →  when_idle  →  followup()
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_receive_request_followup_routes_to_queue_prompt(
+async def test_receive_request_followup_routes_to_followup(
     controller: SessionController,
     mock_turn_runner: MagicMock,
 ) -> None:
@@ -95,18 +95,18 @@ async def test_receive_request_followup_routes_to_queue_prompt(
     await controller.receive_request("sess-1", "later", priority="followup")
     await controller.receive_request("sess-1", "later", priority="when_idle")
 
-    # Both followup and when_idle should route to queue_prompt
-    assert mock_turn_runner.queue_prompt.await_count == 2
-    mock_turn_runner.inject_prompt.assert_not_awaited()
+    # Both followup and when_idle should route to followup()
+    assert mock_turn_runner.followup.await_count == 2
+    mock_turn_runner.steer.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
-# Backward compatibility: asap  →  inject_prompt
+# Backward compatibility: asap  →  steer()
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_receive_request_asap_still_routes_to_inject_prompt(
+async def test_receive_request_asap_still_routes_to_steer(
     controller: SessionController,
     mock_turn_runner: MagicMock,
 ) -> None:
@@ -120,17 +120,17 @@ async def test_receive_request_asap_still_routes_to_inject_prompt(
 
     await controller.receive_request("sess-1", "urgent", priority="asap")
 
-    mock_turn_runner.inject_prompt.assert_awaited_once_with("sess-1", "urgent")
-    mock_turn_runner.queue_prompt.assert_not_awaited()
+    mock_turn_runner.steer.assert_awaited_once_with("sess-1", "urgent")
+    mock_turn_runner.followup.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
-# Backward compatibility: when_idle  →  queue_prompt
+# Backward compatibility: when_idle  →  followup()
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_receive_request_when_idle_still_routes_to_queue_prompt(
+async def test_receive_request_when_idle_still_routes_to_followup(
     controller: SessionController,
     mock_turn_runner: MagicMock,
 ) -> None:
@@ -144,5 +144,5 @@ async def test_receive_request_when_idle_still_routes_to_queue_prompt(
 
     await controller.receive_request("sess-1", "later", priority="when_idle")
 
-    mock_turn_runner.queue_prompt.assert_awaited_once_with("sess-1", "later")
-    mock_turn_runner.inject_prompt.assert_not_awaited()
+    mock_turn_runner.followup.assert_awaited_once_with("sess-1", "later")
+    mock_turn_runner.steer.assert_not_awaited()

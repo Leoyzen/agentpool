@@ -92,7 +92,8 @@ def _make_state(tmp_path: Any) -> ServerState:
     state = ServerState(working_dir=str(tmp_path), agent=agent)
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}
-    state.session_status = {}
+    # No session_pool_integration — _process_message_locked will use the
+    # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
 
@@ -108,7 +109,6 @@ def _seed_session(state: ServerState, session_id: str) -> None:
         time=TimeCreatedUpdated(created=now, updated=now),
     )
     state.messages[session_id] = []
-    state.session_status[session_id] = SessionStatus(type="idle")
 
     user_msg = UserMessage(
         id="msg_user_001",

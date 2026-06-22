@@ -149,8 +149,8 @@ async def test_resume_session_creates_session_if_not_found(mock_acp_agent, mock_
 
     # Non-existent session should return empty response (no models)
     assert response.models is None
-    # create_session IS called to attempt session creation even when store returns None
-    mock_acp_agent.session_manager.create_session.assert_awaited_once()
+    # resume_session no longer calls create_session; it only calls session_manager.resume_session()
+    mock_acp_agent.session_manager.create_session.assert_not_awaited()
 
 
 @pytest.mark.unit

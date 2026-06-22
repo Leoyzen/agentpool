@@ -18,6 +18,7 @@ from agentpool.sessions.models import PendingDeferredCall, SessionData
 from agentpool_server.opencode_server.models import (
     MessageWithParts,
     Session,
+    SessionStatusEvent,
     SessionUpdatedEvent,
     TimeCreatedUpdated,
     UserMessage,
@@ -186,12 +187,18 @@ async def test_ensure_session_checkpointed_marks_idle(mock_state: ServerState) -
     mock_store.load = AsyncMock(return_value=sd)
     mock_state.pool.session_pool.sessions.store = mock_store
 
-    with patch.object(mock_state, "broadcast_event", new=AsyncMock()):
+    with patch.object(mock_state, "broadcast_event", new=AsyncMock()) as mock_broadcast:
         await ensure_session(mock_state, session_id)
 
-    # Should be idle even though status is checkpointed in storage
-    assert session_id in mock_state.session_status
-    assert mock_state.session_status[session_id].type == "idle"
+    # Should be idle even though status is checkpointed in storage.
+    # Status is broadcast via set_session_status() + mark_session_idle().
+    status_events = [
+        call.args[0]
+        for call in mock_broadcast.await_args_list
+        if isinstance(call.args[0], SessionStatusEvent)
+    ]
+    assert len(status_events) >= 1
+    assert status_events[0].properties.status.type == "idle"
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +385,6 @@ async def test_route_message_replays_deferred_results(mock_state: ServerState) -
 
     # Patch internal methods that spawn background tasks
     with (
-        patch.object(integration, "_start_status_bridge", new=AsyncMock()),
         patch.object(integration, "_start_event_consumer", new=AsyncMock()),
         patch.object(mock_state, "broadcast_event", new=AsyncMock()),
     ):
@@ -412,7 +418,6 @@ async def test_route_message_skips_resume_when_not_checkpointed(
     integration = OpenCodeSessionPoolIntegration(sp, mock_state)
 
     with (
-        patch.object(integration, "_start_status_bridge", new=AsyncMock()),
         patch.object(integration, "_start_event_consumer", new=AsyncMock()),
         patch.object(mock_state, "broadcast_event", new=AsyncMock()),
     ):

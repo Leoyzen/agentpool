@@ -118,6 +118,9 @@ class TestSessionDirectoryQueryParam:
         When provided, it should filter sessions by the given directory
         instead of the default env.cwd.
         """
+        # Use legacy path (agent.list_sessions) by clearing session_controller
+        server_state.session_controller = None
+
         directory = "/tmp/custom-directory"
         now = datetime.now(UTC)
 
@@ -151,6 +154,9 @@ class TestSessionDirectoryQueryParam:
         This allows the OpenCode TUI to request sessions for a specific
         project directory regardless of the server's configured env.cwd.
         """
+        # Use legacy path (agent.list_sessions) by clearing session_controller
+        server_state.session_controller = None
+
         override_dir = "/tmp/override-directory"
         server_state.agent.env.cwd = "/tmp/default-env-cwd"
         server_state.agent.list_sessions = AsyncMock(return_value=[])  # type: ignore[method-assign]
@@ -190,6 +196,9 @@ class TestSessionCwdPathNormalization:
         cwd="/foo/bar/", strict matching would fail. Path normalization
         should handle this.
         """
+        # Use legacy path (agent.list_sessions) by clearing session_controller
+        server_state.session_controller = None
+
         cwd_without_slash = str(tmp_project_dir)
         cwd_with_slash = str(tmp_project_dir) + "/"
 
@@ -230,6 +239,9 @@ class TestSessionCwdPathNormalization:
         Both "." and "/full/path" refer to the same directory when cwd
         is /full/path.
         """
+        # Use legacy path (agent.list_sessions) by clearing session_controller
+        server_state.session_controller = None
+
         # This test documents expected behavior - the actual fix
         # would be in NativeAgent.list_sessions()
         cwd_absolute = str(tmp_project_dir)

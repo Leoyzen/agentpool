@@ -8,11 +8,14 @@ consuming events from the SessionPool's EventBus.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.events.events import (
     RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
 )
@@ -38,6 +41,7 @@ from agentpool_server.opencode_server.models import (
     SessionCreatedEvent,
     SessionErrorEvent,
     SessionStatus,
+    SessionStatusEvent,
     TimeCreated,
     TimeCreatedUpdated,
     UserMessage,
@@ -52,7 +56,6 @@ from agentpool_server.opencode_server.models.parts import (
     ToolStateRunning,
 )
 from agentpool_server.opencode_server.models.session import Session
-from agentpool_server.opencode_server.status_bridge import SessionStatusBridge
 
 
 if TYPE_CHECKING:
@@ -202,9 +205,8 @@ async def set_session_status(
 ) -> None:
     """Set the status of a session.
 
-    Uses SessionStatusBridge when the feature flag is enabled.
-    Falls back to the in-memory session_status dict for tests and
-    legacy code paths.
+    Broadcasts ``SessionStatusEvent`` via ``ServerState`` directly.
+    Falls back to the in-memory session_status dict for legacy code paths.
 
     Args:
         state: The OpenCode server state.
@@ -212,16 +214,10 @@ async def set_session_status(
         status: The new session status.
     """
     if _use_session_pool_for_status(state):
-        integration = getattr(state, "session_pool_integration", None)
-        if integration is not None:
-            bridge = integration._status_bridges.get(session_id)
-            if bridge is not None:
-                if status.type == "busy":
-                    await bridge._broadcast_busy()
-                    return
-                if status.type == "idle":
-                    await bridge._broadcast_idle()
-                    return
+        await state.broadcast_event(
+            SessionStatusEvent.create(session_id, status)
+        )
+        return
 
     # Fallback: write to the in-memory dict for backward compatibility
     session_status = getattr(state, "session_status", None)
@@ -616,7 +612,6 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
         super().__init__()
         self.session_pool = session_pool
         self.server_state = server_state
-        self._status_bridges: dict[str, SessionStatusBridge] = {}
         # Per-session state for mixin hooks
         self._contexts: dict[str, EventProcessorContext] = {}
         self._adapters: dict[str, OpenCodeEventAdapter] = {}
@@ -652,7 +647,6 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             session_id, agent_name, **metadata
         )
         if was_created:
-            await self._start_status_bridge(session_id)
             await self._start_event_consumer(session_id)
 
             # Broadcast session.created event so OpenCode clients can upsert
@@ -694,7 +688,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             **metadata,
         )
         if was_created:
-            await self._start_status_bridge(new_session_id)
+            pass  # Forked session inherits parent's event consumer
         return state
 
     async def close_session(self, session_id: str) -> None:
@@ -707,7 +701,6 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             session_id: The session to close.
         """
         await self._stop_event_consumer(session_id)
-        await self._stop_status_bridge(session_id)
         await self.session_pool.close_session(session_id)
 
     async def route_message(
@@ -880,41 +873,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                     "Failed to stop event consumer during shutdown",
                     session_id=session_id,
                 )
-        for session_id in list(self._status_bridges.keys()):
-            try:
-                await self._stop_status_bridge(session_id)
-            except Exception:
-                logger.exception(
-                    "Failed to stop status bridge during shutdown",
-                    session_id=session_id,
-                )
         await self.session_pool.shutdown()
-
-    async def _start_status_bridge(self, session_id: str) -> None:
-        """Start a SessionStatusBridge for a session.
-
-        Args:
-            session_id: The session to monitor.
-        """
-        if session_id in self._status_bridges:
-            return
-        bridge = SessionStatusBridge(
-            server_state=self.server_state,
-            session_id=session_id,
-            event_bus=self.session_pool.event_bus,
-        )
-        self._status_bridges[session_id] = bridge
-        await bridge.start()
-
-    async def _stop_status_bridge(self, session_id: str) -> None:
-        """Stop the SessionStatusBridge for a session.
-
-        Args:
-            session_id: The session to stop monitoring.
-        """
-        bridge = self._status_bridges.pop(session_id, None)
-        if bridge is not None:
-            await bridge.stop()
 
     def set_session_context_data(self, session_id: str, data: dict[str, Any]) -> None:
         """Store serialized EventProcessorContext data for session resume.
@@ -1194,6 +1153,27 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                         spawn_event=spawn,
                         event=event,
                     )
+
+            # Handle run lifecycle events for session status
+            match event:
+                case RunStartedEvent():
+                    await set_session_status(
+                        self.server_state, session_id, SessionStatus(type="busy")
+                    )
+                case StreamCompleteEvent():
+                    await set_session_status(
+                        self.server_state, session_id, SessionStatus(type="idle")
+                    )
+                case RunFailedEvent(exception=exc):
+                    await set_session_status(
+                        self.server_state, session_id, SessionStatus(type="idle")
+                    )
+                    if isinstance(exc, Exception) and not isinstance(exc, asyncio.CancelledError):
+                        await self.server_state.broadcast_event(
+                            SessionErrorEvent.from_exception(exc, session_id=session_id)
+                        )
+                case _:
+                    pass
 
             ctx = self._contexts.get(session_id)
             if ctx is None:

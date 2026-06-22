@@ -10,7 +10,7 @@
       },
       "sessionUpdate": "tool_call",
       "status": "pending",
-      "title": "Editing: /test/example.py",
+      "title": "Executing: edit",
       "toolCallId": "pyd_ai_tool_call_id__edit"
     },
     "type": "tool_call"
@@ -42,12 +42,11 @@
       ],
       "locations": [
         {
-          "line": 0,
           "path": "/test/example.py"
         }
       ],
       "sessionUpdate": "tool_call_update",
-      "status": "in_progress",
+      "status": "completed",
       "title": "Editing: /test/example.py",
       "toolCallId": "pyd_ai_tool_call_id__edit"
     },

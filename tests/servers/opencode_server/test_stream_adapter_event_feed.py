@@ -55,7 +55,6 @@ def _setup_session(state: ServerState, session_id: str) -> None:
     )
     state.sessions[session_id] = session
     state.messages[session_id] = []
-    state.session_status[session_id] = SessionStatus(type="idle")
 
 
 def _create_user_message(
@@ -137,7 +136,8 @@ def event_bus_test_state(tmp_project_dir, mock_agent_with_event_bus):
     state = ServerState(working_dir=str(tmp_project_dir), agent=agent)
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}
-    state.session_status = {}
+    # No session_pool_integration — _process_message_locked will use the
+    # fallback path via session_pool.sessions.get_or_create_session.
     return state
 
 

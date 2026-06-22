@@ -62,7 +62,7 @@ def session_manager(mock_agent: MagicMock, mock_session_store: MagicMock) -> ACP
     pool.session_pool = session_pool
 
     manager = ACPSessionManager(pool=pool)
-    manager._active = {}
+    manager._acp_sessions = {}
     return manager
 
 
@@ -234,8 +234,8 @@ async def test_resume_with_mcp_servers_initializes_connections(
     # Assert
     assert result is not None
     mock_session_instance.initialize_mcp_servers.assert_awaited_once()
-    # Session must be added to _active
-    assert "sess-abc-123" in session_manager._active
+    # Session must be added to _acp_sessions
+    assert "sess-abc-123" in session_manager._acp_sessions
 
 
 # ---------------------------------------------------------------------------

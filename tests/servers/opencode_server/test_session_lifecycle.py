@@ -65,7 +65,7 @@ class TestSessionCreatedEvent:
         assert event.properties.info.project_id == "global"  # Non-git directory returns "global"
         status_events = event_capture.get_events_by_type("session.status")
         idle_events = event_capture.get_events_by_type("session.idle")
-        assert len(status_events) == 1
+        assert len(status_events) == 2  # set_session_status() + mark_session_idle() explicit broadcast
         assert len(idle_events) == 1
         assert isinstance(status_events[0], SessionStatusEvent)
         assert isinstance(idle_events[0], SessionIdleEvent)
@@ -130,7 +130,7 @@ class TestSessionCRUD:
         assert "updated" in session["time"]
         status_events = event_capture.get_events_by_type("session.status")
         idle_events = event_capture.get_events_by_type("session.idle")
-        assert len(status_events) == 1
+        assert len(status_events) == 2  # set_session_status() + mark_session_idle() explicit broadcast
         assert len(idle_events) == 1
 
     async def test_create_session_with_parent_id(self, async_client: AsyncClient):
@@ -363,13 +363,23 @@ class TestSessionStatus:
         # Create a session
         response = await async_client.post("/session", json={"title": "Running Session"})
         session_id = response.json()["id"]
-        # Set status to busy (simulating running operation)
-        server_state.session_status[session_id] = SessionStatus(type="busy")
+        # Track broadcast events to verify idle status after abort
+        status_events: list[SessionStatusEvent] = []
+        original_broadcast = server_state.broadcast_event
+
+        async def tracking_broadcast(event: Any) -> None:
+            if isinstance(event, SessionStatusEvent):
+                status_events.append(event)
+            await original_broadcast(event)
+
+        server_state.broadcast_event = tracking_broadcast  # type: ignore[method-assign]
         # Abort the session
         abort_response = await async_client.post(f"/session/{session_id}/abort")
         assert abort_response.status_code == 200
         assert abort_response.json() is True
-        assert server_state.session_status[session_id].type == "idle"
+        # Verify idle status was broadcast
+        idle_events = [e for e in status_events if e.properties.status.type == "idle"]
+        assert len(idle_events) >= 1, f"Expected idle broadcast after abort, got {status_events}"
 
     async def test_abort_session_delegates_to_session_pool(
         self,
@@ -385,7 +395,6 @@ class TestSessionStatus:
         assert abort_response.status_code == 200
         assert abort_response.json() is True
 
-        assert server_state.session_status[session_id].type == "idle"
         server_state.agent.interrupt.assert_awaited_once()
         # Verify SessionPool cancel_run_for_session was called
         session_pool = server_state.agent.agent_pool.session_pool

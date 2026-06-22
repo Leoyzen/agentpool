@@ -38,6 +38,11 @@ class ProtocolEventConsumerMixin(ABC):
         start_event_consumer(child_session_id) themselves.
     """
 
+    # Set to True in subclasses that don't need event processing
+    # (e.g. stateless HTTP servers like AG-UI and OpenAI API).
+    # SpawnSessionStart detection still works regardless of this flag.
+    _skip_event_processing: bool = False
+
     def __init__(self) -> None:
         """Initialize mixin state.
 
@@ -220,10 +225,11 @@ class ProtocolEventConsumerMixin(ABC):
                 if isinstance(envelope.event, SpawnSessionStart):
                     await self._on_spawn_session_start(session_id, envelope)
 
-                try:
-                    await self._handle_event(session_id, envelope)
-                except ConsumerShutdown:
-                    break
+                if not self._skip_event_processing:
+                    try:
+                        await self._handle_event(session_id, envelope)
+                    except ConsumerShutdown:
+                        break
         finally:
             await self.event_bus.unsubscribe(session_id, queue)
             self._consumer_queues.pop(session_id, None)

@@ -14,35 +14,6 @@
   },
   {
     "payload": {
-      "content": [
-        {
-          "content": {
-            "text": "Hello, World!",
-            "type": "text"
-          },
-          "type": "content"
-        }
-      ],
-      "rawOutput": "Hello, World!",
-      "sessionUpdate": "tool_call_update",
-      "status": "completed",
-      "toolCallId": "pyd_ai_tool_call_id__read"
-    },
-    "type": "tool_call_update"
-  },
-  {
-    "payload": {
-      "kind": "other",
-      "rawInput": {},
-      "sessionUpdate": "tool_call",
-      "status": "pending",
-      "title": "Reading file: /test/hello.txt",
-      "toolCallId": "pyd_ai_tool_call_id__read"
-    },
-    "type": "tool_call"
-  },
-  {
-    "payload": {
       "locations": [
         {
           "line": 0,
@@ -91,6 +62,15 @@
       "sessionUpdate": "tool_call_update",
       "status": "in_progress",
       "title": "Read: /test/hello.txt",
+      "toolCallId": "pyd_ai_tool_call_id__read"
+    },
+    "type": "tool_call_update"
+  },
+  {
+    "payload": {
+      "rawOutput": "Hello, World!",
+      "sessionUpdate": "tool_call_update",
+      "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__read"
     },
     "type": "tool_call_update"

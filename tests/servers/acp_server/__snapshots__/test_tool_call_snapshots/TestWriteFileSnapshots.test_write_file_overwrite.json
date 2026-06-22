@@ -9,7 +9,7 @@
       },
       "sessionUpdate": "tool_call",
       "status": "pending",
-      "title": "Editing: /test/existing.txt",
+      "title": "Executing: write",
       "toolCallId": "pyd_ai_tool_call_id__write"
     },
     "type": "tool_call"
@@ -41,7 +41,6 @@
       ],
       "locations": [
         {
-          "line": 0,
           "path": "/test/existing.txt"
         }
       ],

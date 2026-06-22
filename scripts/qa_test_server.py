@@ -38,7 +38,6 @@ def create_test_app() -> FastAPI:
     pool.manifest = Mock()
     pool.manifest.agents = {}
     pool.manifest.opencode = Mock()
-    pool.manifest.opencode.should_use_session_pool_for = Mock(return_value=False)
     pool.skill_commands = None
 
     # Storage

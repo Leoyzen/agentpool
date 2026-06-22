@@ -555,7 +555,7 @@ class AgentPoolACPAgent(ACPAgent):
             return self._sessions_cache
 
         # Get agent from first active session, or fall back to default
-        first_session = next(iter(self.session_manager._active.values()), None)
+        first_session = next(iter(self.session_manager._acp_sessions.values()), None)
         agent = first_session.agent if first_session else self.default_agent
         try:
             logger.info("Listing sessions for agent", agent_name=agent.name)
@@ -650,73 +650,8 @@ class AgentPoolACPAgent(ACPAgent):
                 params.session_id,
                 params.prompt,
             )
-            if response is not None:
-                return response
-            # Per-agent canary flag is off — fall through to legacy path
-
-        logger.info("Processing prompt", session_id=params.session_id)
-        session = self.session_manager.get_session(params.session_id)
-        # Auto-recreate session if not found (e.g., after pool swap)
-        if not session:
-            logger.info("Session not found, recreating", session_id=params.session_id)
-            # Try to get cwd from stored session data
-            cwd = "."
-            try:
-                stored = (
-                    await self.session_manager.session_store.load(params.session_id)
-                    if self.session_manager.session_store
-                    else None
-                )
-                if stored and stored.cwd:
-                    cwd = stored.cwd
-            except Exception:  # noqa: BLE001
-                pass  # Use default cwd
-
-            try:
-                # Recreate session with same ID using default agent
-                await self.session_manager.create_session(
-                    agent=self.default_agent,
-                    cwd=cwd,
-                    client=self.client,
-                    acp_agent=self,
-                    session_id=params.session_id,
-                    client_capabilities=self.client_capabilities,
-                    client_info=self.client_info,
-                    subagent_display_mode=self.subagent_display_mode,
-                )
-                if session := self.session_manager.get_session(params.session_id):
-                    # Initialize session extras
-                    self.tasks.create_task(session.send_available_commands_update())
-                    self.tasks.create_task(session.agent.load_rules(session.cwd))
-            except Exception:
-                logger.exception("Failed to recreate session", session_id=params.session_id)
-                return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
-
-        try:
-            if not session:
-                raise ValueError(f"Session {params.session_id} not found")  # noqa: TRY301
-            stop_reason = await session.process_prompt(params.prompt)
-            # Return the actual stop reason from the session
-        except Exception as e:
-            logger.exception("Failed to process prompt", session_id=params.session_id)
-            msg = f"Error processing prompt: {e}"
-            if session:
-                # Send error as toast instead of polluting chat history
-                await session._send_toast(
-                    message=msg,
-                    level="error",
-                )
-                await anyio.sleep(0.05)  # Allow network buffers to flush
-
-            return PromptResponse(stop_reason="end_turn", user_message_id=params.message_id)
-        else:
-            response = PromptResponse(
-                stop_reason=stop_reason,
-                user_message_id=params.message_id,
-                usage=session.last_usage,
-            )
-            logger.info("Returning PromptResponse", stop_reason=stop_reason)
             return response
+        raise RuntimeError("No protocol handler configured for prompt processing")
 
     async def close_session(self, params: CloseSessionRequest) -> CloseSessionResponse:
         """Stop an active session and free its resources.
@@ -954,6 +889,14 @@ class AgentPoolACPAgent(ACPAgent):
             manifest = getattr(agent_pool, "manifest", None) if agent_pool else None
             if manifest and manifest.model_variants:
                 valid_model_ids.update(manifest.model_variants.keys())
+                # Also include resolved identifiers from StringModelConfig variants,
+                # since configOptions sends resolved identifiers (e.g., "openai-chat:svc/glm-4.7")
+                # while model_variants.keys() are variant names (e.g., "glm47").
+                from llmling_models_config import StringModelConfig
+
+                for config in manifest.model_variants.values():
+                    if isinstance(config, StringModelConfig):
+                        valid_model_ids.add(config.identifier)
 
             # Validate the requested model
             if params.model_id not in valid_model_ids:
@@ -1096,15 +1039,13 @@ class AgentPoolACPAgent(ACPAgent):
 
         logger.info("Swapping pool", config_path=config_path, agent=agent_name)
 
-        # Acquire session_manager._lock to serialize with create_session()
-        async with self.session_manager._lock:
-            # 1. Copy and clear all active sessions while holding the lock
-            sessions = list(self.session_manager._active.values())
-            self.session_manager._active.clear()
-            # 2. Set swap flag to prevent new session creation during swap
-            self._swap_in_progress = True
+        # 1. Copy and clear all active sessions
+        sessions = list(self.session_manager._acp_sessions.values())
+        self.session_manager._acp_sessions.clear()
+        # 2. Set swap flag to prevent new session creation during swap
+        self._swap_in_progress = True
 
-        # 3. Close all sessions (outside the lock - may take time)
+        # 3. Close all sessions (may take time)
         for session in sessions:
             try:
                 await session.close()

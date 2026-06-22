@@ -65,22 +65,38 @@ def event_bus(bridged_state: ServerState) -> EventBus:
 
 
 @pytest.mark.anyio
-async def test_legacy_path_broadcasts_to_sse_only(server_state: ServerState) -> None:
+async def test_legacy_path_broadcasts_to_sse_only(
+    tmp_project_dir: Path,
+    mock_agent: Mock,
+) -> None:
     """Without a session_controller, events flow only to SSE subscribers."""
+    state = ServerState(
+        working_dir=str(tmp_project_dir),
+        agent=mock_agent,
+        session_controller=None,
+    )
     queue = asyncio.Queue()
-    server_state.event_subscribers.append(queue)
+    state.event_subscribers.append(queue)
 
     event = SessionStatusEvent.create("sess-legacy", SessionStatus(type="busy"))
-    await server_state.broadcast_event(event)
+    await state.broadcast_event(event)
 
     assert queue.qsize() == 1
     assert queue.get_nowait() is event
 
 
 @pytest.mark.anyio
-async def test_legacy_path_no_bridge_created(server_state: ServerState) -> None:
+async def test_legacy_path_no_bridge_created(
+    tmp_project_dir: Path,
+    mock_agent: Mock,
+) -> None:
     """ServerState without session_controller has no event_bridge."""
-    assert server_state.event_bridge is None
+    state = ServerState(
+        working_dir=str(tmp_project_dir),
+        agent=mock_agent,
+        session_controller=None,
+    )
+    assert state.event_bridge is None
 
 
 # =============================================================================

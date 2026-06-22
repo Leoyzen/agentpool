@@ -116,7 +116,8 @@ def server_state(tmp_path: Any) -> ServerState:
     state = ServerState(working_dir=str(tmp_path), agent=agent)
     # Initialize backward-compat dicts removed from ServerState dataclass
     state.messages = {}
-    state.session_status = {}
+    # No session_pool_integration — this test uses OpenCodeSessionPoolIntegration
+    # directly and creates its own integration instance.
     return state
 
 

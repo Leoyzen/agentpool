@@ -55,6 +55,9 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
     Provides both chat completions and responses endpoints.
     """
 
+    # OpenAI API is stateless HTTP; events are not consumed here.
+    _skip_event_processing = True
+
     @property
     def event_bus(self) -> EventBus:
         """Return the EventBus instance to subscribe to."""

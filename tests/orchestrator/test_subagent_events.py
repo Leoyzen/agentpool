@@ -61,8 +61,6 @@ class MockServerState:
         self.pool: Any = None
         self.session_status: dict[str, Any] = {}
         self.config = MagicMock()
-        self.config.use_session_pool_for_messages = False
-        self.config.use_session_pool_for_status = False
 
     async def broadcast_event(self, event: Any) -> None:
         self.events.append(event)

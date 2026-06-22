@@ -102,6 +102,33 @@ def _extract_provider(config: AnyModelConfig) -> str:
             return "unknown"
 
 
+def _resolve_variant_identifier(config: AnyModelConfig, variant_name: str) -> str:
+    """Resolve a model variant config to its underlying model identifier.
+
+    Returns the identifier in ``{system}:{model_name}`` format matching
+    ``agent.model_name``, so the current model can be matched against
+    configured variants.
+
+    For StringModelConfig, resolves through ``config.get_model()`` to get
+    the canonical system name (e.g., ``"openai-chat"`` → ``"openai"``).
+    Falls back to the raw identifier if resolution fails.
+
+    Args:
+        config: Model variant configuration.
+        variant_name: The variant name to use as fallback.
+
+    Returns:
+        Resolved model identifier string matching agent.model_name format.
+    """
+    if isinstance(config, StringModelConfig):
+        try:
+            model = config.get_model()
+            return f"{model.system}:{model.model_name}"
+        except Exception:
+            return config.identifier
+    return variant_name
+
+
 def _build_providers_from_tokonomics(toko_models: list[TokoModelInfo]) -> list[Provider]:
     """Build providers list from tokonomics discovery results.
 
@@ -236,16 +263,19 @@ async def build_model_state_for_acp(
     manifest = agent_pool.manifest if agent_pool else None
 
     if manifest and manifest.model_variants:
-        for variant_name, _config in manifest.model_variants.items():
-            provider_name = _extract_provider(_config)
+        for variant_name, config in manifest.model_variants.items():
+            provider_name = _extract_provider(config)
 
             # Skip if provider is disabled
             if provider_router and provider_router.is_provider_disabled(provider_name):
                 continue
 
+            # Resolve the actual model identifier for the model_id field,
+            # using variant name as the display name (alias).
+            model_id = _resolve_variant_identifier(config, variant_name)
             configured_models.append(
                 ACPModelInfo(
-                    model_id=variant_name,
+                    model_id=model_id,
                     name=variant_name,
                 )
             )
@@ -253,15 +283,15 @@ async def build_model_state_for_acp(
     if configured_models:
         current_model = agent.model_name
         all_ids = [m.model_id for m in configured_models]
-        if current_model and current_model not in all_ids:
-            # Ensure current model is visible in IDE even if not in configured variants
+        if current_model and current_model in all_ids:
+            current_model_id = current_model
+        elif current_model:
+            # Current model is not among configured variants — add it
             desc = "Currently configured model"
             model_info = ACPModelInfo(
                 model_id=current_model, name=current_model, description=desc
             )
             configured_models.insert(0, model_info)
-            current_model_id = current_model
-        elif current_model and current_model in all_ids:
             current_model_id = current_model
         else:
             current_model_id = all_ids[0]

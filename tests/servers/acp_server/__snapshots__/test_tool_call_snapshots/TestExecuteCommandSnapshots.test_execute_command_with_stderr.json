@@ -7,7 +7,7 @@
       },
       "sessionUpdate": "tool_call",
       "status": "pending",
-      "title": "Running: ls /nonexistent",
+      "title": "Executing: bash",
       "toolCallId": "pyd_ai_tool_call_id__bash"
     },
     "type": "tool_call"
@@ -44,7 +44,15 @@
   },
   {
     "payload": {
-      "rawOutput": "ls: cannot access '/nonexistent': No such file or directory\n\n\nError: Command failed\nExit code: 2",
+      "rawOutput": {
+        "content": "ls: cannot access '/nonexistent': No such file or directory\n\n\nError: Command failed\nExit code: 2",
+        "metadata": {
+          "description": "ls /nonexistent",
+          "exit": 2,
+          "output": "ls: cannot access '/nonexistent': No such file or directory\n"
+        },
+        "structured_content": null
+      },
       "sessionUpdate": "tool_call_update",
       "status": "completed",
       "toolCallId": "pyd_ai_tool_call_id__bash"
