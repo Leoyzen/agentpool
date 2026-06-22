@@ -636,27 +636,23 @@ class SessionController:
                 # consistency are preserved.  Each tool call creates its own
                 # child session but reuses the canonical pool-level agent.
                 if session.parent_session_id:
-                    # Inherit parent session's MCP providers onto the shared
-                    # agent before returning it.  Without this, subagents
-                    # cannot access MCP tools added dynamically to the parent
-                    # session (e.g., via ACP session_mcp_providers).
-                    parent_agent = self._session_agents.get(session.parent_session_id)
-                    if parent_agent is not None:
-                        mcp_providers = [
-                            p
-                            for p in parent_agent.tools.external_providers
-                            if getattr(p, "kind", None) == "mcp"
-                        ]
-                        for provider in mcp_providers:
-                            if provider not in base_agent.tools.external_providers:
-                                base_agent.tools.add_provider(provider)
-                        if mcp_providers:
-                            logger.info(
-                                "Inherited parent session MCP providers to shared agent",
-                                session_id=session_id,
-                                parent_session_id=session.parent_session_id,
-                                num_providers=len(mcp_providers),
-                            )
+                    # NOTE: We intentionally do NOT inherit parent session's
+                    # MCP providers to child sessions.
+                    #
+                    # Pool-level MCP providers (from YAML mcp_servers) are
+                    # already present on the shared base_agent, so no
+                    # inheritance is needed for those.
+                    #
+                    # Session-level MCP providers (added dynamically via ACP
+                    # mcp-over-acp, e.g. workspace-fs) are per-session: child
+                    # sessions created via ACP session/new receive their own
+                    # independent MCP connections.  Inheriting the parent's
+                    # session-level providers alongside the child's own would
+                    # register duplicate FunctionToolset instances on the
+                    # shared base_agent, causing pydantic-ai CombinedToolset
+                    # to raise a UserError for conflicting tool names.
+                    #
+                    # See: pydantic_ai/toolsets/combined.py get_tools()
                     if input_provider is not None:
                         session.input_provider = input_provider
                     self._session_agents[session_id] = base_agent
