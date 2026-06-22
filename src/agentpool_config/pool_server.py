@@ -202,6 +202,30 @@ class ACPPoolServerConfig(BasePoolServerConfig):
     )
     """Port to listen on (streamable-http only)."""
 
+    websocket_ping_interval: float | None = Field(
+        default=60.0,
+        gt=0,
+        title="WebSocket ping interval",
+    )
+    """Seconds between server-initiated WebSocket ping frames.
+
+    Set to null to disable server-side WebSocket heartbeat.
+    """
+
+    websocket_pong_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        title="WebSocket pong timeout",
+    )
+    """Seconds to wait for each expected WebSocket pong."""
+
+    websocket_max_missed_pongs: int = Field(
+        default=3,
+        gt=0,
+        title="WebSocket max missed pongs",
+    )
+    """Consecutive missed WebSocket pongs to tolerate before disconnecting."""
+
     model_config = ConfigDict(frozen=True)
 
 

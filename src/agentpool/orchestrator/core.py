@@ -635,6 +635,27 @@ class SessionController:
                 # consistency are preserved.  Each tool call creates its own
                 # child session but reuses the canonical pool-level agent.
                 if session.parent_session_id:
+                    # Inherit parent session's MCP providers onto the shared
+                    # agent before returning it.  Without this, subagents
+                    # cannot access MCP tools added dynamically to the parent
+                    # session (e.g., via ACP session_mcp_providers).
+                    parent_agent = self._session_agents.get(session.parent_session_id)
+                    if parent_agent is not None:
+                        mcp_providers = [
+                            p
+                            for p in parent_agent.tools.external_providers
+                            if getattr(p, "kind", None) == "mcp"
+                        ]
+                        for provider in mcp_providers:
+                            if provider not in base_agent.tools.external_providers:
+                                base_agent.tools.add_provider(provider)
+                        if mcp_providers:
+                            logger.info(
+                                "Inherited parent session MCP providers to shared agent",
+                                session_id=session_id,
+                                parent_session_id=session.parent_session_id,
+                                num_providers=len(mcp_providers),
+                            )
                     if input_provider is not None:
                         session.input_provider = input_provider
                     self._session_agents[session_id] = base_agent
@@ -686,26 +707,6 @@ class SessionController:
                     if self.pool.skills_instruction_provider:
                         agent.tools.add_provider(self.pool.skills_instruction_provider)
                     agent.tools.add_provider(self.pool.skills_tools_provider)
-                # Inherit parent session's MCP providers for subagent sessions
-                # (only providers with kind="mcp", not lead-agent-specific tools)
-                if session.parent_session_id:
-                    parent_agent = self._session_agents.get(session.parent_session_id)
-                    if parent_agent is not None:
-                        mcp_providers = [
-                            p
-                            for p in parent_agent.tools.external_providers
-                            if getattr(p, "kind", None) == "mcp"
-                        ]
-                        for provider in mcp_providers:
-                            if provider not in agent.tools.external_providers:
-                                agent.tools.add_provider(provider)
-                        if mcp_providers:
-                            logger.info(
-                                "Inherited parent session MCP providers",
-                                session_id=session_id,
-                                parent_session_id=session.parent_session_id,
-                                num_providers=len(mcp_providers),
-                            )
                 self._session_agents[session_id] = agent
                 session.agent = agent
                 session.is_per_session_agent = True

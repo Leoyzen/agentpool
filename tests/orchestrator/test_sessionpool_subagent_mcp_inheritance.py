@@ -74,11 +74,12 @@ async def test_child_session_inherits_parent_mcp_providers() -> None:
     Steps:
     1. Create AgentPool with a NativeAgentConfig agent using TestModel.
     2. Create a parent session and get its per-session agent.
-    3. Add a MockMCPResourceProvider with a mock tool to both the parent agent's
-       and the shared pool agent's external_providers.
-    4. Create a child session with parent_session_id set.
-    5. Get the child session's per-session agent (returns shared pool agent).
-    6. Assert the child agent's tools.external_providers contains the MCP provider.
+    3. Add a MockMCPResourceProvider ONLY to the parent agent.
+    4. Verify the shared agent does NOT have the provider (proving inheritance
+       is needed).
+    5. Create a child session with parent_session_id set.
+    6. Get the child session's agent — should have inherited the MCP provider
+       from the parent via the inheritance logic in get_or_create_session_agent.
     """
     agent_config = NativeAgentConfig(
         name="test_agent",
@@ -104,19 +105,23 @@ async def test_child_session_inherits_parent_mcp_providers() -> None:
             parent_session_id
         )
 
-        # Step 2: Add a mock MCP provider to both the parent agent and the shared agent
+        # Step 2: Add a mock MCP provider ONLY to the parent agent
         mock_tool = Tool.from_callable(_mock_tool, name_override="mock_tool")
         mock_provider = MockMCPResourceProvider(
             name="mock_mcp_provider",
             tools=[mock_tool],
         )
         parent_agent.tools.add_provider(mock_provider)
-        # Also add to shared agent since child sessions reuse the shared agent
-        base_agent.tools.add_provider(mock_provider)
 
-        # Verify parent has the provider (among pool-level providers)
+        # Verify parent has the provider
         assert mock_provider in parent_agent.tools.external_providers, (
             "Parent agent's external_providers should contain the mock MCP provider"
+        )
+
+        # Verify shared agent does NOT have the provider (before inheritance)
+        assert mock_provider not in base_agent.tools.external_providers, (
+            "Shared agent must NOT have the parent-only MCP provider "
+            "before child session creation"
         )
 
         # Step 3: Create child session with parent_session_id
@@ -126,20 +131,15 @@ async def test_child_session_inherits_parent_mcp_providers() -> None:
             agent_name="test_agent",
         )
 
-        # Step 4: Get the child session's per-session agent (returns shared agent)
+        # Step 4: Get the child session's agent
+        # get_or_create_session_agent should inherit parent's MCP providers
         child_agent = await session_pool.sessions.get_or_create_session_agent(
             child_session_id
         )
 
-        # Step 5: Assert child (shared agent) has the MCP provider
+        # Step 5: Assert child has the MCP provider (inherited from parent)
         assert mock_provider in child_agent.tools.external_providers, (
-            "Child agent's external_providers should contain the MCP provider"
-        )
-
-        # Verify non-MCP providers are NOT inherited
-        non_mcp_names = [p.name for p in child_agent.tools.external_providers]
-        assert "non_mcp_provider_should_not_be_inherited" not in non_mcp_names, (
-            "Non-MCP providers should not be inherited by child sessions"
+            "Child agent's external_providers should contain the inherited MCP provider"
         )
 
         await session_pool.shutdown()
@@ -187,15 +187,13 @@ async def test_child_session_does_not_inherit_non_mcp_providers() -> None:
         )
         parent_agent.tools.add_provider(non_mcp_provider)
 
-        # Add an MCP provider to both parent and shared agent
+        # Add an MCP provider to parent only — child should inherit it
         mcp_tool = Tool.from_callable(_mock_tool, name_override="mcp_tool")
         mcp_provider = MockMCPResourceProvider(
             name="mock_mcp_provider",
             tools=[mcp_tool],
         )
         parent_agent.tools.add_provider(mcp_provider)
-        # Also add MCP provider to shared agent since child sessions reuse it
-        base_agent.tools.add_provider(mcp_provider)
 
         # Verify parent has both new providers (in addition to pool-level ones)
         assert non_mcp_provider in parent_agent.tools.external_providers, (
@@ -230,6 +228,100 @@ async def test_child_session_does_not_inherit_non_mcp_providers() -> None:
             for p in child_agent.tools.external_providers
         ), (
             "Child should have the inherited mock MCP provider"
+        )
+
+        await session_pool.shutdown()
+
+
+@pytest.mark.integration
+async def test_red_flag_child_session_does_not_inherit_parent_only_mcp_providers() -> None:
+    """RED FLAG TEST: Child session inherits MCP providers added ONLY to parent.
+
+    This test proves the regression introduced by commit 2ccf90544 which
+    added an early return for child sessions (core.py:637-643), bypassing
+    the MCP inheritance code (core.py:689-708).
+
+    BUG: Child sessions return the shared pool-level agent (base_agent),
+    which does NOT have MCP providers added exclusively to the parent
+    session's per-session agent. This means dynamically added MCP tools
+    (e.g., via ACP session_mcp_providers) are invisible to subagents.
+
+    EXPECTED: Child session agent inherits MCP providers from parent.
+    ACTUAL: Child session gets shared agent, missing parent's MCP providers.
+
+    If this test PASSES, the regression is fixed.
+    If this test FAILS, the early return at core.py:637-643 is still
+    bypassing the MCP inheritance code.
+    """
+    agent_config = NativeAgentConfig(
+        name="test_agent",
+        model="test",
+        system_prompt="You are a test agent",
+    )
+    manifest = AgentsManifest(agents={"test_agent": agent_config})
+
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        await session_pool.start()
+
+        parent_session_id = "parent-redflag-test"
+        child_session_id = "child-redflag-test"
+
+        # Get the shared pool-level agent — we do NOT add providers to it
+        base_agent = pool.get_agent("test_agent")
+
+        # Create parent session and get its per-session agent
+        await session_pool.create_session(parent_session_id, agent_name="test_agent")
+        parent_agent = await session_pool.sessions.get_or_create_session_agent(
+            parent_session_id
+        )
+
+        # Add a mock MCP provider ONLY to the parent agent (NOT shared agent)
+        mock_tool = Tool.from_callable(_mock_tool, name_override="redflag_mcp_tool")
+        mock_provider = MockMCPResourceProvider(
+            name="redflag_mcp_provider",
+            tools=[mock_tool],
+        )
+        parent_agent.tools.add_provider(mock_provider)
+
+        # Verify parent has the provider
+        assert mock_provider in parent_agent.tools.external_providers, (
+            "Parent agent should have the mock MCP provider"
+        )
+
+        # CRITICAL: Verify shared agent does NOT have this provider
+        assert mock_provider not in base_agent.tools.external_providers, (
+            "Shared agent must NOT have the parent-only MCP provider "
+            "(otherwise the test can't detect the regression)"
+        )
+
+        # Create child session with parent_session_id
+        await session_pool.create_session(
+            child_session_id,
+            parent_session_id=parent_session_id,
+            agent_name="test_agent",
+        )
+
+        # Get child session agent — should inherit parent's MCP providers
+        child_agent = await session_pool.sessions.get_or_create_session_agent(
+            child_session_id
+        )
+
+        # RED FLAG ASSERTION: This FAILS with the current code because
+        # child_agent is the shared base_agent (early return at core.py:637-643),
+        # which does NOT have the parent-only MCP provider.
+        #
+        # Expected behavior: child inherits parent's MCP providers.
+        # Actual behavior: child gets shared agent without parent's MCP providers.
+        assert mock_provider in child_agent.tools.external_providers, (
+            "RED FLAG — Regression confirmed: Child session does NOT inherit "
+            "parent-only MCP providers. The early return at core.py:637-643 "
+            "bypasses the MCP inheritance code at core.py:689-708.\n\n"
+            f"Child agent type: {type(child_agent).__name__}\n"
+            f"Child is shared agent: {child_agent is base_agent}\n"
+            f"Child providers: {[p.name for p in child_agent.tools.external_providers]}\n"
+            f"Parent providers: {[p.name for p in parent_agent.tools.external_providers]}"
         )
 
         await session_pool.shutdown()

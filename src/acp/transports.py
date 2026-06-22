@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import logging
 import os
 import subprocess
-from typing import TYPE_CHECKING, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Any, Literal, Protocol, assert_never
 import uuid
 
 import anyio
@@ -21,7 +21,7 @@ from anyio.abc import ByteReceiveStream, ByteSendStream
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping
+    from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
     from pathlib import Path
 
     from anyio.abc import Process
@@ -31,6 +31,10 @@ if TYPE_CHECKING:
     from acp.agent.protocol import Agent
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_WEBSOCKET_PING_INTERVAL = 60.0
+DEFAULT_WEBSOCKET_PONG_TIMEOUT = 30.0
+DEFAULT_WEBSOCKET_MAX_MISSED_PONGS = 3
 
 
 # =============================================================================
@@ -57,10 +61,49 @@ class WebSocketTransport:
     Attributes:
         host: Host to bind the WebSocket server to.
         port: Port for the WebSocket server.
+        ping_interval: Seconds between server-initiated WebSocket ping frames.
+            Set to None to disable AgentPool's heartbeat.
+        pong_timeout: Seconds to wait for a pong response to each ping.
+        max_missed_pongs: Consecutive missed pongs before closing the connection.
     """
 
     host: str = "localhost"
     port: int = 8765
+    ping_interval: float | None = DEFAULT_WEBSOCKET_PING_INTERVAL
+    pong_timeout: float = DEFAULT_WEBSOCKET_PONG_TIMEOUT
+    max_missed_pongs: int = DEFAULT_WEBSOCKET_MAX_MISSED_PONGS
+
+    def __post_init__(self) -> None:
+        if self.ping_interval is not None and self.ping_interval <= 0:
+            msg = "ping_interval must be positive or None"
+            raise ValueError(msg)
+        _validate_websocket_heartbeat(self.pong_timeout, self.max_missed_pongs)
+
+
+class _HeartbeatWebSocket(Protocol):
+    async def ping(self) -> Awaitable[float]: ...
+
+    async def close(self, code: int = 1000, reason: str = "") -> None: ...
+
+
+def _validate_websocket_heartbeat(pong_timeout: float, max_missed_pongs: int) -> None:
+    if pong_timeout <= 0:
+        msg = "pong_timeout must be positive"
+        raise ValueError(msg)
+    if max_missed_pongs <= 0:
+        msg = "max_missed_pongs must be positive"
+        raise ValueError(msg)
+
+
+def _effective_websocket_pong_timeout(
+    ping_interval: float | None,
+    pong_timeout: float,
+    max_missed_pongs: int,
+) -> float | None:
+    """Return a single keepalive timeout matching the multi-miss tolerance window."""
+    if ping_interval is None:
+        return None
+    return pong_timeout * max_missed_pongs + ping_interval * (max_missed_pongs - 1)
 
 
 @dataclass
@@ -89,10 +132,23 @@ class ACPWebSocketTransport:
     Attributes:
         host: Host to bind the WebSocket server to.
         port: Port for the WebSocket server.
+        ping_interval: Seconds between server-initiated WebSocket ping frames.
+            Set to None to disable server-side heartbeat.
+        pong_timeout: Seconds to wait for each expected pong.
+        max_missed_pongs: Consecutive missed pongs to tolerate before disconnecting.
     """
 
     host: str = "localhost"
     port: int = 8080
+    ping_interval: float | None = DEFAULT_WEBSOCKET_PING_INTERVAL
+    pong_timeout: float = DEFAULT_WEBSOCKET_PONG_TIMEOUT
+    max_missed_pongs: int = DEFAULT_WEBSOCKET_MAX_MISSED_PONGS
+
+    def __post_init__(self) -> None:
+        if self.ping_interval is not None and self.ping_interval <= 0:
+            msg = "ping_interval must be positive or None"
+            raise ValueError(msg)
+        _validate_websocket_heartbeat(self.pong_timeout, self.max_missed_pongs)
 
 
 # Type alias for all supported transports
@@ -162,10 +218,42 @@ async def serve(
     match transport:
         case StdioTransport():
             await _serve_stdio(agent, shutdown_event, debug_file, **kwargs)
-        case WebSocketTransport(host=host, port=port):
-            await _serve_websocket(agent, host, port, shutdown_event, debug_file, **kwargs)
-        case ACPWebSocketTransport(host=host, port=port):
-            await _serve_streamable_http(agent, host, port, shutdown_event, debug_file, **kwargs)
+        case WebSocketTransport(
+            host=host,
+            port=port,
+            ping_interval=ping_interval,
+            pong_timeout=pong_timeout,
+            max_missed_pongs=max_missed_pongs,
+        ):
+            await _serve_websocket(
+                agent,
+                host,
+                port,
+                shutdown_event,
+                debug_file,
+                ping_interval=ping_interval,
+                pong_timeout=pong_timeout,
+                max_missed_pongs=max_missed_pongs,
+                **kwargs,
+            )
+        case ACPWebSocketTransport(
+            host=host,
+            port=port,
+            ping_interval=ping_interval,
+            pong_timeout=pong_timeout,
+            max_missed_pongs=max_missed_pongs,
+        ):
+            await _serve_streamable_http(
+                agent,
+                host,
+                port,
+                shutdown_event,
+                debug_file,
+                ping_interval=ping_interval,
+                pong_timeout=pong_timeout,
+                max_missed_pongs=max_missed_pongs,
+                **kwargs,
+            )
         case StreamTransport(reader=reader, writer=writer):
             await _serve_streams(agent, reader, writer, shutdown_event, debug_file, **kwargs)
         case _ as unreachable:
@@ -227,6 +315,10 @@ async def _serve_websocket(
     port: int,
     shutdown_event: asyncio.Event | None,
     debug_file: str | None,
+    *,
+    ping_interval: float | None = DEFAULT_WEBSOCKET_PING_INTERVAL,
+    pong_timeout: float = DEFAULT_WEBSOCKET_PONG_TIMEOUT,
+    max_missed_pongs: int = DEFAULT_WEBSOCKET_MAX_MISSED_PONGS,
     **kwargs: Any,
 ) -> None:
     """Run agent as WebSocket server."""
@@ -251,6 +343,23 @@ async def _serve_websocket(
         )
         connections.append(conn)
 
+        heartbeat_task: asyncio.Task[None] | None = None
+        if ping_interval is not None:
+            logger.info(
+                "Starting WebSocket heartbeat with interval=%s, timeout=%s, max_missed=%s",
+                ping_interval,
+                pong_timeout,
+                max_missed_pongs,
+            )
+            heartbeat_task = asyncio.create_task(
+                _websocket_heartbeat(
+                    websocket,
+                    ping_interval=ping_interval,
+                    pong_timeout=pong_timeout,
+                    max_missed_pongs=max_missed_pongs,
+                )
+            )
+
         try:
             # Wait for shutdown or for the receive loop to end (client disconnect)
             _recv_conn = getattr(conn, "_conn", None)
@@ -258,6 +367,8 @@ async def _serve_websocket(
             waitables: list[asyncio.Future[Any]] = [asyncio.create_task(shutdown.wait())]
             if isinstance(recv_task, asyncio.Task):
                 waitables.append(recv_task)
+            if heartbeat_task is not None:
+                waitables.append(heartbeat_task)
 
             done, _ = await asyncio.wait(waitables, return_when=asyncio.FIRST_COMPLETED)
 
@@ -270,11 +381,25 @@ async def _serve_websocket(
         except websockets.exceptions.ConnectionClosed:
             logger.info("WebSocket client disconnected")
         finally:
-            connections.remove(conn)
-            await conn.close()
+            if heartbeat_task is not None and not heartbeat_task.done():
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Unexpected error during heartbeat task cleanup")
+            try:
+                connections.remove(conn)
+            except ValueError:
+                pass
+            try:
+                await conn.close()
+            except Exception:
+                logger.exception("Unexpected error closing WebSocket connection")
 
     logger.info("Starting WebSocket server on ws://%s:%d", host, port)
-    async with websockets.serve(handle_client, host, port):
+    async with websockets.serve(handle_client, host, port, ping_interval=None):
         logger.info("WebSocket server running on ws://%s:%d", host, port)
         await shutdown.wait()
 
@@ -283,12 +408,66 @@ async def _serve_websocket(
         await conn.close()
 
 
+async def _websocket_heartbeat(
+    websocket: _HeartbeatWebSocket,
+    *,
+    ping_interval: float,
+    pong_timeout: float,
+    max_missed_pongs: int,
+) -> None:
+    """Close a WebSocket only after several consecutive missed pong responses."""
+    import websockets
+
+    missed_pongs = 0
+    ping_count = 0
+    logger.info("WebSocket heartbeat started")
+    while True:
+        await asyncio.sleep(ping_interval)
+        ping_count += 1
+        logger.debug("Sending WebSocket ping #%d", ping_count)
+        try:
+            pong_waiter: Awaitable[float] = await websocket.ping()
+            await asyncio.wait_for(pong_waiter, timeout=pong_timeout)
+            logger.debug("Pong #%d received in time", ping_count)
+            if missed_pongs:
+                logger.info(
+                    "WebSocket heartbeat recovered after %d missed pong(s)",
+                    missed_pongs,
+                )
+                missed_pongs = 0
+        except TimeoutError:
+            missed_pongs += 1
+            logger.warning(
+                "WebSocket heartbeat missed pong %d/%d",
+                missed_pongs,
+                max_missed_pongs,
+            )
+            if missed_pongs >= max_missed_pongs:
+                logger.warning(
+                    "Closing WebSocket after %d consecutive missed pong(s)",
+                    missed_pongs,
+                )
+                await websocket.close(code=1011, reason="pong timeout")
+                return
+        except websockets.exceptions.ConnectionClosed:
+            return
+        except Exception:
+            logger.exception("WebSocket heartbeat failed")
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason="heartbeat failed")
+            return
+
+
 async def _serve_streamable_http(
     agent: Agent | Callable[[AgentSideConnection], Agent],
     host: str,
     port: int,
     shutdown_event: asyncio.Event | None,
     debug_file: str | None,
+    *,
+    ping_interval: float | None = DEFAULT_WEBSOCKET_PING_INTERVAL,
+    pong_timeout: float = DEFAULT_WEBSOCKET_PONG_TIMEOUT,
+    max_missed_pongs: int = DEFAULT_WEBSOCKET_MAX_MISSED_PONGS,
     **kwargs: Any,
 ) -> None:
     """Run agent as a streamable HTTP WebSocket server (Starlette-based)."""
@@ -339,7 +518,18 @@ async def _serve_streamable_http(
             await conn.close()
 
     app = Starlette(routes=[WebSocketRoute("/acp", handle_acp)])
-    config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        ws_ping_interval=ping_interval,
+        ws_ping_timeout=_effective_websocket_pong_timeout(
+            ping_interval,
+            pong_timeout,
+            max_missed_pongs,
+        ),
+    )
     server = uvicorn.Server(config)
 
     async def shutdown_watcher() -> None:
