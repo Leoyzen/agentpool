@@ -260,3 +260,92 @@ async def test_child_session_without_pool_sessions_falls_back_to_top_level():
     # We can't check the store since there's no store configured, but
     # the session_id should be from generate_session_id (top-level path)
     assert session_id == "session_fallback_001"
+
+
+# =============================================================================
+# Red-flag tests: get_session() should return ACPSession even when
+# _session_controller hasn't registered the session yet.
+# =============================================================================
+
+
+async def test_get_session_returns_session_when_not_yet_in_controller():
+    """get_session() should return the ACPSession from _acp_sessions even
+    when _session_controller exists but hasn't registered the session yet.
+
+    This is a red-flag test — it verifies the bug where get_session()
+    returns None because _session_controller.get_session() returns None,
+    even though the session IS in _acp_sessions.
+
+    Bug: During session/new, create_session() adds the session to
+    _acp_sessions but the orchestrator registers it with _session_controller
+    asynchronously. If get_session() is called between these two steps,
+    it returns None, causing create_task(session.send_available_commands_update())
+    to be skipped — so available_commands_update is never sent.
+    """
+    pool, agent, sessions, store = _make_pool_with_sessions()
+    manager = ACPSessionManager(pool=pool)
+
+    session_id = "sess-get-session-001"
+
+    # Simulate what create_session() does: add to _acp_sessions but NOT
+    # to _session_controller (which is populated asynchronously later).
+    mock_session = MagicMock()
+    mock_session.session_id = session_id
+    manager._acp_sessions[session_id] = mock_session
+
+    # _session_controller exists (from SessionPool) but doesn't have the session
+    assert manager._session_controller is not None
+    assert manager._session_controller.get_session(session_id) is None, (
+        "Precondition: session should NOT be in controller yet"
+    )
+
+    # RED FLAG: get_session() should still return the session from _acp_sessions
+    result = manager.get_session(session_id)
+    assert result is not None, (
+        f"get_session({session_id!r}) returned None even though the session "
+        f"exists in _acp_sessions. This means create_task() calls in "
+        f"new_session/load_session/resume_session are silently skipped, "
+        f"and available_commands_update is never sent."
+    )
+    assert result is mock_session, (
+        "get_session() should return the same session object from _acp_sessions"
+    )
+
+
+async def test_get_session_returns_none_when_not_in_either():
+    """get_session() should return None when session is in neither
+    _session_controller nor _acp_sessions."""
+    pool, agent, sessions, store = _make_pool_with_sessions()
+    manager = ACPSessionManager(pool=pool)
+
+    result = manager.get_session("nonexistent-session")
+    assert result is None, (
+        "get_session() should return None for a session that doesn't exist"
+    )
+
+
+async def test_get_session_returns_session_when_in_both():
+    """get_session() should return the session when it exists in both
+    _session_controller and _acp_sessions."""
+    pool, agent, sessions, store = _make_pool_with_sessions()
+    manager = ACPSessionManager(pool=pool)
+
+    session_id = "sess-in-both-001"
+
+    # Register in both
+    mock_session = MagicMock()
+    mock_session.session_id = session_id
+    manager._acp_sessions[session_id] = mock_session
+
+    # Register with session controller
+    await sessions.create_session(
+        session_id=session_id,
+        agent_name=agent.name,
+    )
+
+    result = manager.get_session(session_id)
+    assert result is not None, (
+        f"get_session({session_id!r}) should return the session when it "
+        f"exists in both _session_controller and _acp_sessions"
+    )
+    assert result is mock_session

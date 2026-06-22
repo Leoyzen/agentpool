@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any, Literal, assert_never
 import webbrowser
 
@@ -349,6 +350,9 @@ class ACPInputProvider(InputProvider):
             if isinstance(params, types.ElicitRequestURLParams):
                 return await self._get_url_elicitation(params)
             return await self._get_form_elicitation(params)
+        except asyncio.CancelledError:
+            logger.debug("Elicitation cancelled by user")
+            return types.ElicitResult(action="cancel")
         except Exception as e:
             logger.exception("Failed to handle elicitation")
             return types.ErrorData(code=types.INTERNAL_ERROR, message=f"Elicitation failed: {e}")

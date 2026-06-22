@@ -185,12 +185,12 @@ class ACPSessionManager:
     def get_session(self, session_id: str) -> ACPSession | None:
         """Get an active session by ID.
 
-        First checks SessionController for lifecycle state, then resolves
-        the protocol-specific ACPSession runtime object from _acp_sessions.
+        Resolves the protocol-specific ACPSession runtime object from
+        _acp_sessions. Does not gate on SessionController registration,
+        because during session creation the ACPSession exists in
+        _acp_sessions before the orchestrator registers it with the
+        controller asynchronously.
         """
-        if self._session_controller is not None:
-            if self._session_controller.get_session(session_id) is None:
-                return None
         return self._acp_sessions.get(session_id)
 
     async def resume_session(

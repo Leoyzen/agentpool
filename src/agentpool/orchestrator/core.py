@@ -25,6 +25,7 @@ from agentpool.messaging import ChatMessage
 from agentpool.models.pending_interaction import PendingPermission
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.sessions.models import PendingDeferredCall, SessionData
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
@@ -1571,6 +1572,10 @@ class TurnRunner:
                         "should handle them.",
                         pending_count=len(run_ctx.injection_manager._pending_injections),
                     )
+            except RunAbortedError:
+                logger.debug("Run aborted by user", session_id=session_id)
+                # Don't mark run as failed — this is user-initiated cancellation
+                raise
             except (Exception, asyncio.CancelledError) as exc:
                 if run_handle is not None and run_handle.status not in (
                     RunStatus.completed,

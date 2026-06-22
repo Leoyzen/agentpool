@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, assert_never
 
 from agentpool.log import get_logger
-from agentpool.resource_providers import StaticResourceProvider
 from agentpool.utils.baseregistry import AgentPoolError
 
 
@@ -57,6 +56,7 @@ class ToolManager:
             tools: Initial tools to register
             tool_mode: Tool execution mode (None or "codemode")
         """
+        from agentpool.resource_providers import StaticResourceProvider
         from agentpool.resource_providers.codemode.provider import CodeModeResourceProvider
 
         super().__init__()

@@ -79,12 +79,19 @@ def mock_acp_agent_for_session(
 
 
 @pytest.mark.unit
-async def test_session_initialize_calls_send_available_commands_update(
+async def test_session_initialize_does_not_call_send_available_commands_update(
     pool_and_agent: tuple[AgentPool, Agent],
     mock_client: AsyncMock,
     mock_acp_agent_for_session: MagicMock,
 ) -> None:
-    """ACPSession.initialize() should call send_available_commands_update()."""
+    """ACPSession.initialize() should NOT call send_available_commands_update().
+
+    The available_commands_update is now sent by the ACP lifecycle handlers
+    (new_session, load_session, resume_session) via create_task after the
+    response returns. Sending it during initialize() would cause a duplicate
+    notification since initialize() runs during session construction inside
+    create_session()/resume_session(), and the handlers also schedule it.
+    """
     _, agent = pool_and_agent
     session = ACPSession(
         session_id="test-session",
@@ -100,7 +107,7 @@ async def test_session_initialize_calls_send_available_commands_update(
 
     await session.initialize()
 
-    session.send_available_commands_update.assert_awaited_once()  # type: ignore[attr-defined]
+    session.send_available_commands_update.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 @pytest.mark.unit
