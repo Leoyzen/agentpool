@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import SessionResumeEvent
+from agentpool.agents.events import SessionResumeEvent, StreamCompleteEvent
 from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -1576,6 +1576,12 @@ class TurnRunner:
         if _session is not None:
             _session._turn_owner_task = asyncio.current_task()
         _in_turn_context.set(True)
+        # Track whether the agent already produced a StreamCompleteEvent.
+        # If it did, subsequent exceptions (e.g. CancelledError from
+        # generator cleanup) are NOT run failures — the agent completed
+        # successfully and the exception is a spurious side effect.
+        stream_completed = False
+
         try:
             try:
                 # Process prompts and handle injections/queued prompts
@@ -1591,11 +1597,15 @@ class TurnRunner:
                         _skip_pool=True,
                         **stream_kwargs,
                     ):
+                        if isinstance(event, StreamCompleteEvent):
+                            stream_completed = True
                         await self._publish_event(session_id, event)
                 else:
                     async for event in agent._run_stream_once(
                         run_ctx, *prompts, session_id=session_id, **stream_kwargs
                     ):
+                        if isinstance(event, StreamCompleteEvent):
+                            stream_completed = True
                         await self._publish_event(session_id, event)
 
                 # After _run_stream_once completes, handle unconsumed injections.
@@ -1615,11 +1625,15 @@ class TurnRunner:
                                 _skip_pool=True,
                                 **stream_kwargs,
                             ):
+                                if isinstance(event, StreamCompleteEvent):
+                                    stream_completed = True
                                 await self._publish_event(session_id, event)
                         else:
                             async for event in agent._run_stream_once(
                                 run_ctx, *current_prompts, session_id=session_id, **stream_kwargs
                             ):
+                                if isinstance(event, StreamCompleteEvent):
+                                    stream_completed = True
                                 await self._publish_event(session_id, event)
                         run_ctx.injection_manager.flush_pending_to_queue()
                 elif run_ctx.injection_manager.has_pending():
@@ -1632,6 +1646,25 @@ class TurnRunner:
             except RunAbortedError:
                 logger.debug("Run aborted by user", session_id=session_id)
                 # Don't mark run as failed — this is user-initiated cancellation
+                raise
+            except (Exception, asyncio.CancelledError) as exc:
+                # Only mark as failed if the agent did NOT already complete.
+                # A CancelledError after StreamCompleteEvent is a spurious
+                # side effect of generator cleanup, not a real failure.
+                if not stream_completed:
+                    if run_handle is not None and run_handle.status not in (
+                        RunStatus.completed,
+                        RunStatus.failed,
+                        RunStatus.checkpointed,
+                    ):
+                        run_handle.fail(exception=exc, event_bus=self.event_bus)
+                else:
+                    logger.debug(
+                        "Suppressed RunFailedEvent after StreamCompleteEvent",
+                        session_id=session_id,
+                        exc_type=type(exc).__name__,
+                        exc_repr=repr(exc),
+                    )
                 raise
             except (Exception, asyncio.CancelledError) as exc:
                 if run_handle is not None and run_handle.status not in (

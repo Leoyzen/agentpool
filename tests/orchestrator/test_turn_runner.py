@@ -7,6 +7,7 @@ and cancellation semantics.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import MagicMock
@@ -1228,3 +1229,148 @@ async def test_stream_event_emitter_wraps_subagent_event_in_envelope(
     assert published.event is event, (
         "Original SubAgentEvent should be preserved unmodified"
     )
+
+
+# ---------------------------------------------------------------------------
+# RED FLAG TESTS – spurious RunFailedEvent after StreamCompleteEvent
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_cancelled_error_after_stream_complete_is_suppressed(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """RED FLAG: CancelledError in generator cleanup after StreamCompleteEvent
+    must NOT produce a spurious RunFailedEvent.
+
+    Verifies the fix: ``_run_native_once`` tracks whether
+    ``StreamCompleteEvent`` was already seen.  If it was, subsequent
+    exceptions (like ``CancelledError`` from generator cleanup) do NOT
+    trigger ``RunHandle.fail()``.
+    """
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+
+    stream_yielded = asyncio.Event()
+    finally_entered = asyncio.Event()
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        from agentpool.agents.events import StreamCompleteEvent
+        from agentpool.messaging.messages import ChatMessage
+
+        try:
+            yield StreamCompleteEvent(
+                message=ChatMessage(content="Done", role="assistant"),
+            )
+            stream_yielded.set()
+        finally:
+            finally_entered.set()
+            await asyncio.sleep(0.5)
+
+    agent._run_stream_once = _fake_stream
+    await _setup_session(controller, "sess-fixed", agent, mock_pool, turn_runner)
+
+    event_queue = await turn_runner.event_bus.subscribe("sess-fixed")
+    events: list[Any] = []
+
+    async def _consume() -> None:
+        try:
+            while True:
+                event = await asyncio.wait_for(event_queue.get(), timeout=2.0)
+                if event is None:
+                    break
+                events.append(event)
+        except TimeoutError:
+            pass
+
+    consumer = asyncio.create_task(_consume())
+
+    turn_task = asyncio.create_task(
+        turn_runner.run_turn("sess-fixed", "hello"),
+    )
+
+    await asyncio.wait_for(stream_yielded.wait(), timeout=2.0)
+    await asyncio.wait_for(finally_entered.wait(), timeout=2.0)
+    await asyncio.sleep(0.05)
+
+    turn_task.cancel()
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await turn_task
+
+    await asyncio.sleep(0.1)
+    await turn_runner.event_bus.publish("sess-fixed", None)
+    await consumer
+
+    unwrapped = [e.event if isinstance(e, EventEnvelope) else e for e in events]
+
+    from agentpool.agents.events import RunFailedEvent, StreamCompleteEvent as SCE
+
+    # StreamCompleteEvent was published
+    complete_events = [e for e in unwrapped if isinstance(e, SCE)]
+    assert len(complete_events) >= 1
+
+    # THE FIX: NO RunFailedEvent after StreamCompleteEvent
+    failed_events = [e for e in unwrapped if isinstance(e, RunFailedEvent)]
+    assert len(failed_events) == 0, (
+        f"Expected 0 RunFailedEvent after StreamCompleteEvent, got {len(failed_events)}"
+    )
+
+
+@pytest.mark.anyio
+async def test_cancelled_error_without_stream_complete_still_fails(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """When CancelledError occurs WITHOUT a prior StreamCompleteEvent,
+    RunFailedEvent should still be published (legitimate failure)."""
+    agent = MagicMock()
+    agent.get_active_run_context.return_value = None
+
+    async def _fake_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        raise RuntimeError("genuine crash")
+        yield
+
+    agent._run_stream_once = _fake_stream
+    await _setup_session(controller, "sess-genuine", agent, mock_pool, turn_runner)
+
+    event_queue = await turn_runner.event_bus.subscribe("sess-genuine")
+    events: list[Any] = []
+
+    async def _consume() -> None:
+        try:
+            while True:
+                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                if event is None:
+                    break
+                events.append(event)
+        except TimeoutError:
+            pass
+
+    consumer = asyncio.create_task(_consume())
+
+    with pytest.raises(RuntimeError, match="genuine crash"):
+        await turn_runner.run_turn("sess-genuine", "hello")
+
+    await asyncio.sleep(0.05)
+    await turn_runner.event_bus.publish("sess-genuine", None)
+    await consumer
+
+    unwrapped = [e.event if isinstance(e, EventEnvelope) else e for e in events]
+
+    from agentpool.agents.events import RunFailedEvent
+
+    failed_events = [e for e in unwrapped if isinstance(e, RunFailedEvent)]
+    assert len(failed_events) == 1
+    assert isinstance(failed_events[0].exception, RuntimeError)
