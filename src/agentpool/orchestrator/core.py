@@ -701,19 +701,16 @@ class SessionController:
                 # AgentContext.internal_fs is visible to pool.get_agent() callers.
                 agent._internal_fs = base_agent._internal_fs
                 await agent.__aenter__()
-                # Restore conversation history from shared agent if it was loaded
-                # (e.g., by resume_session during reconnection). Copy chat_messages
-                # to ensure per-session agent has same history as shared pool agent.
-                if base_agent.conversation.chat_messages:
-                    agent.conversation.chat_messages = base_agent.conversation.chat_messages.copy()
-                else:
-                    try:
-                        await agent.load_session(session_id)
-                    except Exception:
-                        logger.exception(
-                            "Failed to load session for per-session agent",
-                            session_id=session_id,
-                        )
+                # Load conversation history directly from storage into the
+                # per-session agent. Do NOT copy from the shared base_agent,
+                # which would mutate shared state across sessions.
+                try:
+                    await agent.load_session(session_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to load session for per-session agent",
+                        session_id=session_id,
+                    )
                 # Add pool-level providers to per-session agent
                 # (same as shared agents get in AgentPool.__aenter__)
                 if self.pool is not None:
