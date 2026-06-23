@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, assert_never
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
+from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.tools.base import Tool, ToolResult
 
 
@@ -97,7 +98,7 @@ class QuestionTool(Tool[ToolResult]):
                 answer_str = str(content)
                 return ToolResult(content=answer_str, metadata={"answers": [[answer_str]]})
             case ElicitResult(action="cancel"):
-                return ToolResult(content="User cancelled the request", metadata={"answers": []})
+                raise RunAbortedError("User cancelled the elicitation request")
             case ElicitResult():
                 return ToolResult(content="User declined to answer", metadata={"answers": []})
             case ErrorData(message=message):
