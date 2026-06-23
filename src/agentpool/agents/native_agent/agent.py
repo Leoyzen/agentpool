@@ -1257,42 +1257,45 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     async def load_session(self, session_id: str) -> SessionData | None:
         """Load and restore a session from storage.
 
-        Loads session data and restores the conversation history for this agent.
+        Loads session data and restores conversation history for this agent.
+        Message history loads independently from session metadata (separate tables).
 
         Args:
             session_id: Unique identifier for the session to load
 
         Returns:
-            SessionData if session was found and loaded, None otherwise
+            SessionData if session was found and loaded, None otherwise.
         """
         if not self.agent_pool:
             return None
 
+        session_data: SessionData | None = None
         try:
-            # Load session data from session store
             session_data = await self.agent_pool.storage.load_session(session_id)
-            if not session_data:
-                return None
-            # Load conversation history using storage manager's get_session_messages
-            # This uses get_history_provider() to select the correct provider
-            try:
-                messages = await self.agent_pool.storage.get_session_messages(session_id)
-                # Restore to conversation history
-                self.conversation.chat_messages.clear()
-                self.conversation.chat_messages.extend(messages)
-                msg = "Session loaded with conversation history"
-                self.log.info(msg, session_id=session_id, message_count=len(messages))
-            except RuntimeError as e:
-                # No capable provider found for loading history
-                self.log.info(
-                    "Session loaded (no history support)", session_id=session_id, error=str(e)
-                )
-
         except Exception:
-            self.log.exception("Failed to load session", session_id=session_id)
-            return None
-        else:
-            return session_data
+            self.log.exception(
+                "Failed to load session data", session_id=session_id
+            )
+
+        try:
+            messages = await self.agent_pool.storage.get_session_messages(session_id)
+            self.conversation.chat_messages.clear()
+            self.conversation.chat_messages.extend(messages)
+            self.log.info(
+                "Session loaded with conversation history",
+                session_id=session_id,
+                message_count=len(messages),
+            )
+        except RuntimeError as e:
+            self.log.info(
+                "Session loaded (no history support)", session_id=session_id, error=str(e)
+            )
+        except Exception:
+            self.log.exception(
+                "Failed to load session messages", session_id=session_id
+            )
+
+        return session_data
 
 
 if __name__ == "__main__":
