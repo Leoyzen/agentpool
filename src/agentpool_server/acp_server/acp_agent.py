@@ -260,6 +260,7 @@ class AgentPoolACPAgent(ACPAgent):
         self.provider_router = ProviderRouter(None)
         # NEW: Cache agent config for per-session creation (RFC-0031)
         from agentpool.models.agents import NativeAgentConfig
+
         if (
             self.agent_pool
             and self.agent_pool.main_agent
@@ -272,9 +273,8 @@ class AgentPoolACPAgent(ACPAgent):
                 self._agent_config = cfg
 
         # Initialize SessionPool-backed protocol handler if feature flag is enabled
-        if (
-            self.agent_pool
-            and (self.agent_pool.manifest.acp and self.agent_pool.manifest.acp.use_session_pool)
+        if self.agent_pool and (
+            self.agent_pool.manifest.acp and self.agent_pool.manifest.acp.use_session_pool
         ):
             from agentpool_server.acp_server.event_converter import ACPEventConverter
             from agentpool_server.acp_server.handler import ACPProtocolHandler
@@ -599,12 +599,13 @@ class AgentPoolACPAgent(ACPAgent):
     async def resume_session(self, params: ResumeSessionRequest) -> ResumeSessionResponse:
         """Resume an existing session without replaying history.
 
-        Like load_session but doesn't send session/update notifications with
-        previous messages. The agent restores its internal state so the
-        conversation can continue.
+        Restores session context, creates a per-session agent with loaded
+        conversation history, and returns session state.
 
         UNSTABLE: This feature is not part of the spec yet.
         """
+        from agentpool.agents.acp_agent import ACPAgent as ACPAgentClient
+
         if not self._initialized:
             raise RuntimeError("Agent not initialized")
 
@@ -625,11 +626,44 @@ class AgentPoolACPAgent(ACPAgent):
                 logger.error("Failed to resume session")
                 return ResumeSessionResponse()
 
-            # Schedule post-resume tasks
+            session_pool = self.agent_pool.session_pool
+            if session_pool is not None:
+                try:
+                    await session_pool.create_session(
+                        params.session_id, cwd=session.cwd or params.cwd
+                    )
+                    session_agent = await session_pool.sessions.get_or_create_session_agent(
+                        params.session_id
+                    )
+                    if session.session_mcp_providers:
+                        for provider in session.session_mcp_providers:
+                            if provider not in session_agent.tools.external_providers:
+                                session_agent.tools.add_provider(provider)
+                except Exception:
+                    logger.exception(
+                        "Failed to create per-session agent during resume",
+                        session_id=params.session_id,
+                    )
+
+            models: SessionModelState | None = None
+            mode_state: SessionModeState | None = None
+            config_options: list[SessionConfigOption] = []
+            if isinstance(session.agent, ACPAgentClient) and session.agent._state:
+                models = session.agent._state.models
+                mode_state = session.agent._state.modes
+            else:
+                models = await get_session_model_state(
+                    session.agent, provider_router=self.provider_router
+                )
+                mode_state = await get_session_mode_state(session.agent)
+                config_options = await get_session_config_options(session.agent)
+
             self.tasks.create_task(session.send_available_commands_update())
             self.tasks.create_task(session.agent.load_rules(session.cwd))
             logger.info("Session resumed", session_id=params.session_id)
-            return ResumeSessionResponse()
+            return ResumeSessionResponse(
+                models=models, modes=mode_state, config_options=config_options
+            )
 
         except Exception:
             logger.exception("Failed to resume session", session_id=params.session_id)
@@ -704,6 +738,7 @@ class AgentPoolACPAgent(ACPAgent):
             )
         except ValueError as e:
             from acp.exceptions import RequestError
+
             raise RequestError.invalid_params({"id": params.id}) from e
         return SetProvidersResponse()
 
@@ -713,6 +748,7 @@ class AgentPoolACPAgent(ACPAgent):
             await self.provider_router.disable_provider(params.id)
         except ValueError as e:
             from acp.exceptions import RequestError
+
             raise RequestError.invalid_params({"id": params.id}) from e
         return DisableProvidersResponse()
 
@@ -777,9 +813,7 @@ class AgentPoolACPAgent(ACPAgent):
             with anyio.fail_after(300):
                 return await self.client.send_request("mcp/message", message)
 
-        await self._mcp_manager.create_connection(
-            connection_id, server, send_to_client
-        )
+        await self._mcp_manager.create_connection(connection_id, server, send_to_client)
         logger.info(
             "ACP MCP server connected",
             server_name=server.name,
@@ -796,9 +830,7 @@ class AgentPoolACPAgent(ACPAgent):
             connection_id: The connection ID to disconnect.
         """
         try:
-            await self.client.send_request(
-                "mcp/disconnect", {"connectionId": connection_id}
-            )
+            await self.client.send_request("mcp/disconnect", {"connectionId": connection_id})
         except Exception:
             logger.exception(
                 "Failed to send mcp/disconnect to client",
@@ -1081,6 +1113,7 @@ class AgentPoolACPAgent(ACPAgent):
             if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
                 cfg = pool.manifest.agents[pool.main_agent.name]
                 from agentpool.models.agents import NativeAgentConfig
+
                 if isinstance(cfg, NativeAgentConfig):
                     if cfg.name is None:
                         cfg = cfg.model_copy(update={"name": pool.main_agent.name})
@@ -1088,6 +1121,7 @@ class AgentPoolACPAgent(ACPAgent):
             elif pool.manifest.agents:
                 cfg = next(iter(pool.manifest.agents.values()))
                 from agentpool.models.agents import NativeAgentConfig
+
                 if isinstance(cfg, NativeAgentConfig):
                     self._agent_config = cfg
             else:
