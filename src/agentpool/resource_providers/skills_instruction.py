@@ -93,11 +93,17 @@ class SkillsInstructionProvider(ResourceProvider):
         if injection_mode == "off":
             return ""
 
-        # 2. Collect skills from skill_provider (includes local + MCP) or registry
+        # 2. Collect skills from skill_provider (includes local + MCP) or registry.
+        # Deduplicate by name with first-wins priority (local skills appear first
+        # in the AggregatingResourceProvider's provider order).
         skill_items: list[tuple[str, Any]] = []
+        seen: set[str] = set()
         if self.skill_provider is not None:
             skills = await self.skill_provider.get_skills()
-            skill_items = [(skill.name, skill) for skill in skills]
+            for skill in skills:
+                if skill.name not in seen:
+                    seen.add(skill.name)
+                    skill_items.append((skill.name, skill))
         elif self.registry is not None:
             skill_items = list(self.registry.items())
 
@@ -168,9 +174,12 @@ class SkillsInstructionProvider(ResourceProvider):
 
         attr_str = " " + " ".join(attrs) if attrs else ""
 
-        # Get skill URI/path for reference
+        # Get skill URI/path for reference — use safe_uri to avoid leaking
+        # absolute filesystem paths for local skills
         skill_uri = ""
-        if hasattr(skill, "skill_path"):
+        if hasattr(skill, "safe_uri"):
+            skill_uri = skill.safe_uri
+        elif hasattr(skill, "skill_path"):
             skill_uri = str(skill.skill_path)
 
         # Build inner content
@@ -194,7 +203,9 @@ class SkillsInstructionProvider(ResourceProvider):
 
     def _format_skill_full(self, name: str, skill: Any, instructions: str) -> str:
         """Format full skill content in XML."""
-        path = str(skill.skill_path) if hasattr(skill, "skill_path") else ""
+        path = skill.safe_uri if hasattr(skill, "safe_uri") else (
+            str(skill.skill_path) if hasattr(skill, "skill_path") else ""
+        )
 
         # No leading indentation inside instruction text (LLM-sensitive); outer XML only.
         return f"""<skill_content id="{escape(name)}" name="{escape(name)}">

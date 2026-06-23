@@ -162,8 +162,20 @@ class AggregatingResourceProvider(ResourceProvider):
         return [r for provider in self.providers for r in await provider.get_resources()]
 
     async def get_skills(self) -> list[Skill]:
-        """Get skills from all providers."""
-        return [s for provider in self.providers for s in await provider.get_skills()]
+        """Get skills from all providers, deduplicated by name.
+
+        Providers are iterated in registration order (local first, then MCP).
+        When multiple providers have a skill with the same name, the first
+        occurrence wins — giving local skills priority over remote/MCP skills.
+        """
+        seen: set[str] = set()
+        result: list[Skill] = []
+        for provider in self.providers:
+            for skill in await provider.get_skills():
+                if skill.name not in seen:
+                    seen.add(skill.name)
+                    result.append(skill)
+        return result
 
     async def get_skill_instructions(
         self, skill_name: str, arguments: dict[str, str] | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -86,7 +87,7 @@ async def test_skills_instruction_full(mock_registry, mock_ctx):
     assert '<skill_content id="skill1" name="skill1">' in result
     assert "<skill-instruction>" in result
     assert "instructions1" in result
-    assert "Base directory for this skill: /tmp/skill1/" in result
+    assert "Base directory for this skill: skill://local/skill1/" in result
 
 
 @pytest.mark.asyncio
@@ -156,7 +157,7 @@ async def test_skills_instruction_with_skill_provider(mock_registry, mock_ctx):
     mcp_skill = Skill(
         name="mcp_skill",
         description="MCP skill description",
-        skill_path=UPath("mcp://server/tool"),
+        skill_path=PurePosixPath("mcp://server/tool"),
         instructions="MCP skill instructions",
     )
 
@@ -177,7 +178,7 @@ async def test_skills_instruction_with_skill_provider(mock_registry, mock_ctx):
     assert "<id>mcp-skill</id>" in result
     assert "<name>mcp-skill</name>" in result
     assert "<description>MCP skill description</description>" in result
-    assert "<uri>mcp://server/tool</uri>" in result
+    assert "<uri>mcp:/server/tool</uri>" in result
 
     # Verify skill_provider.get_skills was called
     mock_skill_provider.get_skills.assert_called_once()

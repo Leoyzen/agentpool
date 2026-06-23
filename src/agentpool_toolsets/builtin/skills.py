@@ -286,7 +286,7 @@ async def load_skill(  # noqa: PLR0911
         header = f"# {skill.name} → Reference: {effective_ref_path}"
         parts = [header]
         parts.append(instructions)
-        parts.append(f"Skill directory: {skill.skill_path}")
+        parts.append(f"Skill URI: {skill.safe_uri}")
         if resolved.provider:
             parts.append(
                 f"URI: skill://{resolved.provider}/{resolved.skill_name}/{effective_ref_path}"
@@ -306,7 +306,7 @@ async def load_skill(  # noqa: PLR0911
         if meta:
             parts.append(meta)
         parts.append(instructions)
-        parts.append(f"Skill directory: {skill.skill_path}")
+        parts.append(f"Skill URI: {skill.safe_uri}")
 
         # Add URI information if loaded via URI
         if is_uri and resolved.provider:
@@ -324,7 +324,8 @@ async def list_skills(ctx: AgentContext) -> str:
     if ctx.pool is None:
         return "No agent pool available - skills require pool context"
 
-    # Get skills from both local registry and MCP provider
+    # Get skills from both local registry and MCP provider.
+    # Deduplicate by name: local skills take priority (appear first in list).
     skills = ctx.pool.skills.list_skills()
     # Filter out skills that disable model invocation (for model visibility)
     visible_skills = [s for s in skills if not getattr(s, "disable_model_invocation", False)]
@@ -337,7 +338,13 @@ async def list_skills(ctx: AgentContext) -> str:
         except Exception:
             pass
 
-    all_skills = visible_skills + provider_skills
+    # Merge with dedup: local (visible_skills) first, then provider_skills
+    seen: set[str] = {s.name for s in visible_skills}
+    all_skills = list(visible_skills)
+    for skill in provider_skills:
+        if skill.name not in seen:
+            seen.add(skill.name)
+            all_skills.append(skill)
 
     if not all_skills:
         return "No skills available"

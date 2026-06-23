@@ -508,7 +508,7 @@ class TestLoadSkillBackwardCompatibility:
             assert "# simple-skill" in result
             assert "A simple test skill" in result
             assert "Instructions go here" in result
-            assert "Skill directory:" in result
+            assert "Skill URI:" in result
 
     async def test_bare_name_skill_not_found(
         self,

@@ -288,19 +288,23 @@ class TestSkillNameCollisionResolution:
         mock_skill_collision_local: Skill,
         mock_skill_collision_mcp: Skill,
     ) -> None:
-        """Test that when skills have same name, first provider's skill wins."""
+        """Test that when skills have same name, first provider's skill wins.
+
+        AggregatingResourceProvider deduplicates by name with first-wins priority.
+        Local provider is first, so local skill is kept and MCP is dropped.
+        """
         local_provider = MockLocalResourceProvider(
             name="local", skills=[mock_skill_collision_local]
         )
         mcp_provider = MockMCPResourceProvider(name="mcp", skills=[mock_skill_collision_mcp])
-        # Local provider is first, so its skill should appear first
+        # Local provider is first, so its skill should win
         aggregator = AggregatingResourceProvider(providers=[local_provider, mcp_provider])
 
         skills = await aggregator.get_skills()
 
-        # Both skills should be present (duplicates allowed at this level)
-        assert len(skills) == 2
-        # First skill should be from local provider
+        # Only one skill should be present (deduplicated by name)
+        assert len(skills) == 1
+        # The surviving skill should be from local provider (first in order)
         assert skills[0].name == "shared-skill"
         assert skills[0].metadata["source"] == "local"
 
@@ -309,7 +313,10 @@ class TestSkillNameCollisionResolution:
         mock_skill_collision_local: Skill,
         mock_skill_collision_mcp: Skill,
     ) -> None:
-        """Test that reversing provider order changes which skill comes first."""
+        """Test that reversing provider order changes which skill wins.
+
+        With MCP provider first, the MCP skill wins in name collision.
+        """
         local_provider = MockLocalResourceProvider(
             name="local", skills=[mock_skill_collision_local]
         )
@@ -319,8 +326,9 @@ class TestSkillNameCollisionResolution:
 
         skills = await aggregator.get_skills()
 
-        assert len(skills) == 2
-        # First skill should now be from MCP provider
+        # Only one skill should be present (deduplicated by name)
+        assert len(skills) == 1
+        # The surviving skill should be from MCP provider (first in reversed order)
         assert skills[0].name == "shared-skill"
         assert skills[0].metadata["source"] == "mcp"
 

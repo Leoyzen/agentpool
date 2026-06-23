@@ -89,6 +89,22 @@ class Skill(BaseModel):
                 data["metadata"] = {str(k): str(v) for k, v in meta.items()}
         return data
 
+    @property
+    def safe_uri(self) -> str:
+        """Return a safe ``skill://`` URI for external exposure.
+
+        For local filesystem skills (UPath), returns ``skill://local/{name}``.
+        For virtual/MCP skills (PurePosixPath), returns the existing URI as-is.
+
+        This property ensures that absolute filesystem paths are never leaked
+        to LLM prompts, tool outputs, or API responses.
+        """
+        if type(self.skill_path) is PurePosixPath:
+            # Virtual/MCP skill — already has a skill:// or mcp:// URI
+            return str(self.skill_path)
+        # Local filesystem skill — generate a safe skill:// URI
+        return f"skill://local/{self.name}"
+
     def load_instructions(self) -> str:
         """Lazy-load full instructions from SKILL.md.
 
@@ -250,9 +266,7 @@ def to_prompt(skills: list[Skill]) -> str:
         if skill.argument_hint:
             lines.append(f"<argument-hint>{html.escape(skill.argument_hint)}</argument-hint>")
 
-        skill_md = find_skill_md(skill.skill_path)
-        if skill_md is not None:
-            lines.append(f"<location>{skill_md}</location>")
+        lines.append(f"<uri>{html.escape(skill.safe_uri)}</uri>")
         lines.append("</skill>")
     lines.append("</available_skills>")
     return "\n".join(lines)

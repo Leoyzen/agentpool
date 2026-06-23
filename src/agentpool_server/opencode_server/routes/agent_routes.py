@@ -181,7 +181,7 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
                     SkillInfo(
                         name=skill.name,
                         description=skill.description,
-                        location=str(skill.skill_path),
+                        location=skill.safe_uri,
                         content=content,
                     )
                 )

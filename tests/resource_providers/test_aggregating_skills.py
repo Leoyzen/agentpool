@@ -115,10 +115,11 @@ async def test_get_skills_includes_duplicates_from_different_providers() -> None
     # Get skills
     result = await aggregating.get_skills()
 
-    # Should have both skills (duplicates preserved)
-    assert len(result) == 2
+    # Should have only one skill (deduplicated by name, first-wins)
+    assert len(result) == 1
+    # The surviving skill should be from provider1 (first in order)
     assert skill1 in result
-    assert skill2 in result
+    assert skill2 not in result
 
 
 @pytest.mark.asyncio
