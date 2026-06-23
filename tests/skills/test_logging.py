@@ -112,7 +112,7 @@ class TestCommandRegistryLogging:
         registry = SkillCommandRegistry(skills_registry=skills_registry)
 
         with caplog.at_level(logging.DEBUG):
-            await registry.initialize()
+            await registry.initialize(wait=True)
 
         assert check_log_message(caplog, logging.INFO, "Synced")
         # "initial commands from SkillsRegistry" log was removed in refactoring

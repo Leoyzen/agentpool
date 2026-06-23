@@ -203,7 +203,7 @@ async def test_skill_discovery_50_skills_with_command_registry(tmp_path: str) ->
 
     start = time.perf_counter()
     await skills_registry.discover_skills()
-    await command_registry.initialize()
+    await command_registry.initialize(wait=True)
     end = time.perf_counter()
 
     duration_ms = (end - start) * 1000
@@ -271,7 +271,7 @@ async def test_acp_bridge_bulk_conversion(tmp_path: str) -> None:
 
     # Time only the command registry initialization (conversion)
     start = time.perf_counter()
-    await command_registry.initialize()
+    await command_registry.initialize(wait=True)
     end = time.perf_counter()
 
     duration_ms = (end - start) * 1000
@@ -328,7 +328,7 @@ async def test_agui_bridge_bulk_conversion(tmp_path: str) -> None:
     await skills_registry.discover_skills()
 
     start = time.perf_counter()
-    await command_registry.initialize()
+    await command_registry.initialize(wait=True)
     end = time.perf_counter()
 
     duration_ms = (end - start) * 1000
@@ -406,7 +406,7 @@ async def test_opencode_bridge_bulk_conversion(tmp_path: str) -> None:
     await skills_registry.discover_skills()
 
     start = time.perf_counter()
-    await command_registry.initialize()
+    await command_registry.initialize(wait=True)
     end = time.perf_counter()
 
     duration_ms = (end - start) * 1000

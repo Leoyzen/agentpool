@@ -29,7 +29,7 @@ class TestInitializeWithoutSkillsRegistry:
         registry = SkillCommandRegistry()
 
         # Should complete without errors
-        await registry.initialize()
+        await registry.initialize(wait=True)
 
         assert registry.has_skills is False
         assert registry.has_commands is False
@@ -40,7 +40,7 @@ class TestInitializeWithoutSkillsRegistry:
         registry = SkillCommandRegistry(skills_registry=None)
 
         # Should complete without errors
-        await registry.initialize()
+        await registry.initialize(wait=True)
 
         assert registry.has_skills is False
         assert registry.has_commands is False
@@ -58,7 +58,7 @@ class TestInitializeSyncsExistingSkills:
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
 
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         assert "existing-skill" in command_registry
         assert command_registry.has_commands is True
@@ -81,7 +81,7 @@ class TestInitializeSyncsExistingSkills:
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
 
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         assert len(command_registry) == 3
         assert "skill-1" in command_registry
@@ -94,7 +94,7 @@ class TestInitializeSyncsExistingSkills:
         skills_registry = SkillsRegistry()
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
 
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         assert len(command_registry) == 0
         assert command_registry.has_commands is False
@@ -109,7 +109,7 @@ class TestInitializeSubscribesToEvents:
         skills_registry = SkillsRegistry()
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
 
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Add a skill after initialization
         skill = create_test_skill("runtime-skill", "Added at runtime")
@@ -129,7 +129,7 @@ class TestInitializeSubscribesToEvents:
         skills_registry.register("removable-skill", skill)
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         assert "removable-skill" in command_registry
 
@@ -148,7 +148,7 @@ class TestRuntimeSkillAddition:
         """Test that adding skill at runtime creates a command."""
         skills_registry = SkillsRegistry()
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         skill = create_test_skill("new-skill", "A new skill added at runtime")
         skills_registry.register("new-skill", skill)
@@ -163,7 +163,7 @@ class TestRuntimeSkillAddition:
         """Test adding multiple skills at runtime."""
         skills_registry = SkillsRegistry()
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         for i in range(5):
             skill = create_test_skill(f"dynamic-skill-{i}", f"Dynamic skill {i}")
@@ -185,7 +185,7 @@ class TestRuntimeSkillRemoval:
         skills_registry.register("to-remove", skill)
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         assert "to-remove" in command_registry
 
@@ -202,7 +202,7 @@ class TestRuntimeSkillRemoval:
         skills_registry.register("only-in-registry", skill)
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Manually remove from command_registry first
         del command_registry["only-in-registry"]
@@ -226,7 +226,7 @@ class TestReplaceExistingSkills:
         skills_registry.register("replaceable", original_skill)
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Manually register a different command with same name
         replacement_skill = create_test_skill("replaceable", "Updated description")
@@ -248,7 +248,7 @@ class TestReplaceExistingSkills:
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
 
         # First initialize
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
         assert "duplicate-test" in command_registry
 
         # Register another skill
@@ -256,7 +256,7 @@ class TestReplaceExistingSkills:
         skills_registry.register("another-skill", skill2)
 
         # Initialize again - should not raise error
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         assert "duplicate-test" in command_registry
         assert "another-skill" in command_registry
@@ -277,7 +277,7 @@ class TestCommandChangeBroadcasts:
             broadcasts.append((name, command))
 
         command_registry.on_command_change(on_change)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Clear broadcasts from initialization
         broadcasts.clear()
@@ -305,7 +305,7 @@ class TestCommandChangeBroadcasts:
         def on_change(name: str, command: SkillCommand | None) -> None:
             broadcasts.append((name, command))
 
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
         command_registry.on_command_change(on_change)
 
         # Clear broadcasts from registration
@@ -343,7 +343,7 @@ class TestEventHandlerEdgeCases:
         """Test that _on_skill_removed handles missing command."""
         skills_registry = SkillsRegistry()
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Call handler directly with non-existent name
         command_registry._on_skill_removed("non-existent", None)
@@ -365,7 +365,7 @@ class TestIntegrationScenarios:
         skills_registry.register("persistent", skill1)
 
         command_registry = SkillCommandRegistry(skills_registry=skills_registry)
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Initial state
         assert "persistent" in command_registry
@@ -391,7 +391,7 @@ class TestIntegrationScenarios:
         command_registry = SkillCommandRegistry()
 
         # Should complete without errors
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Manually register a command
         skill = create_test_skill("manual", "Manually registered")
@@ -410,8 +410,8 @@ class TestIntegrationScenarios:
         registry1 = SkillCommandRegistry(skills_registry=skills_registry)
         registry2 = SkillCommandRegistry(skills_registry=skills_registry)
 
-        await registry1.initialize()
-        await registry2.initialize()
+        await registry1.initialize(wait=True)
+        await registry2.initialize(wait=True)
 
         assert "shared" in registry1
         assert "shared" in registry2

@@ -65,6 +65,7 @@ class MCPResourceProvider(ResourceProvider):
         self._resources_cache: list[ResourceInfo] | None = None
         self._skills_cache: list[Skill] | None = None
         self._client_connected = False
+        self._unsupported_methods: set[str] = set()
         self.client = MCPClient(
             config=self.server,
             sampling_callback=self._sampling_callback,
@@ -223,6 +224,10 @@ class MCPResourceProvider(ResourceProvider):
 
     async def refresh_prompts_cache(self) -> None:
         """Refresh the prompts cache by fetching from client."""
+        if "prompts" in self._unsupported_methods:
+            self._prompts_cache = []
+            return
+
         from agentpool.prompts.prompts import MCPClientPrompt
 
         all_prompts: list[MCPClientPrompt] = []
@@ -237,8 +242,10 @@ class MCPResourceProvider(ResourceProvider):
 
             self._prompts_cache = all_prompts
             logger.debug("Refreshed MCP prompts cache", num_prompts=len(all_prompts))
-        except Exception:
+        except Exception as e:
             logger.exception("Failed to refresh MCP prompts cache")
+            if "method_not_found" in str(e):
+                self._unsupported_methods.add("prompts")
             self._prompts_cache = []
 
     async def get_prompts(self) -> list[MCPClientPrompt]:  # type: ignore
@@ -251,6 +258,10 @@ class MCPResourceProvider(ResourceProvider):
 
     async def refresh_resources_cache(self) -> None:
         """Refresh the resources cache by fetching from client."""
+        if "resources" in self._unsupported_methods:
+            self._resources_cache = []
+            return
+
         all_resources: list[ResourceInfo] = []
         try:
             for resource in await self.client.list_resources():
@@ -267,8 +278,10 @@ class MCPResourceProvider(ResourceProvider):
 
             self._resources_cache = all_resources
             logger.debug("Refreshed MCP resources cache", num_resources=len(all_resources))
-        except Exception:
+        except Exception as e:
             logger.exception("Failed to refresh MCP resources cache")
+            if "method_not_found" in str(e):
+                self._unsupported_methods.add("resources")
             self._resources_cache = []
 
     async def get_resources(self) -> list[ResourceInfo]:
@@ -361,13 +374,38 @@ class MCPResourceProvider(ResourceProvider):
         Combines both prompt-based skills (MCP prompts mapped to skills)
         and resource-based skills (FastMCP Skills Provider via skill:// URI).
 
+        Prompt and resource skill discovery run in parallel for performance.
+
         Returns:
             List of Skill objects from both sources
         """
         if self._skills_cache is None:
-            # Get both prompt-based and resource-based skills
-            prompt_skills = await self._get_prompt_skills()
-            resource_skills = await self._get_resource_skills()
+            # Run prompt-based and resource-based skill discovery in parallel
+            prompt_skills_result, resource_skills_result = await asyncio.gather(
+                self._get_prompt_skills(),
+                self._get_resource_skills(),
+                return_exceptions=True,
+            )
+
+            prompt_skills: list[Skill] = (
+                prompt_skills_result if not isinstance(prompt_skills_result, BaseException) else []
+            )
+            resource_skills: list[Skill] = (
+                resource_skills_result
+                if not isinstance(resource_skills_result, BaseException)
+                else []
+            )
+
+            if isinstance(prompt_skills_result, BaseException):
+                logger.warning(
+                    "Failed to discover prompt-based skills",
+                    error=str(prompt_skills_result),
+                )
+            if isinstance(resource_skills_result, BaseException):
+                logger.warning(
+                    "Failed to discover resource-based skills",
+                    error=str(resource_skills_result),
+                )
 
             # Combine and deduplicate by name (resource skills take precedence)
             skill_map: dict[str, Skill] = {}
@@ -457,6 +495,8 @@ class MCPResourceProvider(ResourceProvider):
         """Discover skills via skill:// URI scheme (FastMCP Skills Provider).
 
         Detects resources matching skill://{name}/SKILL.md pattern.
+        Uses resource description or skill name as description — does NOT
+        read SKILL.md content during discovery to avoid N network round-trips.
 
         Returns:
             List of Skill objects from skill:// resources
@@ -485,14 +525,18 @@ class MCPResourceProvider(ResourceProvider):
                     if resource_path not in ("SKILL.md", "_manifest"):
                         continue
 
+                    # Use resource description or default — skip reading SKILL.md
+                    # during discovery to avoid N network round-trips.
+                    # Full description is loaded lazily via _get_skill_description
+                    # when get_skill_instructions() is called.
+                    description = resource.description or f"MCP skill: {skill_name}"
+
                     # Preserve original skill name from MCP resource URI.
                     # FastMCP uses directory names as-is for skill identifiers,
                     # which may contain underscores. The Skill model's field_validator
                     # normalizes name to kebab-case (replacing _ with -), so we store
                     # the original name in metadata for constructing read_resource URIs
                     # that match what the MCP server recognizes.
-                    main_uri = f"skill://{skill_name}/SKILL.md"
-                    description = await self._get_skill_description(skill_name, main_uri)
 
                     # Use PurePosixPath for skill:// URIs since UPath doesn't support
                     # the skill:// protocol. MCP skills are loaded via the provider's

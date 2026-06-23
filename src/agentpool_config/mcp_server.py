@@ -62,6 +62,10 @@ class BaseMCPServerConfig(Schema):
     enabled: bool = Field(default=True, title="Server enabled")
     """Whether this server is currently enabled."""
 
+    lazy: bool = Field(default=False, title="Lazy connection")
+    """If True, defer MCP server connection until first access (tool/skill/prompt/resource).
+    Reduces pool startup time when many MCP servers are configured."""
+
     env: dict[str, str] | None = Field(default=None, title="Environment variables")
     """Environment variables to pass to the server process."""
 

@@ -555,7 +555,7 @@ class TestSkillLifecycle:
 
         # Step 3: Discover skills (simulating filesystem discovery)
         await skills_registry.discover_skills()
-        await command_registry.initialize()
+        await command_registry.initialize(wait=True)
 
         # Step 4: Verify all protocols have the skills
         assert len(skills_registry.list_items()) == 3

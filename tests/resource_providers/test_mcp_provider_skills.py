@@ -315,19 +315,25 @@ async def test_get_resource_skills_ignores_non_skill_resources(mcp_provider):
 
 @pytest.mark.asyncio
 async def test_get_resource_skills_reads_manifest(mcp_provider):
-    """Test that _get_resource_skills() uses description from _get_skill_description."""
+    """Test that _get_resource_skills() uses resource.description, not SKILL.md content.
+
+    Since discovery no longer reads SKILL.md content (to avoid N network round-trips),
+    the description comes from the MCP resource's built-in description field.
+    Full descriptions are loaded lazily via _get_skill_description() only when
+    get_skill_instructions() is called.
+    """
     mock_resource = MagicMock()
     mock_resource.name = "test-skill-manifest"
     mock_resource.uri = "skill://test-skill/_manifest"
     mock_resource.description = "Test skill"
 
     mcp_provider.get_resources = AsyncMock(return_value=[mock_resource])
-    mcp_provider._get_skill_description = AsyncMock(return_value="From manifest")
 
     resource_skills = await mcp_provider._get_resource_skills()
 
     assert len(resource_skills) == 1
-    assert resource_skills[0].description == "From manifest"
+    # Uses resource.description directly — no longer calls _get_skill_description()
+    assert resource_skills[0].description == "Test skill"
 
 
 @pytest.mark.asyncio

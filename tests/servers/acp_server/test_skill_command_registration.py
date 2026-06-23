@@ -13,6 +13,7 @@ from agentpool.skills.command import SkillCommand
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.skill import Skill
 from agentpool_server.acp_server.session import ACPSession
+from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 
 @pytest.fixture
@@ -46,13 +47,19 @@ def agent_pool_with_skill() -> AgentPool:
     return pool
 
 
+def _make_mock_acp_agent():
+    """Create a mock ACP agent with synchronous task execution."""
+    mock = Mock()
+    mock.tasks = Mock()
+    mock.tasks.create_task = lambda coro: coro
+    return mock
+
+
 async def test_skill_commands_registered_in_session(agent_pool_with_skill: AgentPool):
     """Verify skill commands are registered in ACPSession's command_store."""
     agent = agent_pool_with_skill.get_agent("test_agent")
     mock_client = AsyncMock()
-    mock_acp_agent = Mock()
-    mock_acp_agent.tasks = Mock()
-    mock_acp_agent.tasks.create_task = lambda coro: coro
+    mock_acp_agent = _make_mock_acp_agent()
 
     session = ACPSession(
         session_id="test-session",
@@ -72,33 +79,51 @@ async def test_skill_commands_registered_in_session(agent_pool_with_skill: Agent
     assert "test-skill" in command_names, f"test-skill not in {command_names}"
 
 
-async def test_available_commands_update_sent_on_init(agent_pool_with_skill: AgentPool):
-    """Verify available_commands_update is sent during session initialization."""
+async def test_available_commands_update_sent_after_create_session(
+    agent_pool_with_skill: AgentPool,
+):
+    """Verify skill commands are registered and send_available_commands_update works.
+
+    In the real ACP flow, send_available_commands_update is called by
+    new_session/load_session/resume_session (acp_agent.py) AFTER
+    session_manager.create_session() returns — not during session.initialize().
+    This test verifies the end-to-end behavior: after create_session, the
+    session's command_store contains skill commands and can send them.
+    """
     agent = agent_pool_with_skill.get_agent("test_agent")
     mock_client = AsyncMock()
-    mock_acp_agent = Mock()
-    mock_acp_agent.tasks = Mock()
-    mock_acp_agent.tasks.create_task = lambda coro: coro
+    mock_acp_agent = _make_mock_acp_agent()
 
-    session = ACPSession(
-        session_id="test-session",
+    # Mock pool storage to avoid DB dependency in create_session
+    agent_pool_with_skill.storage = Mock()
+    agent_pool_with_skill.storage.generate_session_id = Mock(return_value="test-session-001")
+    agent_pool_with_skill._session_store = None
+
+    # Create session manager
+    manager = ACPSessionManager(pool=agent_pool_with_skill)
+
+    # Create session via the real create_session path (used by new_session/load_session/resume_session)
+    session_id = await manager.create_session(
         agent=agent,
         cwd="/tmp",
         client=mock_client,
         acp_agent=mock_acp_agent,
     )
 
-    # Mock send_available_commands_update to track calls
-    update_called = False
-    original_send = session.send_available_commands_update
+    session = manager.get_session(session_id)
+    assert session is not None, "Session should be created"
 
-    async def tracked_send():
-        nonlocal update_called
-        update_called = True
-        await original_send()
+    # Verify skill command is registered in command_store
+    cmd = session.command_store.get_command("test-skill")
+    assert cmd is not None, "Skill command should be registered after create_session"
 
-    session.send_available_commands_update = tracked_send  # type: ignore[method-assign]
-
-    await session.initialize()
-
-    assert update_called, "send_available_commands_update should be called during initialize"
+    # Verify send_available_commands_update sends the notification
+    await session.send_available_commands_update()
+    mock_client.session_update.assert_called()
+    notification = mock_client.session_update.call_args[0][0]
+    assert notification.session_id == session_id
+    update = notification.update
+    assert update.session_update == "available_commands_update"
+    commands = update.available_commands
+    command_names = [c.name for c in commands]
+    assert "test-skill" in command_names, f"test-skill not in {command_names}"

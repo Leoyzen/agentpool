@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Literal
 
 from agentpool.resource_providers.base import ResourceChangeEvent, ResourceProvider
@@ -164,14 +165,24 @@ class AggregatingResourceProvider(ResourceProvider):
     async def get_skills(self) -> list[Skill]:
         """Get skills from all providers, deduplicated by name.
 
-        Providers are iterated in registration order (local first, then MCP).
-        When multiple providers have a skill with the same name, the first
-        occurrence wins — giving local skills priority over remote/MCP skills.
+        Providers are queried in parallel for performance. When multiple
+        providers have a skill with the same name, the first occurrence wins
+        — giving local skills priority over remote/MCP skills (local providers
+        appear first in the provider list, and seen-set deduplication is
+        order-preserving).
         """
+        # Query all providers in parallel
+        results = await asyncio.gather(
+            *(provider.get_skills() for provider in self.providers),
+            return_exceptions=True,
+        )
+
         seen: set[str] = set()
         result: list[Skill] = []
-        for provider in self.providers:
-            for skill in await provider.get_skills():
+        for _provider, provider_skills in zip(self.providers, results, strict=False):
+            if isinstance(provider_skills, BaseException):
+                continue
+            for skill in provider_skills:
                 if skill.name not in seen:
                     seen.add(skill.name)
                     result.append(skill)

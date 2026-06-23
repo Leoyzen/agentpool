@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import time
 from typing import TYPE_CHECKING, Any
@@ -119,18 +120,29 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
         else:
             raise self._error_class(f"Item not found: {key}")
 
-    async def initialize(self) -> None:
+    async def initialize(self, *, wait: bool = False) -> None:
         """Initialize by syncing with SkillsRegistry and subscribing to events.
 
         This method:
-        1. Syncs existing skills from SkillsRegistry and/or skill_provider
+        1. Fires async background sync of existing skills from SkillsRegistry
+           and/or skill_provider — non-blocking by default (wait=False).
+           Failures are logged via add_done_callback, not propagated.
         2. Subscribes to future skill change events from SkillsRegistry
         3. Subscribes to skill provider changes if skill_provider is set
 
+        Args:
+            wait: If True, await the sync completion before returning.
+                  Default False — sync runs in background for fast pool init.
+
         Should be called after SkillsRegistry has loaded its initial skills.
         """
-        # Always sync commands (from both registry and provider)
-        await self._sync_commands()
+        if wait:
+            await self._sync_commands()
+        else:
+            # Fire sync as background task — don't block pool init on MCP skill discovery.
+            # Failures are logged via add_done_callback, not propagated.
+            task = asyncio.create_task(self._sync_commands())
+            task.add_done_callback(self._on_sync_complete)
 
         if self._skills_registry is not None:
             self._subscribe_to_registry()
@@ -138,6 +150,13 @@ class SkillCommandRegistry(BaseRegistry[str, "SkillCommand"]):
         # Subscribe to skill provider changes for dynamic skill discovery
         if self._skill_provider is not None:
             self._subscribe_to_skill_provider()
+
+    def _on_sync_complete(self, task: asyncio.Task[None]) -> None:
+        """Log completion or failure of background _sync_commands task."""
+        try:
+            task.result()
+        except Exception:
+            logger.exception("Background skill command sync failed")
 
     def _subscribe_to_registry(self) -> None:
         """Subscribe to SkillsRegistry change events."""
