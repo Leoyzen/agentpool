@@ -308,13 +308,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 for provider in acp_session.session_mcp_providers:
                     if provider not in session_agent.tools.external_providers:
                         session_agent.tools.add_provider(provider)
-                # Also sync to SessionState so child sessions (subagents) inherit
-                # these providers via SessionController's parent-child copy.
-                session_state = session_pool.sessions._sessions.get(session_id)
-                if session_state is not None:
-                    session_state.resource_providers = list(
-                        acp_session.session_mcp_providers
-                    )
+                # Child sessions inherit parent's session-level MCP providers
+                # via agent sharing in get_or_create_session_agent() — the
+                # child reuses the parent's per-session agent which already
+                # has these providers registered.
                 logger.info(
                     "Added session MCP providers to SessionPool agent",
                     session_id=session_id,

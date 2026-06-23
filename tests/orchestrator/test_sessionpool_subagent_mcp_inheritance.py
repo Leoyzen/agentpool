@@ -1,19 +1,12 @@
 """Integration tests for subagent session agent behavior.
 
-This verifies that child sessions reuse the shared pool-level agent
-(base_agent) and do NOT inherit parent session's dynamically-added
-MCP providers.
+This verifies that child sessions get a lightweight per-session agent
+that inherits the parent's session-level MCP providers without sharing
+chat history, agent state, or mutating the shared pool-level base_agent.
 
-Pool-level MCP providers (from YAML ``mcp_servers``) are already present
-on the shared ``base_agent``, so child sessions have access to those.
-
-Session-level MCP providers (added dynamically via ACP mcp-over-acp,
-e.g. ``workspace-fs``) are per-session: child sessions created via ACP
-``session/new`` receive their own independent MCP connections.
-Inheriting the parent's session-level providers would register duplicate
-``FunctionToolset`` instances on the shared ``base_agent``, causing
-pydantic-ai ``CombinedToolset`` to raise a ``UserError`` for conflicting
-tool names.
+The child agent shares base_agent.mcp to avoid duplicate MCP subprocess
+spawning.  is_per_session_agent is set to False so close_session() on
+the child does NOT call agent.__aexit__().
 """
 
 from __future__ import annotations
@@ -21,7 +14,6 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 import pytest
-from pydantic_ai.models.test import TestModel
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
 from agentpool.resource_providers import ResourceProvider
@@ -72,22 +64,12 @@ def _mock_tool() -> str:
 
 
 @pytest.mark.integration
-async def test_child_session_does_not_inherit_parent_session_mcp_providers() -> None:
-    """Child session agent does NOT inherit parent's session-level MCP providers.
+async def test_child_session_agent_inherits_parent_mcp_providers() -> None:
+    """Child session gets a per-session agent with parent's MCP providers.
 
-    Child sessions reuse the shared pool-level agent (base_agent), which
-    already has pool-level MCP providers. Session-level MCP providers
-    (added dynamically to the parent via ACP mcp-over-acp) are NOT
-    inherited — child sessions get their own via ACP session/new.
-
-    Steps:
-    1. Create AgentPool with a NativeAgentConfig agent using TestModel.
-    2. Create a parent session and get its per-session agent.
-    3. Add a MockMCPResourceProvider ONLY to the parent agent.
-    4. Verify the shared agent does NOT have the provider.
-    5. Create a child session with parent_session_id set.
-    6. Get the child session's agent — should NOT have the parent-only
-       MCP provider (child uses shared base_agent, no inheritance).
+    The child agent is a NEW object (not the parent's agent), so chat
+    history and agent state are NOT shared.  Only kind=='mcp' providers
+    are inherited.
     """
     agent_config = NativeAgentConfig(
         name="test_agent",
@@ -104,16 +86,15 @@ async def test_child_session_does_not_inherit_parent_session_mcp_providers() -> 
         parent_session_id = "parent-mcp-inherit-test"
         child_session_id = "child-mcp-inherit-test"
 
-        # Get the shared pool-level agent
         base_agent = pool.get_agent("test_agent")
 
-        # Step 1: Create parent session and get its per-session agent
+        # Create parent session and get its per-session agent
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
         parent_agent = await session_pool.sessions.get_or_create_session_agent(
             parent_session_id
         )
 
-        # Step 2: Add a mock MCP provider ONLY to the parent agent
+        # Add a mock MCP provider ONLY to the parent agent
         mock_tool = Tool.from_callable(_mock_tool, name_override="mock_tool")
         mock_provider = MockMCPResourceProvider(
             name="mock_mcp_provider",
@@ -122,46 +103,43 @@ async def test_child_session_does_not_inherit_parent_session_mcp_providers() -> 
         parent_agent.tools.add_provider(mock_provider)
 
         # Verify parent has the provider
-        assert mock_provider in parent_agent.tools.external_providers, (
-            "Parent agent's external_providers should contain the mock MCP provider"
-        )
+        assert mock_provider in parent_agent.tools.external_providers
 
-        # Verify shared agent does NOT have the provider
-        assert mock_provider not in base_agent.tools.external_providers, (
-            "Shared agent must NOT have the parent-only MCP provider"
-        )
+        # Verify base_agent does NOT have the provider
+        assert mock_provider not in base_agent.tools.external_providers
 
-        # Step 3: Create child session with parent_session_id
+        # Create child session
         await session_pool.create_session(
             child_session_id,
             parent_session_id=parent_session_id,
             agent_name="test_agent",
         )
 
-        # Step 4: Get the child session's agent
-        # Child reuses shared base_agent — no MCP inheritance
         child_agent = await session_pool.sessions.get_or_create_session_agent(
             child_session_id
         )
 
-        # Step 5: Assert child does NOT have the parent-only MCP provider
-        assert mock_provider not in child_agent.tools.external_providers, (
-            "Child agent must NOT inherit parent-only MCP providers. "
-            "Pool-level providers are already on base_agent; session-level "
-            "providers are per-session and child gets its own via ACP."
+        # Child is a NEW agent object (not parent's agent)
+        assert child_agent is not parent_agent, (
+            "Child must have its own per-session agent, not share parent's"
+        )
+
+        # Child inherits parent's MCP provider
+        assert mock_provider in child_agent.tools.external_providers, (
+            "Child agent should inherit parent's kind=='mcp' providers"
+        )
+
+        # base_agent is NOT mutated
+        assert mock_provider not in base_agent.tools.external_providers, (
+            "base_agent must NOT be mutated"
         )
 
         await session_pool.shutdown()
 
 
 @pytest.mark.integration
-async def test_child_session_does_not_inherit_any_session_providers() -> None:
-    """Child session agent inherits NEITHER MCP nor non-MCP providers from parent.
-
-    Both MCP and non-MCP providers added dynamically to the parent
-    session are per-session and should not leak to child sessions.
-    Pool-level providers are already on the shared base_agent.
-    """
+async def test_child_session_agent_does_not_inherit_non_mcp_providers() -> None:
+    """Child session inherits only kind=='mcp' providers, not non-MCP ones."""
     from agentpool.resource_providers import StaticResourceProvider
 
     agent_config = NativeAgentConfig(
@@ -179,16 +157,14 @@ async def test_child_session_does_not_inherit_any_session_providers() -> None:
         parent_session_id = "parent-non-mcp-test"
         child_session_id = "child-non-mcp-test"
 
-        # Get the shared pool-level agent
         base_agent = pool.get_agent("test_agent")
 
-        # Create parent session and get its per-session agent
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
         parent_agent = await session_pool.sessions.get_or_create_session_agent(
             parent_session_id
         )
 
-        # Add a non-MCP provider (e.g., lead-agent-specific tools)
+        # Add non-MCP provider to parent
         non_mcp_tool = Tool.from_callable(_mock_tool, name_override="lead_agent_tool")
         non_mcp_provider = StaticResourceProvider(
             name="lead_agent_tools",
@@ -196,7 +172,7 @@ async def test_child_session_does_not_inherit_any_session_providers() -> None:
         )
         parent_agent.tools.add_provider(non_mcp_provider)
 
-        # Add an MCP provider to parent only
+        # Add MCP provider to parent
         mcp_tool = Tool.from_callable(_mock_tool, name_override="mcp_tool")
         mcp_provider = MockMCPResourceProvider(
             name="mock_mcp_provider",
@@ -204,48 +180,31 @@ async def test_child_session_does_not_inherit_any_session_providers() -> None:
         )
         parent_agent.tools.add_provider(mcp_provider)
 
-        # Verify parent has both new providers (in addition to pool-level ones)
-        assert non_mcp_provider in parent_agent.tools.external_providers, (
-            "Parent should have the non-MCP provider"
-        )
-        assert mcp_provider in parent_agent.tools.external_providers, (
-            "Parent should have the MCP provider"
-        )
-
-        # Create child session
+        # Create child
         await session_pool.create_session(
             child_session_id,
             parent_session_id=parent_session_id,
             agent_name="test_agent",
         )
-
-        # Get child agent (returns shared pool-level agent)
         child_agent = await session_pool.sessions.get_or_create_session_agent(
             child_session_id
         )
 
-        # Child should inherit NEITHER provider type
-        assert mcp_provider not in child_agent.tools.external_providers, (
-            "Child should NOT inherit session-level MCP providers"
+        # Child inherits MCP provider
+        assert mcp_provider in child_agent.tools.external_providers, (
+            "Child must inherit kind=='mcp' providers"
         )
+        # Child does NOT inherit non-MCP provider
         assert non_mcp_provider not in child_agent.tools.external_providers, (
-            "Child should NOT inherit non-MCP (lead-agent-specific) providers"
+            "Child must NOT inherit non-MCP providers"
         )
 
         await session_pool.shutdown()
 
 
 @pytest.mark.integration
-async def test_child_session_uses_shared_agent_without_inheritance() -> None:
-    """Child session uses shared base_agent without inheriting parent providers.
-
-    Child sessions reuse the shared pool-level agent (base_agent).
-    Session-level MCP providers added dynamically to the parent
-    (e.g., via ACP session_mcp_providers) are NOT copied to the child.
-    This is intentional: child sessions get their own MCP connections
-    via ACP session/new, and inheriting would cause duplicate tool
-    registrations on the shared base_agent.
-    """
+async def test_child_session_agent_shares_base_agent_mcp() -> None:
+    """Child session agent shares base_agent.mcp to avoid duplicate processes."""
     agent_config = NativeAgentConfig(
         name="test_agent",
         model="test",
@@ -258,55 +217,73 @@ async def test_child_session_uses_shared_agent_without_inheritance() -> None:
         assert session_pool is not None
         await session_pool.start()
 
-        parent_session_id = "parent-no-inherit-test"
-        child_session_id = "child-no-inherit-test"
+        parent_session_id = "parent-mcp-share-test"
+        child_session_id = "child-mcp-share-test"
 
-        # Get the shared pool-level agent — we do NOT add providers to it
         base_agent = pool.get_agent("test_agent")
 
-        # Create parent session and get its per-session agent
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
-        parent_agent = await session_pool.sessions.get_or_create_session_agent(
-            parent_session_id
-        )
+        await session_pool.sessions.get_or_create_session_agent(parent_session_id)
 
-        # Add a mock MCP provider ONLY to the parent agent (NOT shared agent)
-        mock_tool = Tool.from_callable(_mock_tool, name_override="noinherit_mcp_tool")
-        mock_provider = MockMCPResourceProvider(
-            name="noinherit_mcp_provider",
-            tools=[mock_tool],
-        )
-        parent_agent.tools.add_provider(mock_provider)
-
-        # Verify parent has the provider
-        assert mock_provider in parent_agent.tools.external_providers, (
-            "Parent agent should have the mock MCP provider"
-        )
-
-        # CRITICAL: Verify shared agent does NOT have this provider
-        assert mock_provider not in base_agent.tools.external_providers, (
-            "Shared agent must NOT have the parent-only MCP provider"
-        )
-
-        # Create child session with parent_session_id
+        # Create child
         await session_pool.create_session(
             child_session_id,
             parent_session_id=parent_session_id,
             agent_name="test_agent",
         )
-
-        # Get child session agent — reuses shared base_agent, no inheritance
         child_agent = await session_pool.sessions.get_or_create_session_agent(
             child_session_id
         )
 
-        # Child should NOT inherit parent-only MCP providers.
-        # Pool-level providers are already on base_agent; session-level
-        # providers are per-session and child gets its own via ACP.
-        assert mock_provider not in child_agent.tools.external_providers, (
-            "Child session must NOT inherit parent-only MCP providers. "
-            "Child reuses shared base_agent; session-level providers are "
-            "per-session and would cause duplicate tool registrations."
+        # Child shares base_agent's MCP manager
+        assert child_agent.mcp is base_agent.mcp, (
+            "Child agent must share base_agent.mcp to avoid duplicate MCP processes"
+        )
+
+        await session_pool.shutdown()
+
+
+@pytest.mark.integration
+async def test_child_session_is_not_per_session_agent() -> None:
+    """Child session has is_per_session_agent=False for cleanup safety."""
+    agent_config = NativeAgentConfig(
+        name="test_agent",
+        model="test",
+        system_prompt="You are a test agent",
+    )
+    manifest = AgentsManifest(agents={"test_agent": agent_config})
+
+    async with AgentPool(manifest) as pool:
+        session_pool = pool.session_pool
+        assert session_pool is not None
+        await session_pool.start()
+
+        parent_session_id = "parent-cleanup-test"
+        child_session_id = "child-cleanup-test"
+
+        await session_pool.create_session(parent_session_id, agent_name="test_agent")
+        await session_pool.sessions.get_or_create_session_agent(parent_session_id)
+
+        await session_pool.create_session(
+            child_session_id,
+            parent_session_id=parent_session_id,
+            agent_name="test_agent",
+        )
+        await session_pool.sessions.get_or_create_session_agent(child_session_id)
+
+        child_state = session_pool.sessions._sessions.get(child_session_id)
+        assert child_state is not None
+        assert child_state.is_per_session_agent is False, (
+            "Child session must have is_per_session_agent=False "
+            "so close_session() does not call agent.__aexit__()"
+        )
+
+        # Close child — should not close parent's MCP
+        await session_pool.close_session(child_session_id)
+
+        parent_state = session_pool.sessions._sessions.get(parent_session_id)
+        assert parent_state is not None, (
+            "Parent session should still exist after child close"
         )
 
         await session_pool.shutdown()
