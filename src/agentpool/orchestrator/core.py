@@ -732,7 +732,16 @@ class SessionController:
                 # AgentContext.internal_fs is visible to pool.get_agent() callers.
                 agent._internal_fs = base_agent._internal_fs
                 await agent.__aenter__()
-                # Add pool-level providers to per-session agent
+                # Load conversation history into per-session agent from storage.
+                # Do NOT copy from shared base_agent to avoid cross-session pollution.
+                try:
+                    await agent.load_session(session_id)
+                except Exception:
+                    logger.exception(
+                        "Failed to load session for per-session agent",
+                        session_id=session_id,
+                    )
+                   # Add pool-level providers to per-session agent
                 # (same as shared agents get in AgentPool.__aenter__)
                 if self.pool is not None:
                     agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())

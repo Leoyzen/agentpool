@@ -253,9 +253,9 @@ class ACPSessionManager:
         self._acp_sessions[session_id] = session
         logger.info("Resumed ACP session", session_id=session_id)
 
-        # Load conversation history into the per-session agent
-        if not await session.agent.load_session(session_id):
-            logger.warning("Agent failed to load session state", session_id=session_id)
+        # Conversation history is loaded by SessionPool's get_or_create_session_agent()
+        # when it creates the per-session agent. Loading history here would
+        # pollute the shared agent (session.agent) across sessions.
 
         return session
 
