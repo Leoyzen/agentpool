@@ -351,7 +351,7 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     prompt_blocks = [TextContentBlock(text="hello")]
     await handler.handle_prompt("resume-test-session", prompt_blocks)
 
-    # For active (non-checkpointed) sessions, create_session should be called
-    # and resume_session should NOT be called
+    # For active sessions not in memory, resume_session IS now called
+    # to restore conversation history (previously only checkpointed were resumed)
+    mock_session_manager.resume_session.assert_awaited()
     pool._session_pool.create_session.assert_awaited()
-    mock_session_manager.resume_session.assert_not_awaited()

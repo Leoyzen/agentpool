@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from acp import Client
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
-    from agentpool.orchestrator.core import EventBus, EventEnvelope
+    from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionState
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
@@ -261,17 +261,14 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 if stored_data is not None:
                     if stored_data.cwd:
                         cwd = stored_data.cwd
-                    # If session is checkpointed and not active, resume it.
-                    # Resuming restores the session wrapper without replaying
-                    # message history (the client already has the messages).
-                    if (
-                        stored_data.status == "checkpointed"
-                        and self.session_manager.get_session(session_id) is None
-                        and self.acp_agent is not None
-                    ):
+                    # If session exists in storage but not active in memory, resume it.
+                    # This handles both checkpointed sessions and normal sessions that
+                    # lost in-memory state due to server restart/pool swap/TTL expiry.
+                    if self.session_manager.get_session(session_id) is None and self.acp_agent is not None:
                         logger.info(
-                            "Resuming checkpointed session",
+                            "Resuming session",
                             session_id=session_id,
+                            status=stored_data.status,
                         )
                         await self.session_manager.resume_session(
                             session_id=session_id,
@@ -284,7 +281,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                         # Re-subscribe EventBus for resumed session
                         await self._ensure_event_consumer(session_id)
             except Exception:  # noqa: BLE001
-                pass  # Use default cwd
+                logger.exception(
+                    "Failed to load/resume session from store",
+                    session_id=session_id,
+                )
 
         # Ensure the session exists in the SessionPool (pass recovered cwd as metadata).
         # create_session is idempotent — no-op if the session already exists.

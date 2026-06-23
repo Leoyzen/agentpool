@@ -133,6 +133,12 @@ class SQLStorageConfig(BaseStorageProviderConfig):
 
         return SQLModelProvider(self)
 
+    def get_session_store(self) -> Any:
+        """Create a SQL-based session store using this config's database."""
+        from agentpool_storage.session_store import SQLSessionStore
+
+        return SQLSessionStore(self)
+
 
 class FileStorageConfig(BaseStorageProviderConfig):
     """File storage configuration."""
