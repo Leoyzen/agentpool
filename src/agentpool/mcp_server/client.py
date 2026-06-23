@@ -115,6 +115,24 @@ class MCPClient:
         if not self.connected:
             raise RuntimeError("Not connected to MCP server")
 
+    def _has_server_capability(self, capability: str) -> bool:
+        """Check if the server declared a specific capability during initialization.
+
+        Args:
+            capability: Capability field name (e.g. 'resources', 'prompts', 'tools').
+
+        Returns:
+            True if the server declared this capability, False otherwise.
+            Returns False if not yet connected or not yet initialized.
+        """
+        try:
+            caps = self._client.session.get_server_capabilities()
+        except RuntimeError:
+            return False
+        if caps is None:
+            return False
+        return getattr(caps, capability, None) is not None
+
     async def __aenter__(self) -> Self:
         """Enter context manager."""
         try:
@@ -306,6 +324,8 @@ class MCPClient:
     async def list_prompts(self) -> list[MCPPrompt]:
         """Get available prompts from the server."""
         self._ensure_connected()
+        if not self._has_server_capability("prompts"):
+            return []
         try:
             return await self._client.list_prompts()
         except Exception as e:  # noqa: BLE001
@@ -315,6 +335,8 @@ class MCPClient:
     async def list_resources(self) -> list[MCPResource]:
         """Get available resources from the server."""
         self._ensure_connected()
+        if not self._has_server_capability("resources"):
+            return []
         try:
             return await self._client.list_resources()
         except Exception as e:
