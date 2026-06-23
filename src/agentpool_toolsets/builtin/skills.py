@@ -93,8 +93,11 @@ async def _load_reference_content(
 
     from agentpool.skills.exceptions import ReferenceNotFoundError
 
-    # For virtual paths (PurePosixPath like skill:// URIs), use the provider
-    if isinstance(skill.skill_path, PurePosixPath) and pool is not None:
+    # For virtual paths (PurePosixPath like skill:// URIs), use the provider.
+    # Use exact type check (not isinstance) to avoid catching UPath subclasses.
+    # UPath is a subclass of PurePosixPath; isinstance would match filesystem skills too,
+    # routing them through the provider which hardcodes references/ prefix.
+    if type(skill.skill_path) is PurePosixPath and pool is not None:
         if pool.skill_provider is not None:
             # Always pass the canonical kebab-case skill.name to the aggregating
             # provider, which matches against Skill.name (always kebab-case).

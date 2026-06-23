@@ -370,6 +370,33 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
+def test_skill_with_root_asset(tmp_path: Path) -> UPath:
+    """Create a test skill with a file at skill root (not in references/).
+
+    This fixture is used to verify that _load_reference_content can load files
+    from the skill directory root via the UPath (direct filesystem) branch, rather
+    than being incorrectly routed through the provider branch which hardcodes
+    references/ prefix.
+    """
+    skill_dir = tmp_path / "expert-knowledge"
+    skill_dir.mkdir()
+
+    smd_content = """---
+name: expert-knowledge
+description: Test skill with assets at root
+---
+"""
+    (skill_dir / "SKILL.md").write_text(smd_content)
+
+    # Create file at skill root (not in references/)
+    assets_dir = skill_dir / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "fta_template.md").write_text("# FTA Template\n\nTemplate content here.")
+
+    return UPath(skill_dir)
+
+
+@pytest.fixture
 def test_skill_with_args(tmp_path: Path) -> UPath:
     """Create a test skill directory with argument placeholders."""
     skill_dir = tmp_path / "arg-skill"
@@ -985,3 +1012,102 @@ class TestListSkillsIntegration:
             assert "Available skills:" in result
             assert "simple-skill" in result
             assert "A simple test skill" in result
+
+
+# =============================================================================
+# Test Class: UPathReferenceLoading
+# =============================================================================
+
+
+class TestUPathReferenceLoading:
+    """Test _load_reference_content with UPath (local filesystem) skills.
+
+    Verifies that UPath skills correctly use the direct filesystem branch,
+    which loads files relative to the skill directory root, rather than being
+    incorrectly routed through the provider branch which hardcodes references/.
+    """
+
+    @pytest.mark.asyncio
+    async def test_load_reference_from_skill_root_via_upath(self) -> None:
+        """Load a reference file at skill root via UPath direct branch.
+
+        The file is at <skill_dir>/assets/fta_template.md, NOT in references/.
+        This must go through the UPath direct filesystem branch.
+        """
+        from unittest.mock import MagicMock
+
+        from agentpool_toolsets.builtin.skills import _load_reference_content
+
+        import tempfile
+        from pathlib import Path
+
+        # Create a real temp skill directory with a file at root level
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            skill_dir = Path(tmp_dir) / "test-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("---\nname: test-skill\ndescription: Test\n---")
+            assets_dir = skill_dir / "assets"
+            assets_dir.mkdir()
+            (assets_dir / "guide.md").write_text("# Guide\n\nContent from root asset.")
+
+            skill = MagicMock()
+            skill.name = "test-skill"
+            skill.skill_path = UPath(skill_dir)
+
+            # pool with skill_provider != None to verify UPath is NOT routed
+            # through the provider branch (file is not in references/)
+            mock_provider = MagicMock()
+            mock_provider.read_reference = None  # would fail if called
+            pool = MagicMock()
+            pool.skill_provider = mock_provider
+
+            result = await _load_reference_content(skill, "assets/guide.md", pool)
+
+            assert "# Guide" in result
+            assert "Content from root asset" in result
+            assert "Reference: assets/guide.md" in result
+
+    @pytest.mark.asyncio
+    async def test_upath_does_not_route_to_provider(self) -> None:
+        """Verify UPath skills are NOT routed through the provider branch.
+
+        The provider branch would look in references/ subdirectory.
+        The file only exists at skill root, so if incorrectly routed through
+        provider, it would fail with ReferenceNotFoundError.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from agentpool_toolsets.builtin.skills import _load_reference_content
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            skill_dir = Path(tmp_dir) / "test-skill-2"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("---\nname: test-skill-2\ndescription: Test\n---")
+            (skill_dir / "root_file.md").write_text("# Root level content")
+
+            skill = MagicMock()
+            skill.name = "test-skill-2"
+            skill.skill_path = UPath(skill_dir)
+
+            # Track whether provider.read_reference was called
+            provider_called = False
+
+            async def fail_if_called(*args, **kwargs) -> tuple[bytes, str]:
+                nonlocal provider_called
+                provider_called = True
+                msg = "Provider should NOT be called for UPath skills"
+                raise RuntimeError(msg)
+
+            mock_provider = MagicMock()
+            mock_provider.read_reference = AsyncMock(side_effect=fail_if_called)
+            pool = MagicMock()
+            pool.skill_provider = mock_provider
+
+            result = await _load_reference_content(skill, "root_file.md", pool)
+
+            assert "Root level content" in result
+            assert not provider_called, "Provider was incorrectly called for UPath skill"
+            mock_provider.read_reference.assert_not_called()
