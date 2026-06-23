@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Self, cast
 
 import anyio
@@ -20,13 +21,51 @@ if TYPE_CHECKING:
 
     from mcp import types
     from mcp.shared.context import RequestContext
-    from mcp.types import SamplingMessage
+    from mcp.types import ElicitRequestParams, ElicitResult, ErrorData, SamplingMessage
     from pydantic_ai.capabilities import MCP
 
+    from agentpool.ui.base import InputProvider
     from agentpool_config.mcp_server import MCPServerConfig
 
 
 logger = get_logger(__name__)
+
+# ContextVar for the current session's InputProvider, set by the run loop
+# before agent execution.  Read by the PydanticAI MCP elicitation callback
+# so that agent-level MCP servers can delegate to ACPInputProvider.
+_current_input_provider: ContextVar[InputProvider | None] = ContextVar(
+    "_current_input_provider", default=None
+)
+
+
+def set_current_input_provider(provider: InputProvider | None) -> None:
+    """Set the InputProvider for the current async context."""
+    _current_input_provider.set(provider)
+
+
+def _make_pydantic_ai_elicitation_callback() -> (
+    Any
+):
+    """Create an elicitation callback for PydanticAI MCP capabilities.
+
+    The callback reads the current InputProvider from the ContextVar
+    and delegates to ``InputProvider.get_elicitation()``.
+    """
+    from mcp.types import ElicitResult as MCPElicitResult
+
+    async def _elicitation_callback(
+        context: RequestContext[Any, Any],
+        params: ElicitRequestParams,
+    ) -> MCPElicitResult | ErrorData:
+        provider = _current_input_provider.get()
+        if provider is None:
+            logger.warning(
+                "No InputProvider in context for MCP elicitation, declining",
+            )
+            return MCPElicitResult(action="decline")
+        return await provider.get_elicitation(params)  # type: ignore[return-value]
+
+    return _elicitation_callback
 
 
 class MCPManager:
@@ -226,7 +265,9 @@ class MCPManager:
             if isinstance(server, AcpMCPServerConfig):
                 continue
 
-            pydantic_server = server.to_pydantic_ai()
+            pydantic_server = server.to_pydantic_ai(
+                elicitation_callback=_make_pydantic_ai_elicitation_callback()
+            )
 
             # Derive a URL for the capability constructor. For HTTP-based
             # transports we use the real endpoint; for stdio we synthesise

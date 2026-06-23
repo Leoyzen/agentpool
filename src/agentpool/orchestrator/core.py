@@ -1456,6 +1456,13 @@ class TurnRunner:
         """
         # Extract input_provider for agent creation, pass remaining kwargs to _run_stream_once
         input_provider = kwargs.pop("input_provider", None)
+        # Set ContextVar for PydanticAI MCP elicitation callback, so that
+        # agent-level MCP servers can resolve the InputProvider at runtime.
+        _elicitation_token = None
+        if input_provider is not None:
+            from agentpool.mcp_server.manager import _current_input_provider
+
+            _elicitation_token = _current_input_provider.set(input_provider)
         agent = await self.sessions.get_or_create_session_agent(
             session_id, input_provider=input_provider
         )
@@ -1649,6 +1656,11 @@ class TurnRunner:
 
             self._runs.pop(run_ctx.run_id, None)
             _current_run_ctx_var.set(None)
+            # Reset elicitation InputProvider ContextVar
+            if _elicitation_token is not None:
+                from agentpool.mcp_server.manager import _current_input_provider
+
+                _current_input_provider.reset(_elicitation_token)
             if _session is not None:
                 _session._turn_owner_task = None
             _in_turn_context.set(False)
