@@ -54,6 +54,7 @@ class RunHandle:
     complete_event: asyncio.Event = field(default_factory=asyncio.Event)
     _cleanup_callback: Callable[[str], None] | None = None
     active_agent_run: AgentRun[Any, Any] | None = None
+    _cancel_fn: Callable[[], None] | None = None
 
     def start(self, task: asyncio.Task[Any] | None = None) -> None:
         """Transition the run to running and store the task.
@@ -118,11 +119,20 @@ class RunHandle:
     def cancel(self) -> None:
         """Cancel the run without triggering synchronous cleanup.
 
-        Sets the cancelled flag on the run context and cancels the
-        underlying task. Cleanup is deferred to the caller or task
-        done-callback to avoid re-entrant deadlocks.
+        Delegates to agent's interrupt() method if available (for proper
+        agent-type-specific cancellation), otherwise falls back to cancelling
+        run_ctx.current_task.
+
+        Sets the cancelled flag on the run context.
+        Cleanup is deferred to the caller or task done-callback
+        to avoid re-entrant deadlocks.
         """
         self.run_ctx.cancelled = True
+
+        if self._cancel_fn is not None:
+            self._cancel_fn()
+            return
+
         task = self.run_ctx.current_task
         if task is not None and not task.done():
             task.cancel()

@@ -683,13 +683,11 @@ class AgentPoolACPAgent(ACPAgent):
         """Cancel operations for a session."""
         logger.info("Cancelling session", session_id=params.session_id)
         try:
-            # Get session and cancel it
-            if session := self.session_manager.get_session(params.session_id):
+            if self._protocol_handler is not None:
+                await self._protocol_handler.cancel_session(params.session_id)
+            elif session := self.session_manager.get_session(params.session_id):
                 await session.cancel()
-                logger.info("Cancelled operations", session_id=params.session_id)
-            else:
-                logger.warning("Session not found for cancellation", session_id=params.session_id)
-
+            logger.info("Cancelled operations", session_id=params.session_id)
         except Exception:
             logger.exception("Failed to cancel session", session_id=params.session_id)
 

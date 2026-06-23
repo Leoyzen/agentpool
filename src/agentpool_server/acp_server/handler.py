@@ -410,6 +410,22 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
         return self._prompt_response(stop_reason)
 
+    async def cancel_session(self, session_id: str) -> None:
+        """Cancel the active run for a session via SessionPool.
+
+        Delegates to ``SessionController.cancel_run_for_session()``, which
+        cancels the per-session agent's background iteration task — the one
+        actually driving the LLM API call.
+
+        Args:
+            session_id: The session to cancel.
+        """
+        session_pool = self.agent_pool.session_pool
+        if session_pool is None:
+            logger.warning("SessionPool not available for cancel", session_id=session_id)
+            return
+        session_pool.sessions.cancel_run_for_session(session_id)
+
     async def close_session(self, session_id: str) -> None:
         """Close a session and tear down its event consumer.
 
