@@ -492,6 +492,7 @@ class SessionController:
         self._max_concurrent_runs: int | None = max_concurrent_runs
         self._turn_runner: TurnRunner | None = None
         self._pending_run_ids: dict[str, str] = {}
+        self._cancel_tasks: set[asyncio.Task[Any]] = set()
 
     async def get_or_create_session(
         self,
@@ -1496,6 +1497,15 @@ class TurnRunner:
         run_ctx.event_bus = self.event_bus
         run_ctx.session_id = session_id
         _current_run_ctx_var.set(run_ctx)
+
+        if hasattr(agent, "interrupt"):
+
+            def _schedule_interrupt() -> None:
+                task = asyncio.ensure_future(agent.interrupt(run_ctx=run_ctx))
+                self._cancel_tasks.add(task)
+                task.add_done_callback(self._cancel_tasks.discard)
+
+            run_handle._cancel_fn = _schedule_interrupt
 
         if _session is not None and _session.current_run_id is None:
             _session.current_run_id = run_id

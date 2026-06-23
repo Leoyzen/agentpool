@@ -5,11 +5,16 @@ Covers:
 - EventBus re-subscribed for resumed session
 - Non-existent session returns appropriate error
 - handle_prompt for checkpointed sessions calls resume_session instead of create_session
+- resume_session proactively creates per-session agent with loaded history
+- resume_session returns full ResumeSessionResponse with models/modes/config_options
+- resume_session injects session MCP providers into per-session agent
+- resume_session does not block on per-session agent creation failure
+- resume_session ensures handle_prompt reuses cached agent (no duplicate creation)
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -112,7 +117,9 @@ async def test_resume_uses_session_manager_resume_when_not_active(
     mocked_acp_agent.session_manager.get_session.return_value = None
     # But exists in store
     mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(return_value=["resume-test-session"])
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
 
     request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
@@ -136,7 +143,9 @@ async def test_resume_starts_event_bus_consumer(mocked_acp_agent):
 
     mocked_acp_agent.session_manager.get_session.return_value = None
     mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(return_value=["resume-test-session"])
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
 
     request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
@@ -162,7 +171,9 @@ async def test_resume_does_not_replay_history(mocked_acp_agent):
 
     mocked_acp_agent.session_manager.get_session.return_value = None
     mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(return_value=["resume-test-session"])
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
 
     request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
@@ -228,7 +239,9 @@ async def test_resume_loads_agent_state(mocked_acp_agent):
 
     mocked_acp_agent.session_manager.get_session.return_value = None
     mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
-    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(return_value=["resume-test-session"])
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
     mocked_acp_agent.session_manager.resume_session.return_value = mock_session
 
     request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
@@ -244,9 +257,7 @@ async def test_resume_loads_agent_state(mocked_acp_agent):
 
 
 @pytest.mark.unit
-async def test_handle_prompt_checkpointed_session_resumes(
-    mocked_acp_agent, mock_connection
-):
+async def test_handle_prompt_checkpointed_session_resumes(mocked_acp_agent, mock_connection):
     """handle_prompt should resume a checkpointed session instead of creating a new one."""
     from agentpool_server.acp_server.event_converter import ACPEventConverter
     from agentpool_server.acp_server.handler import ACPProtocolHandler
@@ -291,6 +302,7 @@ async def test_handle_prompt_checkpointed_session_resumes(
     pool._session_pool.sessions.get_or_create_session_agent = AsyncMock()
 
     from acp.schema.content_blocks import TextContentBlock
+
     prompt_blocks = [TextContentBlock(text="continue work")]
 
     await handler.handle_prompt("resume-test-session", prompt_blocks)
@@ -348,6 +360,7 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     pool._session_pool.sessions.get_or_create_session_agent = AsyncMock()
 
     from acp.schema.content_blocks import TextContentBlock
+
     prompt_blocks = [TextContentBlock(text="hello")]
     await handler.handle_prompt("resume-test-session", prompt_blocks)
 
@@ -355,3 +368,177 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     mock_session_manager.resume_session.assert_awaited()
     pool._session_pool.create_session.assert_awaited()
 
+
+# ---------------------------------------------------------------------------
+# Tests: resume_session creates per-session agent with conversation history
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_session(session_id: str = "resume-test-session") -> MagicMock:
+    mock_session = MagicMock()
+    mock_session.session_id = session_id
+    mock_session.agent = MagicMock()
+    mock_session.agent.load_session = AsyncMock(return_value=True)
+    mock_session.agent.load_rules = AsyncMock()
+    mock_session.send_available_commands_update = AsyncMock()
+    mock_session.cwd = "/tmp/resume"
+    mock_session.session_mcp_providers = []
+    mock_session.notifications = MagicMock()
+    mock_session.notifications.replay = AsyncMock()
+    return mock_session
+
+
+def _setup_session_pool_mock(acp_agent: AgentPoolACPAgent) -> MagicMock:
+    pool = acp_agent.agent_pool
+    pool._session_pool = MagicMock()
+    pool._session_pool.create_session = AsyncMock()
+    pool._session_pool.receive_request = AsyncMock()
+    pool._session_pool.sessions = MagicMock()
+    pool._session_pool.sessions.get_or_create_session_agent = AsyncMock()
+    pool._session_pool.event_bus = MagicMock()
+    return pool._session_pool
+
+
+@pytest.mark.unit
+async def test_resume_creates_per_session_agent_with_history(mocked_acp_agent):
+    """resume_session should call create_session + get_or_create_session_agent."""
+    session_data = _make_session_data()
+    mock_session = _make_mock_session()
+
+    mocked_acp_agent.session_manager.get_session.return_value = None
+    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
+    mocked_acp_agent.session_manager.resume_session.return_value = mock_session
+
+    session_pool = _setup_session_pool_mock(mocked_acp_agent)
+    mock_session_agent = MagicMock()
+    mock_session_agent.tools.external_providers = []
+    session_pool.sessions.get_or_create_session_agent.return_value = mock_session_agent
+
+    request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
+    await mocked_acp_agent.resume_session(request)
+
+    session_pool.create_session.assert_awaited_once_with("resume-test-session", cwd="/tmp/resume")
+    session_pool.sessions.get_or_create_session_agent.assert_awaited_once_with(
+        "resume-test-session"
+    )
+
+
+@pytest.mark.unit
+async def test_resume_returns_models_and_modes(mocked_acp_agent):
+    session_data = _make_session_data()
+    mock_session = _make_mock_session()
+
+    mocked_acp_agent.session_manager.get_session.return_value = None
+    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
+    mocked_acp_agent.session_manager.resume_session.return_value = mock_session
+
+    _setup_session_pool_mock(mocked_acp_agent)
+
+    request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
+    response = await mocked_acp_agent.resume_session(request)
+
+    assert response is not None
+    assert response.config_options is not None
+
+
+@pytest.mark.unit
+async def test_resume_injects_session_mcp_providers(mocked_acp_agent):
+    session_data = _make_session_data()
+    mock_session = _make_mock_session()
+    mock_provider = MagicMock()
+    mock_session.session_mcp_providers = [mock_provider]
+
+    mocked_acp_agent.session_manager.get_session.return_value = None
+    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
+    mocked_acp_agent.session_manager.resume_session.return_value = mock_session
+
+    session_pool = _setup_session_pool_mock(mocked_acp_agent)
+    mock_session_agent = MagicMock()
+    mock_session_agent.tools.external_providers = []
+    mock_session_agent.tools.add_provider = MagicMock()
+    session_pool.sessions.get_or_create_session_agent.return_value = mock_session_agent
+
+    request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
+    await mocked_acp_agent.resume_session(request)
+
+    mock_session_agent.tools.add_provider.assert_called_once_with(mock_provider)
+
+
+@pytest.mark.unit
+async def test_resume_history_load_failure_does_not_block(mocked_acp_agent):
+    session_data = _make_session_data()
+    mock_session = _make_mock_session()
+
+    mocked_acp_agent.session_manager.get_session.return_value = None
+    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
+    mocked_acp_agent.session_manager.resume_session.return_value = mock_session
+
+    session_pool = _setup_session_pool_mock(mocked_acp_agent)
+    session_pool.sessions.get_or_create_session_agent.side_effect = RuntimeError("DB error")
+
+    request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
+    response = await mocked_acp_agent.resume_session(request)
+
+    assert response is not None
+    assert response.config_options is not None
+
+
+@pytest.mark.unit
+async def test_resume_then_handle_prompt_no_duplicate_agent_creation(
+    mocked_acp_agent, mock_connection
+):
+    from acp.schema.content_blocks import TextContentBlock
+    from agentpool_server.acp_server.event_converter import ACPEventConverter
+    from agentpool_server.acp_server.handler import ACPProtocolHandler
+
+    session_data = _make_session_data()
+    mock_session = _make_mock_session()
+
+    mocked_acp_agent.session_manager.get_session.return_value = None
+    mocked_acp_agent.session_manager.session_store.load = AsyncMock(return_value=session_data)
+    mocked_acp_agent.session_manager.session_store.list_sessions = AsyncMock(
+        return_value=["resume-test-session"]
+    )
+    mocked_acp_agent.session_manager.resume_session.return_value = mock_session
+
+    session_pool = _setup_session_pool_mock(mocked_acp_agent)
+    mock_session_agent = MagicMock()
+    mock_session_agent.tools.external_providers = []
+    session_pool.sessions.get_or_create_session_agent.return_value = mock_session_agent
+
+    request = ResumeSessionRequest(session_id="resume-test-session", cwd="/tmp/resume")
+    await mocked_acp_agent.resume_session(request)
+
+    assert session_pool.sessions.get_or_create_session_agent.await_count == 1
+
+    mocked_acp_agent.client_info = None
+    mocked_acp_agent.subagent_display_mode = "legacy"
+
+    mock_client = MagicMock()
+    mock_client.session_update = AsyncMock()
+
+    handler = ACPProtocolHandler(
+        agent_pool=mocked_acp_agent.agent_pool,
+        session_manager=mocked_acp_agent.session_manager,
+        event_converter=ACPEventConverter(subagent_display_mode="legacy"),
+        client=mock_client,
+        client_capabilities=ClientCapabilities(),
+        acp_agent=mocked_acp_agent,
+    )
+    handler.start_event_consumer = AsyncMock()  # type: ignore[assignment]
+
+    await handler.handle_prompt("resume-test-session", [TextContentBlock(text="continue")])
+
+    assert session_pool.sessions.get_or_create_session_agent.await_count == 1
