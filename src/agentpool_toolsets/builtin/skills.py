@@ -195,8 +195,12 @@ async def load_skill(  # noqa: PLR0911
         # Check for reference path first
         # When a reference file is explicitly requested via URI, load ONLY the
         # reference content — not the main SKILL.md instructions.
-        # Check for fallback reference path from provider-less URI resolution
-        ref_path = resolved.reference_path or getattr(skill, "_resolved_reference_path", None)
+        # Check for fallback reference path from provider-less URI resolution.
+        # Priority: _resolved_reference_path first (resolver's fallback correction
+        # for provider-less URIs like skill://skill-name/path), then parsed path.
+        # The resolver's fallback correctly reconstructs the full reference path
+        # when URI parsing misidentifies the skill name as a provider.
+        ref_path = getattr(skill, "_resolved_reference_path", None) or resolved.reference_path
 
         if ref_path:
             # Reference-only loading: skip main SKILL.md content
@@ -278,8 +282,10 @@ async def load_skill(  # noqa: PLR0911
     instructions = _substitute_arguments(instructions, arguments)
 
     # Determine if this is a reference-only load
-    effective_ref_path = (resolved.reference_path if is_uri else None) or getattr(
-        skill, "_resolved_reference_path", None
+    # Priority: _resolved_reference_path first (resolver's fallback correction
+    # for provider-less URIs), then parsed path.
+    effective_ref_path = getattr(skill, "_resolved_reference_path", None) or (
+        resolved.reference_path if is_uri else None
     )
     is_reference_load = is_uri and effective_ref_path is not None
 

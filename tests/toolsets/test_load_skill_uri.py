@@ -1111,3 +1111,135 @@ class TestUPathReferenceLoading:
             assert "Root level content" in result
             assert not provider_called, "Provider was incorrectly called for UPath skill"
             mock_provider.read_reference.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_upath_ref_path_priority_from_resolver_fallback(self) -> None:
+        """_resolved_reference_path from resolver fallback takes priority.
+
+        For provider-less URIs like skill://expert-knowledge/assets/fta_template.md,
+        the URI parser misidentifies the skill name as provider. The resolver's
+        fallback corrects this by setting _resolved_reference_path to the full
+        path ("assets/fta_template.md"), while resolved.reference_path remains the
+        partial ("fta_template.md"). The priority flip ensures the corrected path wins.
+        """
+        from unittest.mock import MagicMock
+
+        from agentpool_toolsets.builtin.skills import _load_reference_content, load_skill
+
+        import tempfile
+        from pathlib import Path
+
+        # Simulate the scenario: skill has _resolved_reference_path set by resolver
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            skill_dir = Path(tmp_dir) / "expert-knowledge"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("---\nname: expert-knowledge\ndescription: Test\n---")
+            assets_dir = skill_dir / "assets"
+            assets_dir.mkdir()
+            (assets_dir / "fta_template.md").write_text("# FTA Template\n\nCorrect content.")
+
+            skill = MagicMock()
+            skill.name = "expert-knowledge"
+            skill.skill_path = UPath(skill_dir)
+            skill.safe_uri = "skill://local/expert-knowledge"
+            # Simulate resolver fallback setting this
+            skill._resolved_reference_path = "assets/fta_template.md"  # type: ignore[attr-defined]
+
+            mock_provider = MagicMock()
+            mock_provider.read_reference = None
+            pool = MagicMock()
+            pool.skill_provider = mock_provider
+
+            # Simulate what load_skill() does: ref_path should prefer _resolved_reference_path
+            ref_path = getattr(skill, "_resolved_reference_path", None)
+            assert ref_path == "assets/fta_template.md"
+            result = await _load_reference_content(skill, ref_path, pool=pool)
+
+            assert "Correct content" in result
+            assert "Reference: assets/fta_template.md" in result
+
+
+# =============================================================================
+# Test Class: ProviderLessURIReferenceLoading
+# =============================================================================
+
+
+@pytest.mark.integration
+class TestProviderLessURIReferenceLoading:
+    """Integration tests for provider-less URIs like skill://skill-name/path.
+
+    Verifies the full load_skill flow resolves provider-less URIs correctly,
+    using the resolver's fallback logic to reconstruct the full reference path.
+    """
+
+    async def test_provider_less_uri_loads_reference_from_skill_root(
+        self,
+        tmp_path: Path,
+        test_skill_with_root_asset: UPath,
+    ) -> None:
+        """skill://expert-knowledge/assets/fta_template.md loads root-level asset.
+
+        Provider-less URI where URI parser misidentifies "expert-knowledge" as
+        provider. Resolver fallback corrects this and reconstructs the full
+        reference path "assets/fta_template.md".
+        """
+        from agentpool_toolsets.builtin.skills import load_skill
+
+        agent_config = NativeAgentConfig(
+            name="test_agent",
+            model="test",
+            system_prompt="You are a test agent",
+        )
+        manifest = AgentsManifest(
+            agents={"test_agent": agent_config},
+            skills=SkillsConfig(
+                paths=[UPath(tmp_path)],
+                include_default=False,
+            ),
+        )
+
+        async with AgentPool(manifest) as pool:
+            agent = pool.get_agent("test_agent")
+            ctx = AgentContext(node=agent, pool=pool)
+
+            # Provider-less URI — should load the asset via resolver fallback
+            result = await load_skill(ctx, "skill://expert-knowledge/assets/fta_template.md")
+
+            assert "FTA Template" in result
+            assert "Template content here" in result
+
+    async def test_provider_less_uri_with_nested_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """skill://test/deep/nested/file.md correctly reconstructs path."""
+        from agentpool_toolsets.builtin.skills import load_skill
+
+        # Create skill with deeply nested file
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: test-skill\ndescription: Test\n---")
+        nested_dir = skill_dir / "deep" / "nested"
+        nested_dir.mkdir(parents=True)
+        (nested_dir / "file.md").write_text("# Deeply nested content")
+
+        agent_config = NativeAgentConfig(
+            name="test_agent",
+            model="test",
+            system_prompt="You are a test agent",
+        )
+        manifest = AgentsManifest(
+            agents={"test_agent": agent_config},
+            skills=SkillsConfig(
+                paths=[UPath(tmp_path)],
+                include_default=False,
+            ),
+        )
+
+        async with AgentPool(manifest) as pool:
+            agent = pool.get_agent("test_agent")
+            ctx = AgentContext(node=agent, pool=pool)
+
+            result = await load_skill(ctx, "skill://test-skill/deep/nested/file.md")
+
+            assert "Deeply nested content" in result
