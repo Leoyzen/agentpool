@@ -31,9 +31,13 @@
 | RunHandle lifecycle | `orchestrator/run.py` |
 | ResourceProvider base + all providers | `resource_providers/{base,mcp_provider,pool,local,...}.py` |
 | Skill YAML frontmatter model | `skills/skill.py` |
+| Skill as pydantic-ai capability (instructions, tools, MCP) | `skills/capability.py` (`SkillCapability`) |
+| Skill MCP server connection lifecycle | `skills/skill_mcp_manager.py` (`SkillMcpManager`) |
+| Skill Python tool import from config | `skills/skill_tool_manager.py` (`SkillToolManager`) |
 | Skill auto-discovery from paths | `skills/registry.py` |
 | Skill wrapped as slash commands | `skills/command.py`, `command_registry.py` |
 | Skill URI resolver (`skill://`) | `skills/uri_resolver.py` |
+| Skill config models (McpServerConfig, ToolConfig) | `agentpool_config/skills.py` |
 | MCP client + tool bridge | `mcp_server/{client,manager,tool_bridge}.py` |
 | Hook types (callable, command, prompt) | `hooks/{base,callable,command,prompt}.py` |
 | AgentHooks container (deprecated) | `hooks/agent_hooks.py` |
@@ -49,6 +53,11 @@
 - **Deferred imports for circular safety**: `TYPE_CHECKING` blocks + `from __future__ import annotations`. For truly circular paths (`messagenode` ↔ `team`), defer imports inside function bodies.
 - **Signals at step boundaries**: `SignalEmittingGraphRun` maps pydantic-graph transitions to `Talk` signals. Do not emit signals manually from inside steps.
 - **Skills parse YAML frontmatter**: `Skill` model uses `extra="forbid"` to reject unknown keys. Instructions lazy-load from `SKILL.md`.
+- **Skills are capabilities**: `SkillCapability` wraps each `Skill` as an `AbstractCapability` providing instructions (`get_instructions`), tools (`get_toolset`), and tool filtering (`get_wrapper_toolset`). Injected in `get_agentlet()` at position 5 (after MCP capabilities).
+- **Skill tools come in two flavors**: Python tools declared via `tools` field (`SkillToolConfig` with `import_path` like `"os:getcwd"`) imported eagerly by `SkillToolManager`. MCP servers declared via `mcp_servers` field (`SkillMcpServerConfig` with `command+args` or `url`) connected lazily per-run by `SkillMcpManager`. Both are prefixed with `{skill_name}__tool__` and `{skill_name}__mcp__` respectively.
+- **mcp.json companion file**: A `mcp.json` file in the skill directory (using Claude Desktop format `{"mcpServers": {...}}`) takes precedence over the frontmatter `mcp-servers` field. Environment variables (`${VAR}`) are expanded automatically.
+- **allowed_tools enforced via FilteredToolset**: The `parsed_allowed_tools()` method parses the space/comma-separated `allowed-tools` frontmatter string. `SkillCapability.get_wrapper_toolset()` wraps the assembled toolset in a `FilteredToolset` that drops tools not in the allowed list.
+- **SkillMcpManager has session-scoped lifecycle**: Connections are per `(session_id, server_name)` pair, lazily established on first tool access, with idle timeout (default 5 minutes) and exponential backoff retry (3 attempts). `on_run_ended()` triggers cleanup.
 - **One MCP server per provider**: Each `MCPResourceProvider` wraps exactly one server. Use `AggregatingProvider` to combine them.
 
 ## Anti-Patterns
@@ -68,4 +77,7 @@
 - **RunHandle cleanup**: `complete_event` fires after all cleanup. `close_session()` awaits it with timeout, then falls back to `cancel_run()`.
 - **Codemode is a metacall**: `CodeModeResourceProvider` wraps all tools into a single Python execution tool. One tool to rule them all.
 - **Skill commands are protocol-agnostic**: `SkillCommand` wraps skills as slash commands working across ACP, AG-UI, and OpenCode without protocol-specific code.
+- **SkillCapability injection order matters**: In `get_agentlet()`, skill capabilities are injected at position 5 (after MCP, deferred bridge, approval bridge, and hook capabilities). Each skill produces one `SkillCapability` instance with its own `SkillMcpManager` and `SkillToolManager` — there is one manager tree shared across all skills from the same agentlet creation call.
+- **mcp.json format follows Claude Desktop**: The companion file uses `{"mcpServers": {"name": {"command": "...", "args": [...], ...}}}` JSON format. The `_load_mcp_json()` function handles env var expansion and converts entries to `SkillMcpServerConfig` objects. Only filesystem skills (UPath paths) can have companion files — virtual skills (PurePosixPath) cannot.
+- **Tool prefixing prevents name collisions**: Python tools get the prefix `{skill_name}__tool__` and MCP tools get `{skill_name}__mcp__`. This ensures tool names from different skills never collide in the agent's tool namespace.
 - **Config model lives in separate package**: `agentpool_config/` exists solely to prevent import cycles with protocol servers.

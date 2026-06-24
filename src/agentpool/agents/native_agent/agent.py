@@ -344,9 +344,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 msg = f"Second parameter of history processor must be messages/msgs/history, got {params[1].name}"
                 raise ValueError(msg)
 
-    def _resolve_history_processors(
-        self, *, _warn: bool = True
-    ) -> list[Callable[..., Any]]:
+    def _resolve_history_processors(self, *, _warn: bool = True) -> list[Callable[..., Any]]:
         """Resolve history processors from config with caching.
 
         .. deprecated::
@@ -469,13 +467,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         content = function(**arguments)
                         sys_prompts.append(content)
                     case PackagePromptConfig(
-                        package=pkg, resource=resource, variables=variables,
+                        package=pkg,
+                        resource=resource,
+                        variables=variables,
                     ):
                         from importlib.resources import files as pkg_files
 
-                        template_content = (
-                            pkg_files(pkg) / resource
-                        ).read_text(encoding="utf-8")
+                        template_content = (pkg_files(pkg) / resource).read_text(encoding="utf-8")
                         if variables:
                             from jinja2 import Template
 
@@ -769,13 +767,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     provider_tools = await provider.get_tools()
                     for tool in provider_tools:
                         from agentpool.agents.native_agent.tool_wrapping import wrap_tool
+
                         context_for_tools = self.get_context(
                             input_provider=input_provider, run_ctx=run_ctx
                         )
                         wrapped = wrap_tool(tool, context_for_tools, hooks=self._hook_manager)
-                        direct_tools.append(
-                            tool.to_pydantic_ai(function_override=wrapped)
-                        )
+                        direct_tools.append(tool.to_pydantic_ai(function_override=wrapped))
                 except Exception:
                     logger.exception(
                         "Failed to register tools from provider",
@@ -818,6 +815,19 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # 4. MCP servers
         mcp_capabilities = self.mcp.as_capability()
         tool_capabilities.extend(mcp_capabilities)
+        # 5. Skill capabilities — from pool-scoped instances created during __aenter__.
+        #    Each SkillCapability provides tools and MCP servers.
+        #    Instructions are handled by SkillsInstructionProvider (no double injection).
+        if self.agent_pool is not None:
+            pool_capabilities = self.agent_pool.skill_capabilities
+            if pool_capabilities:
+                visibility_checker = getattr(self.agent_pool, "is_skill_visible_to_node", None)
+                for cap in pool_capabilities:
+                    if visibility_checker is not None and not visibility_checker(
+                        cap._skill, self.name
+                    ):
+                        continue
+                    tool_capabilities.append(cap)
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
@@ -833,7 +843,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 # Wrap each instruction for pydantic-ai compatibility
                 for instruction_fn in provider_instructions:
                     try:
-                        wrapped_instruction = wrap_instruction(instruction_fn, fallback="", _warn=False)
+                        wrapped_instruction = wrap_instruction(
+                            instruction_fn, fallback="", _warn=False
+                        )
                         all_instructions.append(wrapped_instruction)
                     except Exception:
                         # Wrap failure - log and skip this instruction
@@ -952,9 +964,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 result = event.message
 
         if result is None:
-            raise RuntimeError(
-                "RunExecutor.execute() completed without a StreamCompleteEvent"
-            )
+            raise RuntimeError("RunExecutor.execute() completed without a StreamCompleteEvent")
 
         state.result = result
         return result
@@ -1188,17 +1198,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             self.log.info(f"_set_mode called for model: {mode_id}")
             # Resolve variant name from actual model identifier if needed
             variant_name = mode_id
-            if (
-                self.agent_pool
-                and mode_id not in self.agent_pool.manifest.model_variants
-            ):
+            if self.agent_pool and mode_id not in self.agent_pool.manifest.model_variants:
                 # mode_id is an actual model identifier, find matching variant
                 for vn, config in self.agent_pool.manifest.model_variants.items():
                     model = config.get_model()
                     resolved = f"{model.system}:{model.model_name}"
                     if resolved == mode_id:
                         variant_name = vn
-                        self.log.info(f"Resolved model identifier {mode_id} to variant {variant_name}")
+                        self.log.info(
+                            f"Resolved model identifier {mode_id} to variant {variant_name}"
+                        )
                         break
             # Validate model exists (check both tokonomics models and model_variants)
             is_valid = False
@@ -1214,7 +1223,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 and variant_name in self.agent_pool.manifest.model_variants
             ):
                 is_valid = True
-                self.log.info(f"Model {mode_id} validated against model_variants (variant: {variant_name})")
+                self.log.info(
+                    f"Model {mode_id} validated against model_variants (variant: {variant_name})"
+                )
             if not is_valid:
                 self.log.warning(
                     f"Model {mode_id} validation failed. Available variants: {list(self.agent_pool.manifest.model_variants.keys()) if self.agent_pool else 'N/A'}"
@@ -1295,9 +1306,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         try:
             session_data = await self.agent_pool.storage.load_session(session_id)
         except Exception:
-            self.log.exception(
-                "Failed to load session data", session_id=session_id
-            )
+            self.log.exception("Failed to load session data", session_id=session_id)
 
         try:
             messages = await self.agent_pool.storage.get_session_messages(session_id)
@@ -1313,9 +1322,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 "Session loaded (no history support)", session_id=session_id, error=str(e)
             )
         except Exception:
-            self.log.exception(
-                "Failed to load session messages", session_id=session_id
-            )
+            self.log.exception("Failed to load session messages", session_id=session_id)
 
         return session_data
 

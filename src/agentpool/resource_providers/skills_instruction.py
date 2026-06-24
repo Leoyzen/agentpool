@@ -6,6 +6,7 @@ from xml.sax.saxutils import escape
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.log import get_logger
 from agentpool.resource_providers import ResourceProvider
+from agentpool.skills.capability import SkillCapability
 
 
 if TYPE_CHECKING:
@@ -142,12 +143,10 @@ class SkillsInstructionProvider(ResourceProvider):
                 if mode == "metadata":
                     content = self._format_skill_metadata(name, skill)
                 elif mode == "full":
-                    # Load instructions if available
-                    instructions = ""
-                    if hasattr(skill, "load_instructions"):
-                        instructions = skill.load_instructions()
-                    elif hasattr(skill, "instructions"):
-                        instructions = skill.instructions or ""
+                    # Delegate instruction content to SkillCapability
+                    cap = SkillCapability(skill)
+                    instructions_raw = cap.get_instructions()
+                    instructions = instructions_raw if isinstance(instructions_raw, str) else ""
 
                     content = self._format_skill_full(name, skill, instructions)
                 else:
@@ -207,14 +206,40 @@ class SkillsInstructionProvider(ResourceProvider):
         if arg_hint := getattr(skill, "argument_hint", None):
             lines.append(f"<argument-hint>{escape(arg_hint)}</argument-hint>")
 
+        # Add tools if present (SkillCapability manages these at runtime)
+        if tools := getattr(skill, "tools", None):
+            lines.append("<tools>")
+            for tool in tools:
+                lines.append(f"<tool>{escape(tool.import_path)}</tool>")
+            lines.append("</tools>")
+
+        # Add MCP servers if present (SkillCapability manages these at runtime)
+        if mcp_servers := getattr(skill, "mcp_servers", None):
+            lines.append("<mcp_servers>")
+            for server_name in mcp_servers:
+                lines.append(f"<server>{escape(server_name)}</server>")
+            lines.append("</mcp_servers>")
+
         lines.append("</skill>")
         return "\n".join(lines)
 
     def _format_skill_full(self, name: str, skill: Any, instructions: str) -> str:
-        """Format full skill content in XML."""
-        path = skill.safe_uri if hasattr(skill, "safe_uri") else (
-            str(skill.skill_path) if hasattr(skill, "skill_path") else ""
+        """Format full skill content in XML with tool/MCP hints."""
+        path = (
+            skill.safe_uri
+            if hasattr(skill, "safe_uri")
+            else (str(skill.skill_path) if hasattr(skill, "skill_path") else "")
         )
+
+        # Build tool/MCP hints from SkillCapability-managed resources
+        hints_parts: list[str] = []
+        if tools := getattr(skill, "tools", None):
+            tool_names = [t.import_path for t in tools]
+            hints_parts.append(f"Available tools: {', '.join(tool_names)}")
+        if mcp_servers := getattr(skill, "mcp_servers", None):
+            hints_parts.append(f"MCP servers: {', '.join(mcp_servers.keys())}")
+
+        hints_block = "\n".join(hints_parts) if hints_parts else ""
 
         # No leading indentation inside instruction text (LLM-sensitive); outer XML only.
         return f"""<skill_content id="{escape(name)}" name="{escape(name)}">
@@ -224,6 +249,7 @@ Base directory for this skill: {path}/
 File references (@path) are relative to this directory.
 
 {instructions}
+{hints_block}
 </skill-instruction>
 <user-request>
 $ARGUMENTS

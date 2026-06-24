@@ -203,6 +203,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             self._skill_commands: SkillCommandRegistry | None = None
             self._skill_resolver: SkillURIResolver | None = None
             self._skill_provider: AggregatingResourceProvider | None = None
+            self._skill_mcp_manager: Any | None = None  # SkillMcpManager — pool-scoped
+            self._skill_tool_manager: Any | None = None  # SkillToolManager — pool-scoped
+            self._skill_capabilities: list[Any] = []  # SkillCapability instances
             skill_scopes = getattr(self.manifest, "model_extra", None) or {}
             raw_skill_scopes = skill_scopes.get("_skill_scopes", {})
             self._default_skill_scope = str(raw_skill_scopes.get("default_scope", "host"))
@@ -235,7 +238,11 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 )
                 self.register(name, agent)
 
-            logger.debug("AgentPool: registered %d agents: %s", len(self.all_agents), list(self.all_agents.keys()))
+            logger.debug(
+                "AgentPool: registered %d agents: %s",
+                len(self.all_agents),
+                list(self.all_agents.keys()),
+            )
             self._create_teams()
             if connect_nodes:
                 self._connect_nodes()
@@ -286,6 +293,8 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                     skill_provider=self._skill_provider,
                 )
                 await self._skill_commands.initialize()
+                # Create pool-scoped SkillCapability instances for all discovered skills
+                await self._rebuild_skill_capabilities()
                 aggregating_provider = self.mcp.get_aggregating_provider()
                 agents = list(self.all_agents.values())
                 teams = list(self.teams.values())
@@ -643,19 +652,70 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 self._skill_resolver.register_provider(provider.name, provider)
             self._pending_skill_providers.clear()
 
+    async def _rebuild_skill_capabilities(self) -> None:
+        """Rebuild SkillCapability instances from currently discovered skills.
+
+        Creates pool-scoped SkillMcpManager and SkillToolManager on first call,
+        then creates a SkillCapability for each skill from SkillsManager.
+        Skills with ``disable_model_invocation=True`` are skipped.
+
+        This method is called:
+        - During ``__aenter__`` after skill discovery completes.
+        - Whenever ``_skill_provider.skills_changed`` fires (dynamic registration).
+        """
+        from agentpool.skills.capability import SkillCapability
+        from agentpool.skills.skill_mcp_manager import SkillMcpManager
+        from agentpool.skills.skill_tool_manager import SkillToolManager
+
+        # Create pool-scoped managers on first call
+        if self._skill_mcp_manager is None:
+            self._skill_mcp_manager = SkillMcpManager()
+        if self._skill_tool_manager is None:
+            self._skill_tool_manager = SkillToolManager()
+
+        # Build capabilities from SkillsManager (local filesystem skills only —
+        # MCP-provided skills are handled separately by MCP capability system)
+        capabilities: list[Any] = []
+        if self.skills is not None:
+            for skill in self.skills.list_skills():
+                if skill.disable_model_invocation:
+                    continue
+                cap = SkillCapability(
+                    skill,
+                    self._skill_mcp_manager,
+                    self._skill_tool_manager,
+                )
+                capabilities.append(cap)
+
+        self._skill_capabilities = capabilities
+        logger.debug(
+            "Rebuilt skill capabilities",
+            count=len(capabilities),
+            skill_names=[c._skill.name for c in capabilities],
+        )
+
+    @property
+    def skill_capabilities(self) -> list[Any]:
+        """Get pool-scoped SkillCapability instances.
+
+        These are created once in ``__aenter__`` and rebuilt on
+        dynamic skill registration/unregistration.
+        """
+        return self._skill_capabilities
+
     async def _on_skills_changed(self, event: Any) -> None:
         """Handle skills changed events from the skill provider.
 
         This method is called when the skill provider detects changes to skills
-        from any source (local filesystem or MCP servers). The event is already
-        handled by SkillCommandRegistry which listens to _skill_provider directly.
+        from any source (local filesystem or MCP servers). Skill command
+        registry changes are handled by SkillCommandRegistry which listens to
+        ``_skill_provider`` directly. We rebuild skill capabilities to keep
+        them in sync with the latest skill list.
 
         Args:
             event: The resource change event from the provider.
         """
-        # Skill changes are handled by SkillCommandRegistry which subscribes
-        # directly to _skill_provider.skills_changed. No additional forwarding
-        # needed here to avoid potential event loops.
+        await self._rebuild_skill_capabilities()
 
     async def cleanup(self) -> None:
         """Clean up all agents."""
@@ -760,8 +820,11 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.delegation.team import Team
 
         team = Team(
-            agents, name=name, description=description,
-            shared_prompt=shared_prompt, member_timeout=member_timeout,
+            agents,
+            name=name,
+            description=description,
+            shared_prompt=shared_prompt,
+            member_timeout=member_timeout,
         )
         if name:
             self[name] = team

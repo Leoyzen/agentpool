@@ -152,3 +152,113 @@ class SkillsConfig(Schema):
             result.extend(DEFAULT_SKILLS_PATHS)
 
         return result
+
+
+class SkillMcpServerConfig(Schema):
+    """Configuration for an MCP server used by a skill tool.
+
+    Specifies how to connect to an MCP (Model Context Protocol) server
+    for providing skill-level tools. Either a local command-based server
+    or a remote URL-based server can be configured.
+
+    Attributes:
+        command: Executable command to start the MCP server (e.g., "npx").
+            Use None when connecting via url.
+        args: Command-line arguments passed to the executable.
+        url: Remote URL for connecting to an existing MCP server.
+            Use None when starting a local server via command.
+        headers: HTTP headers to include when connecting via url.
+        env: Environment variables to set when launching the server process.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "x-icon": "octicon:tools-16",
+            "x-doc-title": "Skill MCP Server",
+        },
+    )
+
+    command: str | None = Field(
+        default=None,
+        title="MCP server command",
+        examples=["npx", "uvx", "python"],
+    )
+    """Executable command to start the MCP server process.
+
+    Set to None when connecting to a remote MCP server via url instead.
+    """
+
+    args: list[str] = Field(
+        default_factory=list,
+        title="Command arguments",
+        examples=[["-y", "@playwright/mcp"]],
+    )
+    """Command-line arguments passed to the executable."""
+
+    url: str | None = Field(
+        default=None,
+        title="Server URL",
+        examples=["http://localhost:8080/mcp"],
+    )
+    """Remote URL for connecting to an existing MCP server.
+
+    Set to None when starting a local server via command instead.
+    """
+
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        title="HTTP headers",
+        examples=[{"Authorization": "Bearer token123"}],
+    )
+    """HTTP headers to include when connecting to a URL-based server."""
+
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        title="Environment variables",
+        examples=[{"NODE_ENV": "production"}],
+    )
+    """Environment variables to set when launching the server process."""
+
+
+class SkillToolConfig(Schema):
+    """Configuration for a skill tool implemented in Python.
+
+    Defines a callable Python function that a skill can use as a tool.
+    The function is referenced by its Python import path and invoked
+    with arguments from the skill definition.
+
+    Attributes:
+        type: The tool implementation type. Currently only "python" is
+            supported, which loads a callable via its Python import path.
+        import_path: Dotted Python path to the callable, in the format
+            "module:function" or "package.module:function".
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "x-icon": "octicon:code-16",
+            "x-doc-title": "Skill Tool Configuration",
+        },
+    )
+
+    type: Literal["python"] = Field(
+        title="Tool type",
+        examples=["python"],
+    )
+    """The tool implementation type.
+
+    Currently only "python" is supported. Future types may include
+    "docker", "subprocess", or other execution backends.
+    """
+
+    import_path: str = Field(
+        title="Import path",
+        examples=["mymodule:my_function", "package.module:ToolClass"],
+    )
+    """Python import path to the tool callable.
+
+    Uses the format "module:function" (e.g., "os:getcwd").
+    The callable is imported lazily when the tool is first invoked.
+    """

@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import html
+import json
+import logging
+import os
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from upathtools import UPath
+
+from agentpool_config.skills import SkillMcpServerConfig, SkillToolConfig
 
 
 # Type for skill paths - can be UPath (for local filesystem skills)
@@ -57,6 +62,12 @@ class Skill(BaseModel):
     # Argument hint for slash command completion
     argument_hint: str | None = Field(default=None, alias="argument-hint")
 
+    # MCP server configurations for skill-provided tools
+    mcp_servers: dict[str, SkillMcpServerConfig] | None = Field(default=None, alias="mcp-servers")
+
+    # Tool configurations for skill-provided functionality
+    tools: list[SkillToolConfig] | None = Field(default=None)
+
     @field_validator("name")
     @classmethod
     def _validate_name(cls, v: str) -> str:
@@ -88,6 +99,33 @@ class Skill(BaseModel):
             if isinstance(meta, dict):
                 data["metadata"] = {str(k): str(v) for k, v in meta.items()}
         return data
+
+    @field_validator("allowed_tools", mode="before")
+    @classmethod
+    def _normalize_allowed_tools(cls, v: Any) -> str | None:
+        """Normalize allowed_tools: accept list[str] in code, keep str from YAML.
+
+        When constructing Skill objects programmatically, callers may pass
+        a list of tool names for convenience. This validator normalizes
+        those to the space-separated string format that matches what YAML
+        frontmatter parsing produces.
+        """
+        if isinstance(v, list):
+            return " ".join(v)
+        return v
+
+    def parsed_allowed_tools(self) -> list[str]:
+        """Parse allowed_tools into a list of individual tool names.
+
+        Returns:
+            List of tool name strings, split by comma or whitespace.
+            Returns an empty list if allowed_tools is None.
+        """
+        if self.allowed_tools is None:
+            return []
+        return [
+            token.strip() for token in self.allowed_tools.replace(",", " ").split() if token.strip()
+        ]
 
     @property
     def safe_uri(self) -> str:
@@ -174,7 +212,88 @@ class Skill(BaseModel):
             raise ValueError("Virtual paths cannot be read from filesystem")
         content = skill_file.read_text("utf-8")
         metadata, _body = parse_frontmatter(content)
+
+        # Load companion mcp.json (takes precedence over frontmatter mcp-servers)
+        mcp_servers = _load_mcp_json(skill_dir)
+        if mcp_servers is not None:
+            metadata["mcp-servers"] = mcp_servers
+
         return cls(skill_path=skill_dir, **metadata)
+
+
+def _expand_env_vars_in_value(value: Any) -> Any:
+    """Recursively expand ``${VAR}`` environment variables in all string values.
+
+    Args:
+        value: A value that may contain strings needing env var expansion.
+
+    Returns:
+        The value with all strings having env vars expanded.
+    """
+    if isinstance(value, str):
+        return os.path.expandvars(value)
+    if isinstance(value, dict):
+        return {k: _expand_env_vars_in_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_vars_in_value(item) for item in value]
+    return value
+
+
+def _load_mcp_json(
+    skill_dir: SkillPathType,
+) -> dict[str, SkillMcpServerConfig] | None:
+    """Load companion ``mcp.json`` file from a skill directory.
+
+    Looks for a ``mcp.json`` file in the skill directory that follows the
+    Claude Desktop MCP server configuration format:
+
+    .. code-block:: json
+
+        {
+            "mcpServers": {
+                "server-name": {
+                    "command": "npx",
+                    "args": ["-y", "@playwright/mcp"]
+                }
+            }
+        }
+
+    Environment variables (``${VAR}`` syntax) are expanded in all string values.
+
+    Args:
+        skill_dir: Path to the skill directory.
+
+    Returns:
+        Dictionary of server name to ``SkillMcpServerConfig``, or ``None``
+        if no ``mcp.json`` file exists or it cannot be parsed.
+    """
+    # Only load mcp.json from filesystem paths (UPath), not virtual paths
+    if type(skill_dir) is PurePosixPath:
+        return None
+
+    mcp_json_path = skill_dir / "mcp.json"
+    if not mcp_json_path.exists():
+        return None
+
+    try:
+        raw = json.loads(mcp_json_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logging.getLogger(__name__).warning("Failed to parse mcp.json in %s: %s", skill_dir, exc)
+        return None
+
+    servers_raw = raw.get("mcpServers")
+    if not isinstance(servers_raw, dict):
+        return None
+
+    result: dict[str, SkillMcpServerConfig] = {}
+    for name, entry in servers_raw.items():
+        if not isinstance(entry, dict):
+            continue
+        # Expand env vars in all string values within the entry
+        expanded = _expand_env_vars_in_value(entry)
+        result[name] = SkillMcpServerConfig(**expanded)
+
+    return result
 
 
 def find_skill_md(skill_dir: SkillPathType) -> SkillPathType | None:

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "test-server-stdio": {
+      "command": "echo",
+      "args": ["hello"]
+    },
+    "test-server-http": {
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer ${TOKEN}"
+      }
+    }
+  }
+}

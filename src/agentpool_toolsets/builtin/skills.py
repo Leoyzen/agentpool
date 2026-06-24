@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.resource_providers import StaticResourceProvider
+from agentpool.skills.skill_mcp_manager import SkillMcpManager
+from agentpool.skills.skill_tool_manager import SkillToolManager
 from agentpool.skills.uri_resolver import ResolvedSkillURI
 
 
@@ -315,6 +317,24 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
     # Apply argument substitution
     instructions = _substitute_arguments(instructions, arguments)
 
+    # Activate MCP servers and tools declared in the skill
+    mcp_lines: list[str] = []
+    tool_lines: list[str] = []
+
+    if skill.mcp_servers:
+        mcp_manager = SkillMcpManager()
+        for server_name, config in skill.mcp_servers.items():
+            mcp_manager.prepare(server_name, config)
+            server_desc = config.command or config.url or "configured"
+            mcp_lines.append(f"- `{server_name}`: {server_desc}")
+
+    if skill.tools:
+        tool_manager = SkillToolManager()
+        for tool_config in skill.tools:
+            result = tool_manager.import_tool(tool_config)
+            status = "✓" if result is not None else "✗"
+            tool_lines.append(f"- `{tool_config.import_path}` ({status})")
+
     # Determine if this is a reference-only load
     # Priority: _resolved_reference_path first (resolver's fallback correction
     # for provider-less URIs), then parsed path.
@@ -342,8 +362,6 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
             meta_lines.append(f"License: {skill.license}")
         if skill.compatibility:
             meta_lines.append(f"Compatibility: {skill.compatibility}")
-        if skill.allowed_tools:
-            meta_lines.append(f"Allowed tools: {skill.allowed_tools}")
         meta = "\n".join(meta_lines)
         parts = [header]
         if meta:
@@ -354,6 +372,14 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
         # Add URI information if loaded via URI
         if is_uri and resolved.provider:
             parts.append(f"URI: skill://{resolved.provider}/{resolved.skill_name}")
+
+    # Append activated MCP servers section
+    if mcp_lines:
+        parts.append("## Activated MCP Servers\n" + "\n".join(mcp_lines))
+
+    # Append activated tools section
+    if tool_lines:
+        parts.append("## Activated Tools\n" + "\n".join(tool_lines))
 
     return "\n\n".join(parts)
 
