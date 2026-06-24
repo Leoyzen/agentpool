@@ -492,7 +492,6 @@ class SessionController:
         self._max_concurrent_runs: int | None = max_concurrent_runs
         self._turn_runner: TurnRunner | None = None
         self._pending_run_ids: dict[str, str] = {}
-        self._cancel_tasks: set[asyncio.Task[Any]] = set()
 
     async def get_or_create_session(
         self,
@@ -1404,6 +1403,7 @@ class TurnRunner:
         self._turn_timings: list[tuple[float, float]] = []
         self._max_turn_timing_history: int = 100
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._cancel_tasks: set[asyncio.Task[Any]] = set()
         self._runs: dict[str, AgentRunContext] = {}
         self._last_error: BaseException | None = None
 
