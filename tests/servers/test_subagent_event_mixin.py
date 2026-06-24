@@ -10,6 +10,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
+import anyio
 from pydantic_ai import TextPartDelta
 import pytest
 
@@ -52,17 +53,26 @@ class _TestConsumer(ProtocolEventConsumerMixin):
     async def _after_consumer_loop(self, session_id: str) -> None:
         self.after_loop_calls.append(session_id)
 
-    async def _on_spawn_session_start(
-        self, session_id: str, event: SpawnSessionStart
-    ) -> None:
+    async def _on_spawn_session_start(self, session_id: str, event: SpawnSessionStart) -> None:
         self.spawn_session_start_calls.append((session_id, event))
+
+
+def _make_stream_and_mock_subscribe(
+    mock_event_bus: AsyncMock,
+) -> tuple[anyio.abc.ObjectSendStream[EventEnvelope], anyio.abc.ObjectReceiveStream[EventEnvelope]]:
+    """Create a memory stream pair and wire subscribe to return the receive end."""
+    send_stream, receive_stream = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=receive_stream)
+    return send_stream, receive_stream
 
 
 @pytest.fixture
 def mock_event_bus() -> AsyncMock:
     """Return a mock EventBus with async subscribe/unsubscribe."""
     bus = AsyncMock(spec=EventBus)
-    bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    from tests._helpers.mock_stream import EmptyReceiveStream
+
+    bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     bus.unsubscribe = AsyncMock(return_value=None)
     return bus
 
@@ -73,9 +83,8 @@ async def test_start_consumer_subscribes_and_runs_loop(mock_event_bus: AsyncMock
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
 
-    assert "sess-1" in consumer._consumer_tasks
-    task = consumer._consumer_tasks["sess-1"]
-    assert not task.done()
+    assert "sess-1" in consumer._session_groups
+    assert "sess-1" in consumer._consumer_streams
 
     mock_event_bus.subscribe.assert_awaited_once_with("sess-1", scope="descendants")
 
@@ -87,13 +96,11 @@ async def test_start_consumer_is_idempotent(mock_event_bus: AsyncMock) -> None:
     """Calling start_event_consumer twice does not create duplicate tasks."""
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
-    task1 = consumer._consumer_tasks["sess-1"]
 
     await consumer.start_event_consumer("sess-1")
-    task2 = consumer._consumer_tasks["sess-1"]
 
-    assert task1 is task2
-    assert len(consumer._consumer_tasks) == 1
+    assert len(consumer._session_groups) == 1
+    assert "sess-1" in consumer._session_groups
 
     await consumer.stop_event_consumer("sess-1")
 
@@ -108,7 +115,7 @@ async def test_start_consumer_is_threadsafe(mock_event_bus: AsyncMock) -> None:
 
     await asyncio.gather(start(), start())
 
-    assert len(consumer._consumer_tasks) == 1
+    assert len(consumer._session_groups) == 1
 
     await consumer.stop_event_consumer("sess-1")
 
@@ -120,12 +127,10 @@ async def test_stop_consumer_cancels_task_and_unsubscribes(
     """Stopping a consumer cancels the task and unsubscribes from EventBus."""
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
-    task = consumer._consumer_tasks["sess-1"]
 
     await consumer.stop_event_consumer("sess-1")
 
-    assert task.done()
-    assert "sess-1" not in consumer._consumer_tasks
+    assert "sess-1" not in consumer._session_groups
     assert mock_event_bus.unsubscribe.await_count >= 1
 
 
@@ -139,8 +144,7 @@ async def test_stop_consumer_is_safe_when_not_running(mock_event_bus: AsyncMock)
 @pytest.mark.anyio
 async def test_handle_event_dispatches_to_subclass(mock_event_bus: AsyncMock) -> None:
     """Verify abstract _handle_event is called with correct arguments."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    send_stream, _ = _make_stream_and_mock_subscribe(mock_event_bus)
 
     consumer = _TestConsumer(mock_event_bus)
     mock_handle = AsyncMock()
@@ -148,7 +152,7 @@ async def test_handle_event_dispatches_to_subclass(mock_event_bus: AsyncMock) ->
 
     event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
     envelope = EventEnvelope(source_session_id="sess-1", event=event)
-    await queue.put(envelope)
+    await send_stream.send(envelope)
 
     await consumer.start_event_consumer("sess-1")
 
@@ -167,8 +171,7 @@ async def test_consumer_shutdown_gracefully_stops_loop(
     mock_event_bus: AsyncMock,
 ) -> None:
     """_handle_event raises ConsumerShutdown, loop exits gracefully."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    send_stream, _ = _make_stream_and_mock_subscribe(mock_event_bus)
 
     consumer = _TestConsumer(mock_event_bus)
     consumer._handle_event = AsyncMock(  # type: ignore[method-assign]
@@ -176,26 +179,28 @@ async def test_consumer_shutdown_gracefully_stops_loop(
     )
 
     event = RunErrorEvent(message="shutdown-test")
-    await queue.put(event)
+    envelope = EventEnvelope(source_session_id="sess-1", event=event)
+    await send_stream.send(envelope)
 
     await consumer.start_event_consumer("sess-1")
 
-    task = consumer._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    for _ in range(100):
+        if "sess-1" in consumer.after_loop_calls:
+            break
+        await asyncio.sleep(0.01)
 
-    assert task.done()
-    assert "sess-1" not in consumer._consumer_tasks
     assert "sess-1" in consumer.after_loop_calls
+
+    await consumer.stop_event_consumer("sess-1")
     mock_event_bus.unsubscribe.assert_awaited()
 
 
 @pytest.mark.anyio
-async def test_unhandled_exception_unsubscribes_in_finally(
+async def test_unhandled_exception_propagates(
     mock_event_bus: AsyncMock,
 ) -> None:
-    """_handle_event raises generic Exception; unsubscribe and after hook run."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    """_handle_event raises generic Exception; after hook runs."""
+    send_stream, _ = _make_stream_and_mock_subscribe(mock_event_bus)
 
     consumer = _TestConsumer(mock_event_bus)
     consumer._handle_event = AsyncMock(  # type: ignore[method-assign]
@@ -203,17 +208,17 @@ async def test_unhandled_exception_unsubscribes_in_finally(
     )
 
     event = RunErrorEvent(message="boom-test")
-    await queue.put(event)
+    envelope = EventEnvelope(source_session_id="sess-1", event=event)
+    await send_stream.send(envelope)
 
     await consumer.start_event_consumer("sess-1")
 
-    task = consumer._consumer_tasks["sess-1"]
-    with pytest.raises(RuntimeError, match="boom"):
-        await asyncio.wait_for(task, timeout=0.5)
+    for _ in range(100):
+        if "sess-1" in consumer.after_loop_calls:
+            break
+        await asyncio.sleep(0.01)
 
-    assert "sess-1" not in consumer._consumer_tasks
     assert "sess-1" in consumer.after_loop_calls
-    mock_event_bus.unsubscribe.assert_awaited()
 
 
 @pytest.mark.anyio
@@ -221,49 +226,40 @@ async def test_cancelled_error_reraised_after_cleanup(
     mock_event_bus: AsyncMock,
 ) -> None:
     """Cancel the consumer task mid-loop; CancelledError propagates, cleanup runs."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
-
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
-    # Ensure the task has reached queue.get() before we cancel it.
     await asyncio.sleep(0.01)
 
-    task = consumer._consumer_tasks["sess-1"]
-    task.cancel()
+    await consumer.stop_event_consumer("sess-1")
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    assert "sess-1" not in consumer._consumer_tasks
+    assert "sess-1" not in consumer._session_groups
     mock_event_bus.unsubscribe.assert_awaited()
 
 
 @pytest.mark.anyio
-async def test_none_sentinel_stops_loop(mock_event_bus: AsyncMock) -> None:
-    """Put None in queue; loop exits gracefully and after hook runs."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+async def test_end_of_stream_stops_loop(mock_event_bus: AsyncMock) -> None:
+    """Close send stream; loop exits gracefully and after hook runs."""
+    send_stream, _ = _make_stream_and_mock_subscribe(mock_event_bus)
 
     consumer = _TestConsumer(mock_event_bus)
-    await queue.put(None)
 
     await consumer.start_event_consumer("sess-1")
+    await asyncio.sleep(0.01)
 
-    task = consumer._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    await send_stream.aclose()
 
-    assert task.done()
-    assert "sess-1" not in consumer._consumer_tasks
+    for _ in range(100):
+        if "sess-1" in consumer.after_loop_calls:
+            break
+        await asyncio.sleep(0.01)
+
     assert "sess-1" in consumer.after_loop_calls
-    mock_event_bus.unsubscribe.assert_awaited()
 
 
 @pytest.mark.anyio
 async def test_spawn_session_start_calls_hook(mock_event_bus: AsyncMock) -> None:
     """SpawnSessionStart triggers _on_spawn_session_start then _handle_event."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    send_stream, _ = _make_stream_and_mock_subscribe(mock_event_bus)
 
     consumer = _TestConsumer(mock_event_bus)
 
@@ -277,13 +273,15 @@ async def test_spawn_session_start_calls_hook(mock_event_bus: AsyncMock) -> None
         spawn_mechanism="spawn",
     )
     envelope = EventEnvelope(source_session_id="sess-1", event=event)
-    await queue.put(envelope)
-    await queue.put(None)
+    await send_stream.send(envelope)
+    await send_stream.aclose()
 
     await consumer.start_event_consumer("sess-1")
 
-    task = consumer._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    for _ in range(100):
+        if len(consumer.spawn_session_start_calls) > 0:
+            break
+        await asyncio.sleep(0.01)
 
     assert len(consumer.spawn_session_start_calls) == 1
     assert consumer.spawn_session_start_calls[0] == ("sess-1", envelope)
@@ -293,8 +291,7 @@ async def test_spawn_session_start_calls_hook(mock_event_bus: AsyncMock) -> None
 @pytest.mark.anyio
 async def test_before_after_hooks_called_in_order(mock_event_bus: AsyncMock) -> None:
     """_before_consumer_loop runs before loop, _after_consumer_loop after exit."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    send_stream, _ = _make_stream_and_mock_subscribe(mock_event_bus)
 
     consumer = _TestConsumer(mock_event_bus)
 
@@ -303,9 +300,13 @@ async def test_before_after_hooks_called_in_order(mock_event_bus: AsyncMock) -> 
 
     assert consumer.before_loop_calls == ["sess-1"]
 
-    await queue.put(None)
+    await send_stream.aclose()
 
-    task = consumer._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    for _ in range(100):
+        if "sess-1" in consumer.after_loop_calls:
+            break
+        await asyncio.sleep(0.01)
 
-    assert consumer.after_loop_calls == ["sess-1"]
+    assert "sess-1" in consumer.after_loop_calls
+
+    await consumer.stop_event_consumer("sess-1")

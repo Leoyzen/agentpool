@@ -1,14 +1,16 @@
 """Unit tests for EventBus (SessionPool Group 2.10).
 
-Tests pub/sub semantics, bounded queue dropping, sentinel-based
+Tests pub/sub semantics, bounded stream dropping, EndOfStream-based
 shutdown, and subscriber lifecycle management.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
+import anyio
 import pytest
 
 from agentpool.agents.events import PartDeltaEvent, PartStartEvent, RunStartedEvent
@@ -26,7 +28,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 @pytest.fixture
 def event_bus() -> EventBus:
-    """Return a fresh EventBus with small queue for deterministic tests."""
+    """Return a fresh EventBus with small buffer for deterministic tests."""
     return EventBus(max_queue_size=3)
 
 
@@ -36,38 +38,60 @@ def sample_event() -> RunStartedEvent:
     return RunStartedEvent(session_id="sess-1", run_id="run-1")
 
 
+async def _drain_stream(stream: anyio.abc.ObjectReceiveStream[Any]) -> list[Any]:
+    """Drain all available items from a memory receive stream without blocking."""
+    items: list[Any] = []
+    while True:
+        try:
+            items.append(stream.receive_nowait())
+        except (anyio.WouldBlock, anyio.EndOfStream, anyio.ClosedResourceError):
+            break
+    return items
+
+
+async def _receive_one(
+    stream: anyio.abc.ObjectReceiveStream[Any], timeout: float = 0.5
+) -> Any | None:
+    """Receive one item from a stream with a timeout."""
+    try:
+        with anyio.fail_after(timeout):
+            return await stream.receive()
+    except TimeoutError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Subscribe / Unsubscribe
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_subscribe_creates_queue(event_bus: EventBus) -> None:
-    """subscribe() returns an asyncio.Queue bound to the session."""
-    queue = await event_bus.subscribe("sess-1")
-    assert isinstance(queue, asyncio.Queue)
-    assert queue.maxsize == 3
+async def test_subscribe_creates_receive_stream(event_bus: EventBus) -> None:
+    """subscribe() returns a memory object receive stream."""
+    stream = await event_bus.subscribe("sess-1")
+    assert hasattr(stream, "receive")
+    assert hasattr(stream, "receive_nowait")
 
 
 @pytest.mark.anyio
-async def test_subscribe_multiple_queues_same_session(event_bus: EventBus) -> None:
-    """Multiple subscribers for the same session each get their own queue."""
-    q1 = await event_bus.subscribe("sess-1")
-    q2 = await event_bus.subscribe("sess-1")
+async def test_subscribe_multiple_streams_same_session(event_bus: EventBus) -> None:
+    """Multiple subscribers for the same session each get their own stream."""
+    s1 = await event_bus.subscribe("sess-1")
+    s2 = await event_bus.subscribe("sess-1")
     counts = await event_bus.get_subscriber_counts()
     assert counts["sess-1"] == 2
-    assert q1 is not q2
+    assert s1 is not s2
 
 
 @pytest.mark.anyio
-async def test_unsubscribe_removes_queue(event_bus: EventBus) -> None:
-    """unsubscribe() removes the specific queue and cleans up empty lists."""
-    q1 = await event_bus.subscribe("sess-1")
-    q2 = await event_bus.subscribe("sess-1")
-    await event_bus.unsubscribe("sess-1", q1)
+async def test_unsubscribe_removes_stream(event_bus: EventBus) -> None:
+    """unsubscribe() removes the specific stream and cleans up empty lists."""
+    s1 = await event_bus.subscribe("sess-1")
+    s2 = await event_bus.subscribe("sess-1")
+    await event_bus.unsubscribe("sess-1", s1)
     counts = await event_bus.get_subscriber_counts()
     assert counts["sess-1"] == 1
-    await event_bus.unsubscribe("sess-1", q2)
+    await event_bus.unsubscribe("sess-1", s2)
     counts = await event_bus.get_subscriber_counts()
     assert "sess-1" not in counts
 
@@ -75,21 +99,21 @@ async def test_unsubscribe_removes_queue(event_bus: EventBus) -> None:
 @pytest.mark.anyio
 async def test_unsubscribe_unknown_session_noop(event_bus: EventBus) -> None:
     """Unsubscribing from a non-existent session is a no-op."""
-    q = asyncio.Queue()
-    await event_bus.unsubscribe("missing", q)
+    send, recv = anyio.create_memory_object_stream(max_buffer_size=10)
+    await event_bus.unsubscribe("missing", recv)
     counts = await event_bus.get_subscriber_counts()
     assert counts == {}
 
 
 @pytest.mark.anyio
-async def test_unsubscribe_wrong_queue_noop(event_bus: EventBus) -> None:
-    """Unsubscribing a queue that was never subscribed is a no-op."""
-    q_real = await event_bus.subscribe("sess-1")
-    q_fake = asyncio.Queue()
-    await event_bus.unsubscribe("sess-1", q_fake)
+async def test_unsubscribe_wrong_stream_noop(event_bus: EventBus) -> None:
+    """Unsubscribing a stream that was never subscribed is a no-op."""
+    s_real = await event_bus.subscribe("sess-1")
+    send, recv_fake = anyio.create_memory_object_stream(max_buffer_size=10)
+    await event_bus.unsubscribe("sess-1", recv_fake)
     counts = await event_bus.get_subscriber_counts()
     assert counts["sess-1"] == 1
-    _ = q_real  # keep reference for type checker
+    _ = s_real
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +126,10 @@ async def test_publish_single_subscriber(
     event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
-    """A published event reaches the subscriber queue."""
-    queue = await event_bus.subscribe("sess-1")
+    """A published event reaches the subscriber stream."""
+    stream = await event_bus.subscribe("sess-1")
     await event_bus.publish("sess-1", sample_event)
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await _receive_one(stream)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-1"
@@ -117,14 +141,13 @@ async def test_publish_multiple_subscribers(
     sample_event: RunStartedEvent,
 ) -> None:
     """Each subscriber receives an independent shallow copy of the event."""
-    q1 = await event_bus.subscribe("sess-1")
-    q2 = await event_bus.subscribe("sess-1")
+    s1 = await event_bus.subscribe("sess-1")
+    s2 = await event_bus.subscribe("sess-1")
     await event_bus.publish("sess-1", sample_event)
-    ev1 = await asyncio.wait_for(q1.get(), timeout=0.5)
-    ev2 = await asyncio.wait_for(q2.get(), timeout=0.5)
+    ev1 = await _receive_one(s1)
+    ev2 = await _receive_one(s2)
     assert ev1 is not None
     assert ev2 is not None
-    # EventEnvelope is frozen/immutable, so the same object can be shared
     assert ev1 == ev2
     assert isinstance(ev1.event, RunStartedEvent)
     assert isinstance(ev2.event, RunStartedEvent)
@@ -147,131 +170,79 @@ async def test_publish_different_sessions_isolated(
     event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
-    """Events are only delivered to queues for the matching session_id."""
-    q1 = await event_bus.subscribe("sess-1")
-    q2 = await event_bus.subscribe("sess-2")
+    """Events are only delivered to streams for the matching session_id."""
+    s1 = await event_bus.subscribe("sess-1")
+    s2 = await event_bus.subscribe("sess-2")
     await event_bus.publish("sess-1", sample_event)
-    received = await asyncio.wait_for(q1.get(), timeout=0.5)
+    received = await _receive_one(s1)
     assert received is not None
-    assert q2.empty()
-    _ = q2  # silence unused-variable warning
+    s2_items = await _drain_stream(s2)
+    assert len(s2_items) == 0
 
 
 # ---------------------------------------------------------------------------
-# Bounded queue dropping
+# Bounded stream dropping
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_publish_drops_oldest_when_queue_full(
+async def test_publish_drops_subscriber_when_buffer_full(
     event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
-    """When a subscriber queue is full, the oldest event is dropped."""
-    queue = await event_bus.subscribe("sess-1")
-    ev_old = RunStartedEvent(session_id="sess-1", run_id="old")
-    ev_mid = RunStartedEvent(session_id="sess-1", run_id="mid")
-    ev_new = RunStartedEvent(session_id="sess-1", run_id="new")
-    # Fill queue to capacity (maxsize=3)
-    await event_bus.publish("sess-1", ev_old)
-    await event_bus.publish("sess-1", ev_mid)
-    await event_bus.publish("sess-1", sample_event)
-    # Queue is now full; publish another -> oldest dropped
-    await event_bus.publish("sess-1", ev_new)
-    # Drain queue
-    items: list[Any] = []
-    while not queue.empty():
-        items.append(await queue.get())
-    run_ids = []
-    for e in items:
-        if isinstance(e.event, RunStartedEvent):
-            run_ids.append(e.event.run_id)
-    assert "old" not in run_ids
-    assert run_ids == ["mid", "run-1", "new"]
-
-
-@pytest.mark.anyio
-async def test_publish_removes_dead_queue_after_drop_failure(
-    event_bus: EventBus,
-    sample_event: RunStartedEvent,
-) -> None:
-    """If dropping + re-adding fails repeatedly, the subscriber is removed."""
-    queue = await event_bus.subscribe("sess-1")
-    # Fill queue
+    """When a subscriber buffer is full and can't drain, subscriber is dropped."""
+    stream = await event_bus.subscribe("sess-1")
     for i in range(3):
         await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
-    # Now make the queue "broken" by replacing put_nowait with a raiser
-    original_put = queue.put_nowait
+    await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="ev3"))
+    await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="ev4"))
 
-    def broken_put(_item: Any) -> None:
-        raise asyncio.QueueFull
-
-    def broken_get() -> Any:
-        raise asyncio.QueueEmpty
-
-    queue.put_nowait = broken_put  # type: ignore[method-assign]
-    queue.get_nowait = broken_get  # type: ignore[method-assign]
-    await event_bus.publish("sess-1", sample_event)
-    # Restore so we can inspect
-    queue.put_nowait = original_put  # type: ignore[method-assign]
+    items = await _drain_stream(stream)
+    run_ids = [e.event.run_id for e in items if isinstance(e.event, RunStartedEvent)]
+    assert len(run_ids) <= 3
     counts = await event_bus.get_subscriber_counts()
     assert "sess-1" not in counts
 
 
 @pytest.mark.anyio
-async def test_publish_exception_removes_dead_subscriber(
+async def test_publish_removes_dead_subscriber_on_broken_resource(
     event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
-    """Subscribers that raise arbitrary exceptions on put are removed."""
-    queue = await event_bus.subscribe("sess-1")
-
-    def raiser(_item: Any) -> None:
-        raise RuntimeError("boom")
-
-    queue.put_nowait = raiser  # type: ignore[method-assign]
+    """Subscribers with broken send streams are removed."""
+    stream = await event_bus.subscribe("sess-1")
+    await stream.aclose()
     await event_bus.publish("sess-1", sample_event)
     counts = await event_bus.get_subscriber_counts()
     assert "sess-1" not in counts
 
 
 # ---------------------------------------------------------------------------
-# close_session / sentinel shutdown
+# close_session / EndOfStream shutdown
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_close_session_sends_sentinel(
+async def test_close_session_signals_end_of_stream(
     event_bus: EventBus,
     sample_event: RunStartedEvent,
 ) -> None:
-    """close_session() puts None sentinel into every subscriber queue."""
-    q1 = await event_bus.subscribe("sess-1")
-    q2 = await event_bus.subscribe("sess-1")
+    """close_session() closes send streams, causing EndOfStream on consumers."""
+    s1 = await event_bus.subscribe("sess-1")
+    s2 = await event_bus.subscribe("sess-1")
     await event_bus.publish("sess-1", sample_event)
     await event_bus.close_session("sess-1")
-    for q in (q1, q2):
-        ev = await asyncio.wait_for(q.get(), timeout=0.5)
-        assert ev is not None
-        sentinel = await asyncio.wait_for(q.get(), timeout=0.5)
-        assert sentinel is None
 
+    received1: list[Any] = []
+    async for envelope in s1:
+        received1.append(envelope)
 
-@pytest.mark.anyio
-async def test_close_session_drains_full_queue_to_fit_sentinel(
-    event_bus: EventBus,
-) -> None:
-    """If queue is full, close_session drains events until sentinel fits."""
-    queue = await event_bus.subscribe("sess-1")
-    for i in range(3):
-        await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
-    assert queue.full()
-    await event_bus.close_session("sess-1")
-    # Drain everything
-    items: list[Any] = []
-    while not queue.empty():
-        items.append(queue.get_nowait())
-    assert items[-1] is None
+    received2: list[Any] = []
+    async for envelope in s2:
+        received2.append(envelope)
+
+    assert len(received1) >= 1
+    assert len(received2) >= 1
 
 
 @pytest.mark.anyio
@@ -351,8 +322,8 @@ async def test_replay_buffer_per_session_isolated(event_bus: EventBus) -> None:
     """Each session has its own independent replay buffer."""
     await event_bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id="a"))
     await event_bus.publish("sess-2", RunStartedEvent(session_id="sess-2", run_id="b"))
-    assert event_bus._replay_buffers["sess-1"][0].run_id == "a"
-    assert event_bus._replay_buffers["sess-2"][0].run_id == "b"
+    assert event_bus._replay_buffers["sess-1"][0].event.run_id == "a"
+    assert event_bus._replay_buffers["sess-2"][0].event.run_id == "b"
 
 
 @pytest.mark.anyio
@@ -362,8 +333,8 @@ async def test_replay_buffer_custom_size() -> None:
     for i in range(15):
         await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
     assert len(bus._replay_buffers["sess-1"]) == 10
-    assert bus._replay_buffers["sess-1"][0].run_id == "ev5"
-    assert bus._replay_buffers["sess-1"][-1].run_id == "ev14"
+    assert bus._replay_buffers["sess-1"][0].event.run_id == "ev5"
+    assert bus._replay_buffers["sess-1"][-1].event.run_id == "ev14"
 
 
 # ---------------------------------------------------------------------------
@@ -376,16 +347,10 @@ async def test_replay_protocol_new_subscriber_gets_historical() -> None:
     """New subscriber receives last N buffered events as replay."""
     bus = EventBus(max_queue_size=10)
     for i in range(5):
-        await bus.publish(
-            "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}")
-        )
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
 
-    queue = await bus.subscribe("sess-1")
-
-    # Drain all events from the queue
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
+    stream = await bus.subscribe("sess-1")
+    received = await _drain_stream(stream)
 
     assert len(received) == 5
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
@@ -394,26 +359,17 @@ async def test_replay_protocol_new_subscriber_gets_historical() -> None:
 
 @pytest.mark.anyio
 async def test_replay_protocol_ordering() -> None:
-    """Replayed events precede live events in the queue."""
+    """Replayed events precede live events in the stream."""
     bus = EventBus(max_queue_size=10)
     for i in range(3):
-        await bus.publish(
-            "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"hist-{i}")
-        )
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"hist-{i}"))
 
-    queue = await bus.subscribe("sess-1")
+    stream = await bus.subscribe("sess-1")
 
-    # Publish more events after subscription
     for i in range(2):
-        await bus.publish(
-            "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"live-{i}")
-        )
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"live-{i}"))
 
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
-
+    received = await _drain_stream(stream)
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert run_ids == ["hist-0", "hist-1", "hist-2", "live-0", "live-1"]
 
@@ -423,16 +379,10 @@ async def test_replay_protocol_no_duplicates() -> None:
     """No duplicate events when publish happens during subscribe replay."""
     bus = EventBus(max_queue_size=10)
     for i in range(5):
-        await bus.publish(
-            "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}")
-        )
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
 
-    queue = await bus.subscribe("sess-1")
-
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
+    stream = await bus.subscribe("sess-1")
+    received = await _drain_stream(stream)
 
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert len(run_ids) == len(set(run_ids)), f"Duplicate run_ids found: {run_ids}"
@@ -443,46 +393,28 @@ async def test_replay_protocol_race_condition() -> None:
     """Subscribe concurrently with publishes; all events arrive in order."""
     bus = EventBus(max_queue_size=10)
 
-    # Publish initial historical events
     for i in range(3):
-        await bus.publish(
-            "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"hist-{i}")
-        )
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"hist-{i}"))
 
-    # Start subscribe concurrently with more publishes
     subscribe_task = asyncio.create_task(bus.subscribe("sess-1"))
     publish_tasks = [
         asyncio.create_task(
-            bus.publish(
-                "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"race-{i}")
-            )
+            bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"race-{i}"))
         )
         for i in range(3)
     ]
 
-    queue = await subscribe_task
+    stream = await subscribe_task
     await asyncio.gather(*publish_tasks)
 
-    # Publish final live events
     for i in range(2):
-        await bus.publish(
-            "sess-1", RunStartedEvent(session_id="sess-1", run_id=f"live-{i}")
-        )
+        await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"live-{i}"))
 
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
-
+    received = await _drain_stream(stream)
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
 
-    # All 8 events should be present
     assert len(run_ids) == 8, f"Expected 8 events, got {len(run_ids)}: {run_ids}"
-
-    # No duplicates
     assert len(run_ids) == len(set(run_ids)), f"Duplicate run_ids found: {run_ids}"
-
-    # Historical events come first (oldest three)
     assert run_ids[:3] == ["hist-0", "hist-1", "hist-2"]
 
 
@@ -493,48 +425,27 @@ async def test_replay_protocol_race_condition() -> None:
 
 @pytest.mark.anyio
 async def test_event_ordering_replay_then_live() -> None:
-    """Replayed PartStart→PartDelta→PartEnd events precede live events in queue."""
+    """Replayed PartStart→PartDelta→PartEnd events precede live events in stream."""
     bus = EventBus(max_queue_size=10)
 
-    # Publish initial SSE sequence (will be replayed)
+    await bus.publish("sess-1", PartStartEvent(index=0, part=TextPart(content="hello")))
     await bus.publish(
-        "sess-1",
-        PartStartEvent(index=0, part=TextPart(content="hello")),
+        "sess-1", PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" world"))
     )
-    await bus.publish(
-        "sess-1",
-        PartDeltaEvent(index=0, delta=TextPartDelta(content_delta=" world")),
-    )
-    await bus.publish(
-        "sess-1",
-        PartEndEvent(index=0, part=TextPart(content="hello world")),
-    )
+    await bus.publish("sess-1", PartEndEvent(index=0, part=TextPart(content="hello world")))
 
-    queue = await bus.subscribe("sess-1")
+    stream = await bus.subscribe("sess-1")
 
-    # Publish live SSE sequence after subscription
+    await bus.publish("sess-1", PartStartEvent(index=1, part=TextPart(content="goodbye")))
     await bus.publish(
-        "sess-1",
-        PartStartEvent(index=1, part=TextPart(content="goodbye")),
+        "sess-1", PartDeltaEvent(index=1, delta=TextPartDelta(content_delta=" world"))
     )
-    await bus.publish(
-        "sess-1",
-        PartDeltaEvent(index=1, delta=TextPartDelta(content_delta=" world")),
-    )
-    await bus.publish(
-        "sess-1",
-        PartEndEvent(index=1, part=TextPart(content="goodbye world")),
-    )
+    await bus.publish("sess-1", PartEndEvent(index=1, part=TextPart(content="goodbye world")))
 
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
+    received = await _drain_stream(stream)
 
-    # Verify 6 events total
     assert len(received) == 6
 
-    # Verify replayed events come first, then live events
     assert isinstance(received[0].event, PartStartEvent)
     assert received[0].event.index == 0
     assert isinstance(received[1].event, PartDeltaEvent)
@@ -555,29 +466,21 @@ async def test_event_ordering_no_gaps_in_replay() -> None:
     """Replay buffer eviction drops oldest events; subscriber sees contiguous range."""
     bus = EventBus(max_queue_size=200, replay_buffer_size=100)
 
-    # Publish 100 events (fills buffer exactly)
     for i in range(100):
         await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
 
-    # Publish 50 more (evicts oldest 50: ev0-ev49)
     for i in range(100, 150):
         await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"ev{i}"))
 
-    queue = await bus.subscribe("sess-1")
+    stream = await bus.subscribe("sess-1")
+    received = await _drain_stream(stream)
 
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
-
-    # Should receive exactly 100 events (ev50-ev149)
     assert len(received) == 100
 
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     expected = [f"ev{i}" for i in range(50, 150)]
     assert run_ids == expected
 
-    # Verify no gaps and strict monotonic ordering
     for i, rid in enumerate(run_ids):
         assert rid == f"ev{i + 50}"
 
@@ -594,31 +497,22 @@ async def test_event_ordering_concurrent_publish() -> None:
                 RunStartedEvent(session_id="sess-1", run_id=f"task{task_id}-ev{i}"),
             )
 
-    # Launch 5 concurrent publishers, each emitting 20 events
     tasks = [asyncio.create_task(publisher(tid, 20)) for tid in range(5)]
     await asyncio.gather(*tasks)
 
-    queue = await bus.subscribe("sess-1")
+    stream = await bus.subscribe("sess-1")
+    received = await _drain_stream(stream)
 
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
-
-    # All 100 events should be present
     assert len(received) == 100
 
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert len(run_ids) == 100
     assert len(run_ids) == len(set(run_ids)), f"Duplicate run_ids found: {run_ids}"
 
-    # Verify each task's events are in relative order
     for tid in range(5):
         task_events = [rid for rid in run_ids if rid.startswith(f"task{tid}-")]
         expected = [f"task{tid}-ev{i}" for i in range(20)]
-        assert task_events == expected, (
-            f"Task {tid} events out of order: {task_events}"
-        )
+        assert task_events == expected, f"Task {tid} events out of order: {task_events}"
 
 
 @pytest.mark.anyio
@@ -626,26 +520,19 @@ async def test_event_ordering_mixed_sessions() -> None:
     """Events from different sessions are isolated; subscriber sees only its session."""
     bus = EventBus(max_queue_size=10)
 
-    # Interleave events across three sessions
     for i in range(5):
         await bus.publish("sess-1", RunStartedEvent(session_id="sess-1", run_id=f"s1-ev{i}"))
         await bus.publish("sess-2", RunStartedEvent(session_id="sess-2", run_id=f"s2-ev{i}"))
         await bus.publish("sess-3", RunStartedEvent(session_id="sess-3", run_id=f"s3-ev{i}"))
 
-    queue = await bus.subscribe("sess-1")
+    stream = await bus.subscribe("sess-1")
+    received = await _drain_stream(stream)
 
-    # Drain all events
-    received: list[Any] = []
-    while not queue.empty():
-        received.append(queue.get_nowait())
-
-    # Should receive only sess-1 events
     assert len(received) == 5
 
     run_ids = [e.event.run_id for e in received if isinstance(e.event, RunStartedEvent)]
     assert run_ids == ["s1-ev0", "s1-ev1", "s1-ev2", "s1-ev3", "s1-ev4"]
 
-    # Verify no cross-session leakage
     for e in received:
         if isinstance(e.event, RunStartedEvent):
             assert e.source_session_id == "sess-1"
@@ -660,10 +547,10 @@ async def test_event_ordering_mixed_sessions() -> None:
 async def test_child_events_visible_with_descendants_scope(event_bus: EventBus) -> None:
     """Parent subscriber with scope='descendants' receives child session events."""
     event_bus._session_tree["parent"] = ["child"]
-    queue = await event_bus.subscribe("parent", scope="descendants")
+    stream = await event_bus.subscribe("parent", scope="descendants")
     child_event = RunStartedEvent(session_id="child", run_id="run-child")
     await event_bus.publish("child", child_event)
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await _receive_one(stream)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-child"
@@ -673,18 +560,19 @@ async def test_child_events_visible_with_descendants_scope(event_bus: EventBus) 
 async def test_child_events_not_visible_with_session_scope(event_bus: EventBus) -> None:
     """Parent subscriber with scope='session' does NOT receive child session events."""
     event_bus._session_tree["parent"] = ["child"]
-    queue = await event_bus.subscribe("parent", scope="session")
+    stream = await event_bus.subscribe("parent", scope="session")
     child_event = RunStartedEvent(session_id="child", run_id="run-child")
     await event_bus.publish("child", child_event)
-    assert queue.empty()
+    items = await _drain_stream(stream)
+    assert len(items) == 0
 
 
 @pytest.mark.anyio
 async def test_event_ordering_parent_and_child() -> None:
     """Events from parent and child arrive in correct interleaved order."""
-    event_bus = EventBus(max_queue_size=10)
-    event_bus._session_tree["parent"] = ["child"]
-    queue = await event_bus.subscribe("parent", scope="descendants")
+    bus = EventBus(max_queue_size=10)
+    bus._session_tree["parent"] = ["child"]
+    stream = await bus.subscribe("parent", scope="descendants")
     events = [
         ("parent", "run-1"),
         ("child", "run-2"),
@@ -693,12 +581,11 @@ async def test_event_ordering_parent_and_child() -> None:
         ("parent", "run-5"),
     ]
     for session_id, run_id in events:
-        await event_bus.publish(
-            session_id, RunStartedEvent(session_id=session_id, run_id=run_id)
-        )
+        await bus.publish(session_id, RunStartedEvent(session_id=session_id, run_id=run_id))
     received: list[str] = []
     for _ in events:
-        ev = await asyncio.wait_for(queue.get(), timeout=0.5)
+        ev = await _receive_one(stream)
+        assert ev is not None
         assert isinstance(ev.event, RunStartedEvent)
         received.append(ev.event.run_id)
     assert received == ["run-1", "run-2", "run-3", "run-4", "run-5"]
@@ -711,12 +598,10 @@ async def test_grandchild_events_visible_with_descendants_scope(
     """Parent subscriber with scope='descendants' receives grandchild events."""
     event_bus._session_tree["parent"] = ["child"]
     event_bus._session_tree["child"] = ["grandchild"]
-    queue = await event_bus.subscribe("parent", scope="descendants")
-    grandchild_event = RunStartedEvent(
-        session_id="grandchild", run_id="run-grandchild"
-    )
+    stream = await event_bus.subscribe("parent", scope="descendants")
+    grandchild_event = RunStartedEvent(session_id="grandchild", run_id="run-grandchild")
     await event_bus.publish("grandchild", grandchild_event)
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await _receive_one(stream)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-grandchild"

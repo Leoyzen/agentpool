@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock
 
+import anyio
 import pytest
 
 from pathlib import PurePosixPath
@@ -40,7 +41,8 @@ def agent_pool_with_skill() -> AgentPool:
     mock_session_pool = MagicMock()
     mock_session_pool.sessions = MagicMock()
     mock_session_pool.event_bus = MagicMock()
-    mock_session_pool.event_bus.subscribe = AsyncMock()
+    from tests._helpers.mock_stream import EmptyReceiveStream
+    mock_session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     mock_session_pool.sessions.get_or_create_session_agent = AsyncMock(return_value=agent)
     # run_stream must return an async iterable
     async def _empty_stream(*args: Any, **kwargs: Any) -> Any:

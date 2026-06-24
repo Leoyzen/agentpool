@@ -16,6 +16,8 @@ These tests should FAIL before the fix and PASS afterwards.
 from __future__ import annotations
 
 import asyncio
+
+import anyio
 import os
 import time
 from typing import Any
@@ -86,7 +88,8 @@ def _make_state(tmp_path: Any) -> ServerState:
     _run_handle.complete_event.wait = AsyncMock()
     pool.session_pool.receive_request = AsyncMock(return_value=_run_handle)
     pool.session_pool.event_bus = Mock()
-    pool.session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    from tests._helpers.mock_stream import EmptyReceiveStream
+    pool.session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     pool.session_pool.event_bus.unsubscribe = AsyncMock()
 
     state = ServerState(working_dir=str(tmp_path), agent=agent)

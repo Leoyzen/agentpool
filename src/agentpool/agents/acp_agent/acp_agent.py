@@ -476,13 +476,28 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         tool_metadata: dict[str, dict[str, Any]] = {}
         # Determine event source: event_bus when available, else event_queue
         event_bus = run_ctx.event_bus
-        bus_queue: asyncio.Queue[Any] | None = None
+        bus_stream: anyio.abc.ObjectReceiveStream[EventEnvelope] | None = None
         event_source: asyncio.Queue[Any]
         if event_bus is not None:
-            bus_queue = await event_bus.subscribe(session_id)
-            event_source = bus_queue
+            bus_stream = await event_bus.subscribe(session_id)
+            # Bridge memory receive stream to asyncio.Queue for
+            # compatibility with merge_queue_into_iterator.
+            # This bridge will be removed in Phase 5 when
+            # merge_queue_into_iterator is replaced with task group.
+            event_source = asyncio.Queue()
+            _bus_stream = bus_stream
+
+            async def _forward_bus_events() -> None:
+                try:
+                    async for envelope in _bus_stream:
+                        await event_source.put(envelope)
+                except Exception:
+                    pass
+
+            _bridge_task = asyncio.create_task(_forward_bus_events())
         else:
             event_source = run_ctx.event_queue
+            _bridge_task = None
         try:
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
             async with (
@@ -523,9 +538,13 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True
         finally:
-            if event_bus is not None and bus_queue is not None:
+            if _bridge_task is not None and not _bridge_task.done():
+                _bridge_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await _bridge_task
+            if event_bus is not None and bus_stream is not None:
                 try:
-                    await event_bus.unsubscribe(session_id, bus_queue)
+                    await event_bus.unsubscribe(session_id, bus_stream)
                 except Exception:
                     self.log.exception(
                         "Failed to unsubscribe from event bus during cleanup",

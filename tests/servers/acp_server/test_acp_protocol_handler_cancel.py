@@ -106,8 +106,7 @@ async def test_cancel_session_handles_no_running_consumer(
     """cancel_session should handle case where no consumer is running."""
     session_id = "test-session-456"
 
-    # No consumer started - _consumer_tasks is empty
-    assert session_id not in acp_handler._consumer_tasks
+    assert session_id not in acp_handler._session_groups
 
     # Should not raise even with no consumer
     await acp_handler.cancel_session(session_id)

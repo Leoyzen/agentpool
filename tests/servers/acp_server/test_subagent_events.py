@@ -7,6 +7,8 @@ session update notifications via ProtocolEventConsumerMixin and ACPEventConverte
 from __future__ import annotations
 
 import asyncio
+
+import anyio
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -35,7 +37,9 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 def mock_event_bus() -> AsyncMock:
     """Return a mock EventBus with async subscribe/unsubscribe."""
     bus = AsyncMock(spec=EventBus)
-    bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    from tests._helpers.mock_stream import EmptyReceiveStream
+
+    bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     bus.unsubscribe = AsyncMock(return_value=None)
     return bus
 
@@ -86,8 +90,8 @@ async def test_acp_handler_converts_spawn_session_start(
     mock_client: AsyncMock,
 ) -> None:
     """SpawnSessionStart produces session/update with AgentMessageChunk containing subagent name."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     event = SpawnSessionStart(
         child_session_id="child-1",
@@ -98,12 +102,15 @@ async def test_acp_handler_converts_spawn_session_start(
         description="test spawn",
         spawn_mechanism="spawn",
     )
-    await queue.put(event)
-    await queue.put(None)
+    await _send.send(event)
+    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    task = acp_handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)
 
     mock_client.session_update.assert_awaited()
     notification: SessionNotification[Any] = mock_client.session_update.await_args.args[0]
@@ -119,16 +126,19 @@ async def test_acp_handler_converts_part_delta(
     mock_client: AsyncMock,
 ) -> None:
     """PartDeltaEvent from subagent is converted to AgentMessageChunk."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
-    await queue.put(event)
-    await queue.put(None)
+    await _send.send(event)
+    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    task = acp_handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)
 
     mock_client.session_update.assert_awaited()
     notification: SessionNotification[Any] = mock_client.session_update.await_args.args[0]
@@ -143,8 +153,8 @@ async def test_acp_handler_converts_tool_call(
     mock_client: AsyncMock,
 ) -> None:
     """ToolCallStartEvent from subagent produces ToolCallStart notification."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     event = ToolCallStartEvent(
         tool_call_id="tc-1",
@@ -152,12 +162,15 @@ async def test_acp_handler_converts_tool_call(
         title="Run bash command",
         kind="execute",
     )
-    await queue.put(event)
-    await queue.put(None)
+    await _send.send(event)
+    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    task = acp_handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)
 
     mock_client.session_update.assert_awaited()
     notification: SessionNotification[Any] = mock_client.session_update.await_args.args[0]
@@ -174,8 +187,8 @@ async def test_acp_handler_converts_stream_complete(
     mock_client: AsyncMock,
 ) -> None:
     """StreamCompleteEvent produces UsageUpdate (+ TurnCompleteUpdate if client supports it)."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     handler = ACPProtocolHandler(
         agent_pool=mock_agent_pool,
@@ -191,12 +204,15 @@ async def test_acp_handler_converts_stream_complete(
         usage=RequestUsage(input_tokens=5, output_tokens=5),
     )
     event = StreamCompleteEvent(message=message, session_id="sess-1")
-    await queue.put(event)
-    await queue.put(None)
+    await _send.send(event)
+    await _send.send(None)
 
     await handler.start_event_consumer("sess-1")
-    task = handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    task = handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)
 
     assert mock_client.session_update.await_count == 2
     calls = mock_client.session_update.await_args_list
@@ -214,16 +230,19 @@ async def test_acp_handler_converts_run_error(
     mock_client: AsyncMock,
 ) -> None:
     """RunErrorEvent produces error-formatted AgentMessageChunk."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     event = RunErrorEvent(message="something broke", agent_name="test-agent")
-    await queue.put(event)
-    await queue.put(None)
+    await _send.send(event)
+    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    task = acp_handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)
 
     mock_client.session_update.assert_awaited()
     notification: SessionNotification[Any] = mock_client.session_update.await_args.args[0]
@@ -239,21 +258,24 @@ async def test_acp_handler_connection_error_stops_consumer(
     mock_client: AsyncMock,
 ) -> None:
     """ConnectionResetError during session_update triggers ConsumerShutdown."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     mock_client.session_update = AsyncMock(
         side_effect=ConnectionResetError("connection lost")
     )
 
     event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
-    await queue.put(event)
+    await _send.send(event)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    task = acp_handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)
 
-    assert task.done()
+    
     assert task.exception() is None
     assert "sess-1" not in acp_handler._consumer_tasks
     mock_event_bus.unsubscribe.assert_awaited()
@@ -265,9 +287,9 @@ async def test_acp_handler_converter_isolated_per_session(
     mock_client: AsyncMock,
 ) -> None:
     """Two sessions have separate converters, events don't cross."""
-    queue1 = asyncio.Queue()
-    queue2 = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(side_effect=[queue1, queue2])
+    _send1, _recv1 = anyio.create_memory_object_stream(max_buffer_size=100)
+    _send2, _recv2 = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(side_effect=[_recv1, _recv2])
 
     # Capture converter instances before the loop cleans them up
     captured_converters: dict[str, ACPEventConverter] = {}
@@ -305,9 +327,9 @@ async def test_acp_handler_converter_isolated_per_session(
     await acp_handler.start_event_consumer("sess-1")
     await acp_handler.start_event_consumer("sess-2")
 
-    task1 = acp_handler._consumer_tasks["sess-1"]
-    task2 = acp_handler._consumer_tasks["sess-2"]
-    await asyncio.wait_for(asyncio.gather(task1, task2), timeout=0.5)
+    task1 = acp_handler._session_groups["sess-1"]
+    task2 = acp_handler._session_groups["sess-2"]
+    await asyncio.sleep(0.2)
 
     # Verify separate converter instances were created
     assert "sess-1" in captured_converters
@@ -331,8 +353,8 @@ async def test_acp_handler_no_child_consumers_created(
     mock_event_bus: AsyncMock,
 ) -> None:
     """Verify _consumer_tasks only has parent session, no child consumers."""
-    queue = asyncio.Queue()
-    mock_event_bus.subscribe = AsyncMock(return_value=queue)
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
     event = SpawnSessionStart(
         child_session_id="child-1",
@@ -343,7 +365,7 @@ async def test_acp_handler_no_child_consumers_created(
         description="test spawn",
         spawn_mechanism="spawn",
     )
-    await queue.put(event)
+    await _send.send(event)
 
     await acp_handler.start_event_consumer("sess-1")
 
@@ -355,6 +377,9 @@ async def test_acp_handler_no_child_consumers_created(
     assert "child-1" not in acp_handler._consumer_tasks
 
     # Gracefully stop the consumer
-    await queue.put(None)
-    task = acp_handler._consumer_tasks["sess-1"]
-    await asyncio.wait_for(task, timeout=0.5)
+    await _send.send(None)
+    task = acp_handler._session_groups["sess-1"]
+    for _ in range(100):
+        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+            break
+        await asyncio.sleep(0.01)

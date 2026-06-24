@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import anyio
 import pytest
 
 from agentpool.agents.base_agent import BaseAgent
@@ -52,7 +53,8 @@ def create_mock_agent() -> MagicMock:
     agent.agent_pool.session_pool.sessions.get_or_create_session = AsyncMock()
     agent.agent_pool.session_pool.sessions.get_session = MagicMock(return_value=None)
     agent.agent_pool.session_pool.event_bus = MagicMock()
-    agent.agent_pool.session_pool.event_bus.subscribe = AsyncMock()
+    from tests._helpers.mock_stream import EmptyReceiveStream
+    agent.agent_pool.session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     agent.agent_pool.session_pool.event_bus.unsubscribe = AsyncMock()
     agent.env = MagicMock()
     agent.env.cwd = "/test/dir"

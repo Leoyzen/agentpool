@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any, assert_never
 
+import anyio
+
 from fastapi import APIRouter, HTTPException, Query, status
 
 from agentpool.log import get_logger
@@ -564,27 +566,18 @@ async def _process_message_locked(  # noqa: PLR0915
             # and accumulates response_text / tokens for finalize().
             # The session-scoped consumer (_event_consumer_loop) already
             # broadcasts SSE events; we only feed the adapter context here.
-            event_queue = await session_pool.event_bus.subscribe(session_id)
+            event_stream = await session_pool.event_bus.subscribe(session_id)
 
             async def _feed_adapter() -> None:
                 try:
-                    while True:
-                        event = await event_queue.get()
-                        if event is None:
-                            break
+                    async for event in event_stream:
                         async for _ in adapter.convert_event(event.event):
-                            pass  # Context updated; broadcast by session consumer
+                            pass
                 except asyncio.CancelledError:
                     raise
 
-            adapter_task = asyncio.create_task(
-                _feed_adapter(), name=f"adapter_feed_{session_id}"
-            )
+            adapter_task = asyncio.create_task(_feed_adapter(), name=f"adapter_feed_{session_id}")
 
-            # Wait for the full run loop (including auto-resume) to complete.
-            # The session-scoped EventBus consumer (started in create_session)
-            # handles all event streaming; this handler only synchronises on
-            # completion and finalises the assistant message.
             try:
                 await run_handle.complete_event.wait()
             except asyncio.CancelledError:
@@ -594,7 +587,7 @@ async def _process_message_locked(  # noqa: PLR0915
                 adapter_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await adapter_task
-                await session_pool.event_bus.unsubscribe(session_id, event_queue)
+                await session_pool.event_bus.unsubscribe(session_id, event_stream)
 
             # Finalize based on run outcome
             if run_handle.status != RunStatus.failed:
@@ -627,15 +620,15 @@ async def _process_message_locked(  # noqa: PLR0915
 
                 # Add the aborted assistant message to the SessionPool agent's
                 # in-memory conversation so history remains consistent.
-                sp_session_pool = integration.session_pool if integration is not None else session_pool
+                sp_session_pool = (
+                    integration.session_pool if integration is not None else session_pool
+                )
                 sp_session = sp_session_pool.sessions.get_session(session_id)
                 if sp_session is not None and sp_session.agent is not None:
                     chat_msg = opencode_to_chat_message(
                         assistant_msg_with_parts, session_id=session_id
                     )
-                    sp_session.agent.conversation.add_chat_messages(
-                        [chat_msg], extend_last=True
-                    )
+                    sp_session.agent.conversation.add_chat_messages([chat_msg], extend_last=True)
         else:
             # Message was queued for later processing (session busy)
             logger.info(
@@ -658,12 +651,8 @@ async def _process_message_locked(  # noqa: PLR0915
         sp_session_pool = integration.session_pool if integration is not None else session_pool
         sp_session = sp_session_pool.sessions.get_session(session_id)
         if sp_session is not None and sp_session.agent is not None:
-            chat_msg = opencode_to_chat_message(
-                assistant_msg_with_parts, session_id=session_id
-            )
-            sp_session.agent.conversation.add_chat_messages(
-                [chat_msg], extend_last=True
-            )
+            chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
+            sp_session.agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     except Exception as exc:
         # Any unexpected error during SessionPool routing
         logger.exception("SessionPool routing failed", session_id=session_id, error=str(exc))
@@ -682,12 +671,8 @@ async def _process_message_locked(  # noqa: PLR0915
         sp_session_pool = integration.session_pool if integration is not None else session_pool
         sp_session = sp_session_pool.sessions.get_session(session_id)
         if sp_session is not None and sp_session.agent is not None:
-            chat_msg = opencode_to_chat_message(
-                assistant_msg_with_parts, session_id=session_id
-            )
-            sp_session.agent.conversation.add_chat_messages(
-                [chat_msg], extend_last=True
-            )
+            chat_msg = opencode_to_chat_message(assistant_msg_with_parts, session_id=session_id)
+            sp_session.agent.conversation.add_chat_messages([chat_msg], extend_last=True)
     finally:
         # Session-scoped resources (EventBus consumer)
         # are managed by OpenCodeSessionPoolIntegration and are NOT torn
@@ -826,7 +811,6 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
                 priority="when_idle",
                 input_provider=input_provider,
             )
-
 
 
 @router.get("/message/{message_id}")

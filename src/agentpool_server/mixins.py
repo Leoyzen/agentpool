@@ -47,11 +47,13 @@ class ProtocolEventConsumerMixin(ABC):
     def __init__(self) -> None:
         """Initialize mixin state.
 
-        Sets up internal tracking for CancelScopes and TaskGroups.
+        Sets up internal tracking for CancelScopes, TaskGroups, and
+        per-session receive streams.
         """
         super().__init__()
         self._session_scopes: dict[str, anyio.CancelScope] = {}
         self._session_groups: dict[str, anyio.TaskGroup] = {}
+        self._consumer_streams: dict[str, anyio.abc.ObjectReceiveStream[EventEnvelope]] = {}
         self._consumer_locks: dict[str, asyncio.Lock] = {}
         self._consumer_lock_creation_lock: asyncio.Lock = asyncio.Lock()
 
@@ -73,7 +75,7 @@ class ProtocolEventConsumerMixin(ABC):
         return "descendants"
 
     async def _before_consumer_loop(self, session_id: str) -> None:  # noqa: B027
-        """Hook called before the consumer loop starts reading from queue.
+        """Hook called before the consumer loop starts reading from the stream.
 
         Subclasses may override to set up per-session context (e.g.
         creating an event converter or adapter).
@@ -143,25 +145,35 @@ class ProtocolEventConsumerMixin(ABC):
                 self._consumer_locks[session_id] = asyncio.Lock()
 
         async with self._consumer_locks[session_id]:
-            # Check if already running
             if session_id in self._session_groups:
                 return
 
-            # Create CancelScope and TaskGroup for this session's consumer
+            receive_stream = await self.event_bus.subscribe(
+                session_id, scope=self._get_subscription_scope()
+            )
+            self._consumer_streams[session_id] = receive_stream
+
             cancel_scope = anyio.CancelScope()
             task_group = anyio.create_task_group()
 
-            # Store for cleanup
             self._session_scopes[session_id] = cancel_scope
             self._session_groups[session_id] = task_group
 
-            # Subscribe to get queue (still returns asyncio.Queue in this phase)
-            queue = await self.event_bus.subscribe(session_id, scope=self._get_subscription_scope())
-            self._consumer_queues[session_id] = queue
+            tg = task_group
+            scope = cancel_scope
+            done_event = anyio.Event()
 
-            # Spawn consumer loop in TaskGroup
-            async with task_group as tg:
-                tg.start_soon(self._event_consumer_loop(session_id))
+            async def _run_consumer() -> None:
+                with scope:
+                    async with tg:
+                        tg.start_soon(self._event_consumer_loop, session_id)
+                        await done_event.wait()
+
+            asyncio.ensure_future(_run_consumer())
+            self._consumer_done_events: dict[str, anyio.Event] = getattr(
+                self, "_consumer_done_events", {}
+            )
+            self._consumer_done_events[session_id] = done_event
 
     async def stop_event_consumer(self, session_id: str) -> None:
         """Stop an event consumer for a given session.
@@ -180,32 +192,31 @@ class ProtocolEventConsumerMixin(ABC):
         # Cleanup after CancelScope ensures proper termination
         self._session_scopes.pop(session_id, None)
         self._session_groups.pop(session_id, None)
-        self._consumer_tasks.pop(session_id, None)
-        queue = self._consumer_queues.pop(session_id, None)
-        if queue is not None:
-            await self.event_bus.unsubscribe(session_id, queue)
+        stream = self._consumer_streams.pop(session_id, None)
+        if stream is not None:
+            await self.event_bus.unsubscribe(session_id, stream)
 
         self._consumer_locks.pop(session_id, None)
 
     async def _event_consumer_loop(self, session_id: str) -> None:
-        """Read events from the subscription queue and dispatch to hooks.
+        """Read events from the subscription stream and dispatch to hooks.
 
-        The loop exits gracefully when a None sentinel is received,
-        when ConsumerShutdown is raised from _handle_event(), or
-        when the task is cancelled.
+        The loop exits gracefully when the receive stream reaches
+        EndOfStream (send stream closed), when ConsumerShutdown is raised
+        from _handle_event(), or when the task is cancelled.
 
         SpawnSessionStart events are dispatched to BOTH
         _on_spawn_session_start() AND _handle_event(). All other
-        non-None events go only to _handle_event().
+        events go only to _handle_event().
 
-        Cleanup (unsubscribe, _after_consumer_loop) is performed in a
-        finally block regardless of how the loop exits.
+        Cleanup (_after_consumer_loop) is performed in a finally
+        block regardless of how the loop exits.
 
         Args:
             session_id: The session whose events to consume.
         """
-        queue = self._consumer_queues.get(session_id)
-        if queue is None:
+        stream = self._consumer_streams.get(session_id)
+        if stream is None:
             return
 
         started = False
@@ -213,13 +224,9 @@ class ProtocolEventConsumerMixin(ABC):
             await self._before_consumer_loop(session_id)
             started = True
 
-            while True:
-                envelope = await queue.get()
-                if envelope is None:
-                    break
-
+            async for envelope in stream:
                 # Support both EventEnvelope wrappers (from EventBus) and
-                # raw events (e.g. in tests that put items directly on queue)
+                # raw events (e.g. in tests that put items directly on stream)
                 if not hasattr(envelope, "event"):
                     from agentpool.orchestrator.core import EventEnvelope
 
@@ -234,7 +241,8 @@ class ProtocolEventConsumerMixin(ABC):
                     except ConsumerShutdown:
                         break
         finally:
-            # Unsubscribe handled by stop_event_consumer() after TaskGroup exits
-            # Cleanup per-session state
+            done_event = getattr(self, "_consumer_done_events", {}).pop(session_id, None)
+            if done_event is not None:
+                done_event.set()
             if started:
                 await self._after_consumer_loop(session_id)

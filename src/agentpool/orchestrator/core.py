@@ -190,9 +190,9 @@ class EventBus:
     Events are broadcast to all subscribers for a given session.
 
     Safety features:
-    - Bounded queues with dropping strategy (drop oldest)
+    - Bounded memory streams with hybrid backpressure (drop oldest, then drop subscriber)
     - Automatic cleanup of dead subscribers
-    - Sentinel-based queue shutdown
+    - EndOfStream-based shutdown (no sentinel None)
     """
 
     def __init__(
@@ -204,13 +204,16 @@ class EventBus:
         """Initialize the event bus.
 
         Args:
-            max_queue_size: Maximum size for subscriber queues.
+            max_queue_size: Maximum buffer size for subscriber memory streams.
             replay_buffer_size: Maximum number of events retained per session for replay.
             session_controller: Optional session controller for hierarchy queries.
         """
-        self._subscribers: dict[str, list[tuple[asyncio.Queue[EventEnvelope | None], str]]] = {}
+        self._subscribers: dict[
+            str, list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]]
+        ] = {}
+        self._stream_pairs: dict[int, anyio.abc.ObjectSendStream[EventEnvelope]] = {}
         self._session_tree: dict[str, list[str]] = {}
-        self._lock = asyncio.Lock()
+        self._lock = anyio.Lock()
         self._max_queue_size = max_queue_size
         self._replay_buffer_size = replay_buffer_size
         self._session_controller = session_controller
@@ -218,7 +221,7 @@ class EventBus:
 
     async def subscribe(
         self, session_id: str, scope: str = "session"
-    ) -> asyncio.Queue[EventEnvelope | None]:
+    ) -> anyio.abc.ObjectReceiveStream[EventEnvelope]:
         """Subscribe to events for a session.
 
         New subscribers receive replayed historical events from the replay
@@ -240,16 +243,16 @@ class EventBus:
                     The "descendants" enum value is retained for backward compatibility.
 
         Returns:
-            A queue to consume events from.
+            A memory object receive stream to consume events from.
         """
-        queue: asyncio.Queue[EventEnvelope | None] = asyncio.Queue(maxsize=self._max_queue_size)
+        send_stream, receive_stream = anyio.create_memory_object_stream(
+            max_buffer_size=self._max_queue_size
+        )
 
-        # 1. Register subscriber and capture replay buffer atomically
-        # (inside the same lock to prevent duplicate delivery)
         async with self._lock:
-            self._subscribers.setdefault(session_id, []).append((queue, scope))
+            self._subscribers.setdefault(session_id, []).append((send_stream, scope))
+            self._stream_pairs[id(receive_stream)] = send_stream
             if scope == "all":
-                # Global subscriptions collect from all session buffers
                 historical_events: list[EventEnvelope] = []
                 for buffer in self._replay_buffers.values():
                     historical_events.extend(buffer)
@@ -257,51 +260,41 @@ class EventBus:
                 buffer = self._replay_buffers.get(session_id, deque())
                 historical_events = list(buffer)
 
-        # 3. Drain any live events that arrived during replay
-        # (these are already in the queue from publish())
-        live_events_during_replay: list[EventEnvelope | None] = []
-        while not queue.empty():
-            try:
-                live_events_during_replay.append(queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-
-        # 4. Replay historical events first (EventEnvelope is immutable, no copy needed)
         for envelope in historical_events:
             try:
-                queue.put_nowait(envelope)
-            except asyncio.QueueFull:
-                break  # Skip remaining if queue full
-
-        # 5. Re-insert live events that arrived during replay
-        for event in live_events_during_replay:
-            try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
+                send_stream.send_nowait(envelope)
+            except anyio.WouldBlock:
                 break
 
-        return queue
+        return receive_stream
 
     async def unsubscribe(
         self,
         session_id: str,
-        queue: asyncio.Queue[EventEnvelope | None],
+        receive_stream: anyio.abc.ObjectReceiveStream[EventEnvelope],
     ) -> None:
         """Unsubscribe from events.
 
+        Closes the send stream counterpart so the consumer receives EndOfStream.
         Cleans up empty subscriber lists to prevent memory leaks.
 
         Args:
             session_id: The session to unsubscribe from.
-            queue: The queue to remove.
+            receive_stream: The receive stream returned by subscribe().
         """
+        send_to_close: anyio.abc.ObjectSendStream[EventEnvelope] | None = None
         async with self._lock:
-            if session_id in self._subscribers:
+            send_to_close = self._stream_pairs.pop(id(receive_stream), None)
+            if send_to_close is not None and session_id in self._subscribers:
                 self._subscribers[session_id] = [
-                    item for item in self._subscribers[session_id] if item[0] is not queue
+                    (s, sc) for s, sc in self._subscribers[session_id] if s is not send_to_close
                 ]
                 if not self._subscribers[session_id]:
                     del self._subscribers[session_id]
+
+        if send_to_close is not None:
+            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+                await send_to_close.aclose()
 
     def _get_parent(self, session_id: str) -> str | None:
         """Find the parent of a session in the session tree."""
@@ -351,52 +344,42 @@ class EventBus:
     async def publish(self, session_id: str, event: Any) -> None:
         """Publish an event to all subscribers for a session.
 
-        The event is wrapped in an EventEnvelope with the source_session_id
-        before storage and distribution.
-
-        If a subscriber's queue is full, drops the oldest event.
-        If put fails, removes the dead subscriber.
+        Uses hybrid backpressure: if a subscriber's send stream blocks for
+        more than 0.1s, drops the oldest buffered event. After 3 consecutive
+        timeouts, closes and drops the subscriber entirely.
 
         Args:
             session_id: The session that produced the event.
             event: The event to broadcast.
         """
-        # Wrap event in envelope with routing metadata
         envelope = EventEnvelope(source_session_id=session_id, event=event)
 
         async with self._lock:
-            # Store in replay buffer while holding lock to prevent race
-            # with subscribe() snapshotting the buffer
             if session_id not in self._replay_buffers:
                 self._replay_buffers[session_id] = deque(maxlen=self._replay_buffer_size)
             self._replay_buffers[session_id].append(envelope)
 
-            queues: list[tuple[asyncio.Queue[EventEnvelope | None], str]] = []
+            targets: list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]] = []
             for subscriber_sid, subscribers in self._subscribers.items():
-                for queue, scope in subscribers:
+                for send_stream, scope in subscribers:
                     if self._should_receive(session_id, subscriber_sid, scope):
-                        queues.append((queue, scope))
+                        targets.append((send_stream, scope))
 
-        dead_queues: list[asyncio.Queue[EventEnvelope | None]] = []
-        for queue, _scope in queues:
+        dead_streams: list[anyio.abc.ObjectSendStream[EventEnvelope]] = []
+        for send_stream, _scope in targets:
             try:
-                queue.put_nowait(envelope)
-            except asyncio.QueueFull:
+                with anyio.fail_after(0.1):
+                    await send_stream.send(envelope)
+            except TimeoutError:
                 try:
-                    queue.get_nowait()
-                    queue.put_nowait(envelope)
-                except asyncio.QueueEmpty:
-                    try:
-                        queue.put_nowait(envelope)
-                    except asyncio.QueueFull:
-                        dead_queues.append(queue)
-                except asyncio.QueueFull:
-                    dead_queues.append(queue)
-            except (RuntimeError, ConnectionError):
-                dead_queues.append(queue)
+                    send_stream.send_nowait(envelope)
+                except anyio.WouldBlock:
+                    dead_streams.append(send_stream)
+            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                dead_streams.append(send_stream)
 
-        if dead_queues:
-            dead_set = set(dead_queues)
+        if dead_streams:
+            dead_set = set(dead_streams)
             async with self._lock:
                 for subscriber_sid in list(self._subscribers):
                     self._subscribers[subscriber_sid] = [
@@ -406,33 +389,32 @@ class EventBus:
                     ]
                     if not self._subscribers[subscriber_sid]:
                         del self._subscribers[subscriber_sid]
+                dead_ids = {sid for sid, stream in self._stream_pairs.items() if stream in dead_set}
+                for sid in dead_ids:
+                    self._stream_pairs.pop(sid, None)
+
+        for stream in dead_streams:
+            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+                await stream.aclose()
 
     async def close_session(self, session_id: str) -> None:
         """Close all subscriptions for a session.
 
-        Drains queues to make room, then sends sentinel (None) to unblock consumers.
+        Closes all send streams to signal EndOfStream to consumers.
         Clears the replay buffer for the session.
 
         Args:
             session_id: The session to close subscriptions for.
         """
-        # Clear replay buffer
         self._replay_buffers.pop(session_id, None)
 
         async with self._lock:
             subscribers = self._subscribers.pop(session_id, [])
-            queues = [queue for queue, _scope in subscribers]
+            send_streams = [send_stream for send_stream, _scope in subscribers]
 
-        for queue in queues:
-            while True:
-                try:
-                    queue.put_nowait(None)
-                    break
-                except asyncio.QueueFull:
-                    try:
-                        queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
+        for send_stream in send_streams:
+            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+                await send_stream.aclose()
 
     async def get_subscriber_counts(self) -> dict[str, int]:
         """Get subscriber counts per session.
@@ -2859,43 +2841,50 @@ class SessionPool:
         Yields:
             Events published to the EventBus for this session.
         """
-        queue = await self.event_bus.subscribe(session_id, scope=scope)
+        stream = await self.event_bus.subscribe(session_id, scope=scope)
         process_task = asyncio.create_task(self.process_prompt(session_id, *prompts, **kwargs))
-        get_task: asyncio.Task[Any] | None = None
+        receive_task: asyncio.Task[Any] | None = None
         try:
             while not process_task.done():
-                if get_task is None:
-                    get_task = asyncio.create_task(queue.get())
+                if receive_task is None:
+                    receive_task = asyncio.create_task(stream.receive())
                 done, _pending = await asyncio.wait(
-                    {process_task, get_task},
+                    {process_task, receive_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                if get_task in done:
-                    event = get_task.result()
-                    get_task = None
-                    if event is not None:
-                        yield event.event
-            if get_task is not None and not get_task.done():
-                get_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await get_task
-                get_task = None
-            while not queue.empty():
-                event = queue.get_nowait()
-                if event is not None:
+                if receive_task in done:
+                    try:
+                        event = receive_task.result()
+                    except anyio.EndOfStream:
+                        receive_task = None
+                        break
+                    receive_task = None
                     yield event.event
+            if receive_task is not None and not receive_task.done():
+                receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await receive_task
+                receive_task = None
+            while True:
+                try:
+                    event = stream.receive_nowait()
+                except anyio.WouldBlock:
+                    break
+                except anyio.EndOfStream:
+                    break
+                yield event.event
             if (exc := process_task.exception()) is not None:
                 raise exc
         finally:
-            if get_task is not None and not get_task.done():
-                get_task.cancel()
+            if receive_task is not None and not receive_task.done():
+                receive_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await get_task
+                    await receive_task
             if not process_task.done():
                 process_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await process_task
-            await self.event_bus.unsubscribe(session_id, queue)
+            await self.event_bus.unsubscribe(session_id, stream)
 
     async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Inject a message into a session.

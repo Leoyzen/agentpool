@@ -144,7 +144,7 @@ async def test_event_consumer_started_on_session_creation(
     )
 
     assert "test-consumer-session" in integration._consumer_tasks
-    task = integration._consumer_tasks["test-consumer-session"]
+    task = integration._session_groups["test-consumer-session"]
     assert not task.done()
 
     # Clean up
@@ -234,7 +234,7 @@ async def test_multiple_requests_share_one_consumer(
         agent_name="test-agent",
     )
 
-    first_task = integration._consumer_tasks["test-dedup-session"]
+    first_task = integration._session_groups["test-dedup-session"]
 
     # Second create_session should be idempotent
     await integration.create_session(
@@ -242,7 +242,7 @@ async def test_multiple_requests_share_one_consumer(
         agent_name="test-agent",
     )
 
-    second_task = integration._consumer_tasks["test-dedup-session"]
+    second_task = integration._session_groups["test-dedup-session"]
 
     assert first_task is second_task
 

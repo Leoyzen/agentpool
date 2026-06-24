@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import anyio
 import pytest
 
 from acp.schema import ClientCapabilities, ResumeSessionRequest
@@ -328,7 +329,9 @@ async def test_handle_prompt_active_session_uses_create_session(mocked_acp_agent
     pool._session_pool.sessions.store.load = AsyncMock(return_value=session_data)
     # Make event_bus.subscribe an AsyncMock
     pool._session_pool.event_bus = MagicMock()
-    pool._session_pool.event_bus.subscribe = AsyncMock()
+    _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
+    await _send.aclose()
+    pool._session_pool.event_bus.subscribe = AsyncMock(return_value=_recv)
     pool._session_pool.event_bus.unsubscribe = AsyncMock()
 
     mock_session_manager = mocked_acp_agent.session_manager
