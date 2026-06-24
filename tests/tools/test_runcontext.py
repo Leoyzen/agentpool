@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic_ai import RunContext
 from pydantic_ai.models.test import TestModel
 import pytest
@@ -20,7 +22,7 @@ async def agent_ctx_tool(ctx: AgentContext) -> str:
     return "AgentContext tool"
 
 
-async def data_with_run_ctx(ctx: RunContext[AgentContext[dict[str, str]]]) -> str:
+async def data_with_run_ctx(ctx: RunContext[Any]) -> str:
     """Tool accessing data through RunContext."""
     return f"Data from RunContext: {ctx.deps.data}"
 
@@ -51,7 +53,7 @@ async def test_tool_context_injection():
     context_received = None
     deps_received = None
 
-    async def test_tool(ctx: RunContext[AgentContext]) -> str:
+    async def test_tool(ctx: RunContext[Any]) -> str:
         """Test tool that captures its context."""
         nonlocal context_received, deps_received
         context_received = ctx

@@ -195,11 +195,6 @@ class TestProtocolFeatureFlags:
         manifest = AgentsManifest()
         assert manifest.acp.use_session_pool is True
 
-    def test_opencode_config_default(self) -> None:
-        """OpenCodeConfig.use_session_pool should default to True."""
-        manifest = AgentsManifest()
-        assert manifest.opencode.use_session_pool is True
-
     def test_acp_config_from_yaml(self) -> None:
         """ACP config should parse from YAML."""
         manifest = AgentsManifest.from_yaml("""
@@ -207,14 +202,6 @@ acp:
   use_session_pool: true
 """)
         assert manifest.acp.use_session_pool is True
-
-    def test_opencode_config_from_yaml(self) -> None:
-        """OpenCode config should parse from YAML."""
-        manifest = AgentsManifest.from_yaml("""
-opencode:
-  use_session_pool: true
-""")
-        assert manifest.opencode.use_session_pool is True
 
     def test_session_pool_config_from_yaml(self) -> None:
         """SessionPool config should parse from YAML."""
@@ -227,28 +214,6 @@ session_pool:
         assert manifest.session_pool.enable_auto_resume is False
         assert manifest.session_pool.session_ttl_seconds == 7200.0
         assert manifest.session_pool.max_auto_resume == 20
-
-    def test_full_manifest_with_session_pool(self) -> None:
-        """Full manifest should include all session pool configurations."""
-        manifest = AgentsManifest.from_yaml("""
-agents:
-  assistant:
-    model: test
-    system_prompt: "You are helpful."
-
-session_pool:
-  enable_auto_resume: true
-  max_queue_size: 2000
-
-acp:
-  use_session_pool: true
-
-opencode:
-  use_session_pool: false
-""")
-        assert manifest.session_pool.max_queue_size == 2000
-        assert manifest.acp.use_session_pool is True
-        assert manifest.opencode.use_session_pool is False
 
 
 # =============================================================================

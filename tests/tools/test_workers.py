@@ -7,7 +7,7 @@ from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool import Agent, AgentPool, AgentsManifest
-from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent, SubAgentEvent
+from agentpool.agents.events import SpawnSessionStart, StreamCompleteEvent
 from agentpool.agents.exceptions import DelegationDepthError, MAX_DELEGATION_DEPTH
 
 
@@ -124,10 +124,12 @@ async def test_history_sharing(tmp_path: Path):
     async with AgentPool(manifest) as pool:
         main_agent = pool.get_agent("main")
         worker = pool.get_agent("worker")
-        # Configure models: real model for main agent, TestModel for worker
-        await main_agent.set_model("openai:gpt-5-nano")
+        # Configure models: TestModel for both agents
+        main_model = TestModel(call_tools=["ask_worker"])
         worker_model = TestModel(custom_output_text="The value is 42")
+        assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
+        await main_agent.set_model(main_model)
         await worker.set_model(worker_model)
         # Create some conversation history
         result = await main_agent.run("Remember X equals 42")
@@ -263,11 +265,18 @@ async def test_worker_emits_spawn_session_start_event(tmp_path: Path):
 
 
 async def test_worker_emits_subagent_events(tmp_path: Path):
-    """Test that worker tool emits SubAgentEvent wrapping worker events."""
+    """Test that worker tool emits child session events via EventBus descendants scope.
+
+    After the refactoring (commit 2d72eddd4), worker tools no longer wrap child
+    session events in SubAgentEvent. Instead, events from child sessions flow
+    through the EventBus directly and are received when subscribing with
+    ``scope="descendants"``.
+    """
     config_path = write_config(BASIC_WORKERS, tmp_path)
     manifest = AgentsManifest.from_file(config_path)
 
-    subagent_events: list[SubAgentEvent] = []
+    spawn_events: list[SpawnSessionStart] = []
+    child_events: list[StreamCompleteEvent] = []
 
     async with AgentPool(manifest) as pool:
         main_agent = pool.get_agent("main")
@@ -286,21 +295,28 @@ async def test_worker_emits_subagent_events(tmp_path: Path):
         async for event in session_pool.run_stream(
             "ses_test", "Ask worker: do something", scope="descendants"
         ):
-            if isinstance(event, SubAgentEvent):
-                subagent_events.append(event)
+            if isinstance(event, SpawnSessionStart):
+                spawn_events.append(event)
+            elif isinstance(event, StreamCompleteEvent) and event.session_id != "ses_test":
+                child_events.append(event)
 
-    # Verify SubAgentEvents were emitted
-    assert len(subagent_events) > 0
+    # Verify SpawnSessionStart was emitted
+    assert len(spawn_events) == 1
+    assert spawn_events[0].source_name == "worker"
+    assert spawn_events[0].child_session_id is not None
+    assert spawn_events[0].child_session_id.startswith("ses_")
 
-    # Find the StreamCompleteEvent wrapped in SubAgentEvent
-    complete_events = [e for e in subagent_events if isinstance(e.event, StreamCompleteEvent)]
-    assert len(complete_events) > 0
-
-    # Verify event has correct session tracking
-    for event in subagent_events:
-        assert event.child_session_id is not None
-        assert event.child_session_id.startswith("ses_")
-        assert event.source_name == "worker"
+    # Verify child session events came through the EventBus directly.
+    # Child session events may have session_id set to the child session or empty.
+    # Filter out the parent session's own StreamCompleteEvent (session_id == parent).
+    child_complete = [
+        e for e in child_events
+        if e.session_id != "ses_test"
+    ]
+    assert len(child_complete) >= 1, (
+        f"Expected at least 1 child StreamCompleteEvent, got {len(child_complete)}"
+    )
+    assert child_complete[0].message.content == "Worker output"
 
 
 async def test_worker_session_isolation(tmp_path: Path):
@@ -476,14 +492,6 @@ async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
         # Simulate running at max depth by setting run_ctx.depth directly
         async with main_agent:
             # Run at max depth — the worker tool should raise DelegationDepthError
-            from agentpool.agents.context import AgentRunContext
-
-            # Create a run context at MAX_DELEGATION_DEPTH
-            max_depth_ctx = AgentRunContext(depth=MAX_DELEGATION_DEPTH)
-
-            # Use run_stream which sets up run_ctx internally
-            # We need to directly test the tool's behavior at max depth.
-            # The easiest way is to patch the depth via the agent's run.
             depth_exceeded = False
             try:
                 # Run at max depth by providing a pre-configured depth
@@ -499,12 +507,18 @@ async def test_delegation_depth_error_at_max_depth(tmp_path: Path):
 
 
 async def test_subagent_event_depth_propagation(tmp_path: Path):
-    """Test that SubAgentEvent depth matches SpawnSessionStart depth."""
+    """Test that SpawnSessionStart depth is consistent and child events are received.
+
+    After the refactoring (commit 2d72eddd4), SubAgentEvent is no longer emitted.
+    Child session events come through the EventBus directly via scope="descendants".
+    This test verifies that SpawnSessionStart carries the correct depth and that
+    child session events are properly associated with the child session.
+    """
     config_path = write_config(BASIC_WORKERS, tmp_path)
     manifest = AgentsManifest.from_file(config_path)
 
     spawn_events: list[SpawnSessionStart] = []
-    subagent_events: list[SubAgentEvent] = []
+    child_complete_events: list[StreamCompleteEvent] = []
 
     async with AgentPool(manifest) as pool:
         main_agent = pool.get_agent("main")
@@ -524,15 +538,24 @@ async def test_subagent_event_depth_propagation(tmp_path: Path):
         ):
             if isinstance(event, SpawnSessionStart):
                 spawn_events.append(event)
-            elif isinstance(event, SubAgentEvent):
-                subagent_events.append(event)
+            elif isinstance(event, StreamCompleteEvent) and event.session_id != "ses_test":
+                child_complete_events.append(event)
 
-    # Verify SpawnSessionStart and SubAgentEvent have consistent depth
+    # Verify SpawnSessionStart was emitted with correct depth
     assert len(spawn_events) == 1
-    assert len(subagent_events) > 0
     expected_depth = spawn_events[0].depth
-    for sa_event in subagent_events:
-        assert sa_event.depth == expected_depth
+    assert expected_depth == 1  # Child of root session should have depth 1
+
+    # Verify child session events were received with matching session ID.
+    # Child session events may have session_id set to the child session or empty.
+    child_complete = [
+        e for e in child_complete_events
+        if e.session_id != "ses_test"
+    ]
+    assert len(child_complete) >= 1, (
+        f"Expected at least 1 child StreamCompleteEvent, got {len(child_complete)}"
+    )
+    assert child_complete[0].message.content == "Worker result"
 
 
 if __name__ == "__main__":

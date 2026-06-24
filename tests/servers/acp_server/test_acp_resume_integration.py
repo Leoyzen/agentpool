@@ -28,6 +28,7 @@ def mock_agent() -> MagicMock:
     """Create a mock agent with load_session."""
     agent = MagicMock()
     agent.name = "test_agent"
+    agent.model_name = "test-model"
     agent.load_session = AsyncMock(return_value=True)
     agent.load_rules = AsyncMock()
     agent.conversation = MagicMock()
@@ -104,7 +105,12 @@ async def test_create_then_resume_preserves_conversation_history(
     mock_agent: MagicMock,
     known_session_data: SessionData,
 ) -> None:
-    """Resume should call agent.load_session to restore conversation history."""
+    """Resume should create and return an ACPSession without polluting the shared agent.
+
+    session_manager.resume_session() no longer calls agent.load_session() —
+    conversation history loading is now handled by SessionPool's
+    get_or_create_session_agent() when creating per-session agents.
+    """
     # Arrange: store session data
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
@@ -127,7 +133,8 @@ async def test_create_then_resume_preserves_conversation_history(
     # Assert
     assert result is not None
     assert result is mock_session_instance
-    mock_agent.load_session.assert_awaited_once_with("sess-abc-123")
+    # load_session is no longer called in resume_session — it's handled by SessionPool
+    mock_agent.load_session.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +309,11 @@ async def test_no_duplicate_load_session_call_on_resume(
     mock_agent: MagicMock,
     known_session_data: SessionData,
 ) -> None:
-    """session_manager.resume_session must call agent.load_session exactly once."""
+    """session_manager.resume_session must NOT call agent.load_session.
+
+    Conversation history loading is now handled by SessionPool's
+    get_or_create_session_agent(), not by resume_session directly.
+    """
     # Arrange
     session_manager.session_store.load = AsyncMock(return_value=known_session_data)  # type: ignore[union-attr]
 
@@ -321,8 +332,8 @@ async def test_no_duplicate_load_session_call_on_resume(
             acp_agent=MagicMock(),
         )
 
-    # Assert: agent.load_session called exactly once (not duplicated)
-    mock_agent.load_session.assert_awaited_once_with("sess-abc-123")
+    # Assert: agent.load_session is NOT called by resume_session
+    mock_agent.load_session.assert_not_awaited()
 
 
 @pytest.mark.unit

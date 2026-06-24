@@ -932,6 +932,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     *prompts,  # type: ignore[arg-type]
                     input_provider=input_provider,
                     parent_session_id=parent_session_id,
+                    depth=depth,
                 ):
                     yield event
 

@@ -5,11 +5,46 @@ from __future__ import annotations
 import logging
 
 import pytest
+import structlog
 from upathtools import UPath
 
 from agentpool.skills.command import SkillCommand
 from agentpool.skills.registry import SkillsRegistry
 from agentpool.skills.skill import Skill
+
+
+@pytest.fixture(autouse=True)
+def _setup_agentpool_logging() -> None:
+    """Ensure agentpool loggers are configured for test capture.
+
+    Resets structlog to a minimal configuration and sets the agentpool
+    logger tree to DEBUG so that caplog reliably captures log messages
+    regardless of structlog auto-configuration order in parallel runs.
+    """
+    # Reset structlog to a minimal configuration that passes through to stdlib logging.
+    # This avoids interference from logfire.StructlogProcessor() and other processors
+    # that may be configured by production code or other tests.
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_log_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.dev.ConsoleRenderer(colors=False),
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # Set the entire agentpool logger tree to DEBUG so that structlog's
+    # filter_by_level processor passes messages through regardless of
+    # any explicit level set on individual loggers.
+    agentpool_root = logging.getLogger("agentpool")
+    agentpool_root.setLevel(logging.DEBUG)
+    agentpool_root.propagate = True
+
+    # Also ensure the root logger is at DEBUG for caplog compatibility.
+    logging.getLogger().setLevel(logging.DEBUG)
 
 
 @pytest.fixture
@@ -64,6 +99,7 @@ class TestCommandRegistryLogging:
         """Test that registry initialization logs at DEBUG level."""
         from agentpool.skills.command_registry import SkillCommandRegistry
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             _registry = SkillCommandRegistry()
 
@@ -77,6 +113,7 @@ class TestCommandRegistryLogging:
 
         registry = SkillCommandRegistry()
 
+        caplog.set_level(logging.INFO)
         with caplog.at_level(logging.INFO):
             registry.register("test-cmd", test_command)
 
@@ -92,6 +129,7 @@ class TestCommandRegistryLogging:
         registry = SkillCommandRegistry()
         registry.register("test-cmd", test_command)
 
+        caplog.set_level(logging.INFO)
         with caplog.at_level(logging.INFO):
             del registry["test-cmd"]
 
@@ -111,6 +149,7 @@ class TestCommandRegistryLogging:
 
         registry = SkillCommandRegistry(skills_registry=skills_registry)
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             await registry.initialize(wait=True)
 
@@ -129,6 +168,7 @@ class TestACPSkillBridgeLogging:
 
         bridge = ACPSkillBridge()
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             bridge.handle_change("test-cmd", test_command)
 
@@ -146,6 +186,7 @@ class TestACPSkillBridgeLogging:
         bridge = ACPSkillBridge()
         bridge.handle_change("test-cmd", test_command)
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             bridge.handle_change("test-cmd", None)
 
@@ -163,6 +204,7 @@ class TestAGUISkillBridgeLogging:
 
         bridge = AGUISkillBridge()
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             bridge.handle_change("test-cmd", test_command)
 
@@ -180,6 +222,7 @@ class TestAGUISkillBridgeLogging:
         bridge = AGUISkillBridge()
         bridge.handle_change("test-cmd", test_command)
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             bridge.handle_change("test-cmd", None)
 
@@ -195,6 +238,7 @@ class TestOpenCodeSkillBridgeLogging:
         """Test that command creation logs at DEBUG level."""
         from agentpool_server.opencode_server.skill_bridge import create_skill_command
 
+        caplog.set_level(logging.DEBUG)
         with caplog.at_level(logging.DEBUG):
             _cmd = create_skill_command(test_command)
 
@@ -209,6 +253,7 @@ class TestOpenCodeSkillBridgeLogging:
 
         bridge = OpenCodeSkillBridge()
 
+        caplog.set_level(logging.INFO)
         with caplog.at_level(logging.INFO):
             bridge.handle_change("test-cmd", test_command)
 

@@ -1498,6 +1498,7 @@ class TurnRunner:
         # RunExecutor.execute() uses run_handle to set/clear active_agent_run.
         run_ctx._run_handle = run_handle  # type: ignore[attr-defined]
         run_ctx.deps = kwargs.get("deps")
+        run_ctx.depth = kwargs.get("depth", 0)
         run_ctx.run_id = run_id
         run_ctx.cancelled = False
         run_ctx.current_task = asyncio.current_task()

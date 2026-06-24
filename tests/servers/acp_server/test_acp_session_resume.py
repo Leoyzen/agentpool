@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,6 +57,7 @@ def mock_session():
     session.cwd = "/tmp"
 
     session.agent = MagicMock()
+    session.agent.model_name = "test-model"
     session.agent.conversation = MagicMock()
     session.agent.conversation.chat_messages = []
     session.agent.load_session = AsyncMock(return_value=True)
@@ -316,11 +316,13 @@ async def test_resume_session_with_none_mcp_servers_calls_initialize():
 
 
 @pytest.mark.unit
-async def test_resume_session_warns_when_load_session_returns_false(caplog):
-    """Test that resume_session logs a warning when agent.load_session()
-    returns False."""
-    caplog.set_level(logging.WARNING)
+async def test_resume_session_does_not_call_load_session():
+    """Test that resume_session does NOT call agent.load_session().
 
+    Conversation history loading was moved to SessionPool's
+    get_or_create_session_agent(), so resume_session no longer
+    calls agent.load_session() directly.
+    """
     pool = AgentPool()
 
     def _callback(message: str) -> str:
@@ -352,7 +354,7 @@ async def test_resume_session_warns_when_load_session_returns_false(caplog):
         mock_session.initialize = AsyncMock()
         mock_session.initialize_mcp_servers = AsyncMock()
         mock_session.agent = MagicMock()
-        mock_session.agent.load_session = AsyncMock(return_value=False)
+        mock_session.agent.load_session = AsyncMock()
         MockSession.return_value = mock_session
 
         await manager.resume_session(
@@ -361,10 +363,7 @@ async def test_resume_session_warns_when_load_session_returns_false(caplog):
             acp_agent=mock_acp_agent,
         )
 
-    assert any(
-        "Agent failed to load session state" in record.message
-        for record in caplog.records
-    )
+    mock_session.agent.load_session.assert_not_awaited()
 
 
 @pytest.mark.unit

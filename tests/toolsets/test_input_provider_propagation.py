@@ -61,24 +61,29 @@ async def test_input_provider_propagated_to_subagent_via_task_tool() -> None:
         parent = pool.get_agent("parent")
         child = pool.get_agent("child")
 
-        # Patch child's run_stream to capture the input_provider argument
+        # Patch session_pool.run_stream (what SubagentTools.task actually calls)
+        # to capture the input_provider argument
         captured_kwargs = {}
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
-        async def mock_run_stream(*_args: Any, **kwargs: Any) -> Any:
+        original_run_stream = session_pool.run_stream
+
+        async def mock_run_stream(session_id: str, *prompts: str, **kwargs: Any) -> Any:
             captured_kwargs.update(kwargs)
             yield StreamCompleteEvent(
                 message=ChatMessage(content="done", role="assistant"),
             )
 
-        with patch.object(child, "run_stream", side_effect=mock_run_stream):
+        with patch.object(session_pool, "run_stream", side_effect=mock_run_stream):
             await parent.run(
                 "Delegate to child",
                 input_provider=fake_provider,
             )
 
-        # Verify input_provider was passed to child's run_stream
+        # Verify input_provider was passed to session_pool.run_stream
         assert "input_provider" in captured_kwargs, (
-            f"input_provider not passed to child.run_stream. "
+            f"input_provider not passed to session_pool.run_stream. "
             f"Captured kwargs: {captured_kwargs}"
         )
         assert captured_kwargs["input_provider"] is fake_provider, (
@@ -114,24 +119,27 @@ async def test_input_provider_propagated_to_worker() -> None:
         main = pool.get_agent("main")
         helper = pool.get_agent("helper")
 
-        # Patch helper's run_stream to capture the input_provider argument
+        # Patch session_pool.run_stream (what worker tool actually calls)
+        # to capture the input_provider argument
         captured_kwargs = {}
+        session_pool = pool.session_pool
+        assert session_pool is not None
 
-        async def mock_run_stream(*_args: Any, **kwargs: Any) -> Any:
+        async def mock_run_stream(session_id: str, *prompts: str, **kwargs: Any) -> Any:
             captured_kwargs.update(kwargs)
             yield StreamCompleteEvent(
                 message=ChatMessage(content="done", role="assistant"),
             )
 
-        with patch.object(helper, "run_stream", side_effect=mock_run_stream):
+        with patch.object(session_pool, "run_stream", side_effect=mock_run_stream):
             await main.run(
                 "Ask helper",
                 input_provider=fake_provider,
             )
 
-        # Verify input_provider was passed to helper's run_stream
+        # Verify input_provider was passed to session_pool.run_stream
         assert "input_provider" in captured_kwargs, (
-            f"input_provider not passed to helper.run_stream. "
+            f"input_provider not passed to session_pool.run_stream. "
             f"Captured kwargs: {captured_kwargs}"
         )
         assert captured_kwargs["input_provider"] is fake_provider, (

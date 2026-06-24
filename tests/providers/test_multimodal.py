@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from pydantic_ai import ImageUrl
 import pytest
 
@@ -9,6 +11,8 @@ from agentpool import Agent
 @pytest.mark.flaky(reruns=2)
 async def test_vision(vision_model: str):
     """Test basic vision capability with a small, public image."""
+    if not os.getenv("TEST_VISION_MODEL"):
+        pytest.skip("TEST_VISION_MODEL not set; default may not support multimodal")
     agent = Agent(name="test-vision", model=vision_model)
     # Using a small, public image
     msg = "https://python.org/static/community_logos/python-logo-master-v3-TM.png"

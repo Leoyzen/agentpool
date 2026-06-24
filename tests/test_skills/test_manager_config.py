@@ -8,10 +8,38 @@ import tempfile
 from textwrap import dedent
 
 import pytest
+import structlog
 from upathtools import UPath
 
 from agentpool.skills.manager import SkillsManager
 from agentpool_config.skills import SkillsConfig
+
+
+@pytest.fixture(autouse=True)
+def _setup_agentpool_logging() -> None:
+    """Ensure agentpool loggers are configured for test capture.
+
+    Resets structlog to a minimal configuration and sets the agentpool
+    logger tree to DEBUG so that caplog reliably captures log messages
+    regardless of structlog auto-configuration order in parallel runs.
+    """
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_log_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.dev.ConsoleRenderer(colors=False),
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    agentpool_root = logging.getLogger("agentpool")
+    agentpool_root.setLevel(logging.DEBUG)
+    agentpool_root.propagate = True
+
+    logging.getLogger().setLevel(logging.DEBUG)
 
 
 @pytest.fixture
@@ -99,6 +127,7 @@ async def test_discover_skills_logging(
     config = SkillsConfig(paths=[UPath("/non/existent/custom/path")], include_default=True)
 
     manager = SkillsManager()
+    caplog.set_level(logging.DEBUG)
     with caplog.at_level(logging.DEBUG):
         await manager.discover_skills(config=config)
 
@@ -109,13 +138,6 @@ async def test_discover_skills_logging(
     )
 
     # Check for DEBUG for default paths
-    assert any(
-        "Default skills directory not found" in record.message and record.levelno == logging.DEBUG
-        for record in caplog.records
-    )
-
-    # Check for DEBUG for default paths (they likely don't exist in the test environment)
-    print(f"Logged messages: {[r.message for r in caplog.records]}")
     assert any(
         "Default skills directory not found" in record.message and record.levelno == logging.DEBUG
         for record in caplog.records

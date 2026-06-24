@@ -117,12 +117,14 @@ async def test_connect_acp_mcp_server_timeout(
     """Verify connect_acp_mcp_server raises TimeoutError when send_request hangs."""
 
     async def hang_forever(*args, **kwargs):
-        await asyncio.Event().wait()
+        await anyio.sleep(float("inf"))
 
     acp_agent.client.send_request = hang_forever  # type: ignore[method-assign]
 
+    # Wrap with short timeout to override the 300s internal anyio.fail_after
     with pytest.raises(TimeoutError):
-        await acp_agent.connect_acp_mcp_server(server_config)
+        with anyio.fail_after(2):
+            await acp_agent.connect_acp_mcp_server(server_config)
 
 
 # Test 4: disconnect_acp_mcp_server sends mcp/disconnect and removes connection
