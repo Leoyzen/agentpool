@@ -58,13 +58,13 @@
 
 ## 6. Phase 6: GraphStreamingAdapter TaskGroup
 
-- [ ] 6.1 Refactor `GraphStreamingAdapter.__aiter__()` in `src/agentpool/messaging/streaming_adapter.py`: wrap `_graph_iteration_task()` in `anyio.create_task_group()` via `tg.start_soon()`
-- [ ] 6.2 Remove `_iteration_task: asyncio.Task | None` field from `GraphStreamingAdapter.__init__()`
-- [ ] 6.3 Remove timeout-based polling: replace `await asyncio.wait_for(event_queue.get(), timeout=0.1)` with `await event_queue.get()` (no timeout; cancellation via TaskGroup)
-- [ ] 6.4 Remove `asyncio.shield()` + `asyncio.wait_for()` cleanup pattern from `__aiter__()` finally block; rely on `TaskGroup.__aexit__`
-- [ ] 6.5 Keep `_iteration_done` event and `_iteration_error` for downstream compatibility
-- [ ] 6.6 Write test: break from `__aiter__` mid-stream, verify `_iteration_task` completes within 2s, verify no `asyncio.shield()` or `wait_for()` in implementation
-- [ ] 6.7 Run `uv run pytest tests/ -k "streaming_adapter" -x` to verify adapter changes
+- [x] 6.1 Refactor `GraphStreamingAdapter.__aiter__()` in `src/agentpool/messaging/streaming_adapter.py`: wrap `_graph_iteration_task()` in `anyio.create_task_group()` via `tg.start_soon()`
+- [x] 6.2 Remove `_iteration_task: asyncio.Task | None` field from `GraphStreamingAdapter.__init__()`
+- [x] 6.3 Remove timeout-based polling: replace `await asyncio.wait_for(event_queue.get(), timeout=0.1)` with `await event_queue.get()` (no timeout; cancellation via TaskGroup)
+- [x] 6.4 Remove `asyncio.shield()` + `asyncio.wait_for()` cleanup pattern from `__aiter__()` finally block; rely on `TaskGroup.__aexit__`
+- [x] 6.5 Keep `_iteration_done` event and `_iteration_error` for downstream compatibility
+- [x] 6.6 Write test: break from `__aiter__` mid-stream, verify `_iteration_task` completes within 2s, verify no `asyncio.shield()` or `wait_for()` in implementation
+- [x] 6.7 Run `uv run pytest tests/ -k "streaming_adapter" -x` to verify adapter changes
 
 ## 7. Phase 7: TaskManager Deprecation (BaseServer + 6 Protocol Servers)
 
