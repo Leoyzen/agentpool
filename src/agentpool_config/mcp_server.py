@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 from pydantic import ConfigDict, Field, HttpUrl, model_validator
 from schemez import Schema
+
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -182,6 +186,43 @@ class BaseMCPServerConfig(Schema):
         return StdioMCPServerConfig.from_string(text)
 
 
+def _make_timeout_logger(
+    server_name: str | None,
+) -> Any:
+    """Build a ``process_tool_call`` callback that logs MCP tool call timeouts.
+
+    The callback wraps ``direct_call_tool`` and emits a ``WARNING``-level log
+    when the underlying MCP request times out, so operators can distinguish
+    timeouts from other tool errors.
+
+    Args:
+        server_name: Display name of the MCP server, included in the log message.
+
+    Returns:
+        A callable suitable for ``MCPServer.process_tool_call``.
+    """
+    async def _process_tool_call(
+        ctx: Any,
+        direct_call_tool: Any,
+        name: str,
+        tool_args: dict[str, Any],
+    ) -> Any:
+        try:
+            return await direct_call_tool(name, tool_args)
+        except Exception as e:
+            msg = str(e)
+            if "Timed out" in msg or "timeout" in msg.lower():
+                logger.warning(
+                    "MCP tool call timed out (server=%s, tool=%s): %s",
+                    server_name,
+                    name,
+                    msg,
+                )
+            raise
+
+    return _process_tool_call
+
+
 class StdioMCPServerConfig(BaseMCPServerConfig):
     """MCP server started via stdio.
 
@@ -260,6 +301,7 @@ class StdioMCPServerConfig(BaseMCPServerConfig):
             "timeout": self.timeout,
             "read_timeout": self.timeout,
             "elicitation_callback": elicitation_callback,
+            "process_tool_call": _make_timeout_logger(self.display_name),
         }
         if self.env:
             kwargs["env"] = self.get_env_vars()
@@ -333,6 +375,7 @@ class SSEMCPServerConfig(BaseMCPServerConfig):
             "timeout": self.timeout,
             "read_timeout": self.timeout,
             "elicitation_callback": elicitation_callback,
+            "process_tool_call": _make_timeout_logger(self.display_name),
         }
         return MCPServerSSE(**kwargs)
 
@@ -404,6 +447,7 @@ class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
             timeout=self.timeout,
             read_timeout=self.timeout,
             elicitation_callback=elicitation_callback,
+            process_tool_call=_make_timeout_logger(self.display_name),
         )
 
 
