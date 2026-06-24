@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-DEFAULT_READ_TIMEOUT_SECONDS: float = 300.0
+DEFAULT_READ_TIMEOUT_SECONDS: float = 600.0
 
 
 class AcpMcpTransport(ClientTransport):

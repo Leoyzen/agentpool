@@ -74,9 +74,9 @@ class BaseMCPServerConfig(Schema):
     """Environment variables to pass to the server process."""
 
     timeout: float = Field(
-        default=300.0,
+        default=600.0,
         gt=0,
-        examples=[30.0, 60.0, 300.0, 3600.0],
+        examples=[30.0, 60.0, 300.0, 600.0],
         title="Server timeout",
     )
     """Timeout in seconds for both the MCP initialization handshake and per-request
