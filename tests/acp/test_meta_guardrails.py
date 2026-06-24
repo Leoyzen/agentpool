@@ -4,22 +4,18 @@ Ensures that ``subagent_session_info`` is NOT emitted in ``field_meta``
 when the converter is in legacy mode (the default). The ``subagent_session_info``
 field is exclusive to ``subagent_display_mode="zed"`` and must not leak
 into legacy client protocols.
+
+``SubAgentEvent`` content rendering is delegated to child consumers by the
+simplified architecture — the parent converter intentionally drops these
+events. Only ``SpawnSessionStart`` guardrails remain here.
 """
 
 from __future__ import annotations
 
 import pytest
-from pydantic_ai import PartStartEvent, TextPart, TextPartDelta
 
-from agentpool.agents.events import (
-    PartDeltaEvent,
-    SpawnSessionStart,
-    StreamCompleteEvent,
-    SubAgentEvent,
-)
+from agentpool.agents.events import SpawnSessionStart
 from agentpool_server.acp_server.event_converter import ACPEventConverter
-from agentpool.messaging.messages import ChatMessage
-from pydantic_ai.usage import RequestUsage
 
 
 @pytest.fixture
@@ -142,132 +138,4 @@ async def test_spawn_session_start_legacy_child_session_tracked(
     assert "child_track_001" in converter._child_sessions
 
 
-# ---------------------------------------------------------------------------
-# SubAgentEvent — legacy mode
-# ---------------------------------------------------------------------------
 
-
-@pytest.mark.unit
-async def test_subagent_event_text_legacy_no_subagent_session_info(
-    converter: ACPEventConverter,
-):
-    """SubAgentEvent wrapping a text start event in legacy mode must not leak meta."""
-    inner_event = PartStartEvent(index=0, part=TextPart(content="Hello from subagent"))
-    sub_event = SubAgentEvent(
-        source_name="helper",
-        source_type="agent",
-        event=inner_event,
-        depth=1,
-    )
-    updates = [u async for u in converter.convert(sub_event)]
-
-    assert len(updates) >= 1
-    for update in updates:
-        d = _dump(update)
-        assert not _has_subagent_session_info(d), (
-            f"Legacy SubAgentEvent(text) leaked subagent_session_info: {d.get('field_meta')}"
-        )
-
-
-@pytest.mark.unit
-async def test_subagent_event_text_delta_legacy_no_subagent_session_info(
-    converter: ACPEventConverter,
-):
-    """SubAgentEvent wrapping a text delta in legacy mode must not leak meta."""
-    inner_event = PartDeltaEvent(index=1, delta=TextPartDelta(content_delta=" more text"))
-    sub_event = SubAgentEvent(
-        source_name="helper",
-        source_type="agent",
-        event=inner_event,
-        depth=1,
-    )
-    updates = [u async for u in converter.convert(sub_event)]
-
-    assert len(updates) >= 1
-    for update in updates:
-        d = _dump(update)
-        assert not _has_subagent_session_info(d), (
-            f"Legacy SubAgentEvent(text delta) leaked subagent_session_info: {d.get('field_meta')}"
-        )
-
-
-@pytest.mark.unit
-async def test_subagent_event_text_is_message_chunk_not_tool_progress(
-    converter: ACPEventConverter,
-):
-    """SubAgentEvent with text in legacy mode yields AgentMessageChunk, not ToolCallProgress."""
-    inner_event = PartStartEvent(index=0, part=TextPart(content="Hello"))
-    sub_event = SubAgentEvent(
-        source_name="helper",
-        source_type="agent",
-        event=inner_event,
-        depth=1,
-    )
-    updates = [u async for u in converter.convert(sub_event)]
-
-    assert len(updates) >= 1
-    for update in updates:
-        d = _dump(update)
-        assert d.get("session_update") == "agent_message_chunk", (
-            f"Expected agent_message_chunk, got {d.get('session_update')}"
-        )
-
-
-@pytest.mark.unit
-async def test_subagent_event_stream_complete_legacy_no_subagent_session_info(
-    converter: ACPEventConverter,
-):
-    """SubAgentEvent with StreamCompleteEvent in legacy mode must not leak meta."""
-    message = ChatMessage(
-        content="Done",
-        role="assistant",  # type: ignore[arg-type]
-        usage=RequestUsage(),
-    )
-    inner_event = StreamCompleteEvent(message=message)
-    sub_event = SubAgentEvent(
-        source_name="helper",
-        source_type="agent",
-        event=inner_event,
-        depth=1,
-    )
-    updates = [u async for u in converter.convert(sub_event)]
-
-    # Legacy mode yields AgentMessageChunk with a "---" separator
-    assert len(updates) >= 1
-    for update in updates:
-        d = _dump(update)
-        assert not _has_subagent_session_info(d), (
-            f"Legacy SubAgentEvent(complete) leaked subagent_session_info: {d.get('field_meta')}"
-        )
-
-
-@pytest.mark.unit
-async def test_subagent_event_mixed_legacy_no_subagent_session_info(
-    converter: ACPEventConverter,
-):
-    """Multiple SubAgentEvents in legacy mode never leak subagent_session_info."""
-    events = [
-        SubAgentEvent(
-            source_name="researcher",
-            source_type="agent",
-            event=PartStartEvent(index=0, part=TextPart(content="Finding data")),
-            depth=1,
-        ),
-        SubAgentEvent(
-            source_name="researcher",
-            source_type="agent",
-            event=PartDeltaEvent(index=1, delta=TextPartDelta(content_delta="... still searching")),
-            depth=1,
-        ),
-    ]
-
-    all_updates: list[dict[str, object]] = []
-    for event in events:
-        async for update in converter.convert(event):
-            all_updates.append(_dump(update))
-
-    assert len(all_updates) >= 1
-    for d in all_updates:
-        assert not _has_subagent_session_info(d), (
-            f"Legacy mixed SubAgentEvent leaked subagent_session_info: {d.get('field_meta')}"
-        )

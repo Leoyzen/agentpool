@@ -210,39 +210,6 @@ async def test_none_child_after_valid_spawn_does_not_crash(
     updates = [u async for u in zed_converter.convert(sub_event)]
     assert len(updates) == 0
 
-    # Real child session should still be tracked unmodified
-    assert "real_child" in zed_converter._subagent_tool_map
-    assert zed_converter._subagent_message_counts["real_child"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Converter state preservation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_none_child_preserves_converter_state(
-    zed_converter: ACPEventConverter,
-) -> None:
-    """SubAgentEvent with child_session_id=None must not alter converter state."""
-    # Set up some existing state
-    zed_converter._subagent_tool_map["existing_child"] = "tc_existing"
-    zed_converter._subagent_message_counts["existing_child"] = 5
-
-    inner_event = PartStartEvent(index=0, part=TextPart(content="Hello"))
-    sub_event = SubAgentEvent(
-        source_name="helper",
-        source_type="agent",
-        event=inner_event,
-        depth=1,
-        child_session_id=None,
-    )
-    _ = [u async for u in zed_converter.convert(sub_event)]
-
-    # State must be unchanged
-    assert zed_converter._subagent_tool_map == {"existing_child": "tc_existing"}
-    assert zed_converter._subagent_message_counts == {"existing_child": 5}
-
 
 # ---------------------------------------------------------------------------
 # Multiple inner event types with None child_session_id

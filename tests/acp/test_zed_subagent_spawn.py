@@ -87,12 +87,12 @@ class TestZedModeSpawnSessionStart:
     async def test_title_is_task_and_status_pending(
         self, zed_converter: ACPEventConverter
     ):
-        """ToolCallStart must have title='task' and status='pending'."""
+        """ToolCallStart must have title='coder: Coding subagent' and status='pending'."""
         event = _make_spawn_event()
         updates = await _collect(zed_converter, event)
         tcs: ToolCallStart = updates[0]  # type: ignore[assignment]
 
-        assert tcs.title == "task"
+        assert tcs.title == "coder: Coding subagent"
         assert tcs.status == "pending"
 
     @pytest.mark.unit
@@ -147,32 +147,6 @@ class TestZedModeSpawnSessionStart:
         assert len(updates) == 1
         assert not isinstance(updates[0], ToolCallStart)
 
-    @pytest.mark.unit
-    async def test_subagent_tool_map_is_populated(
-        self, zed_converter: ACPEventConverter
-    ):
-        """Internal _subagent_tool_map must map child_session_id to tool_call_id."""
-        child_id = "child_ses_map_test"
-        event = _make_spawn_event(child_session_id=child_id)
-        updates = await _collect(zed_converter, event)
-        tcs: ToolCallStart = updates[0]  # type: ignore[assignment]
-
-        assert child_id in zed_converter._subagent_tool_map
-        assert zed_converter._subagent_tool_map[child_id] == tcs.tool_call_id
-
-    @pytest.mark.unit
-    async def test_subagent_message_counts_initialized(
-        self, zed_converter: ACPEventConverter
-    ):
-        """Internal _subagent_message_counts must start at 0 for the child."""
-        child_id = "child_ses_counts_test"
-        event = _make_spawn_event(child_session_id=child_id)
-        _ = await _collect(zed_converter, event)
-
-        assert child_id in zed_converter._subagent_message_counts
-        assert zed_converter._subagent_message_counts[child_id] == 0
-
-
 # ---------------------------------------------------------------------------
 # Multiple spawns
 # ---------------------------------------------------------------------------
@@ -197,20 +171,4 @@ class TestZedModeMultipleSpawns:
 
         assert tcs_a.tool_call_id != tcs_b.tool_call_id
 
-    @pytest.mark.unit
-    async def test_two_spawns_separate_tool_map_entries(
-        self, zed_converter: ACPEventConverter
-    ):
-        """Each child session should have its own _subagent_tool_map entry."""
-        event_a = _make_spawn_event(child_session_id="child_map_a")
-        event_b = _make_spawn_event(child_session_id="child_map_b")
 
-        _ = await _collect(zed_converter, event_a)
-        _ = await _collect(zed_converter, event_b)
-
-        assert "child_map_a" in zed_converter._subagent_tool_map
-        assert "child_map_b" in zed_converter._subagent_tool_map
-        assert (
-            zed_converter._subagent_tool_map["child_map_a"]
-            != zed_converter._subagent_tool_map["child_map_b"]
-        )
