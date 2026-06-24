@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING
 
 import anyio
@@ -244,5 +245,11 @@ class ProtocolEventConsumerMixin(ABC):
             done_event = getattr(self, "_consumer_done_events", {}).pop(session_id, None)
             if done_event is not None:
                 done_event.set()
+            self._session_scopes.pop(session_id, None)
+            self._session_groups.pop(session_id, None)
+            stream = self._consumer_streams.pop(session_id, None)
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    await self.event_bus.unsubscribe(session_id, stream)
             if started:
                 await self._after_consumer_loop(session_id)

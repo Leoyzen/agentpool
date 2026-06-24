@@ -12,7 +12,20 @@ from agentpool_config.storage import SQLStorageConfig, StorageConfig
 from agentpool_storage.sql_provider import SQLModelProvider
 from agentpool_storage.sql_provider.models import Conversation
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
+import anyio
 
+
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 @pytest.fixture
 async def sql_provider(tmp_path):
@@ -133,8 +146,8 @@ async def test_subagent_event_lineage(test_pool):
     child_events: list[Any] = []
     await asyncio.sleep(0.1)  # Give events time to propagate
 
-    while not queue.empty():
-        envelope = queue.get_nowait()
+    while not _stream_empty(queue):
+        envelope = queue.receive_nowait()
         if envelope is None:
             break
         child_events.append(envelope)

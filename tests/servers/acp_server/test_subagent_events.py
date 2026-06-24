@@ -103,10 +103,10 @@ async def test_acp_handler_converts_spawn_session_start(
         spawn_mechanism="spawn",
     )
     await _send.send(event)
-    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._session_groups["sess-1"]
+    await asyncio.sleep(0.1)
+    await _send.aclose()
     for _ in range(100):
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
@@ -131,10 +131,10 @@ async def test_acp_handler_converts_part_delta(
 
     event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
     await _send.send(event)
-    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._session_groups["sess-1"]
+    await asyncio.sleep(0.1)
+    await _send.aclose()
     for _ in range(100):
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
@@ -163,10 +163,10 @@ async def test_acp_handler_converts_tool_call(
         kind="execute",
     )
     await _send.send(event)
-    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._session_groups["sess-1"]
+    await asyncio.sleep(0.1)
+    await _send.aclose()
     for _ in range(100):
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
@@ -205,12 +205,12 @@ async def test_acp_handler_converts_stream_complete(
     )
     event = StreamCompleteEvent(message=message, session_id="sess-1")
     await _send.send(event)
-    await _send.send(None)
 
     await handler.start_event_consumer("sess-1")
-    task = handler._session_groups["sess-1"]
+    await asyncio.sleep(0.1)
+    await _send.aclose()
     for _ in range(100):
-        if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
+        if len(handler._converters) == 0 or "sess-1" not in handler._consumer_streams:
             break
         await asyncio.sleep(0.01)
 
@@ -235,10 +235,10 @@ async def test_acp_handler_converts_run_error(
 
     event = RunErrorEvent(message="something broke", agent_name="test-agent")
     await _send.send(event)
-    await _send.send(None)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._session_groups["sess-1"]
+    await asyncio.sleep(0.1)
+    await _send.aclose()
     for _ in range(100):
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
@@ -269,15 +269,15 @@ async def test_acp_handler_connection_error_stops_consumer(
     await _send.send(event)
 
     await acp_handler.start_event_consumer("sess-1")
-    task = acp_handler._session_groups["sess-1"]
+    await asyncio.sleep(0.1)
+    await _send.aclose()
     for _ in range(100):
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
         await asyncio.sleep(0.01)
 
-    
-    assert task.exception() is None
-    assert "sess-1" not in acp_handler._consumer_tasks
+
+    assert "sess-1" not in acp_handler._session_groups
     mock_event_bus.unsubscribe.assert_awaited()
 
 
@@ -319,17 +319,14 @@ async def test_acp_handler_converter_isolated_per_session(
         description="spawn b",
         spawn_mechanism="spawn",
     )
-    await queue1.put(event1)
-    await queue2.put(event2)
-    await queue1.put(None)
-    await queue2.put(None)
+    await _send1.send(event1)
+    await _send2.send(event2)
 
     await acp_handler.start_event_consumer("sess-1")
     await acp_handler.start_event_consumer("sess-2")
-
-    task1 = acp_handler._session_groups["sess-1"]
-    task2 = acp_handler._session_groups["sess-2"]
     await asyncio.sleep(0.2)
+    await _send1.aclose()
+    await _send2.aclose()
 
     # Verify separate converter instances were created
     assert "sess-1" in captured_converters
@@ -352,7 +349,7 @@ async def test_acp_handler_no_child_consumers_created(
     acp_handler: ACPProtocolHandler,
     mock_event_bus: AsyncMock,
 ) -> None:
-    """Verify _consumer_tasks only has parent session, no child consumers."""
+    """Verify _session_groups only has parent session, no child consumers."""
     _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
     mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
@@ -369,16 +366,13 @@ async def test_acp_handler_no_child_consumers_created(
 
     await acp_handler.start_event_consumer("sess-1")
 
-    # Allow consumer to process SpawnSessionStart
     await asyncio.sleep(0.05)
 
-    assert len(acp_handler._consumer_tasks) == 1
-    assert "sess-1" in acp_handler._consumer_tasks
-    assert "child-1" not in acp_handler._consumer_tasks
+    assert len(acp_handler._session_groups) == 1
+    assert "sess-1" in acp_handler._session_groups
+    assert "child-1" not in acp_handler._session_groups
 
-    # Gracefully stop the consumer
-    await _send.send(None)
-    task = acp_handler._session_groups["sess-1"]
+    await _send.aclose()
     for _ in range(100):
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break

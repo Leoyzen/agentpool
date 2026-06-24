@@ -70,16 +70,24 @@ def _make_stream_and_mock_subscribe(
 def mock_event_bus() -> AsyncMock:
     """Return a mock EventBus with async subscribe/unsubscribe."""
     bus = AsyncMock(spec=EventBus)
-    from tests._helpers.mock_stream import EmptyReceiveStream
-
-    bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     bus.unsubscribe = AsyncMock(return_value=None)
     return bus
 
 
+@pytest.fixture
+def mock_event_bus_with_stream(mock_event_bus: AsyncMock) -> tuple[AsyncMock, anyio.abc.ObjectSendStream[EventEnvelope]]:
+    """Return a mock EventBus with a real memory stream pair."""
+    send_stream, receive_stream = anyio.create_memory_object_stream(max_buffer_size=100)
+    mock_event_bus.subscribe = AsyncMock(return_value=receive_stream)
+    return mock_event_bus, send_stream
+
+
 @pytest.mark.anyio
-async def test_start_consumer_subscribes_and_runs_loop(mock_event_bus: AsyncMock) -> None:
+async def test_start_consumer_subscribes_and_runs_loop(
+    mock_event_bus: AsyncMock,
+) -> None:
     """Verify EventBus subscription and consumer task creation."""
+    _make_stream_and_mock_subscribe(mock_event_bus)
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
 
@@ -92,8 +100,11 @@ async def test_start_consumer_subscribes_and_runs_loop(mock_event_bus: AsyncMock
 
 
 @pytest.mark.anyio
-async def test_start_consumer_is_idempotent(mock_event_bus: AsyncMock) -> None:
+async def test_start_consumer_is_idempotent(
+    mock_event_bus: AsyncMock,
+) -> None:
     """Calling start_event_consumer twice does not create duplicate tasks."""
+    _make_stream_and_mock_subscribe(mock_event_bus)
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
 
@@ -106,8 +117,11 @@ async def test_start_consumer_is_idempotent(mock_event_bus: AsyncMock) -> None:
 
 
 @pytest.mark.anyio
-async def test_start_consumer_is_threadsafe(mock_event_bus: AsyncMock) -> None:
+async def test_start_consumer_is_threadsafe(
+    mock_event_bus: AsyncMock,
+) -> None:
     """Concurrent calls for the same session are serialized."""
+    _make_stream_and_mock_subscribe(mock_event_bus)
     consumer = _TestConsumer(mock_event_bus)
 
     async def start() -> None:
@@ -125,6 +139,7 @@ async def test_stop_consumer_cancels_task_and_unsubscribes(
     mock_event_bus: AsyncMock,
 ) -> None:
     """Stopping a consumer cancels the task and unsubscribes from EventBus."""
+    _make_stream_and_mock_subscribe(mock_event_bus)
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
 
@@ -226,6 +241,7 @@ async def test_cancelled_error_reraised_after_cleanup(
     mock_event_bus: AsyncMock,
 ) -> None:
     """Cancel the consumer task mid-loop; CancelledError propagates, cleanup runs."""
+    _make_stream_and_mock_subscribe(mock_event_bus)
     consumer = _TestConsumer(mock_event_bus)
     await consumer.start_event_consumer("sess-1")
     await asyncio.sleep(0.01)

@@ -23,6 +23,8 @@ from agentpool_server.opencode_server.models import (
 )
 from agentpool_server.opencode_server.models.events import ServerConnectedEvent
 from agentpool_server.opencode_server.state import ServerState
+import anyio
+
 
 
 if TYPE_CHECKING:
@@ -134,7 +136,7 @@ async def test_bridge_republishes_to_event_bus(
     await asyncio.sleep(0.05)
 
     assert subscriber.qsize() == 1
-    envelope = subscriber.get_nowait()
+    envelope = subscriber.receive_nowait()
     assert isinstance(envelope, EventEnvelope)
     wrapped = envelope.event
     assert isinstance(wrapped, CustomEvent)
@@ -162,7 +164,7 @@ async def test_bridge_wraps_different_event_types(
 
     assert subscriber.qsize() == 2
     for i, evt in enumerate(events):
-        envelope = subscriber.get_nowait()
+        envelope = subscriber.receive_nowait()
         assert isinstance(envelope, EventEnvelope)
         wrapped = envelope.event
         assert isinstance(wrapped, CustomEvent)
@@ -274,7 +276,7 @@ async def test_bridge_isolation_between_sessions(
     assert sub_a.qsize() == 1
     assert sub_b.qsize() == 0
 
-    envelope = sub_a.get_nowait()
+    envelope = sub_a.receive_nowait()
     assert isinstance(envelope, EventEnvelope)
     wrapped = envelope.event
     assert isinstance(wrapped, CustomEvent)

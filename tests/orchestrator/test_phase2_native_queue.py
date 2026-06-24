@@ -19,6 +19,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio
+
 import pytest
 from pydantic_ai import Agent as PydanticAIAgent, RunContext
 from pydantic_ai.models.test import TestModel
@@ -636,7 +638,7 @@ async def test_receive_request_routes_native_agents_correctly(
     await session_pool.receive_request(session_id, "hello", priority="when_idle")
 
     # Wait for execution to start
-    envelope = await asyncio.wait_for(queue.get(), timeout=2.0)
+    envelope = await asyncio.wait_for(queue.receive(), timeout=2.0)
     assert envelope is not None
     assert isinstance(envelope.event, RunStartedEvent)
     assert envelope.event.agent_name == native_agent.name
@@ -674,11 +676,9 @@ async def test_receive_request_inject_prompt_into_active_run(
     events: list[Any] = []
     try:
         while True:
-            event = await asyncio.wait_for(queue.get(), timeout=1.0)
-            if event is None:
-                break
+            event = await asyncio.wait_for(queue.receive(), timeout=1.0)
             events.append(event)
-    except TimeoutError:
+    except (asyncio.TimeoutError, anyio.EndOfStream):
         pass
 
     # Should have at least one RunStartedEvent
@@ -717,11 +717,9 @@ async def test_native_agent_auto_resumes_with_queued_prompts(
     events: list[Any] = []
     try:
         while True:
-            event = await asyncio.wait_for(queue.get(), timeout=2.0)
-            if event is None:
-                break
+            event = await asyncio.wait_for(queue.receive(), timeout=2.0)
             events.append(event)
-    except TimeoutError:
+    except (asyncio.TimeoutError, anyio.EndOfStream):
         pass
 
     # Should get RunStartedEvent and StreamCompleteEvent
@@ -833,11 +831,9 @@ async def test_run_handle_lifecycle_created_completed_cancelled(
     events: list[Any] = []
     try:
         while True:
-            event = await asyncio.wait_for(queue.get(), timeout=2.0)
-            if event is None:
-                break
+            event = await asyncio.wait_for(queue.receive(), timeout=2.0)
             events.append(event)
-    except TimeoutError:
+    except (asyncio.TimeoutError, anyio.EndOfStream):
         pass
 
     # After completion, run handle should be cleaned up
@@ -892,10 +888,8 @@ async def test_receive_request_passes_input_provider_to_session_agent(
     # Wait for execution
     try:
         while True:
-            event = await asyncio.wait_for(queue.get(), timeout=2.0)
-            if event is None:
-                break
-    except TimeoutError:
+            event = await asyncio.wait_for(queue.receive(), timeout=2.0)
+    except (asyncio.TimeoutError, anyio.EndOfStream):
         pass
 
     assert captured_input_provider is fake_input_provider, (
@@ -930,8 +924,6 @@ async def test_receive_request_ignores_unknown_kwargs_gracefully(
     # Wait for execution
     try:
         while True:
-            event = await asyncio.wait_for(queue.get(), timeout=2.0)
-            if event is None:
-                break
-    except TimeoutError:
+            event = await asyncio.wait_for(queue.receive(), timeout=2.0)
+    except (asyncio.TimeoutError, anyio.EndOfStream):
         pass

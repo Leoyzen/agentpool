@@ -22,6 +22,8 @@ from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.messaging import MessageHistory
 from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run_executor import RunExecutor
+import anyio
+
 
 
 def greet(name: str) -> str:
@@ -325,7 +327,7 @@ async def test_process_tool_event_never_publishes_to_event_bus() -> None:
 
     # Verify NO events were published to EventBus
     with pytest.raises(asyncio.QueueEmpty):
-        bus_queue.get_nowait()
+        bus_queue.receive_nowait()
 
 
 @pytest.mark.unit

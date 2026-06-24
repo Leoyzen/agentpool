@@ -516,16 +516,16 @@ class TestBeforeConsumerLoopResume:
         await asyncio.sleep(0.05)
 
         # Verify consumer task and queue exist
-        assert session_id in integration._consumer_tasks
-        assert session_id in integration._consumer_queues
+        assert session_id in integration._session_groups
+        assert session_id in integration._consumer_streams
         assert not integration._session_groups[session_id].done()
 
         # Stop the consumer
         await integration.stop_event_consumer(session_id)
 
         # Verify consumer task and queue are cleaned up
-        assert session_id not in integration._consumer_tasks
-        assert session_id not in integration._consumer_queues
+        assert session_id not in integration._session_groups
+        assert session_id not in integration._consumer_streams
 
         # Now resume: set context data and re-start
         msg = _make_assistant_msg(session_id, server_state.working_dir)
@@ -543,8 +543,8 @@ class TestBeforeConsumerLoopResume:
         await asyncio.sleep(0.05)
 
         # Verify consumer re-started
-        assert session_id in integration._consumer_tasks
-        assert session_id in integration._consumer_queues
+        assert session_id in integration._session_groups
+        assert session_id in integration._consumer_streams
         assert not integration._session_groups[session_id].done()
 
         # Verify context was restored (not created fresh)

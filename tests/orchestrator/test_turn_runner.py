@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import MagicMock
 
+import anyio
 import pytest
 
 from agentpool.agents.context import AgentRunContext
@@ -113,7 +114,7 @@ async def _setup_session(
     from agentpool.agents.base_agent import _current_run_ctx_var
 
     def _mock_get_active_run_context() -> AgentRunContext | None:
-        run_ctx = _current_run_ctx_var.get()
+        run_ctx = _current_run_ctx_var.receive()
         if run_ctx is not None and not run_ctx.completed:
             return run_ctx
         session = controller.get_session(session_id)
@@ -233,11 +234,9 @@ async def test_run_turn_fails_run_handle_on_exception(
     async def _consume() -> None:
         try:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=0.5)
                 events.append(event)
-        except TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             pass
 
     consumer = asyncio.create_task(_consume())
@@ -432,7 +431,7 @@ async def test_run_turn_publishes_events(
     await _setup_session(controller, "sess-1", mock_agent, mock_pool)
     queue = await turn_runner.event_bus.subscribe("sess-1")
     await turn_runner.run_turn("sess-1", "hello")
-    event = await asyncio.wait_for(queue.get(), timeout=0.5)
+    event = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert event is not None
     # EventBus now wraps events in EventEnvelope
     from agentpool.orchestrator.core import EventEnvelope
@@ -893,7 +892,7 @@ async def test_in_turn_context_set_during_run_turn(
         *prompts: Any,
         **kwargs: Any,
     ) -> AsyncIterator[RunStartedEvent]:
-        seen_values.append(_in_turn_context.get())
+        seen_values.append(_in_turn_context.receive())
         yield RunStartedEvent(session_id=kwargs.get("session_id", "default"), run_id="run-1")
 
     agent = MagicMock()
@@ -921,7 +920,7 @@ async def test_in_turn_context_cleared_after_run_turn(
     await _setup_session(controller, "sess-1", mock_agent, mock_pool)
     await turn_runner.run_turn("sess-1", "hello")
 
-    assert _in_turn_context.get() is False, (
+    assert _in_turn_context.receive() is False, (
         "_in_turn_context should be reset after TurnRunner turn completes"
     )
 
@@ -995,7 +994,7 @@ async def test_in_turn_context_propagates_to_child_task(
     child_seen_values: list[bool] = []
 
     async def _child_check() -> None:
-        child_seen_values.append(_in_turn_context.get())
+        child_seen_values.append(_in_turn_context.receive())
 
     async def _fake_stream(
         run_ctx: AgentRunContext,
@@ -1103,7 +1102,7 @@ async def test_publish_event_wraps_in_event_envelope(
     queue = await turn_runner.event_bus.subscribe("sess-pub")
     await turn_runner._publish_event("sess-pub", event)
 
-    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    published = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert isinstance(published, EventEnvelope), (
         "Expected event to be wrapped in EventEnvelope"
     )
@@ -1132,7 +1131,7 @@ async def test_publish_event_preserves_original_event_unmodified(
     queue = await turn_runner.event_bus.subscribe("sess-pub")
     await turn_runner._publish_event("sess-pub", event)
 
-    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    published = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert isinstance(published, EventEnvelope), (
         "Expected event to be wrapped in EventEnvelope"
     )
@@ -1161,7 +1160,7 @@ async def test_publish_event_wraps_objects_without_session_id(
     queue = await turn_runner.event_bus.subscribe("sess-pub")
     await turn_runner._publish_event("sess-pub", event)
 
-    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    published = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert isinstance(published, EventEnvelope), (
         "Event without session_id should be wrapped in EventEnvelope"
     )
@@ -1182,7 +1181,7 @@ async def test_publish_event_wraps_pydantic_ai_events(
     queue = await turn_runner.event_bus.subscribe("sess-pub")
     await turn_runner._publish_event("sess-pub", event)
 
-    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    published = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert isinstance(published, EventEnvelope), (
         "PydanticAI event should be wrapped in EventEnvelope"
     )
@@ -1219,7 +1218,7 @@ async def test_stream_event_emitter_wraps_subagent_event_in_envelope(
     queue = await turn_runner.event_bus.subscribe("parent-sid")
     await emitter._emit(event)
 
-    published = await asyncio.wait_for(queue.get(), timeout=0.5)
+    published = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert isinstance(published, EventEnvelope), (
         "SubAgentEvent should be wrapped in EventEnvelope"
     )
@@ -1282,11 +1281,9 @@ async def test_cancelled_error_after_stream_complete_is_suppressed(
     async def _consume() -> None:
         try:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=2.0)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=2.0)
                 events.append(event)
-        except TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             pass
 
     consumer = asyncio.create_task(_consume())
@@ -1351,11 +1348,9 @@ async def test_cancelled_error_without_stream_complete_still_fails(
     async def _consume() -> None:
         try:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=0.5)
                 events.append(event)
-        except TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             pass
 
     consumer = asyncio.create_task(_consume())

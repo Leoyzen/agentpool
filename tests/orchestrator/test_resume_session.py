@@ -14,7 +14,20 @@ import pytest
 from agentpool.agents.events.events import SessionResumeEvent
 from agentpool.orchestrator.core import SessionPool
 from agentpool.sessions.models import PendingDeferredCall, SessionData
+import anyio
 
+
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 pytestmark = pytest.mark.unit
 
@@ -472,8 +485,8 @@ async def test_resume_session_emits_resume_event(
 
     # Collect events
     events: list[Any] = []
-    while not queue.empty():
-        envelope = queue.get_nowait()
+    while not _stream_empty(queue):
+        envelope = queue.receive_nowait()
         if envelope is not None:
             events.append(envelope.event)
 

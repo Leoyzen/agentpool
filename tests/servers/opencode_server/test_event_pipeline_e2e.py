@@ -42,6 +42,7 @@ from agentpool_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
 )
 from agentpool_server.opencode_server.state import ServerState
+import anyio
 from pydantic_ai.messages import (
     PartDeltaEvent as PydanticPartDeltaEvent,
     PartStartEvent,
@@ -58,6 +59,17 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
+
 def _extract_opencode_events(sse_queue: Any) -> list[Any]:
     """Extract OpenCode events from the SSE subscriber queue.
 
@@ -70,8 +82,8 @@ def _extract_opencode_events(sse_queue: Any) -> list[Any]:
     from agentpool.orchestrator.core import EventEnvelope
 
     result: list[Any] = []
-    while not sse_queue.empty():
-        envelope = sse_queue.get_nowait()
+    while not _stream_empty(sse_queue):
+        envelope = sse_queue.receive_nowait()
         if isinstance(envelope, EventEnvelope):
             inner = envelope.event
             if isinstance(inner, CustomEvent) and inner.event_data is not None:

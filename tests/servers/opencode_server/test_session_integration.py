@@ -28,12 +28,25 @@ from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
 from agentpool_server.opencode_server.models import SessionStatus
 from agentpool_server.opencode_server.state import ServerState
+import anyio
+
 
 
 # =============================================================================
 # Fixtures
 # =============================================================================
 
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 @pytest.fixture
 def mock_agent_pool() -> Mock:
@@ -369,8 +382,8 @@ class TestMessageRouting:
         await asyncio.sleep(0.05)
 
         events = []
-        while not queue.empty():
-            event = queue.get_nowait()
+        while not _stream_empty(queue):
+            event = queue.receive_nowait()
             if event is not None:
                 events.append(event)
 
@@ -405,7 +418,7 @@ class TestSessionStatusSync:
         )
 
         # Event consumer should be started for the session
-        assert "test-session-008" in integration._consumer_tasks
+        assert "test-session-008" in integration._session_groups
 
     @pytest.mark.asyncio
     async def test_status_broadcasts_busy_on_run_start(

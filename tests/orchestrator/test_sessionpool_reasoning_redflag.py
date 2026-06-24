@@ -45,13 +45,7 @@ async def test_reasoning_events_published_to_eventbus():
     await event_bus.publish(session_id, thinking_delta)
     await event_bus.close_session(session_id)  # sends sentinel
 
-    # Consume events
-    collected = []
-    while True:
-        event = await queue.get()
-        if event is None:
-            break
-        collected.append(event)
+    collected = [event async for event in queue]
 
     await event_bus.unsubscribe(session_id, queue)
 
@@ -84,12 +78,7 @@ async def test_eventbus_preserves_event_types_after_copy():
 
     # Verify both subscribers got the event with correct type
     for queue in [queue1, queue2]:
-        collected = []
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            collected.append(event)
+        collected = [event async for event in queue]
 
         assert len(collected) == 1
         event = collected[0]
@@ -127,13 +116,7 @@ async def test_multiple_subscribers_receive_reasoning():
 
     # Both queues should receive all events
     async def drain_queue(queue):
-        events = []
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            events.append(event)
-        return events
+        return [event async for event in queue]
 
     adapter_events, consumer_events = await asyncio.gather(
         drain_queue(adapter_queue),
@@ -183,12 +166,7 @@ async def test_eventbus_with_subagent_wrapping():
     await event_bus.close_session(parent_session)
 
     # Parent subscriber should receive it
-    collected = []
-    while True:
-        event = await queue.get()
-        if event is None:
-            break
-        collected.append(event)
+    collected = [event async for event in queue]
 
     assert len(collected) == 1
     assert isinstance(collected[0].event, SubAgentEvent)

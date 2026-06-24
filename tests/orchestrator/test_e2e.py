@@ -7,10 +7,12 @@ event passing through the EventBus.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import MagicMock
 
+import anyio
 import pytest
 
 from agentpool.agents.context import AgentRunContext
@@ -162,11 +164,9 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     events: list[Any] = []
     while True:
         try:
-            event = await asyncio.wait_for(queue.get(), timeout=0.5)
-            if event is None:
-                break
+            event = await asyncio.wait_for(queue.receive(), timeout=0.5)
             events.append(event)
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             break
 
     # Verify event ordering and types
@@ -186,8 +186,8 @@ async def test_full_session_lifecycle_create_prompt_events_close(
     assert session_pool.sessions.get_session("sess-lifecycle") is None
 
     # Sentinel should have been sent
-    sentinel = await asyncio.wait_for(queue.get(), timeout=0.5)
-    assert sentinel is None
+    with pytest.raises((asyncio.TimeoutError, anyio.EndOfStream)):
+        await asyncio.wait_for(queue.receive(), timeout=0.5)
 
     await session_pool.shutdown()
 
@@ -304,17 +304,18 @@ async def test_multi_agent_concurrent_sessions_no_contamination(
 
     # Collect events for session A
     events_a: list[Any] = []
-    while not queue_a.empty():
-        event = queue_a.get_nowait()
-        if event is not None:
-            events_a.append(event)
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            events_a.append(queue_a.receive_nowait())
+            continue
+        break
 
-    # Collect events for session B
     events_b: list[Any] = []
-    while not queue_b.empty():
-        event = queue_b.get_nowait()
-        if event is not None:
-            events_b.append(event)
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            events_b.append(queue_b.receive_nowait())
+            continue
+        break
 
     # Verify session A only has agent-a events
     assert len(events_a) == 3
@@ -454,21 +455,20 @@ async def test_concurrent_sessions_event_bus_isolation(
 
     # All subscribers for sess-x should have exactly 1 event
     for q in (qx1, qx2):
-        ev = await asyncio.wait_for(q.get(), timeout=0.5)
-        assert ev is not None
+        ev = await asyncio.wait_for(q.receive(), timeout=0.5)
         actual_ev = _unwrap_event(ev)
         assert isinstance(actual_ev, RunStartedEvent)
         assert actual_ev.session_id == "sess-x"
-        assert q.empty()
+        with pytest.raises(anyio.WouldBlock):
+            q.receive_nowait()
 
-    # All subscribers for sess-y should have exactly 1 event
     for q in (qy1, qy2):
-        ev = await asyncio.wait_for(q.get(), timeout=0.5)
-        assert ev is not None
+        ev = await asyncio.wait_for(q.receive(), timeout=0.5)
         actual_ev = _unwrap_event(ev)
         assert isinstance(actual_ev, RunStartedEvent)
         assert actual_ev.session_id == "sess-y"
-        assert q.empty()
+        with pytest.raises(anyio.WouldBlock):
+            q.receive_nowait()
 
     await session_pool.close_session("sess-x")
     await session_pool.close_session("sess-y")
@@ -521,13 +521,18 @@ async def test_cross_protocol_event_publishing_and_subscribing() -> None:
 
     # Verify ACP subscriber receives all events in order
     acp_received: list[Any] = []
-    while not acp_queue.empty():
-        acp_received.append(acp_queue.get_nowait())
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            acp_received.append(acp_queue.receive_nowait())
+            continue
+        break
 
-    # Verify OpenCode subscriber receives all events in order
     opencode_received: list[Any] = []
-    while not opencode_queue.empty():
-        opencode_received.append(opencode_queue.get_nowait())
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            opencode_received.append(opencode_queue.receive_nowait())
+            continue
+        break
 
     assert len(acp_received) == len(events_to_publish)
     assert len(opencode_received) == len(events_to_publish)
@@ -575,12 +580,21 @@ async def test_cross_protocol_multiple_subscribers_different_protocols() -> None
     opencode_received: list[Any] = []
     agui_received: list[Any] = []
 
-    while not acp_queue.empty():
-        acp_received.append(acp_queue.get_nowait())
-    while not opencode_queue.empty():
-        opencode_received.append(opencode_queue.get_nowait())
-    while not agui_queue.empty():
-        agui_received.append(agui_queue.get_nowait())
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            acp_received.append(acp_queue.receive_nowait())
+            continue
+        break
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            opencode_received.append(opencode_queue.receive_nowait())
+            continue
+        break
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            agui_received.append(agui_queue.receive_nowait())
+            continue
+        break
 
     assert len(acp_received) == 3
     assert len(opencode_received) == 3
@@ -623,10 +637,16 @@ async def test_cross_protocol_event_ordering_preserved_under_load() -> None:
     # Collect events for both subscribers
     received_a: list[Any] = []
     received_b: list[Any] = []
-    while not protocol_a.empty():
-        received_a.append(protocol_a.get_nowait())
-    while not protocol_b.empty():
-        received_b.append(protocol_b.get_nowait())
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            received_a.append(protocol_a.receive_nowait())
+            continue
+        break
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            received_b.append(protocol_b.receive_nowait())
+            continue
+        break
 
     assert len(received_a) == event_count
     assert len(received_b) == event_count
@@ -673,14 +693,16 @@ async def test_cross_protocol_with_session_pool_integration(
     acp_events: list[Any] = []
     opencode_events: list[Any] = []
 
-    while not acp_queue.empty():
-        event = acp_queue.get_nowait()
-        if event is not None:
-            acp_events.append(event)
-    while not opencode_queue.empty():
-        event = opencode_queue.get_nowait()
-        if event is not None:
-            opencode_events.append(event)
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            acp_events.append(acp_queue.receive_nowait())
+            continue
+        break
+    while True:
+        with contextlib.suppress(anyio.WouldBlock):
+            opencode_events.append(opencode_queue.receive_nowait())
+            continue
+        break
 
     # Both should see the full lifecycle
     expected_types = [
@@ -712,7 +734,9 @@ async def test_cross_protocol_with_session_pool_integration(
     await session_pool.close_session("sess-integrated")
 
     # Both should receive sentinel
-    assert await asyncio.wait_for(acp_queue.get(), timeout=0.5) is None
-    assert await asyncio.wait_for(opencode_queue.get(), timeout=0.5) is None
+    with pytest.raises((asyncio.TimeoutError, anyio.EndOfStream)):
+        await asyncio.wait_for(acp_queue.receive(), timeout=0.5)
+    with pytest.raises((asyncio.TimeoutError, anyio.EndOfStream)):
+        await asyncio.wait_for(opencode_queue.receive(), timeout=0.5)
 
     await session_pool.shutdown()

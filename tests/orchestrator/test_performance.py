@@ -20,12 +20,25 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunStartedEvent
 from agentpool.orchestrator.core import EventBus, SessionController, SessionPool, TurnRunner
 from agentpool.orchestrator.metrics import MetricsCollector
+import anyio
+
 
 
 # ============================================================================
 # Fixtures
 # ============================================================================
 
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 @pytest.fixture
 def mock_pool() -> MagicMock:
@@ -459,7 +472,7 @@ async def test_1000_concurrent_sessions_with_agents(
     for i in range(session_count):
         sid = f"sess-{i}"
         queue = queues[sid]
-        event = await asyncio.wait_for(queue.get(), timeout=1.0)
+        event = await asyncio.wait_for(queue.receive(), timeout=1.0)
         assert event is not None
         assert isinstance(event, RunStartedEvent)
 
@@ -517,7 +530,7 @@ async def test_rapid_create_close_cycles_with_turns(
         await _attach_agent(session_pool, sid, mock_agent)
         queue = await session_pool.event_bus.subscribe(sid)
         await session_pool.process_prompt(sid, "hello")
-        event = await asyncio.wait_for(queue.get(), timeout=1.0)
+        event = await asyncio.wait_for(queue.receive(), timeout=1.0)
         assert event is not None
         await session_pool.close_session(sid)
         assert session_pool.sessions.get_session(sid) is None
@@ -605,8 +618,8 @@ async def test_event_bus_drop_oldest_under_load() -> None:
 
     # Drain and verify oldest events were dropped
     items: list[Any] = []
-    while not queue.empty():
-        items.append(queue.get_nowait())
+    while not _stream_empty(queue):
+        items.append(queue.receive_nowait())
 
     run_ids = [e.run_id for e in items if isinstance(e, RunStartedEvent)]
     # Oldest events (run-0 through run-989) should have been dropped
@@ -680,7 +693,7 @@ async def test_turn_runner_injection_overflow(
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         try:
-            ev = await asyncio.wait_for(queue.get(), timeout=0.5)
+            ev = await asyncio.wait_for(queue.receive(), timeout=0.5)
             if ev is None:
                 break
             events.append(ev)
@@ -723,7 +736,7 @@ async def test_turn_runner_concurrent_injections(
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
         try:
-            ev = await asyncio.wait_for(queue.get(), timeout=0.5)
+            ev = await asyncio.wait_for(queue.receive(), timeout=0.5)
             if ev is None:
                 break
             events.append(ev)

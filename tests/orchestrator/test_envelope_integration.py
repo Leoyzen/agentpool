@@ -7,7 +7,20 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
+import anyio
 
+
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 class TestEventEnvelopeIntegration:
     """Integration tests for EventEnvelope wrapping behavior."""
@@ -26,10 +39,10 @@ class TestEventEnvelopeIntegration:
         event = {"type": "test", "data": "hello from child"}
         await bus.publish("child-sid", event)
 
-        assert not parent_queue.empty(), (
+        assert not _stream_empty(parent_queue), (
             "Parent subscriber should receive child events wrapped in EventEnvelope"
         )
-        received = await parent_queue.get()
+        received = await parent_queue.receive()
         assert isinstance(received, EventEnvelope), (
             f"Expected EventEnvelope, got {type(received).__name__}"
         )
