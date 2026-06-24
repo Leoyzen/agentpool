@@ -401,11 +401,10 @@ async def list_skills(ctx: AgentContext) -> str:
         except Exception:
             pass
 
-    all_skills = visible_skills + _visible_model_skills(ctx, provider_skills, requested_node_name)
-    # Merge with dedup: local (visible_skills) first, then provider_skills
+    visible_provider_skills = _visible_model_skills(ctx, provider_skills, requested_node_name)
     seen: set[str] = {s.name for s in visible_skills}
     all_skills = list(visible_skills)
-    for skill in provider_skills:
+    for skill in visible_provider_skills:
         if skill.name not in seen:
             seen.add(skill.name)
             all_skills.append(skill)

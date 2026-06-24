@@ -101,6 +101,23 @@ async def test_list_skills_filters_by_current_node_package_scope(tmp_path):
 
 
 @pytest.mark.unit
+async def test_list_skills_filters_provider_skills_by_current_node_package_scope(tmp_path):
+    host_skill = _write_skill(tmp_path, "diagnosis-planning", "Diagnosis planning")
+    provider_skill = Skill(
+        name="fta-review",
+        description="FTA review",
+        skill_path=PurePosixPath("skill://scratchpad/fta-review"),
+        metadata={"scope": "rebuttal_agent"},
+    )
+    pool = _FakePool([host_skill], [provider_skill])
+
+    result = await list_skills(_ctx(pool, "librarian"))
+
+    assert "diagnosis-planning" in result
+    assert "fta-review" not in result
+
+
+@pytest.mark.unit
 async def test_hidden_package_skill_does_not_shadow_visible_provider_skill(tmp_path):
     package_skill = _write_skill(tmp_path, "fta-review", "FTA review")
     package_skill.metadata["scope"] = "rebuttal_agent"
