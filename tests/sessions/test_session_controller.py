@@ -318,10 +318,10 @@ class TestSessionControllerPersistence:
         assert loaded.session_id == "test_session"
         assert loaded.agent_name == "test_agent"
 
-    async def test_close_session_deletes_from_store(
+    async def test_close_session_marks_closed_in_store(
         self, mock_pool: MagicMock, store: MemorySessionStore
     ) -> None:
-        """SessionController deletes session from store on close."""
+        """SessionController marks session as closed in store on close."""
         controller = SessionController(pool=mock_pool, store=store)
 
         await controller.get_or_create_session(
@@ -332,7 +332,8 @@ class TestSessionControllerPersistence:
         await controller.close_session("test_session")
 
         loaded = await store.load("test_session")
-        assert loaded is None
+        assert loaded is not None
+        assert loaded.status == "closed"
 
     async def test_create_with_parent_tracks_children(
         self, mock_pool: MagicMock, store: MemorySessionStore
@@ -377,8 +378,12 @@ class TestSessionControllerPersistence:
 
         assert controller.get_session("parent_1") is None
         assert controller.get_session("child_1") is None
-        assert await store.load("parent_1") is None
-        assert await store.load("child_1") is None
+        parent_data = await store.load("parent_1")
+        assert parent_data is not None
+        assert parent_data.status == "closed"
+        child_data = await store.load("child_1")
+        assert child_data is not None
+        assert child_data.status == "closed"
 
     async def test_child_inherits_project_id_via_metadata(
         self, mock_pool: MagicMock, store: MemorySessionStore

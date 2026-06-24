@@ -293,6 +293,9 @@ class Conversation(AsyncAttrs, SQLModel, table=True):
     checkpoint_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     """Checkpoint data for durable execution (messages_json, pending_calls)."""
 
+    status: str = Field(default="active", index=True)
+    """Session execution status: active, checkpointed, resuming, completed, closed, failed."""
+
     model_config = SQLModelConfig(use_attribute_docstrings=True)  # pyright: ignore[reportCallIssue]
 
 

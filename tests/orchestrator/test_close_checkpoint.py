@@ -94,29 +94,23 @@ def mock_store() -> MagicMock:
 class TestShouldCheckpointOnClose:
     """Test the _should_checkpoint_on_close predicate."""
 
-    def test_returns_false_when_no_pending_calls(
-        self, controller: SessionController
-    ) -> None:
+    def test_returns_false_when_no_pending_calls(self, controller: SessionController) -> None:
         """No pending calls → no checkpoint needed."""
         data = make_session_data(pending=[])
         assert controller._should_checkpoint_on_close(data) is False
 
-    def test_returns_true_when_pending_calls_exist(
-        self, controller: SessionController
-    ) -> None:
+    def test_returns_true_when_pending_calls_exist(self, controller: SessionController) -> None:
         """Pending calls → checkpoint needed."""
         data = make_session_data(pending=[make_pending_call()])
         assert controller._should_checkpoint_on_close(data) is True
 
-    def test_returns_false_when_data_is_none(
-        self, controller: SessionController
-    ) -> None:
+    def test_returns_false_when_data_is_none(self, controller: SessionController) -> None:
         """None data → no checkpoint needed."""
         assert controller._should_checkpoint_on_close(None) is False
 
 
 # ===================================================================
-# close_session – without pending calls (normal behavior)
+# close_session - without pending calls (normal behavior)
 # ===================================================================
 
 
@@ -124,33 +118,32 @@ class TestCloseSessionWithoutPendingCalls:
     """close_session() without pending deferred calls behaves as before."""
 
     @pytest.mark.anyio
-    async def test_removes_session(
-        self, controller: SessionController
-    ) -> None:
+    async def test_removes_session(self, controller: SessionController) -> None:
         """Session is removed from tracking."""
         await controller.get_or_create_session("sess-1")
         await controller.close_session("sess-1")
         assert controller.get_session("sess-1") is None
 
     @pytest.mark.anyio
-    async def test_is_idempotent(
-        self, controller: SessionController
-    ) -> None:
+    async def test_is_idempotent(self, controller: SessionController) -> None:
         """Double close does not raise."""
         await controller.get_or_create_session("sess-1")
         await controller.close_session("sess-1")
         await controller.close_session("sess-1")
 
     @pytest.mark.anyio
-    async def test_deletes_from_store(
-        self, mock_pool: MagicMock, mock_store: MagicMock
-    ) -> None:
-        """When a store exists, the session data is deleted."""
+    async def test_marks_closed_in_store(self, mock_pool: MagicMock, mock_store: MagicMock) -> None:
+        """When a store exists, the session is marked as closed (not deleted)."""
         mock_store.load = AsyncMock(return_value=make_session_data())
+        mock_store.save = AsyncMock(return_value=None)
         ctrl = SessionController(pool=mock_pool, store=mock_store)
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
-        mock_store.delete.assert_awaited_once_with("sess-1")
+        mock_store.delete.assert_not_awaited()
+        closed_saves = [
+            call for call in mock_store.save.await_args_list if call[0][0].status == "closed"
+        ]
+        assert len(closed_saves) >= 1, "Expected save() with status='closed'"
 
     @pytest.mark.anyio
     async def test_does_not_save_checkpoint(
@@ -162,14 +155,16 @@ class TestCloseSessionWithoutPendingCalls:
         await ctrl.get_or_create_session("sess-1")
         await ctrl.close_session("sess-1")
         # save can still be called for other reasons, but never with "checkpointed" status
-        for call in mock_store.save.await_args_list if hasattr(mock_store.save, 'await_args_list') else []:
+        for call in (
+            mock_store.save.await_args_list if hasattr(mock_store.save, "await_args_list") else []
+        ):
             args, _ = call
-            if hasattr(args[0], 'status') and args[0].status == "checkpointed":
+            if hasattr(args[0], "status") and args[0].status == "checkpointed":
                 pytest.fail("save() was called with checkpointed status unexpectedly")
 
 
 # ===================================================================
-# close_session – with pending calls (checkpoint-on-close)
+# close_session - with pending calls (checkpoint-on-close)
 # ===================================================================
 
 
@@ -191,7 +186,8 @@ class TestCloseSessionWithPendingCalls:
 
         # Should save with checkpointed status
         saved_calls = [
-            call for call in mock_store.save.await_args_list
+            call
+            for call in mock_store.save.await_args_list
             if call[0][0].session_id == "sess-1" and call[0][0].status == "checkpointed"
         ]
         assert len(saved_calls) >= 1, "Expected save() with checkpointed status"
@@ -258,7 +254,7 @@ class TestCloseSessionWithPendingCalls:
 
 
 # ===================================================================
-# close_session – without store
+# close_session - without store
 # ===================================================================
 
 
@@ -266,9 +262,7 @@ class TestCloseSessionWithoutStore:
     """close_session() when no store is configured."""
 
     @pytest.mark.anyio
-    async def test_no_store_no_checkpoint(
-        self, controller: SessionController
-    ) -> None:
+    async def test_no_store_no_checkpoint(self, controller: SessionController) -> None:
         """Without a store, close_session just removes the session."""
         await controller.get_or_create_session("sess-1")
         await controller.close_session("sess-1")
@@ -301,7 +295,8 @@ class TestSessionPoolCloseCheckpoint:
 
         # Verify checkpointed save happened
         saved_calls = [
-            call for call in mock_store.save.await_args_list
+            call
+            for call in mock_store.save.await_args_list
             if call[0][0].session_id == "sess-1" and call[0][0].status == "checkpointed"
         ]
         assert len(saved_calls) >= 1, "Expected save() with checkpointed status"

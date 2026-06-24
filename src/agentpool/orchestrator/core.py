@@ -830,7 +830,7 @@ class SessionController:
         self._session_agents.pop(session_id, None)
         self._sessions.pop(session_id, None)
         if self.store is not None:
-            await self.store.delete(session_id)
+            await self._mark_session_closed(session_id)
         # Remove from parent's children list
         if session.parent_session_id and session.parent_session_id in self._children:
             self._children[session.parent_session_id] = [
@@ -905,6 +905,26 @@ class SessionController:
             )
             return False
 
+    async def _mark_session_closed(self, session_id: str) -> None:
+        """Mark a session as closed in the store instead of deleting it.
+
+        This preserves session data across server restarts so that clients
+        can resume sessions via ``session/resume`` or ``session/load`` after
+        a server restart.
+
+        Args:
+            session_id: Session identifier to mark as closed.
+        """
+        assert self.store is not None
+        data = await self.store.load(session_id)
+        if data is None:
+            logger.debug("Session not in store, skipping close mark", session_id=session_id)
+            return
+        data = data.model_copy(update={"status": "closed"})
+        data.touch()
+        await self.store.save(data)
+        logger.debug("Session marked as closed in store", session_id=session_id)
+
     async def close_session(self, session_id: str) -> None:
         """Close a session and clean up resources.
 
@@ -962,7 +982,7 @@ class SessionController:
             agent = self._session_agents.pop(session_id, None)
             self._sessions.pop(session_id, None)
             if self.store is not None and not was_checkpointed:
-                await self.store.delete(session_id)
+                await self._mark_session_closed(session_id)
             # Remove from parent's children list
             if session.parent_session_id and session.parent_session_id in self._children:
                 self._children[session.parent_session_id] = [

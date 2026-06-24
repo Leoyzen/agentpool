@@ -93,6 +93,7 @@ class SQLSessionStore:
             created_at=data.created_at,  # Maps to start_time in DB
             last_active=data.last_active,
             metadata_json=data.metadata,
+            status=data.status,
         )
 
     def _from_db_model(self, row: Session) -> SessionData:
@@ -116,6 +117,7 @@ class SQLSessionStore:
             created_at=row.start_time,  # start_time in DB is created_at in SessionData
             last_active=row.last_active or get_now(),
             metadata=metadata,
+            status=row.status or "active",
         )
 
     async def save(self, data: SessionData) -> None:
