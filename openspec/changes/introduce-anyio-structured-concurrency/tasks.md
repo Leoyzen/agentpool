@@ -49,12 +49,12 @@
 
 ## 5. Phase 5: merge_queue_into_iterator Removal
 
-- [ ] 5.1 Create `_forward_acp_events(async_iter, send_stream)` helper coroutine and `_forward_queue_events(queue, send_stream)` helper coroutine in `src/agentpool/agents/acp_agent/acp_agent.py`
-- [ ] 5.2 Refactor `ACPAgent._run_stream_once()`: replace `async with merge_queue_into_iterator(poll_acp_events(), event_source) as merged:` with `async with anyio.create_task_group() as tg:` + two `tg.start_soon()` forwarders + `async for event in receive_stream:`
-- [ ] 5.3 Remove `merge_queue_into_iterator` function and all related imports from `src/agentpool/utils/streams.py`
-- [ ] 5.3a Verify `streams.py` retains all other exports unchanged: assert `from agentpool.utils.streams import async_tee, stream_to_queue, buffer_stream` still works; verify no other callers import `merge_queue_into_iterator`
-- [ ] 5.4 Verify `tests/delegation/test_break_behavior.py` documented bugs are fixed: run the test script and confirm no `RuntimeError: Attempted to exit cancel scope in a different task` or `ValueError: Token was created in a different Context`
-- [ ] 5.5 Run `uv run pytest tests/ -k "acp_agent" -x` to verify ACP agent changes
+- [x] 5.1 Create `_forward_acp_events(async_iter, send_stream)` helper coroutine and `_forward_queue_events(queue, send_stream)` helper coroutine in `src/agentpool/agents/acp_agent/acp_agent.py`
+- [x] 5.2 Refactor `ACPAgent._run_stream_once()`: replace `async with merge_queue_into_iterator(poll_acp_events(), event_source) as merged:` with `async with anyio.create_task_group() as tg:` + two `tg.start_soon()` forwarders + `async for event in receive_stream:`
+- [x] 5.3 Remove `merge_queue_into_iterator` function and all related imports from `src/agentpool/utils/streams.py`
+- [x] 5.3a Verify `streams.py` retains all other exports unchanged: assert `from agentpool.utils.streams import async_tee, stream_to_queue, buffer_stream` still works; verify no other callers import `merge_queue_into_iterator`
+- [x] 5.4 Verify `tests/delegation/test_break_behavior.py` documented bugs are fixed: run the test script and confirm no `RuntimeError: Attempted to exit cancel scope in a different task` or `ValueError: Token was created in a different Context`
+- [x] 5.5 Run `uv run pytest tests/ -k "acp_agent" -x` to verify ACP agent changes
 
 ## 6. Phase 6: GraphStreamingAdapter TaskGroup
 

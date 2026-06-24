@@ -60,7 +60,6 @@ from agentpool.agents.exceptions import (
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
 from agentpool.orchestrator.core import EventEnvelope
-from agentpool.utils.streams import merge_queue_into_iterator
 from agentpool.utils.subprocess_utils import SubprocessError, run_with_process_monitor
 from agentpool.utils.token_breakdown import calculate_usage_from_parts
 
@@ -474,74 +473,106 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                     yield native_event
 
         tool_metadata: dict[str, dict[str, Any]] = {}
-        # Determine event source: event_bus when available, else event_queue
         event_bus = run_ctx.event_bus
         bus_stream: anyio.abc.ObjectReceiveStream[EventEnvelope] | None = None
-        event_source: asyncio.Queue[Any]
         if event_bus is not None:
             bus_stream = await event_bus.subscribe(session_id)
-            # Bridge memory receive stream to asyncio.Queue for
-            # compatibility with merge_queue_into_iterator.
-            # This bridge will be removed in Phase 5 when
-            # merge_queue_into_iterator is replaced with task group.
-            event_source = asyncio.Queue()
-            _bus_stream = bus_stream
 
-            async def _forward_bus_events() -> None:
-                try:
-                    async for envelope in _bus_stream:
-                        await event_source.put(envelope)
-                except Exception:
-                    pass
-
-            _bridge_task = asyncio.create_task(_forward_bus_events())
-        else:
-            event_source = run_ctx.event_queue
-            _bridge_task = None
         try:
             agent_ctx = self.get_context(run_ctx=run_ctx, input_provider=input_provider)
-            async with (
-                self._tool_bridge.set_run_context(agent_ctx, prompt=prompts),
-                merge_queue_into_iterator(poll_acp_events(), event_source) as merged_events,
-            ):
-                async for event in merged_events:
-                    # Unwrap EventEnvelope from event bus before type checks
-                    if isinstance(event, EventEnvelope):
-                        event = event.event
-                    if isinstance(event, ToolResultMetadataEvent):
-                        tool_metadata[event.tool_call_id] = event.metadata
-                        continue
-                    if run_ctx.cancelled:
-                        self.log.info("Stream cancelled by user")
-                        break
-                    if isinstance(event, ToolCallCompleteEvent):
-                        enriched_event = event
-                        if not enriched_event.agent_name:
-                            enriched_event = replace(enriched_event, agent_name=self.name)
-                        if (
-                            enriched_event.metadata is None
-                            and enriched_event.tool_call_id in tool_metadata
-                        ):
-                            enriched_event = replace(
-                                enriched_event, metadata=tool_metadata[enriched_event.tool_call_id]
-                            )
-                        output_event = enriched_event
-                    else:
-                        output_event = event
-                    part = event_to_part(output_event)
-                    if isinstance(part, TextPart):
-                        text_chunks.append(part.content)
-                    if part:
-                        current_response_parts.append(part)
-                    yield output_event
+            async with self._tool_bridge.set_run_context(agent_ctx, prompt=prompts):
+                send_stream, receive_stream = anyio.create_memory_object_stream(
+                    max_buffer_size=1000
+                )
+                acp_done = anyio.Event()
+
+                async def _forward_acp_events() -> None:
+                    try:
+                        async for event in poll_acp_events():
+                            try:
+                                await send_stream.send(event)
+                            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+                                return
+                    finally:
+                        acp_done.set()
+
+                async def _forward_secondary_events() -> None:
+                    try:
+                        if bus_stream is not None:
+                            while not acp_done.is_set():
+                                with anyio.move_on_after(0.05):
+                                    envelope = await bus_stream.receive()
+                                    await send_stream.send(envelope)
+                            while True:
+                                try:
+                                    envelope = bus_stream.receive_nowait()
+                                    await send_stream.send(envelope)
+                                except anyio.WouldBlock:
+                                    break
+                        else:
+                            event_queue = run_ctx.event_queue
+                            while not acp_done.is_set():
+                                try:
+                                    item = await asyncio.wait_for(
+                                        event_queue.get(), timeout=0.05
+                                    )
+                                    await send_stream.send(item)
+                                except TimeoutError:
+                                    continue
+                            while True:
+                                try:
+                                    item = event_queue.get_nowait()
+                                    await send_stream.send(item)
+                                except asyncio.QueueEmpty:
+                                    break
+                    except (
+                        anyio.EndOfStream,
+                        anyio.ClosedResourceError,
+                        anyio.BrokenResourceError,
+                    ):
+                        pass
+                    finally:
+                        await send_stream.aclose()
+
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(_forward_acp_events)
+                    tg.start_soon(_forward_secondary_events)
+                    async for event in receive_stream:
+                        if isinstance(event, EventEnvelope):
+                            event = event.event
+                        if isinstance(event, ToolResultMetadataEvent):
+                            tool_metadata[event.tool_call_id] = event.metadata
+                            continue
+                        if run_ctx.cancelled:
+                            self.log.info("Stream cancelled by user")
+                            break
+                        if isinstance(event, ToolCallCompleteEvent):
+                            enriched_event = event
+                            if not enriched_event.agent_name:
+                                enriched_event = replace(
+                                    enriched_event, agent_name=self.name
+                                )
+                            if (
+                                enriched_event.metadata is None
+                                and enriched_event.tool_call_id in tool_metadata
+                            ):
+                                enriched_event = replace(
+                                    enriched_event,
+                                    metadata=tool_metadata[enriched_event.tool_call_id],
+                                )
+                            output_event = enriched_event
+                        else:
+                            output_event = event
+                        part = event_to_part(output_event)
+                        if isinstance(part, TextPart):
+                            text_chunks.append(part.content)
+                        if part:
+                            current_response_parts.append(part)
+                        yield output_event
         except asyncio.CancelledError:
             self.log.info("Stream cancelled via task cancellation")
             run_ctx.cancelled = True
         finally:
-            if _bridge_task is not None and not _bridge_task.done():
-                _bridge_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await _bridge_task
             if event_bus is not None and bus_stream is not None:
                 try:
                     await event_bus.unsubscribe(session_id, bus_stream)
