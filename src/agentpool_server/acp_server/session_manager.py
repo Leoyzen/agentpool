@@ -232,8 +232,14 @@ class ACPSessionManager:
             logger.warning(msg, session_id=session_id, agent=data.agent_name)
             return None
 
-        # Use the pool agent directly (per-session agents now managed by SessionPool)
-        session_agent = self._pool.all_agents[data.agent_name]
+        # Create session agent via SessionPool (pool-level agents removed)
+        if self._pool.session_pool is not None:
+            session_agent = await self._pool.session_pool.sessions.get_or_create_session_agent(
+                data.session_id, agent_name=data.agent_name
+            )
+        else:
+            msg = "SessionPool is required for session resume"
+            raise RuntimeError(msg)
 
         session = ACPSession(
             session_id=session_id,
@@ -380,8 +386,8 @@ class ACPSessionManager:
         """Update available commands for all active sessions."""
         sessions = list(self._acp_sessions.values())
         for session in sessions:
-                try:
-                    await session.send_available_commands_update()
-                except Exception:
-                    msg = "Failed to update commands"
-                    logger.exception(msg, session_id=session.session_id)
+            try:
+                await session.send_available_commands_update()
+            except Exception:
+                msg = "Failed to update commands"
+                logger.exception(msg, session_id=session.session_id)

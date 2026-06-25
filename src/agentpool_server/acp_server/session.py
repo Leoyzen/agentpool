@@ -516,10 +516,14 @@ class ACPSession:
         return f"Working directory: {self.cwd}" if self.cwd else ""
 
     async def switch_active_agent(self, agent_name: str) -> None:
-        """Switch to a different agent in the pool."""
-        agents = self.agent_pool.all_agents
-        if agent_name not in agents:
-            available = list(agents.keys())
+        """Switch to a different agent in the pool.
+
+        Creates a new session-level agent for the target name via SessionPool.
+        Pool-level agents were removed — all agents are now session-scoped.
+        """
+        # Validate agent exists in config (not runtime instances)
+        available = list(self.agent_pool.agent_configs.keys())
+        if agent_name not in available:
             raise ValueError(f"Agent {agent_name!r} not found. Available: {available}")
 
         old_agent_name = self.agent.name
@@ -533,8 +537,17 @@ class ACPSession:
             if self.get_cwd_context in self.agent.sys_prompts.prompts:
                 self.agent.sys_prompts.prompts.remove(self.get_cwd_context)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-        # Switch to the pool agent directly (per-session agents now managed by SessionPool)
-        self.agent = agents[agent_name]
+        # Create new session agent via SessionPool (pool-level agents removed)
+        pool = self.agent_pool
+        if pool.session_pool is not None:
+            # Invalidate cache so get_or_create_session_agent creates a fresh agent
+            pool.session_pool.sessions._session_agents.pop(self.session_id, None)
+            self.agent = await pool.session_pool.sessions.get_or_create_session_agent(
+                self.session_id, agent_name=agent_name, input_provider=self.input_provider
+            )
+        else:
+            msg = "SessionPool is required for agent switching"
+            raise RuntimeError(msg)
 
         # Re-apply session-specific mutations
         self.agent.env = self.acp_env
