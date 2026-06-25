@@ -131,7 +131,7 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
         routes: list[Route] = []
 
         # Create route for each agent in the pool (all agent types supported)
-        for agent_name in self.pool.manifest.agents:
+        for agent_name in self.pool.all_agents:
 
             async def agent_handler(request: Request, agent_name: str = agent_name) -> Response:
                 """Handle AG-UI requests for a specific agent."""
@@ -176,4 +176,4 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
         Returns:
             Dictionary mapping agent names to their URLs
         """
-        return {name: self.get_agent_url(name) for name in self.pool.manifest.agents}
+        return {name: self.get_agent_url(name) for name in self.pool.all_agents}
