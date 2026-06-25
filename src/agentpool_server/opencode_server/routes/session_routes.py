@@ -86,7 +86,7 @@ def _resolve_session_create_agent(state: ServerState, requested_agent: str | Non
         return default_agent
 
     pool = state.pool
-    if requested_agent not in pool.all_agents:
+    if requested_agent not in pool.manifest.agents:
         raise HTTPException(status_code=400, detail=f"Unknown agent: {requested_agent}")
     return requested_agent
 

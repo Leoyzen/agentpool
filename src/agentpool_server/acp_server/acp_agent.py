@@ -169,16 +169,16 @@ def get_agent_role_config_option(agent: BaseAgent[Any, Any]) -> SessionConfigOpt
         SessionConfigOption for agent_role, or None if pool has <= 1 agents.
     """
     pool = agent.agent_pool
-    if pool is None or len(pool.all_agents) <= 1:
+    if pool is None or len(pool.manifest.agents) <= 1:
         return None
 
     choices = [
         SessionConfigSelectOption(
-            value=a.name,
-            name=a.display_name if isinstance(a.display_name, str) and a.display_name else a.name,
-            description=f"Switch to {a.name} agent",
+            value=a.name or "",
+            name=a.display_name if isinstance(a.display_name, str) and a.display_name else (a.name or ""),
+            description=f"Switch to {a.name or ''} agent",
         )
-        for a in pool.all_agents.values()
+        for a in pool.manifest.agents.values()
     ]
     return SessionConfigOption(
         id="agent_role",
@@ -1036,7 +1036,7 @@ class AgentPoolACPAgent(ACPAgent):
         from acp.exceptions import RequestError
 
         pool = session.agent.agent_pool
-        if pool is None or agent_name not in pool.all_agents:
+        if pool is None or agent_name not in pool.manifest.agents:
             msg = {"agent_role": agent_name, "reason": "Unknown agent"}
             raise RequestError.invalid_params(msg)
         await self._swap_session_agent(session.session_id, agent_name)
@@ -1134,7 +1134,7 @@ class AgentPoolACPAgent(ACPAgent):
             # 8. Invalidate sessions cache
             self._sessions_cache = None
 
-            agent_names = list(pool.all_agents.keys())
+            agent_names = list(pool.manifest.agents.keys())
             logger.info("Pool swap complete", agent_names=agent_names)
             return agent_names
         finally:

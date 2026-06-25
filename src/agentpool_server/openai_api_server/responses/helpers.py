@@ -15,25 +15,11 @@ from agentpool_server.openai_api_server.responses.models import (
 
 
 if TYPE_CHECKING:
-    from agentpool.agents.base_agent import BaseAgent
+    from agentpool.messaging.messages import ChatMessage
     from agentpool_server.openai_api_server.responses.models import ResponseRequest
 
 
-async def handle_request(request: ResponseRequest, agent: BaseAgent[Any, Any]) -> Response:
-    from fastapi import HTTPException
-
-    match request.input:
-        case str():
-            content = request.input
-        case list():
-            # Get last text content from structured input
-            last = request.input[-1]["content"]
-            text_parts = [p["text"] for p in last if p["type"] == "input_text"]
-            content = "\n".join(text_parts)
-        case _:
-            raise HTTPException(400, "Invalid input format")
-
-    message = await agent.run(content)
+async def handle_request(request: ResponseRequest, message: ChatMessage[Any]) -> Response:
     text = ResponseOutputText(text=str(message.content))
     output_msg_id = f"msg_{uuid4().hex}"
     output_msg = ResponseMessage(id=output_msg_id, role="assistant", content=[text])

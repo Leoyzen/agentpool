@@ -221,7 +221,7 @@ class ACPServer(BaseServer):
             show_events=show_events,
             show_events_detailed=show_events_detailed,
         )
-        agent_names = list(server.pool.all_agents.keys())
+        agent_names = list(server.pool.manifest.agents.keys())
 
         # Validate specified agent exists if provided
         if agent and agent not in pool.manifest.agents:
@@ -245,7 +245,7 @@ class ACPServer(BaseServer):
         """
         # Use specified agent name or fall back to pool's default agent
         if self.agent:
-            if self.agent not in self.pool.all_agents:
+            if self.agent not in self.pool.manifest.agents:
                 raise ValueError(f"Agent {self.agent!r} not found in pool")
             return self.pool.all_agents[self.agent]
         return self.pool.main_agent
@@ -327,7 +327,7 @@ class ACPServer(BaseServer):
                 manifest=new_manifest,
             )
         # 2. Validate agent exists in new pool if specified
-        agent_names = list(new_pool.all_agents.keys())
+        agent_names = list(new_pool.manifest.agents.keys())
         if not agent_names:
             msg = "New configuration contains no agents"
             raise ValueError(msg)

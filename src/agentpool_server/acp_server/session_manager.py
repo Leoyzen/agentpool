@@ -227,7 +227,7 @@ class ACPSessionManager:
             return None
 
         # Validate agent still exists
-        if data.agent_name not in self._pool.all_agents:
+        if data.agent_name not in self._pool.manifest.agents:
             msg = "Session agent no longer exists"
             logger.warning(msg, session_id=session_id, agent=data.agent_name)
             return None

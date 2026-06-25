@@ -131,7 +131,7 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
         routes: list[Route] = []
 
         # Create route for each agent in the pool (all agent types supported)
-        for agent_name in self.pool.all_agents:
+        for agent_name in self.pool.manifest.agents:
 
             async def agent_handler(request: Request, agent_name: str = agent_name) -> Response:
                 """Handle AG-UI requests for a specific agent."""
@@ -157,13 +157,13 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
             from starlette.responses import JSONResponse
 
             agent_list = [
-                {"name": name, "route": f"/{name}", "model": agent.model_name}
-                for name, agent in self.pool.all_agents.items()
+                {"name": name, "route": f"/{name}", "model": str(getattr(agent, "model", ""))}
+                for name, agent in self.pool.manifest.agents.items()
             ]
             return JSONResponse({"agents": agent_list, "count": len(agent_list)})
 
         routes.append(Route("/", list_agents, methods=["GET"]))
-        self.log.info("Created AG-UI routes", agent_count=len(self.pool.all_agents))
+        self.log.info("Created AG-UI routes", agent_count=len(self.pool.manifest.agents))
         return routes
 
     def get_agent_url(self, agent_name: str) -> str:
@@ -176,4 +176,4 @@ class AGUIServer(HTTPServer, ProtocolEventConsumerMixin):
         Returns:
             Dictionary mapping agent names to their URLs
         """
-        return {name: self.get_agent_url(name) for name in self.pool.all_agents}
+        return {name: self.get_agent_url(name) for name in self.pool.manifest.agents}

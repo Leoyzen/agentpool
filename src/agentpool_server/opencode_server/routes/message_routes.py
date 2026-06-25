@@ -83,7 +83,7 @@ def _resolve_message_agent_name(
 ) -> str:
     """Resolve the agent for a message, inheriting the session binding by default."""
     if requested_agent and requested_agent != "default":
-        if requested_agent not in state.pool.all_agents:
+        if requested_agent not in state.pool.manifest.agents:
             raise HTTPException(status_code=400, detail=f"Unknown agent: {requested_agent}")
         return requested_agent
 
