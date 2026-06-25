@@ -273,9 +273,6 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
                         break
                     yield event
 
-                if self._iteration_error is not None:
-                    tg.cancel_scope.cancel()
-
             if self._iteration_error is not None:
                 raise self._iteration_error
 

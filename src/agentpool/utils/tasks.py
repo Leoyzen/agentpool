@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import warnings
 from dataclasses import dataclass, field
 import heapq
 from typing import TYPE_CHECKING, Any
@@ -43,6 +44,11 @@ class TaskManager:
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "TaskManager is deprecated. Use anyio.TaskGroup for structured concurrency.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._pending_tasks: set[asyncio.Task[Any]] = set()
         self._task_queue: list[PrioritizedTask] = []  # heap queue
         self._scheduler_task: asyncio.Task[Any] | None = None
