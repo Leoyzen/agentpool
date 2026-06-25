@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import anyio
 import pytest
 
 from acp.schema import TextContentBlock
@@ -39,13 +40,9 @@ def mock_pool() -> MagicMock:
     sessions_registry.get_or_create_session_agent = AsyncMock(return_value=MagicMock())
     session_pool.sessions = sessions_registry
 
-    # Event consumer loop should exit immediately in tests
-    async def _mock_queue_get():
-        return None  # sentinel to stop consumer loop
+    from tests._helpers.mock_stream import EmptyReceiveStream
 
-    mock_queue = MagicMock()
-    mock_queue.get = _mock_queue_get
-    session_pool.event_bus.subscribe = AsyncMock(return_value=mock_queue)
+    session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.close_session = AsyncMock()
     session_pool.event_bus.unsubscribe = AsyncMock()
 

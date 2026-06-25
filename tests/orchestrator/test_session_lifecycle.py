@@ -9,10 +9,13 @@ Consolidated from:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 import inspect
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
+
+import anyio
 
 import pytest
 
@@ -207,7 +210,7 @@ class TestEventBusScopedSubscription:
         bus = EventBus()
         queue = await bus.subscribe("s1", scope="session")
         await bus.publish("s1", "event1")
-        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+        envelope = await asyncio.wait_for(queue.receive(), timeout=1.0)
         assert envelope is not None
         assert envelope.event == "event1"
 
@@ -220,7 +223,7 @@ class TestEventBusScopedSubscription:
         await bus.publish("s1.1", "event1")
         # Should NOT receive - queue should be empty
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(queue.get(), timeout=0.5)
+            await asyncio.wait_for(queue.receive(), timeout=0.5)
 
     @pytest.mark.anyio
     async def test_descendants_scope_receives_child_events(self) -> None:
@@ -228,7 +231,7 @@ class TestEventBusScopedSubscription:
         bus._session_tree = {"s1": ["s1.1"], "s1.1": []}
         queue = await bus.subscribe("s1", scope="descendants")
         await bus.publish("s1.1", "event1")
-        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+        envelope = await asyncio.wait_for(queue.receive(), timeout=1.0)
         assert envelope is not None
         assert envelope.event == "event1"
 
@@ -238,7 +241,7 @@ class TestEventBusScopedSubscription:
         bus._session_tree = {"s1": ["s1.1", "s1.2"], "s1.1": [], "s1.2": []}
         queue = await bus.subscribe("s1.1", scope="subtree")
         await bus.publish("s1.2", "event1")
-        envelope = await asyncio.wait_for(queue.get(), timeout=1.0)
+        envelope = await asyncio.wait_for(queue.receive(), timeout=1.0)
         assert envelope is not None
         assert envelope.event == "event1"
 
@@ -377,7 +380,7 @@ async def test_close_session_cancels_on_timeout(
                     await asyncio.wait_for(
                         run_handle.complete_event.wait(), timeout=0.1
                     )
-                except TimeoutError:
+                except (asyncio.TimeoutError, anyio.EndOfStream):
                     session_pool.cancel_run(run_handle.run_id)
                     # Give cancellation a moment to propagate and release turn_lock
                     await asyncio.sleep(0.1)
@@ -596,11 +599,9 @@ async def test_run_failed_event_published_on_turn_exception(
     async def _consume() -> None:
         try:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=0.5)
                 events.append(event)
-        except TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             pass
 
     consumer = asyncio.create_task(_consume())
@@ -659,11 +660,9 @@ async def test_run_failed_event_includes_run_id(
     async def _consume() -> None:
         try:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=0.5)
                 events.append(event)
-        except TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             pass
 
     consumer = asyncio.create_task(_consume())
@@ -708,11 +707,9 @@ async def test_run_failed_event_published_via_receive_request(
     async def _consume() -> None:
         try:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=1.0)
                 events.append(event)
-        except TimeoutError:
+        except (asyncio.TimeoutError, anyio.EndOfStream):
             pass
 
     consumer = asyncio.create_task(_consume())

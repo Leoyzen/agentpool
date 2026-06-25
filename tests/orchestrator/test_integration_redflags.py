@@ -13,6 +13,8 @@ import contextlib
 from typing import Any
 from unittest.mock import MagicMock
 
+import anyio
+
 import pytest
 
 from acp.schema import TurnCompleteUpdate
@@ -182,9 +184,7 @@ async def test_real_agentpool_sessionpool_inject_prompt_auto_resume() -> None:
 
         async def _consume_events() -> None:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=1.0)
                 events.append(event)
 
         consumer_task = asyncio.create_task(_consume_events())
@@ -279,9 +279,7 @@ async def test_turn_complete_update_after_auto_resume() -> None:
 
         async def _consume_events() -> None:
             while True:
-                event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-                if event is None:
-                    break
+                event = await asyncio.wait_for(event_queue.receive(), timeout=1.0)
                 events.append(event)
 
         consumer_task = asyncio.create_task(_consume_events())
@@ -369,11 +367,7 @@ class TestEventBusSessionTree:
         event = {"type": "test", "data": "hello from child"}
         await bus.publish("child-sid", event)
 
-        assert not parent_queue.empty(), (
-            "Parent subscriber with scope='descendants' should receive child events "
-            "when EventBus is wired to SessionController"
-        )
-        received = await parent_queue.get()
+        received = parent_queue.receive_nowait()
         assert isinstance(received, EventEnvelope)
         assert received.event == event
         assert received.source_session_id == "child-sid"
@@ -386,8 +380,7 @@ class TestEventBusSessionTree:
         event = {"type": "test", "data": "hello"}
         await bus.publish("same-sid", event)
 
-        assert not queue.empty(), "Exact session scope should work"
-        received = await queue.get()
+        received = queue.receive_nowait()
         assert isinstance(received, EventEnvelope)
         assert received.event == event
         assert received.source_session_id == "same-sid"
@@ -516,8 +509,11 @@ class TestSessionControllerChildrenVsEventBus:
 
         # Step 3: Parent queue should have received all child events
         received = []
-        while not parent_queue.empty():
-            received.append(await parent_queue.get())
+        while True:
+            with contextlib.suppress(anyio.WouldBlock):
+                received.append(parent_queue.receive_nowait())
+                continue
+            break
 
         assert len(received) == len(subagent_events), (
             f"Expected {len(subagent_events)} events, got {len(received)}. "
@@ -551,7 +547,7 @@ class TestSessionControllerChildrenVsEventBus:
         await controller.turn_runner._publish_event("child-sid", child_event)
 
         # Parent receives the event wrapped in EventEnvelope
-        received = await parent_queue.get()
+        received = await parent_queue.receive()
         assert isinstance(received, EventEnvelope)
         assert received.source_session_id == "child-sid", (
             "Child event should carry source_session_id so ACP handler can route it correctly"
@@ -589,10 +585,7 @@ class TestSessionPoolIntegration:
         await pool.event_bus.publish("child-sid", {"type": "agent_message_chunk", "content": "hi"})
 
         # Parent should have received it
-        assert not parent_queue.empty(), (
-            "Parent should receive subagent events via descendants scope "
-            "when EventBus is wired to SessionController through TurnRunner"
-        )
+        parent_queue.receive_nowait()
 
     async def test_manual_session_tree_fix_works(self) -> None:
         """Verify that populating _session_tree manually fixes the issue."""
@@ -605,8 +598,7 @@ class TestSessionPoolIntegration:
 
         await bus.publish("child-sid", {"type": "test", "data": "hello"})
 
-        assert not parent_queue.empty(), "Manual _session_tree fix should work"
-        received = await parent_queue.get()
+        received = parent_queue.receive_nowait()
         assert isinstance(received, EventEnvelope)
         assert received.event["data"] == "hello"
         assert received.source_session_id == "child-sid"
@@ -709,11 +701,9 @@ async def test_shared_agent_inject_prompt_fallback_triggers_auto_resume() -> Non
         async def _consume_events() -> None:
             while True:
                 try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
-                    if event is None:
-                        break
+                    event = await asyncio.wait_for(event_queue.receive(), timeout=1.0)
                     events.append(event)
-                except asyncio.TimeoutError:
+                except (asyncio.TimeoutError, anyio.EndOfStream):
                     break
 
         consumer_task = asyncio.create_task(_consume_events())

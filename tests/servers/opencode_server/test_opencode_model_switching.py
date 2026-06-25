@@ -7,6 +7,8 @@ in OpenCode TUI are not reflected in agentpool runtime.
 from __future__ import annotations
 
 import asyncio
+
+import anyio
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock, patch
@@ -512,7 +514,8 @@ def _make_mock_state_with_session_agent(
 
     # EventBus mock
     session_pool.event_bus = Mock()
-    session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    from tests._helpers.mock_stream import EmptyReceiveStream
+    session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock(return_value=None)
 
     pool.session_pool = session_pool

@@ -16,7 +16,20 @@ from agentpool import Agent
 from agentpool.agents.context import AgentContext, AgentRunContext
 from agentpool.agents.events import RunStartedEvent, StreamEventEmitter
 from agentpool.orchestrator.core import EventBus
+import anyio
 
+
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
@@ -44,7 +57,7 @@ async def test_descendant_scope_receives_child_event() -> None:
     await event_bus.publish(child_id, event)
 
     # Subscriber should receive the event
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-child-1"
@@ -65,7 +78,7 @@ async def test_descendant_scope_receives_own_event() -> None:
     event = RunStartedEvent(session_id=parent_id, run_id="run-parent-1")
     await event_bus.publish(parent_id, event)
 
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-parent-1"
@@ -88,7 +101,7 @@ async def test_descendant_scope_does_not_receive_unrelated_event() -> None:
     await event_bus.publish(unrelated_id, event)
 
     # Queue should remain empty
-    assert queue.empty()
+    assert _stream_empty(queue)
 
 
 @pytest.mark.anyio
@@ -109,7 +122,7 @@ async def test_descendant_scope_receives_grandchild_event() -> None:
     event = RunStartedEvent(session_id=grandchild_id, run_id="run-grandchild-1")
     await event_bus.publish(grandchild_id, event)
 
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-grandchild-1"
@@ -132,7 +145,7 @@ async def test_descendant_scope_child_does_not_receive_parent() -> None:
     await event_bus.publish(parent_id, event)
 
     # Child should not receive parent events
-    assert queue.empty()
+    assert _stream_empty(queue)
 
 
 @pytest.mark.anyio
@@ -164,7 +177,7 @@ async def test_descendant_scope_with_session_controller() -> None:
         event = RunStartedEvent(session_id=child_id, run_id="run-child-1")
         await event_bus.publish(child_id, event)
 
-        received = await asyncio.wait_for(queue.get(), timeout=0.5)
+        received = await asyncio.wait_for(queue.receive(), timeout=0.5)
         assert received is not None
         assert isinstance(received.event, RunStartedEvent)
         assert received.event.run_id == "run-child-1"
@@ -199,13 +212,13 @@ async def test_emit_publishes_exactly_once_to_event_bus() -> None:
     await emitter.emit_event(event)
 
     # EventBus subscriber should receive exactly one event
-    received = await asyncio.wait_for(queue.get(), timeout=0.5)
+    received = await asyncio.wait_for(queue.receive(), timeout=0.5)
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-1"
 
     # No additional events should be on the EventBus queue
-    assert queue.empty()
+    assert _stream_empty(queue)
 
     # run_ctx.event_queue should be empty (no dual-consumer fallback)
     assert run_ctx.event_queue.empty()
@@ -234,10 +247,12 @@ async def test_emit_multiple_events_each_published_once() -> None:
         await emitter.emit_event(event)
 
     received: list[RunStartedEvent] = []
-    while not queue.empty():
-        ev = queue.get_nowait()
-        if ev is not None:
+    while True:
+        try:
+            ev = queue.receive_nowait()
             received.append(ev)
+        except (anyio.WouldBlock, anyio.EndOfStream):
+            break
 
     assert len(received) == 3
     assert [ev.run_id for ev in received] == ["run-0", "run-1", "run-2"]

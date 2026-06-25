@@ -28,6 +28,17 @@ from agentpool.agents.events import StreamCompleteEvent, ToolCallCompleteEvent
 
 
 # Mark all tests in this module as integration tests
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    """Check if a memory receive stream has no buffered items."""
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
+
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
@@ -175,8 +186,8 @@ async def test_native_agent_event_sequence():
             async for event in session_pool.run_stream(session_id, TOOL_CALL_PROMPT):
                 collector.iterated_events.append(event)
 
-        while not handler_queue.empty():
-            event = handler_queue.get_nowait()
+        while not _stream_empty(handler_queue):
+            event = handler_queue.receive_nowait()
             if event is not None:
                 collector.handler_events.append(event)
 
@@ -308,8 +319,8 @@ async def test_handler_receives_all_events():
             async for event in session_pool.run_stream(session_id, "Just say hello"):
                 collector.iterated_events.append(event)
 
-        while not handler_queue.empty():
-            event = handler_queue.get_nowait()
+        while not _stream_empty(handler_queue):
+            event = handler_queue.receive_nowait()
             if event is not None:
                 collector.handler_events.append(event)
 

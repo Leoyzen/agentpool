@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import anyio
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
@@ -145,4 +146,5 @@ class RunHandle:
         """
         if self._cleanup_callback is not None:
             self._cleanup_callback(self.run_id)
-        self.complete_event.set()
+        with anyio.CancelScope(shield=True):
+            self.complete_event.set()

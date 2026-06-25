@@ -95,6 +95,28 @@ class BaseACPAgentConfig(BaseAgentConfig):
     - Remote config: Subprocess operates in a specific remote environment
     """
 
+    protocol_version: Literal[1, 2] | None = Field(
+        default=None,
+        title="Protocol Version",
+        description=(
+            "ACP protocol version to use. Overrides ACP_PROTOCOL_VERSION "
+            "environment variable if set. If None, uses global settings."
+        ),
+        examples=[1, 2],
+    )
+    """ACP protocol version for this agent.
+
+    Controls which protocol version this specific agent will advertise and use.
+    Overrides the global ACP_PROTOCOL_VERSION environment variable.
+
+    - 1: Use stable ACP v1 protocol
+    - 2: Use draft ACP v2 protocol (RFDs in progress)
+    - None: Use global ACP_PROTOCOL_VERSION setting (default)
+
+    Note: v2 is experimental and subject to breaking changes.
+    Only use 2 during development/testing of new RFDs.
+    """
+
     allow_file_operations: bool = Field(default=True, title="Allow File Operations")
     """Whether to allow file read/write operations."""
 
@@ -145,6 +167,22 @@ class BaseACPAgentConfig(BaseAgentConfig):
             providers.append(StaticResourceProvider(name="tools", tools=static_tools))
 
         return providers
+
+    def get_protocol_version(self) -> int:
+        """Get the ACP protocol version for this agent.
+
+        Returns the agent-specific version if configured, otherwise
+        falls back to the global ACP_PROTOCOL_VERSION setting.
+
+        Returns:
+            Protocol version number (1 or 2)
+        """
+        from acp.settings import get_settings
+
+        if self.protocol_version is not None:
+            return self.protocol_version
+
+        return get_settings().get_protocol_version().value
 
     def get_agent[TDeps](
         self,

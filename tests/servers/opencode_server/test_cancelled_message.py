@@ -17,6 +17,8 @@ user messages to display "QUEUED" indefinitely.
 from __future__ import annotations
 
 import asyncio
+
+import anyio
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -143,7 +145,8 @@ def cancellable_mock_agent():
     session_pool.get_messages = AsyncMock(return_value=[])
     # Set up a mock event_bus so _process_message_locked can subscribe
     session_pool.event_bus = Mock()
-    session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    from tests._helpers.mock_stream import EmptyReceiveStream
+    session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock()
     pool.session_pool = session_pool
 

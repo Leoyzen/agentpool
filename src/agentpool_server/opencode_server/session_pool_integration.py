@@ -214,9 +214,7 @@ async def set_session_status(
         status: The new session status.
     """
     if _use_session_pool_for_status(state):
-        await state.broadcast_event(
-            SessionStatusEvent.create(session_id, status)
-        )
+        await state.broadcast_event(SessionStatusEvent.create(session_id, status))
         return
 
     # Fallback: write to the in-memory dict for backward compatibility
@@ -491,9 +489,7 @@ async def _restore_checkpoint_state(
         session_data: The persisted SessionData with checkpoint metadata.
         session_id: The session being restored.
     """
-    _reconstruct_tool_parts_from_checkpoint(
-        state, session_id, session_data.pending_deferred_calls
-    )
+    _reconstruct_tool_parts_from_checkpoint(state, session_id, session_data.pending_deferred_calls)
     _restore_spawn_topology_from_checkpoint(state, session_data, session_id)
 
 
@@ -826,17 +822,14 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
             working_dir=self.server_state.working_dir,
         )
         event_adapter = OpenCodeEventAdapter(ctx)
-        event_queue = await self.session_pool.event_bus.subscribe(session_id)
+        event_stream = await self.session_pool.event_bus.subscribe(session_id)
 
         try:
-            while True:
-                event = await event_queue.get()
-                if event is None:
-                    break
+            async for event in event_stream:
                 async for oc_event in event_adapter.convert_event(event.event):
                     yield oc_event
         finally:
-            await self.session_pool.event_bus.unsubscribe(session_id, event_queue)
+            await self.session_pool.event_bus.unsubscribe(session_id, event_stream)
 
     async def get_session_status(self, session_id: str) -> SessionStatus | None:
         """Get the current status of a session.
@@ -865,7 +858,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
 
     async def shutdown(self) -> None:
         """Shutdown the integration and stop all consumers and bridges."""
-        for session_id in list(self._consumer_tasks.keys()):
+        for session_id in list(self._session_groups.keys()):
             try:
                 await self.stop_event_consumer(session_id)
             except Exception:
@@ -1008,9 +1001,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
 
             # Ensure assistant message is registered before ToolPart creation
             if not self._message_registered.get(session_id, False):
-                await append_message_to_session(
-                    self.server_state, session_id, ctx.assistant_msg
-                )
+                await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
                 )
@@ -1181,9 +1172,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
 
             # Register assistant message on first non-spawn event
             if not self._message_registered.get(session_id, False):
-                await append_message_to_session(
-                    self.server_state, session_id, ctx.assistant_msg
-                )
+                await append_message_to_session(self.server_state, session_id, ctx.assistant_msg)
                 await self.server_state.broadcast_event(
                     MessageUpdatedEvent.create(ctx.assistant_msg.info)
                 )
@@ -1264,8 +1253,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
 
         if assistant_msg is None:
             logger.warning(
-                "No assistant message found for parent session %s, "
-                "skipping ToolPart creation",
+                "No assistant message found for parent session %s, skipping ToolPart creation",
                 parent_session_id,
             )
             return None
@@ -1278,9 +1266,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                 and part.metadata is not None
                 and part.metadata.get("sessionId") == child_session_id
             ):
-                logger.debug(
-                    "ToolPart already exists for child session %s", child_session_id
-                )
+                logger.debug("ToolPart already exists for child session %s", child_session_id)
                 return None
 
         source_name = spawn_event.source_name or "subagent"

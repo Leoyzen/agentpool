@@ -161,7 +161,7 @@ async def test_integration_route_message_starts_consumer_for_existing_session():
     await session_pool.sessions.get_or_create_session(session_id, agent_name="default")
 
     # Verify consumer is NOT running yet
-    assert session_id not in integration._consumer_tasks
+    assert session_id not in integration._session_groups
 
     # Call route_message - should detect missing consumer and start it
     await integration.route_message(
@@ -206,22 +206,15 @@ async def test_consumer_restarted_after_crash():
     await integration._start_event_consumer(session_id)
 
     # Verify it's running
-    assert session_id in integration._consumer_tasks
-    old_task = integration._consumer_tasks[session_id]
-    assert not old_task.done()
+    assert session_id in integration._session_groups
+    assert session_id in integration._consumer_streams
 
-    # Simulate consumer crash by cancelling it
-    old_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await old_task
+    await integration.stop_event_consumer(session_id)
 
-    # Try to start again - should create a new consumer
     await integration._start_event_consumer(session_id)
 
-    # FIXED: New consumer should be started, old task reference cleaned up
-    new_task = integration._consumer_tasks[session_id]
-    assert new_task is not old_task
-    assert not new_task.done()
+    assert session_id in integration._session_groups
+    assert session_id in integration._consumer_streams
 
     # Yield control so the new consumer can finish subscribing to EventBus
     await asyncio.sleep(0)

@@ -7,6 +7,8 @@ import contextlib
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+import anyio
+
 from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
 
@@ -238,13 +240,13 @@ async def _event_generator(
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
     # Subscribe to EventBus for global SSE events
-    event_bus_queue: asyncio.Queue[Any] | None = None
+    event_bus_stream: anyio.abc.ObjectReceiveStream[Any] | None = None
     session_controller = getattr(state, "session_controller", None)
     if session_controller is not None:
         session_pool = getattr(state.pool, "session_pool", None)
         if session_pool is not None:
             event_bus = session_pool.event_bus
-            event_bus_queue = await event_bus.subscribe("__global_sse__", scope="all")
+            event_bus_stream = await event_bus.subscribe("__global_sse__", scope="all")
 
     try:
         # Send initial connected event
@@ -255,8 +257,7 @@ async def _event_generator(
         if event_id > last_id:
             yield {"data": data, "id": str(event_id)}
 
-        if event_bus_queue is None:
-            # No EventBus available — send periodic heartbeats only
+        if event_bus_stream is None:
             while True:
                 await asyncio.sleep(10.0)
                 heartbeat = ServerHeartbeatEvent()
@@ -265,16 +266,16 @@ async def _event_generator(
         else:
             while True:
                 try:
-                    raw_event = await asyncio.wait_for(
-                        event_bus_queue.get(), timeout=10.0
-                    )
+                    with anyio.fail_after(10.0):
+                        raw_event = await event_bus_stream.receive()
                 except TimeoutError:
                     heartbeat = ServerHeartbeatEvent()
                     data = _serialize_event(heartbeat, wrap_payload=wrap_payload)
                     yield {"data": data}
                     continue
+                except anyio.EndOfStream:
+                    break
 
-                # Unwrap EventEnvelope (EventBus always wraps events)
                 from agentpool.orchestrator.core import EventEnvelope
 
                 inner_event: Any
@@ -283,7 +284,6 @@ async def _event_generator(
                 else:
                     inner_event = raw_event
 
-                # Unwrap CustomEvent (event_bridge wraps OpenCode events)
                 if isinstance(inner_event, CustomEvent):
                     if inner_event.event_data is None:
                         continue
@@ -291,7 +291,6 @@ async def _event_generator(
                 else:
                     event = inner_event
 
-                # Skip non-OpenCode events
                 if not hasattr(event, "type"):
                     continue
                 if factory is not None and not isinstance(
@@ -311,12 +310,11 @@ async def _event_generator(
                 if event_id > last_id:
                     yield {"data": data, "id": str(event_id)}
     finally:
-        # Unsubscribe from EventBus
-        if event_bus_queue is not None:
+        if event_bus_stream is not None:
             session_pool = getattr(state.pool, "session_pool", None)
             if session_pool is not None:
                 with contextlib.suppress(Exception):
-                    await session_pool.event_bus.unsubscribe("__global_sse__", event_bus_queue)
+                    await session_pool.event_bus.unsubscribe("__global_sse__", event_bus_stream)
         # Remove from subscriber count
         with contextlib.suppress(ValueError):
             state.event_subscribers.remove(_sentinel_queue)

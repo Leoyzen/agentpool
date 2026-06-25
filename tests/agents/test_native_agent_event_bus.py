@@ -7,7 +7,6 @@ None, tool completion events flow through the same RunExecutor path (standalone 
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from pydantic_ai import BaseToolCallPart, FunctionToolCallEvent, FunctionToolResultEvent
@@ -22,6 +21,8 @@ from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.messaging import MessageHistory
 from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run_executor import RunExecutor
+import anyio
+
 
 
 def greet(name: str) -> str:
@@ -29,13 +30,13 @@ def greet(name: str) -> str:
     return f"Hello, {name}!"
 
 
-def _drain_queue(queue: asyncio.Queue[Any]) -> list[Any]:
-    """Drain all items from an asyncio queue."""
+def _drain_queue(stream: anyio.abc.ObjectReceiveStream[Any]) -> list[Any]:
+    """Drain all items from a memory object receive stream."""
     items = []
     while True:
         try:
-            items.append(queue.get_nowait())
-        except asyncio.QueueEmpty:
+            items.append(stream.receive_nowait())
+        except anyio.WouldBlock:
             break
     return items
 
@@ -324,8 +325,8 @@ async def test_process_tool_event_never_publishes_to_event_bus() -> None:
     assert combined.tool_name == "greet"
 
     # Verify NO events were published to EventBus
-    with pytest.raises(asyncio.QueueEmpty):
-        bus_queue.get_nowait()
+    with pytest.raises(anyio.WouldBlock):
+        bus_queue.receive_nowait()
 
 
 @pytest.mark.unit

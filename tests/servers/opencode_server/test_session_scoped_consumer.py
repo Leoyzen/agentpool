@@ -143,9 +143,8 @@ async def test_event_consumer_started_on_session_creation(
         agent_name="test-agent",
     )
 
-    assert "test-consumer-session" in integration._consumer_tasks
-    task = integration._consumer_tasks["test-consumer-session"]
-    assert not task.done()
+    assert "test-consumer-session" in integration._session_groups
+    assert "test-consumer-session" in integration._consumer_streams
 
     # Clean up
     await integration._stop_event_consumer("test-consumer-session")
@@ -167,11 +166,11 @@ async def test_event_consumer_stopped_on_shutdown(
         agent_name="test-agent",
     )
 
-    assert "test-shutdown-session" in integration._consumer_tasks
+    assert "test-shutdown-session" in integration._session_groups
 
     await integration.shutdown()
 
-    assert "test-shutdown-session" not in integration._consumer_tasks
+    assert "test-shutdown-session" not in integration._session_groups
 
 
 @pytest.mark.asyncio
@@ -234,7 +233,7 @@ async def test_multiple_requests_share_one_consumer(
         agent_name="test-agent",
     )
 
-    first_task = integration._consumer_tasks["test-dedup-session"]
+    first_task = integration._session_groups["test-dedup-session"]
 
     # Second create_session should be idempotent
     await integration.create_session(
@@ -242,7 +241,7 @@ async def test_multiple_requests_share_one_consumer(
         agent_name="test-agent",
     )
 
-    second_task = integration._consumer_tasks["test-dedup-session"]
+    second_task = integration._session_groups["test-dedup-session"]
 
     assert first_task is second_task
 
@@ -295,9 +294,7 @@ async def test_consumer_handles_spawn_session_start(
 
     # The child consumer should be running (it's tracked in the parent consumer's child_tasks)
     # We can't directly access child_tasks, but we can verify no exceptions occurred
-    task = integration._consumer_tasks.get("test-parent-session")
-    assert task is not None
-    assert not task.done()
+    assert "test-parent-session" in integration._session_groups
     assert "test-child-session" in server_state.sessions
     assert server_state.sessions["test-child-session"].parent_id == "test-parent-session"
 

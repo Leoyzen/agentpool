@@ -13,7 +13,7 @@ over `agent.run_stream()`. The findings document known issues and edge cases.
      - `ValueError: Token was created in a different Context`
      - `RuntimeError: generator didn't stop after athrow()`
    - These exceptions are printed to stderr but may not propagate to user code
-   - Caused by `merge_queue_into_iterator` context manager task switching
+   - Previously caused by `merge_queue_into_iterator` context manager task switching (now removed)
 
 2. **_cancelled Flag State** (PARTIALLY WORKS):
    - `_cancelled` flag is set to `True` when break happens during active streaming

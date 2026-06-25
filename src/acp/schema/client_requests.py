@@ -246,16 +246,32 @@ class InitializeRequest(Request):
         allow_file_operations: bool = True,
         terminal_auth: bool = False,
         metadata: dict[str, Any] | None = None,
+        protocol_version: int | None = None,
     ) -> InitializeRequest:
-        """Create ACP initialize request for app with given name (based on pkg metadata)."""
+        """Create ACP initialize request for app with given name (based on pkg metadata).
+
+        Args:
+            package_name: Python package name to read metadata from
+            allow_terminal: Whether client supports terminal operations
+            allow_file_operations: Whether client supports file read/write
+            terminal_auth: Whether client supports terminal authentication
+            metadata: Additional metadata to include in client info
+            protocol_version: Protocol version to advertise. If None, uses
+                ACP_PROTOCOL_VERSION setting (default: 1)
+        """
         from importlib.metadata import metadata as _metadata
+
+        if protocol_version is None:
+            from acp.settings import get_settings
+
+            protocol_version = get_settings().get_protocol_version().value
 
         pkg_meta = _metadata(package_name)
         return cls.create(
             title=pkg_meta["Name"],
             version=pkg_meta["Version"],
             name=package_name,
-            protocol_version=1,
+            protocol_version=protocol_version,
             terminal=allow_terminal,
             read_text_file=allow_file_operations,
             write_text_file=allow_file_operations,

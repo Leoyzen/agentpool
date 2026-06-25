@@ -23,6 +23,8 @@ regression guards once the fix lands.
 from __future__ import annotations
 
 import asyncio
+
+import anyio
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -258,7 +260,8 @@ def _make_pool_mock(agent: Any) -> Mock:
     sp_session.agent = agent
     session_pool.sessions.get_session = Mock(return_value=sp_session)
     session_pool.event_bus = Mock()
-    session_pool.event_bus.subscribe = AsyncMock(return_value=asyncio.Queue())
+    from tests._helpers.mock_stream import EmptyReceiveStream
+    session_pool.event_bus.subscribe = AsyncMock(return_value=EmptyReceiveStream())
     session_pool.event_bus.unsubscribe = AsyncMock()
 
     async def _mock_receive_request(

@@ -14,10 +14,10 @@ the consumer is cancelled, the background task gets a shielded cleanup window.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+import anyio
 from pydantic_ai import CallToolsNode, FunctionToolCallEvent, ModelRequestNode
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.messages import BaseToolCallPart, PartStartEvent, ToolCallPart
@@ -35,8 +35,8 @@ from agentpool.agents.native_agent.helpers import (
 )
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.tools.base import is_terminal_tool
 from agentpool.tasks.exceptions import RunAbortedError
+from agentpool.tools.base import is_terminal_tool
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 
@@ -218,7 +218,9 @@ class RunExecutor:
                                         if isinstance(tool_part, ToolCallPart):
                                             if tool_part.tool_call_id not in emitted_tool_starts:
                                                 emitted_tool_starts.add(tool_part.tool_call_id)
-                                                tool_kind = _tool_kind_map.get(tool_part.tool_name, "other")
+                                                tool_kind = _tool_kind_map.get(
+                                                    tool_part.tool_name, "other"
+                                                )
                                                 await event_queue.put(
                                                     ToolCallStartEvent(
                                                         tool_call_id=tool_part.tool_call_id,
@@ -237,7 +239,9 @@ class RunExecutor:
                                         tool_part = event.part
                                         if tool_part.tool_call_id not in emitted_tool_starts:
                                             emitted_tool_starts.add(tool_part.tool_call_id)
-                                            tool_kind = _tool_kind_map.get(tool_part.tool_name, "other")
+                                            tool_kind = _tool_kind_map.get(
+                                                tool_part.tool_name, "other"
+                                            )
                                             await event_queue.put(
                                                 ToolCallStartEvent(
                                                     tool_call_id=tool_part.tool_call_id,
@@ -335,8 +339,7 @@ class RunExecutor:
                 raise
             except UndrainedPendingMessagesError as exc:
                 logger.warning(
-                    "UndrainedPendingMessagesError caught — "
-                    "pending messages may have been dropped",
+                    "UndrainedPendingMessagesError caught — pending messages may have been dropped",
                     error=str(exc),
                 )
                 iteration_error = exc
@@ -348,9 +351,9 @@ class RunExecutor:
                     self._run_handle.active_agent_run = None
                 await event_queue.put(None)
 
-        self._iteration_task = asyncio.create_task(agent_iteration_task())
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(agent_iteration_task)
 
-        try:
             iteration_done = False
             while True:
                 # Drain any pending context events from run_ctx.event_queue
@@ -387,16 +390,6 @@ class RunExecutor:
                     iteration_done = True
                     continue
                 yield event
-
-        finally:
-            if self._iteration_task is not None and not self._iteration_task.done():
-                self._iteration_task.cancel()
-                with contextlib.suppress(TimeoutError, asyncio.CancelledError):
-                    await asyncio.wait_for(
-                        asyncio.shield(self._iteration_task),
-                        timeout=2.0,
-                    )
-            self._iteration_task = None
 
         # Fallback: when cancelled before any response was produced
         if response_msg is None:

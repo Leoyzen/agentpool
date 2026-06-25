@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from acp import Client
     from acp.schema import ContentBlock, PromptResponse, StopReason
     from agentpool import AgentPool
-    from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionState
+    from agentpool.orchestrator.core import EventBus, EventEnvelope
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
 logger = get_logger(__name__)
@@ -130,8 +130,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             session_id: The session whose consumer is starting.
         """
         client_supports_turn_complete = (
-            self.client_capabilities is not None
-            and self.client_capabilities.turn_complete is True
+            self.client_capabilities is not None and self.client_capabilities.turn_complete is True
         )
         converter = ACPEventConverter(
             subagent_display_mode=self._event_converter_template.subagent_display_mode,
@@ -207,16 +206,16 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         """Backward-compatible wrapper for mixin's consumer loop.
 
         Supports direct invocation (e.g., from tests) by lazily subscribing
-        when no queue has been set up via ``start_event_consumer()``.
+        when no stream has been set up via ``start_event_consumer()``.
 
         Args:
             session_id: The session whose events to consume.
         """
-        if self._consumer_queues.get(session_id) is None:
-            queue = await self.event_bus.subscribe(
+        if self._consumer_streams.get(session_id) is None:
+            stream = await self.event_bus.subscribe(
                 session_id, scope=self._get_subscription_scope()
             )
-            self._consumer_queues[session_id] = queue
+            self._consumer_streams[session_id] = stream
         await super()._event_consumer_loop(session_id)
 
     async def _ensure_event_consumer(self, session_id: str) -> None:
@@ -269,7 +268,10 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                     # Resume sessions that exist in storage but are not active in memory.
                     # This handles checkpointed sessions and normal sessions that lost
                     # in-memory state due to server restart/pool swap/TTL expiry.
-                    if self.session_manager.get_session(session_id) is None and self.acp_agent is not None:
+                    if (
+                        self.session_manager.get_session(session_id) is None
+                        and self.acp_agent is not None
+                    ):
                         logger.info(
                             "Resuming session",
                             session_id=session_id,
@@ -285,7 +287,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                         )
                         # Re-subscribe EventBus for resumed session
                         await self._ensure_event_consumer(session_id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception(
                     "Failed to load/resume session from store",
                     session_id=session_id,
@@ -302,9 +304,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         acp_session = self.session_manager.get_session(session_id)
         if acp_session is not None and acp_session.session_mcp_providers:
             try:
-                session_agent = await session_pool.sessions.get_or_create_session_agent(
-                    session_id
-                )
+                session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
                 for provider in acp_session.session_mcp_providers:
                     if provider not in session_agent.tools.external_providers:
                         session_agent.tools.add_provider(provider)
@@ -337,9 +337,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
 
             commands, non_command_content = split_commands(contents, acp_session.command_store)
             if commands:
-                session_agent = await session_pool.sessions.get_or_create_session_agent(
-                    session_id
-                )
+                session_agent = await session_pool.sessions.get_or_create_session_agent(session_id)
                 for command_text in commands:
                     if match := SLASH_PATTERN.match(command_text.strip()):
                         command_name = match.group(1)
@@ -348,9 +346,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                         continue
                     # Check NodeCommand support via duck-typing to avoid import
                     cmd = acp_session.command_store.get_command(command_name)
-                    if cmd is not None and callable(
-                        supports_node := getattr(cmd, "supports_node", None)
-                    ) and not supports_node(session_agent):
+                    if (
+                        cmd is not None
+                        and callable(supports_node := getattr(cmd, "supports_node", None))
+                        and not supports_node(session_agent)
+                    ):
                         logger.debug(
                             "Command not available for this node type",
                             command=command_name,
@@ -361,15 +361,11 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                     agent_context = session_agent.get_context(data=acp_session)
                     cmd_ctx = acp_session.command_store.create_context(
                         data=agent_context,
-                        output_writer=lambda msg: logger.debug(
-                            "Command output", msg=msg
-                        ),
+                        output_writer=lambda msg: logger.debug("Command output", msg=msg),
                     )
                     command_str = f"{command_name} {args}".strip()
                     try:
-                        await acp_session.command_store.execute_command(
-                            command_str, cmd_ctx
-                        )
+                        await acp_session.command_store.execute_command(command_str, cmd_ctx)
                     except Exception:
                         logger.exception(
                             "Command execution failed",
@@ -397,8 +393,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             # Legacy clients (no turn_complete support) block until the run finishes
             # so they don't need session/update turn_complete notifications.
             if run_handle is not None and not (
-                self.client_capabilities is not None
-                and self.client_capabilities.turn_complete
+                self.client_capabilities is not None and self.client_capabilities.turn_complete
             ):
                 await run_handle.complete_event.wait()
                 # Check if run was cancelled after completing.

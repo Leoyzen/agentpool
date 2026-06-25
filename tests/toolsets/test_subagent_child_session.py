@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import anyio
 import pytest
 
 from agentpool import AgentPool, AgentsManifest
@@ -31,6 +32,17 @@ from agentpool.orchestrator.core import EventEnvelope
 from agentpool.sessions import SessionData
 from agentpool.sessions.store import MemorySessionStore
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
+import anyio
+
+
+def _stream_empty(stream: anyio.abc.ObjectReceiveStream) -> bool:
+    try:
+        stream.receive_nowait()
+        return False
+    except anyio.WouldBlock:
+        return True
+    except anyio.EndOfStream:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +131,8 @@ agents:
                 child_session_id_from_spawn = event.child_session_id
 
         # Drain remaining events from the queue
-        while not queue.empty():
-            envelope = queue.get_nowait()
+        while not _stream_empty(queue):
+            envelope = queue.receive_nowait()
             if envelope is None:
                 break
             # Events are now wrapped in EventEnvelope by the EventBus

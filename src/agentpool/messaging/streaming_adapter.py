@@ -35,6 +35,7 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any, Generic, TypeVar, final
 from uuid import uuid4
 
+import anyio
 from pydantic_graph.graph_builder import EndMarker, ErrorMarker, GraphRun
 
 from agentpool.agents.events import (
@@ -196,7 +197,6 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
         self._iteration_done = asyncio.Event()
         self._iteration_error: BaseException | None = None
         self._final_value: OutputT | None = None
-        self._iteration_task: asyncio.Task[Any] | None = None
 
     def create_collector(self, step_name: str, depth: int = 0) -> StepEventCollector:
         """Create an event collector for a step.
@@ -263,27 +263,15 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
             agent_name=self.agent_name,
         )
 
-        self._iteration_task = asyncio.create_task(self._graph_iteration_task())
-
         try:
-            while True:
-                try:
-                    event = await asyncio.wait_for(
-                        self._event_queue.get(),
-                        timeout=0.1,
-                    )
-                except TimeoutError:
-                    current = asyncio.current_task()
-                    if current is not None and current.cancelling() > 0:
-                        raise asyncio.CancelledError() from None
-                    if self._iteration_done.is_set():
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(self._graph_iteration_task)
+
+                while True:
+                    event = await self._event_queue.get()
+                    if event is None:
                         break
-                    continue
-
-                if event is None:
-                    break
-
-                yield event
+                    yield event
 
             if self._iteration_error is not None:
                 raise self._iteration_error
@@ -297,19 +285,8 @@ class GraphStreamingAdapter(Generic[StateT, DepsT, OutputT]):
                 parent_id=self.user_msg.message_id if self.user_msg else None,
             )
             yield StreamCompleteEvent(message=response_msg)
-
         finally:
             self._iteration_done.set()
-            if self._iteration_task is not None and not self._iteration_task.done():
-                self._iteration_task.cancel()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(self._iteration_task),
-                        timeout=2.0,
-                    )
-                except (TimeoutError, asyncio.CancelledError):
-                    pass
-            self._iteration_task = None
 
 
 async def adapt_graph_run(

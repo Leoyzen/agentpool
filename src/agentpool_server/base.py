@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import anyio
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Self
 
@@ -57,6 +58,7 @@ class BaseServer:
         self.task_manager = TaskManager()
         self._server_task: asyncio.Task[None] | None = None
         self._shutdown_event = asyncio.Event()
+        self._task_group: anyio.TaskGroup | None = None
         self.log = logger.bind(server_name=self.name)
 
     async def __aenter__(self) -> Self:
@@ -88,21 +90,24 @@ class BaseServer:
         raise NotImplementedError("Subclasses must implement _start_async()")
 
     async def start(self) -> None:
-        """Start the server (blocking async - runs until stopped).
+        """Start of server (blocking async - runs until stopped).
 
         This is the public interface that handles exception management
         based on the raise_exceptions setting. Subclasses should implement
         _start_async() instead of overriding this method.
         """
-        try:
-            self.log.info("Starting server")
-            await self._start_async()
-        except Exception as e:
-            if self.raise_exceptions:
-                raise
-            self.log.exception("Server error", exc_info=e)
-        finally:
-            await self.shutdown()
+        async with anyio.create_task_group() as tg:
+            self._task_group = tg
+            try:
+                self.log.info("Starting server")
+                await self._start_async()
+            except Exception as e:
+                if self.raise_exceptions:
+                    raise
+                self.log.exception("Server error", exc_info=e)
+            finally:
+                await self.shutdown()
+                self._task_group = None
 
     async def shutdown(self) -> None:
         """Shutdown server resources.
@@ -128,7 +133,7 @@ class BaseServer:
             raise RuntimeError("Server is already running in background")
 
         self._shutdown_event.clear()
-        self._server_task = self.task_manager.create_task(
+        self._server_task = asyncio.create_task(
             self._run_with_shutdown(), name=f"{self.name}-task"
         )
 
