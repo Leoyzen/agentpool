@@ -263,13 +263,13 @@ class AgentPoolACPAgent(ACPAgent):
 
         if (
             self.agent_pool
-            and self.agent_pool.main_agent
-            and self.agent_pool.main_agent.name in self.agent_pool.manifest.agents
+            and self.agent_pool.main_agent_name
+            and self.agent_pool.main_agent_name in self.agent_pool.manifest.agents
         ):
-            cfg = self.agent_pool.manifest.agents[self.agent_pool.main_agent.name]
+            cfg = self.agent_pool.manifest.agents[self.agent_pool.main_agent_name]
             if isinstance(cfg, NativeAgentConfig):
                 if cfg.name is None:
-                    cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent.name})
+                    cfg = cfg.model_copy(update={"name": self.agent_pool.main_agent_name})
                 self._agent_config = cfg
 
         # Initialize SessionPool-backed protocol handler if feature flag is enabled
@@ -1110,13 +1110,13 @@ class AgentPoolACPAgent(ACPAgent):
                 raise RuntimeError(msg)
 
             # Re-resolve _agent_config from the new pool's manifest
-            if pool.main_agent and pool.main_agent.name in pool.manifest.agents:
-                cfg = pool.manifest.agents[pool.main_agent.name]
+            if pool.main_agent_name and pool.main_agent_name in pool.manifest.agents:
+                cfg = pool.manifest.agents[pool.main_agent_name]
                 from agentpool.models.agents import NativeAgentConfig
 
                 if isinstance(cfg, NativeAgentConfig):
                     if cfg.name is None:
-                        cfg = cfg.model_copy(update={"name": pool.main_agent.name})
+                        cfg = cfg.model_copy(update={"name": pool.main_agent_name})
                     self._agent_config = cfg
             elif pool.manifest.agents:
                 cfg = next(iter(pool.manifest.agents.values()))
