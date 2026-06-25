@@ -283,7 +283,7 @@ class MCPServer(BaseServer):
         try:
             if self._task_group is not None:
                 self._task_group.start_soon(
-                    self.current_session.send_tool_list_changed()
+                    self.current_session.send_tool_list_changed
                 )
             else:
                 self.task_manager.create_task(
@@ -299,7 +299,7 @@ class MCPServer(BaseServer):
         try:
             if self._task_group is not None:
                 self._task_group.start_soon(
-                    self.current_session.send_prompt_list_changed()
+                    self.current_session.send_prompt_list_changed
                 )
             else:
                 self.task_manager.create_task(

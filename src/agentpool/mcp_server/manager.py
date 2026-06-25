@@ -304,19 +304,12 @@ class MCPManager:
     async def cleanup(self) -> None:
         """Clean up all MCP connections and providers."""
         try:
-            try:
-                with anyio.fail_after(5):
-                    with anyio.CancelScope(shield=True):
+            with anyio.CancelScope(shield=True):
+                try:
+                    with anyio.fail_after(5):
                         await self.exit_stack.aclose()
-            except TimeoutError:
-                self.log.warning("MCP cleanup timed out after 5s, forcing exit")
-            except RuntimeError as e:
-                if "different task" in str(e):
-                    if asyncio.current_task():
-                        loop = asyncio.get_running_loop()
-                        await loop.create_task(self.exit_stack.aclose())
-                else:
-                    raise
+                except TimeoutError:
+                    logger.warning("MCP cleanup timed out after 5s, forcing exit")
 
             self.providers.clear()
 

@@ -352,8 +352,7 @@ class RunExecutor:
                 await event_queue.put(None)
 
         async with anyio.create_task_group() as tg:
-            # Track iteration task for concurrency check (lines 114-119)
-            self._iteration_task = tg.start_soon(agent_iteration_task)
+            tg.start_soon(agent_iteration_task)
 
             iteration_done = False
             while True:
