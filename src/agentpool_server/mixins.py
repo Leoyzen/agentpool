@@ -56,6 +56,8 @@ class ProtocolEventConsumerMixin(ABC):
         self._session_groups: dict[str, anyio.TaskGroup] = {}
         self._consumer_streams: dict[str, anyio.abc.ObjectReceiveStream[EventEnvelope]] = {}
         self._consumer_locks: dict[str, asyncio.Lock] = {}
+        self._consumer_tasks: dict[str, asyncio.Task] = {}
+        self._consumer_task_refs: list[asyncio.Task] = []
         self._consumer_lock_creation_lock: asyncio.Lock = asyncio.Lock()
 
     @property
@@ -167,13 +169,12 @@ class ProtocolEventConsumerMixin(ABC):
             async def _run_consumer() -> None:
                 with scope:
                     async with tg:
-                        tg.start_soon(self._event_consumer_loop, session_id)
+                        task_ref = tg.start_soon(self._event_consumer_loop, session_id)
+                        self._consumer_tasks[session_id] = task_ref
                         await done_event.wait()
 
-            asyncio.ensure_future(_run_consumer())
-            self._consumer_done_events: dict[str, anyio.Event] = getattr(
-                self, "_consumer_done_events", {}
-            )
+            task = asyncio.ensure_future(_run_consumer())
+            self._consumer_tasks[session_id] = task
             self._consumer_done_events[session_id] = done_event
 
     async def stop_event_consumer(self, session_id: str) -> None:
