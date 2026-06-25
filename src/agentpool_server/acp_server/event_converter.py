@@ -671,9 +671,10 @@ class ACPEventConverter:
                 # the TurnRunner itself crashed — the session cannot continue.
                 
                 # Check if this is a cancellation (session/cancel notification)
+                import asyncio
                 is_cancellation = (
-                    isinstance(exc, RuntimeError) 
-                    and "cancelled" in str(exc).lower()
+                    isinstance(exc, asyncio.CancelledError)
+                    or (isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower())
                 )
                 
                 if is_cancellation:

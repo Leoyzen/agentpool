@@ -450,11 +450,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # the run so handle_prompt() can unblock and return stopReason="cancelled".
         session = session_pool.sessions.get_session(session_id)
         if session is not None and session.current_run_id is not None:
-            run_handle = session_pool.sessions._runs.get(session.current_run_id)
+            # Use public API get_run() instead of accessing private _runs
+            run_handle = session_pool.get_run(session.current_run_id)
             if run_handle is not None:
                 run_handle.fail(
                     exception=RuntimeError("Session cancelled by client"),
-                    event_bus=session_pool.event_bus if session_pool else None,
+                    event_bus=session_pool.event_bus,
                 )
                 logger.debug(
                     "Run completed as cancelled",
