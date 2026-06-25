@@ -669,10 +669,24 @@ class ACPEventConverter:
                 # Display run failure as agent text and signal turn completion.
                 # Unlike RunErrorEvent (agent-level), RunFailedEvent indicates
                 # the TurnRunner itself crashed — the session cannot continue.
-                error_text = f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
-                yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
-                if self.client_supports_turn_complete:
-                    yield TurnCompleteUpdate(stop_reason="end_turn")
+                
+                # Check if this is a cancellation (session/cancel notification)
+                is_cancellation = (
+                    isinstance(exc, RuntimeError) 
+                    and "cancelled" in str(exc).lower()
+                )
+                
+                if is_cancellation:
+                    # For cancellation, emit turn_complete with cancelled stop_reason
+                    # Don't show error text since cancellation is user-initiated
+                    if self.client_supports_turn_complete:
+                        yield TurnCompleteUpdate(stop_reason="cancelled")
+                else:
+                    # For actual failures, show error message
+                    error_text = f"\n\n❌ **Run Failed** [{run_id}]: {exc}\n\n"
+                    yield AgentMessageChunk.text(error_text, message_id=self._current_message_id)
+                    if self.client_supports_turn_complete:
+                        yield TurnCompleteUpdate(stop_reason="end_turn")
                 self.reset()
 
             case ToolCallDeferredEvent(
