@@ -6,7 +6,7 @@ from asyncio import Lock
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import os
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Self, overload
+from typing import TYPE_CHECKING, Any, Self
 
 from anyenv import ProcessManager
 import anyio
@@ -23,15 +23,12 @@ from agentpool.tasks import TaskRegistry
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator
     from types import TracebackType
 
     from upathtools import JoinablePathLike, UPath
 
     from agentpool.common_types import AnyEventHandlerType
-    from agentpool.delegation.team import Team
-    from agentpool.delegation.teamrun import TeamRun
-    from agentpool.messaging import MessageNode
     from agentpool.messaging.compaction import CompactionPipeline
     from agentpool.models.manifest import AgentsManifest, AnyAgentConfig
     from agentpool.orchestrator import SessionPool
@@ -659,105 +656,9 @@ class AgentPool[TPoolDeps = None]:
         await self.process_manager.cleanup()
         await self.exit_stack.aclose()
 
-    @overload
-    def create_team_run[TDeps, TResult](
-        self,
-        agents: Sequence[MessageNode[TDeps, Any]],
-        validator: MessageNode[Any, TResult] | None = None,
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        shared_prompt: str | None = None,
-    ) -> TeamRun[TDeps, TResult]: ...
-
-    @overload
-    def create_team_run[TResult](
-        self,
-        agents: Sequence[MessageNode[Any, Any]],
-        validator: MessageNode[Any, TResult] | None = None,
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        shared_prompt: str | None = None,
-    ) -> TeamRun[Any, TResult]: ...
-
-    def create_team_run[TResult](
-        self,
-        agents: Sequence[MessageNode[Any, Any]],
-        validator: MessageNode[Any, TResult] | None = None,
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        shared_prompt: str | None = None,
-    ) -> TeamRun[Any, TResult]:
-        """Create a a sequential TeamRun from a list of Agents.
-
-        Args:
-            agents: List of agent names or team/agent instances (all if None)
-            validator: Node to validate the results of the TeamRun
-            name: Optional name for the team
-            description: Optional description for the team
-            shared_prompt: Optional prompt for all agents
-        """
-        from agentpool.delegation.teamrun import TeamRun
-
-        return TeamRun(
-            agents,
-            name=name,
-            description=description,
-            validator=validator,
-            shared_prompt=shared_prompt,
-        )
-
-    @overload
-    def create_team[TDeps](
-        self,
-        agents: Sequence[MessageNode[TDeps, Any]],
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        shared_prompt: str | None = None,
-        member_timeout: float | None = None,
-    ) -> Team[TDeps]: ...
-
-    @overload
-    def create_team(
-        self,
-        agents: Sequence[MessageNode[Any, Any]],
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        shared_prompt: str | None = None,
-        member_timeout: float | None = None,
-    ) -> Team[Any]: ...
-
-    def create_team(
-        self,
-        agents: Sequence[MessageNode[Any, Any]],
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        shared_prompt: str | None = None,
-        member_timeout: float | None = None,
-    ) -> Team[Any]:
-        """Create a group from agent names or instances.
-
-        Args:
-            agents: List of agent names or instances (all if None)
-            name: Optional name for the team
-            description: Optional description for the team
-            shared_prompt: Optional prompt for all agents
-            member_timeout: Per-member timeout in seconds (``None`` = no limit)
-        """
-        from agentpool.delegation.team import Team
-
-        return Team(
-            agents,
-            name=name,
-            description=description,
-            shared_prompt=shared_prompt,
-            member_timeout=member_timeout,
-        )
+    # create_team_run and create_team removed as part of eliminating
+    # pool-level agent creation. Teams are now defined in YAML config
+    # via the ``graph:`` section instead of being created programmatically.
 
     @asynccontextmanager
     async def track_message_flow(self) -> AsyncIterator[MessageFlowTracker]:

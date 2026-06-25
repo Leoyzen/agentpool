@@ -45,7 +45,7 @@ class ListPoolsCommand(NodeCommand):
             else:
                 output_lines.append("**Config:** *(default/built-in)*")
             # Show agents in current pool
-            agent_names = list(pool.all_agents.keys())
+            agent_names = list(pool.agent_configs.keys())
             output_lines.append(f"**Agents:** {', '.join(f'`{n}`' for n in agent_names)}")
             output_lines.append(f"**Active agent:** `{ctx.context.node.name}`")
             output_lines.append("")
@@ -216,7 +216,6 @@ class SpawnCommand(NodeCommand):
             task_prompt: Task prompt for the subagent
         """
         from agentpool.agents.events import SpawnSessionStart
-        from agentpool.common_types import SupportsRunStream
 
         pool = ctx.context.pool
         if pool is None:
@@ -228,18 +227,14 @@ class SpawnCommand(NodeCommand):
             await ctx.output.print("❌ **SessionPool is required for spawn command**")
             return
 
-        if agent_name not in pool.nodes:
-            available = list(pool.nodes.keys())
+        if agent_name not in pool.agent_configs:
+            available = list(pool.agent_configs.keys())
             await ctx.output.print(
                 f"❌ **Agent** `{agent_name}` **not found**\n\n"
                 f"Available agents: {', '.join(available)}"
             )
             return
-        agent = pool.nodes[agent_name]
-        # Check if node supports streaming
-        if not isinstance(agent, SupportsRunStream):
-            await ctx.output.print(f"❌ **Agent** `{agent_name}` **does not support streaming**")
-            return
+        agent_config = pool.agent_configs[agent_name]
 
         # Get parent session ID from the active run context
         parent_session_id = ""
@@ -249,7 +244,7 @@ class SpawnCommand(NodeCommand):
 
         child_session_id = await ctx.context.agent.get_context().create_child_session(
             agent_name=agent_name,
-            agent_type=agent.agent_type,
+            agent_type=agent_config.type,
             parent_session_id=parent_session_id,
             source_name=agent_name,
             source_type="agent",
