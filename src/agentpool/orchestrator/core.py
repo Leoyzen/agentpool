@@ -563,7 +563,7 @@ class SessionController:
 
         state = SessionState(
             session_id=session_id,
-            agent_name=agent_name or self.pool.main_agent.name or "default",
+            agent_name=agent_name or self.pool.main_agent_name or "default",
             parent_session_id=parent_session_id,
             lifecycle_policy=effective_policy,
             metadata=metadata,
@@ -630,62 +630,56 @@ class SessionController:
             session, _was_created = await self._get_or_create_session_locked(session_id, agent_name)
             agent_name = agent_name or session.agent_name
 
-            base_agent = self.pool.get_agent(agent_name)
-
             from agentpool.models.agents import NativeAgentConfig
+            from agentpool_config.context import ConfigContextManager
 
             cfg = self.pool.manifest.agents.get(agent_name)
 
             if isinstance(cfg, NativeAgentConfig):
-                # Use shared agent for child/tool sessions so that pool-level
-                # agent patches (e.g. mock on run_stream) and internal_fs
-                # consistency are preserved.  Each tool call creates its own
-                # child session but reuses the canonical pool-level agent.
                 if session.parent_session_id:
-                    # Create a lightweight per-session agent for child
-                    # sessions that inherits the parent's session-level MCP
-                    # providers without sharing chat history or agent state.
-                    #
-                    # Pool-level MCP providers (from YAML mcp_servers) are
-                    # added below.  Session-level MCP providers (from ACP
-                    # mcp-over-acp) are inherited from the parent.
-                    #
-                    # To avoid spawning duplicate MCP subprocesses, the
-                    # child agent shares base_agent.mcp.  is_per_session_agent
-                    # is set to False so close_session() skips __aexit__.
+                    # Child session: create lightweight agent inheriting
+                    # from parent session's agent.  Shares MCP manager
+                    # to avoid duplicate subprocess spawning.
+                    parent_state = self._sessions.get(session.parent_session_id)
+                    parent_agent = parent_state.agent if parent_state else None
+
                     if cfg.name is None:
                         cfg = cfg.model_copy(update={"name": agent_name})
-                    from agentpool_config.context import ConfigContextManager
 
                     with ConfigContextManager(self.pool._config_file_path):
                         agent: Agent[Any, Any] = cfg.get_agent(
                             input_provider=input_provider,
                             pool=self.pool,
                         )
-                    # Preserve runtime model configuration from shared agent
-                    base_model = getattr(base_agent, "_model", None)
-                    if base_model is not None:
-                        agent._model = base_model
-                        agent.model_settings = getattr(base_agent, "model_settings", None)
-                    if base_agent.env is not None:
-                        agent.env = base_agent.env
-                    agent._internal_fs = base_agent._internal_fs
-                    # Share MCP manager to avoid duplicate subprocess spawning
-                    agent.mcp = base_agent.mcp
+
+                    # Preserve runtime model configuration from parent agent
+                    if parent_agent is not None:
+                        base_model = getattr(parent_agent, "_model", None)
+                        if base_model is not None:
+                            agent._model = base_model
+                            agent.model_settings = getattr(parent_agent, "model_settings", None)
+                        if parent_agent.env is not None:
+                            agent.env = parent_agent.env
+                        agent._internal_fs = parent_agent._internal_fs
+                        # Share MCP manager to avoid duplicate subprocess spawning
+                        agent.mcp = parent_agent.mcp
+
                     await agent.__aenter__()
+
                     # Add pool-level providers
                     if self.pool is not None:
                         agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
                         if self.pool.skills_instruction_provider:
                             agent.tools.add_provider(self.pool.skills_instruction_provider)
                         agent.tools.add_provider(self.pool.skills_tools_provider)
+
                     # Inherit parent's session-level MCP providers
-                    parent_state = self._sessions.get(session.parent_session_id)
-                    if parent_state is not None and parent_state.agent is not None:
-                        for provider in parent_state.agent.tools.external_providers:
+                    if parent_agent is not None:
+                        for provider in parent_agent.tools.external_providers:
                             if getattr(provider, "kind", None) == "mcp":
                                 if provider not in agent.tools.external_providers:
                                     agent.tools.add_provider(provider)
+
                     if input_provider is not None:
                         session.input_provider = input_provider
                     self._session_agents[session_id] = agent
@@ -701,45 +695,19 @@ class SessionController:
                     )
                     return agent
 
-                if self._count_mcp_processes() >= self._mcp_max_processes:
-                    logger.warning(
-                        "MCP process limit reached, falling back to shared agent",
-                        session_id=session_id,
-                        limit=self._mcp_max_processes,
-                    )
-                    # Store input_provider on session, NOT on shared agent
-                    if input_provider is not None:
-                        session.input_provider = input_provider
-                    self._session_agents[session_id] = base_agent
-                    session.agent = base_agent
-                    session.is_per_session_agent = False
-                    return base_agent
-
+                # Main path: create fresh per-session agent from config
                 if cfg.name is None:
                     cfg = cfg.model_copy(update={"name": agent_name})
-                from agentpool_config.context import ConfigContextManager
 
                 with ConfigContextManager(self.pool._config_file_path):
                     agent: Agent[Any, Any] = cfg.get_agent(
                         input_provider=input_provider,
                         pool=self.pool,
                     )
-                # Preserve runtime model configuration from shared agent
-                base_model = getattr(base_agent, "_model", None)
-                if base_model is not None:
-                    agent._model = base_model
-                    agent.model_settings = getattr(base_agent, "model_settings", None)
-                # Preserve runtime env from shared agent for test harnesses
-                # that override agent.env (e.g., MockExecutionEnvironment).
-                if base_agent.env is not None:
-                    agent.env = base_agent.env
-                # Share internal filesystem with shared agent so that
-                # tool state (e.g. async task output files) written via
-                # AgentContext.internal_fs is visible to pool.get_agent() callers.
-                agent._internal_fs = base_agent._internal_fs
+
                 await agent.__aenter__()
-                # Load conversation history into per-session agent from storage.
-                # Do NOT copy from shared base_agent to avoid cross-session pollution.
+
+                # Load conversation history into per-session agent from storage
                 try:
                     await agent.load_session(session_id)
                 except Exception:
@@ -747,13 +715,14 @@ class SessionController:
                         "Failed to load session for per-session agent",
                         session_id=session_id,
                     )
+
                 # Add pool-level providers to per-session agent
-                # (same as shared agents get in AgentPool.__aenter__)
                 if self.pool is not None:
                     agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
                     if self.pool.skills_instruction_provider:
                         agent.tools.add_provider(self.pool.skills_instruction_provider)
                     agent.tools.add_provider(self.pool.skills_tools_provider)
+
                 self._session_agents[session_id] = agent
                 session.agent = agent
                 session.is_per_session_agent = True
@@ -761,19 +730,36 @@ class SessionController:
                 logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
                 return agent
 
-            logger.warning(
-                "Using shared agent for session - state may be shared across sessions",
-                session_id=session_id,
-                agent_name=agent_name,
-                agent_type=type(base_agent).__name__,
-            )
-            # Store input_provider on session, NOT on shared agent
-            if input_provider is not None:
-                session.input_provider = input_provider
-            self._session_agents[session_id] = base_agent
-            session.agent = base_agent
-            session.is_per_session_agent = False
-            return base_agent
+            # Non-native agents (ACP, etc.): create per-session agent from config
+            if cfg is not None:
+                if cfg.name is None:
+                    cfg = cfg.model_copy(update={"name": agent_name})
+
+                with ConfigContextManager(self.pool._config_file_path):
+                    agent = cfg.get_agent(
+                        input_provider=input_provider,
+                        pool=self.pool,
+                    )
+
+                await agent.__aenter__()
+
+                # Add pool-level providers
+                if self.pool is not None:
+                    agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
+                    if self.pool.skills_instruction_provider:
+                        agent.tools.add_provider(self.pool.skills_instruction_provider)
+                    agent.tools.add_provider(self.pool.skills_tools_provider)
+
+                self._session_agents[session_id] = agent
+                session.agent = agent
+                session.is_per_session_agent = True
+                self._increment_mcp_count(agent)
+                logger.info("Created session agent", session_id=session_id, agent_name=agent_name)
+                return agent
+
+            # Config not found
+            msg = f"Agent config not found: {agent_name!r}"
+            raise RuntimeError(msg)
 
     def list_sessions(self) -> list[SessionInfo]:
         """List all active sessions.
@@ -2467,10 +2453,10 @@ class SessionPool:
 
     async def _reconstruct_acp_agent(
         self,
-        _session_id: str,
+        session_id: str,
         agent_name: str,
     ) -> BaseAgent[Any, Any]:
-        """Reconstruct an ACP agent by reopening the subprocess.
+        """Reconstruct an ACP agent from config for session resume.
 
         Args:
             session_id: Session identifier.
@@ -2478,12 +2464,36 @@ class SessionPool:
 
         Returns:
             A reconstructed ACP agent with reopened subprocess.
-        """
-        agent = self.pool.get_agent(agent_name)
 
-        # For ACP agents, reopen the subprocess via __aenter__
-        if hasattr(agent, "__aenter__"):
-            await agent.__aenter__()
+        Raises:
+            SessionNotFoundError: If the agent config is not found.
+        """
+        from agentpool_config.context import ConfigContextManager
+
+        cfg = self.pool.manifest.agents.get(agent_name)
+        if cfg is None:
+            raise SessionNotFoundError(session_id)
+
+        if cfg.name is None:
+            cfg = cfg.model_copy(update={"name": agent_name})
+
+        session = self.sessions.get_session(session_id)
+        input_provider = session.input_provider if session else None
+
+        with ConfigContextManager(self.pool._config_file_path):
+            agent = cfg.get_agent(
+                input_provider=input_provider,
+                pool=self.pool,
+            )
+
+        # Add pool-level providers
+        if self.pool is not None:
+            agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
+            if self.pool.skills_instruction_provider:
+                agent.tools.add_provider(self.pool.skills_instruction_provider)
+            agent.tools.add_provider(self.pool.skills_tools_provider)
+
+        await agent.__aenter__()
         return agent
 
     async def _resume_native_agent(
