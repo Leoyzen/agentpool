@@ -104,8 +104,8 @@ class Team[TDeps = None](BaseTeam[TDeps, Any]):
         from agentpool.utils.identifiers import generate_session_id
 
         session_pool = self.agent_pool.session_pool
-        pool_agents = self.agent_pool.all_agents
-        pool_teams = getattr(self.agent_pool, "teams", {})
+        pool_agents = self.agent_pool.manifest.agents
+        pool_teams = self.agent_pool.manifest.teams
         scoped_nodes: list[MessageNode[Any, Any]] = []
         child_session_ids: dict[str, str] = {}
 
