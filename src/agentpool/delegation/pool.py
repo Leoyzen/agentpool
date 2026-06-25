@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from agentpool.delegation.team import Team
     from agentpool.delegation.teamrun import TeamRun
     from agentpool.messaging.compaction import CompactionPipeline
-    from agentpool.models.manifest import AgentsManifest
+    from agentpool.models.manifest import AgentsManifest, AnyAgentConfig
     from agentpool.orchestrator import SessionPool
     from agentpool.orchestrator.run import RunHandle
     from agentpool.resource_providers.base import ResourceProvider
@@ -930,6 +930,48 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         return next(iter(agents.values()))
 
     @property
+    def main_agent_name(self) -> str:
+        """Get the main agent name.
+
+        Returns the name specified by the ``main_agent_name`` constructor
+        parameter, ``manifest.default_agent``, or falls back to the first
+        agent name from the manifest.
+
+        This property works without calling ``__aenter__()`` — it only
+        reads config data, not runtime agent instances.
+
+        Raises:
+            RuntimeError: If no agents are configured.
+        """
+        if self._main_agent_name:
+            return self._main_agent_name
+        if self.manifest.agents:
+            return next(iter(self.manifest.agents))
+        msg = "No agents configured in manifest"
+        raise RuntimeError(msg)
+
+    @property
+    def main_agent_config(self) -> AnyAgentConfig:
+        """Get the main agent configuration model.
+
+        Resolves :meth:`main_agent_name` and returns its config from
+        ``self.manifest.agents``.
+
+        This property works without calling ``__aenter__()`` — it only
+        reads config data, not runtime agent instances.
+
+        Raises:
+            RuntimeError: If no agents are configured.
+        """
+        name = self.main_agent_name
+        config = self.manifest.agents.get(name)
+        if config is None:
+            available = list(self.manifest.agents.keys())
+            msg = f"Main agent {name!r} not found in config. Available: {available}"
+            raise RuntimeError(msg)
+        return config
+
+    @property
     def teams(self) -> dict[str, BaseTeam[Any, Any]]:
         """Get agents dict (backward compatibility)."""
         from agentpool.delegation.base_team import BaseTeam
@@ -945,6 +987,39 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     def compaction_pipeline(self) -> CompactionPipeline | None:
         """Get the configured compaction pipeline or None if not configured."""
         return self.manifest.get_compaction_pipeline()
+
+    @property
+    def agent_configs(self) -> dict[str, AnyAgentConfig]:
+        """Get all agent configurations from the manifest.
+
+        Returns a direct reference to the manifest's agents dict, providing
+        typed access to configuration metadata (display_name, description,
+        model settings, etc.) without needing to know the manifest structure.
+
+        Use ``"agent_name" in pool.agent_configs`` for existence checks.
+
+        Returns:
+            Dictionary mapping agent names to their ``AnyAgentConfig``.
+        """
+        return self.manifest.agents
+
+    def get_agent_display_name(self, name: str) -> str:
+        """Get the display name for a configured agent.
+
+        Returns the ``display_name`` from the agent's config if set,
+        otherwise falls back to the agent name.
+
+        Args:
+            name: The agent name to look up.
+
+        Returns:
+            The display name, or the agent name if no display name is configured.
+
+        Raises:
+            KeyError: If no agent with the given name exists in the manifest.
+        """
+        config = self.manifest.agents[name]
+        return config.display_name or name
 
     def _validate_item(self, item: MessageNode[Any, Any] | Any) -> MessageNode[Any, Any]:
         """Validate and convert items before registration.
