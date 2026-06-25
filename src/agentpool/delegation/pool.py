@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 from asyncio import Lock
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from dataclasses import dataclass, field
 import os
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Self, overload
@@ -14,34 +12,26 @@ from anyenv import ProcessManager
 import anyio
 from upathtools import to_upath
 
-from agentpool.common_types import NodeName, SupportsStructuredOutput
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
-from agentpool.messaging import MessageNode
 from agentpool.resource_providers.aggregating import AggregatingResourceProvider
 from agentpool.resource_providers.local import LocalResourceProvider
 from agentpool.skills.command_registry import SkillCommandRegistry
 from agentpool.skills.uri_resolver import SkillURIResolver
-from agentpool.talk import TeamTalk
 from agentpool.talk.registry import ConnectionRegistry
 from agentpool.tasks import TaskRegistry
-from agentpool.utils.baseregistry import BaseRegistry
-from agentpool.utils.inspection import get_fn_name
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
-    from contextlib import AbstractAsyncContextManager
     from types import TracebackType
 
     from upathtools import JoinablePathLike, UPath
 
-    from agentpool.agents import Agent
-    from agentpool.agents.base_agent import BaseAgent
-    from agentpool.common_types import AgentName, AnyEventHandlerType
-    from agentpool.delegation.base_team import BaseTeam
+    from agentpool.common_types import AnyEventHandlerType
     from agentpool.delegation.team import Team
     from agentpool.delegation.teamrun import TeamRun
+    from agentpool.messaging import MessageNode
     from agentpool.messaging.compaction import CompactionPipeline
     from agentpool.models.manifest import AgentsManifest, AnyAgentConfig
     from agentpool.orchestrator import SessionPool
@@ -55,28 +45,19 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-@dataclass
-class _WorkflowGraphState:
-    """Shared state for config-based workflow graph execution."""
+class AgentPool[TPoolDeps = None]:
+    """Configuration-driven agent orchestration hub.
 
-    prompts: tuple[Any, ...] = field(default_factory=tuple)
-    kwargs: dict[str, Any] = field(default_factory=dict)
-    result: Any = None
+    Manages agent configurations, shared dependencies, MCP servers,
+    skills, storage, and session orchestration. Agents are defined in
+    YAML config and created on-demand by callers — the pool no longer
+    eagerly instantiates agent instances.
 
-
-class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]]):
-    """Pool managing message processing nodes (agents and teams).
-
-    Acts as a unified registry for all nodes, providing:
-    - Centralized node management and lookup
-    - Shared dependency injection
-    - Connection management
-    - Resource coordination
-
-    Nodes can be accessed through:
-    - nodes: All registered nodes (agents and teams)
-    - agents: Only Agent instances
-    - teams: Only Team instances
+    Config-only APIs:
+    - ``main_agent_name``: Resolved main agent name from config
+    - ``main_agent_config``: Main agent's ``AnyAgentConfig``
+    - ``agent_configs``: All agent configs from the manifest
+    - ``get_agent_display_name()``: Display name for a configured agent
     """
 
     def __init__(  # noqa: PLR0915
@@ -92,7 +73,7 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         session_pool_config: SessionPoolConfig | None = None,
         **kwargs: Any,
     ):
-        """Initialize agent pool with immediate agent creation.
+        """Initialize agent pool with configuration loading.
 
         Args:
             manifest: Agent configuration manifest
@@ -103,10 +84,10 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             event_handlers: Event handlers to pass through to all agents
             main_agent_name: Name of the main agent (overrides manifest.default_agent)
             session_pool_config: Optional override for SessionPool configuration
+            **kwargs: Additional keyword arguments (e.g., deprecated options).
 
         Raises:
-            ValueError: If manifest contains invalid node configurations
-            RuntimeError: If node initialization fails
+            ValueError: If manifest contains invalid configurations
         """
         from agentpool.mcp_server.manager import MCPManager
         from agentpool.models.manifest import AgentsManifest
@@ -120,8 +101,6 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         from agentpool.vfs_registry import VFSRegistry
         from agentpool_config.context import ConfigContextManager
         from agentpool_toolsets.builtin.debug import install_memory_handler
-
-        super().__init__()
 
         # Determine config path first, then load everything with context
         config_path: UPath | None = None
@@ -226,27 +205,6 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             self.process_manager = ProcessManager()
             self.file_ops = FileOpsTracker()
             self.todos = TodoTracker()
-            # Create all agents from unified manifest.agents dict
-            for name, config in self.manifest.agents.items():
-                # Ensure name is set on config
-                cfg = config.model_copy(update={"name": name}) if config.name is None else config
-                agent: BaseAgent[TPoolDeps] = cfg.get_agent(
-                    event_handlers=self.event_handlers,
-                    input_provider=self._input_provider,
-                    pool=self,
-                    deps_type=shared_deps_type,
-                )
-                self.register(name, agent)
-
-            logger.debug(
-                "AgentPool: registered %d agents: %s",
-                len(self.all_agents),
-                list(self.all_agents.keys()),
-            )
-            self._create_teams()
-            if connect_nodes:
-                self._connect_nodes()
-            self.pool_talk = TeamTalk[Any].from_nodes(list(self.nodes.values()))
             self._enter_lock = Lock()  # Initialize async safety fields
             self._running_count = 0
             if "enable_session_pool" in kwargs:
@@ -261,17 +219,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             self._session_pool_config = session_pool_config or self.manifest.session_pool
             self._session_pool: SessionPool | None = None
             self._protocol_servers: list[Any] = []
-            # Graph topology: lazily-built pydantic-graph from registered nodes
+            # Graph topology attributes preserved for future re-implementation
             self._graph: Any | None = None
-            self._graph_dirty = True
-            self._node_id_mapping: dict[Any, MessageNode[Any, Any]] = {}
-            self._talk_mapping: dict[tuple[Any, Any], Any] = {}
-            # Config-based workflow graph (loaded from YAML graph: section)
             self._graph_config: Any | None = None
-            self._load_graph_config(path_for_loading)
-            # Invalidate graph when registry changes
-            self._items.events.added.connect(self._on_registry_changed)
-            self._items.events.removed.connect(self._on_registry_changed)
 
     async def __aenter__(self) -> Self:
         """Enter async context and initialize all agents."""
@@ -296,42 +246,12 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 await self._skill_commands.initialize()
                 # Create pool-scoped SkillCapability instances for all discovered skills
                 await self._rebuild_skill_capabilities()
-                aggregating_provider = self.mcp.get_aggregating_provider()
-                agents = list(self.all_agents.values())
-                teams = list(self.teams.values())
                 if self.skills_instruction_provider:
                     await self.exit_stack.enter_async_context(self.skills_instruction_provider)
-                for agent in agents:
-                    agent.tools.add_provider(aggregating_provider)
-                    if self.skills_instruction_provider:
-                        agent.tools.add_provider(self.skills_instruction_provider)
-                    agent.tools.add_provider(self.skills_tools_provider)
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 if self._session_store is not None:
                     await self.exit_stack.enter_async_context(self._session_store)
-                # Initialize agents and teams (can be parallel)
-                comps: list[AbstractAsyncContextManager[Any]] = [*agents, *teams]
-                node_inits = [self.exit_stack.enter_async_context(c) for c in comps]
-                if self.parallel_load:
-                    await asyncio.gather(*node_inits)
-                else:
-                    for init in node_inits:
-                        await init
-                # Build config-based graph if present
-                if self._graph_config is not None:
-                    try:
-                        self._graph = self._build_graph_from_config()
-                        self._graph_dirty = False
-                    except Exception as exc:
-                        config_path_str = (
-                            str(self._config_file_path)
-                            if self._config_file_path
-                            else "programmatic config"
-                        )
-                        raise RuntimeError(
-                            f"Failed to build graph from config at {config_path_str}: {exc}"
-                        ) from exc
                 # Initialize SessionPool
                 from agentpool.orchestrator import SessionPool
 
@@ -377,13 +297,6 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
                 # Await any in-flight checkpoint operations before cleanup
                 await self._session_pool._await_inflight_checkpoints()
                 self._session_pool = None
-                # Remove MCP aggregating provider from all agents
-                aggregating_provider = self.mcp.get_aggregating_provider()
-                for agent in self.get_agents().values():
-                    agent.tools.remove_provider(aggregating_provider.name)
-                    if self.skills_instruction_provider:
-                        agent.tools.remove_provider(self.skills_instruction_provider.name)
-                    agent.tools.remove_provider(self.skills_tools_provider.name)
                 # Clean up skill provider and resolver
                 if self._skill_provider is not None:
                     self._skill_provider.skills_changed.disconnect(self._on_skills_changed)
@@ -741,11 +654,10 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         await self._rebuild_skill_capabilities()
 
     async def cleanup(self) -> None:
-        """Clean up all agents."""
+        """Clean up pool resources."""
         # Clean up background processes
         await self.process_manager.cleanup()
         await self.exit_stack.aclose()
-        self.clear()
 
     @overload
     def create_team_run[TDeps, TResult](
@@ -789,16 +701,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         from agentpool.delegation.teamrun import TeamRun
 
-        team = TeamRun(
+        return TeamRun(
             agents,
             name=name,
             description=description,
             validator=validator,
             shared_prompt=shared_prompt,
         )
-        if name:
-            self[name] = team
-        return team
 
     @overload
     def create_team[TDeps](
@@ -842,16 +751,13 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         """
         from agentpool.delegation.team import Team
 
-        team = Team(
+        return Team(
             agents,
             name=name,
             description=description,
             shared_prompt=shared_prompt,
             member_timeout=member_timeout,
         )
-        if name:
-            self[name] = team
-        return team
 
     @asynccontextmanager
     async def track_message_flow(self) -> AsyncIterator[MessageFlowTracker]:
@@ -866,68 +772,17 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     async def run_event_loop(self) -> None:
         """Run pool in event-watching mode until interrupted."""
         print("Starting event watch mode...")
-        print("Active nodes: ", ", ".join(list(self.nodes.keys())))
         print("Press Ctrl+C to stop")
 
         shutdown_event = anyio.Event()
         with suppress(KeyboardInterrupt):
             await shutdown_event.wait()
 
-    @overload
-    def get_agents(self) -> dict[str, BaseAgent[Any, Any]]: ...
-
-    @overload
-    def get_agents[TAgent: BaseAgent[Any, Any]](
-        self, agent_type: type[TAgent]
-    ) -> dict[str, TAgent]: ...
-
-    def get_agents[TAgent: BaseAgent[Any, Any]](
-        self,
-        agent_type: type[TAgent] | None = None,
-    ) -> dict[str, TAgent] | dict[str, BaseAgent[Any, Any]]:
-        """Get agents filtered by type.
-
-        Args:
-            agent_type: Optional agent type to filter by. If None, returns all agents.
-
-        Returns:
-            Dictionary mapping agent names to agent instances.
-        """
-        from agentpool.agents.base_agent import BaseAgent
-
-        filter_type = agent_type or BaseAgent
-        return {i.name: i for i in self._items.values() if isinstance(i, filter_type)}
-
-    @property
-    def all_agents(self) -> dict[str, BaseAgent[Any, Any]]:
-        """Get all agents (regular, ACP, and AG-UI)."""
-        return self.get_agents()
-
-    @property
-    def main_agent(self) -> BaseAgent[Any, Any]:
-        """Get the main agent.
-
-        Returns the agent specified by main_agent_name constructor param,
-        manifest.default_agent, or falls back to the first agent.
-
-        Raises:
-            RuntimeError: If no agents are available.
-            ValueError: If the specified main agent doesn't exist.
-        """
-        agents = self.all_agents
-        if not agents:
-            msg = "No agents available in pool"
-            raise RuntimeError(msg)
-
-        if self._main_agent_name:
-            if self._main_agent_name not in agents:
-                available = list(agents.keys())
-                msg = f"Main agent {self._main_agent_name!r} not found. Available: {available}"
-                raise ValueError(msg)
-            return agents[self._main_agent_name]
-
-        # Fallback to first agent
-        return next(iter(agents.values()))
+    # Runtime agent APIs (get_agents, all_agents, main_agent, teams, nodes, get_agent,
+    # add_agent, get_mermaid_diagram, _build_graph, _build_graph_from_config,
+    # _resolve_graph_step_ref) removed as part of eliminating pool-level agent creation.
+    # Config-only APIs (main_agent_name, main_agent_config, agent_configs,
+    # get_agent_display_name) are preserved.
 
     @property
     def main_agent_name(self) -> str:
@@ -971,17 +826,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
             raise RuntimeError(msg)
         return config
 
-    @property
-    def teams(self) -> dict[str, BaseTeam[Any, Any]]:
-        """Get agents dict (backward compatibility)."""
-        from agentpool.delegation.base_team import BaseTeam
-
-        return {i.name: i for i in self._items.values() if isinstance(i, BaseTeam)}
-
-    @property
-    def nodes(self) -> dict[str, MessageNode[Any, Any]]:
-        """Get agents dict (backward compatibility)."""
-        return {i.name: i for i in self._items.values()}
+    # teams, nodes, get_agent, add_agent, get_mermaid_diagram, _build_graph,
+    # _build_graph_from_config, _resolve_graph_step_ref, _load_graph_config removed
+    # as part of eliminating pool-level agent creation.
 
     @property
     def compaction_pipeline(self) -> CompactionPipeline | None:
@@ -1021,324 +868,28 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
         config = self.manifest.agents[name]
         return config.display_name or name
 
-    def _validate_item(self, item: MessageNode[Any, Any] | Any) -> MessageNode[Any, Any]:
-        """Validate and convert items before registration.
+    # Graph-related methods removed as part of eliminating pool-level agent creation.
+    # _validate_item, _create_teams, _connect_nodes, _on_registry_changed, _invalidate_graph
+    # were all dependent on the BaseRegistry pattern and runtime agent instances.
 
-        Raises:
-            AgentPoolError: If item is not a valid node
-        """
-        if not isinstance(item, MessageNode):
-            raise self._error_class(f"Item must be Agent or Team, got {type(item)}")
-        item.agent_pool = self
-        return item
-
-    def _create_teams(self) -> None:
-        """Create all teams in two phases to allow nesting."""
-        # Phase 1: Create empty teams
-        empty_teams: dict[str, BaseTeam[Any, Any]] = {}
-        for name, config in self.manifest.teams.items():
-            empty_teams[name] = config.get_team([], name=name)
-        # Phase 2: Resolve members (supports both str and TeamMemberConfig)
-        for name, config in self.manifest.teams.items():
-            team = empty_teams[name]
-            members: list[MessageNode[Any, Any]] = []
-            agents = self.all_agents
-            for member in config.members:
-                member_name = config.get_member_name(member)
-                if member_name in agents:
-                    members.append(agents[member_name])
-                elif member_name in empty_teams:
-                    members.append(empty_teams[member_name])
-                else:
-                    raise ValueError(f"Unknown team member: {member_name}")
-            team.nodes.extend(members)
-            self[name] = team
-
-    def _connect_nodes(self) -> None:
-        """Set up connections defined in manifest."""
-        # Merge agent and team configs into one dict of nodes with connections
-        for name, config in self.manifest.nodes.items():
-            source = self[name]
-            for target in config.connections or []:
-                target.connect_nodes(source, list(self.all_agents.values()), name)
-        # Connections changed -> graph topology changed
-        self._invalidate_graph()
-
-    def _on_registry_changed(self, key: Any, value: Any) -> None:
-        """Invalidate cached graph when registry changes."""
-        self._invalidate_graph()
-
-    def _invalidate_graph(self) -> None:
-        """Mark the runtime graph as dirty so it will be rebuilt."""
-        self._graph_dirty = True
-
-    def _load_graph_config(self, path_for_loading: Any | None) -> None:
-        """Load graph configuration from raw YAML or manifest extras."""
-        from agentpool_config.graph_config import GraphConfig
-
-        if path_for_loading is not None:
-            import yamling
-
-            try:
-                raw_data = yamling.load_yaml_file(path_for_loading, resolve_inherit=True)
-            except (OSError, ValueError):
-                return
-            # Extract only the 'graph' section from the YAML, not the entire file.
-            # The top-level YAML may contain 'agents', 'skills', etc. that are
-            # not valid GraphConfig fields.
-            graph_data = raw_data.get("graph") if isinstance(raw_data, dict) else None
-            if graph_data is None:
-                # No graph section in config - that's fine, use defaults
-                return
-            try:
-                self._graph_config = GraphConfig.model_validate(graph_data)
-            except Exception as exc:
-                config_str = str(path_for_loading)
-                raise ValueError(f"Failed to build graph config from {config_str}: {exc}") from exc
-        else:
-            extra = getattr(self.manifest, "model_extra", None) or {}
-            if "graph" in extra:
-                graph_data = extra["graph"]
-                if isinstance(graph_data, dict):
-                    self._graph_config = GraphConfig.model_validate(graph_data)
-                elif hasattr(graph_data, "model_dump"):
-                    self._graph_config = graph_data
-
-    def _build_graph_from_config(self) -> Any:  # noqa: PLR0915
-        """Build a pydantic-graph from the stored YAML graph configuration."""
-        if self._graph_config is None:
-            raise ValueError("No graph config loaded")
-        config_path_str = (
-            str(self._config_file_path) if self._config_file_path else "programmatic config"
-        )
-        try:
-            from pydantic_graph import GraphBuilder, StepContext
-            from pydantic_graph.id_types import NodeID
-
-            builder = GraphBuilder(state_type=_WorkflowGraphState, output_type=Any)
-
-            step_ids = [s.id for s in self._graph_config.steps]
-            seen: set[str] = set()
-            duplicates: set[str] = set()
-            for sid in step_ids:
-                if sid in seen:
-                    duplicates.add(sid)
-                seen.add(sid)
-            if duplicates:
-                raise ValueError(f"Duplicate step IDs in graph: {sorted(duplicates)}")  # noqa: TRY301
-
-            step_map: dict[str, Any] = {}
-            for step_cfg in self._graph_config.steps:
-                agent = self.all_agents.get(step_cfg.agent)
-                if agent is None:
-                    available = list(self.all_agents.keys())
-                    raise ValueError(  # noqa: TRY301
-                        f"Graph step '{step_cfg.id}' references unknown agent "
-                        f"'{step_cfg.agent}'. Available agents: {available}"
-                    )
-
-                async def _execute(
-                    ctx: StepContext[_WorkflowGraphState, Any, Any],
-                    node: MessageNode[Any, Any] = agent,
-                ) -> Any:
-                    if ctx.inputs is None:
-                        result = await node.run(*ctx.state.prompts, **ctx.state.kwargs)
-                    else:
-                        result = await node.run_message(ctx.inputs)
-                    ctx.state.result = result
-                    return result
-
-                step = builder.step(call=_execute, node_id=NodeID(step_cfg.id))
-                step_map[step_cfg.id] = step
-
-            for edge_cfg in self._graph_config.edges:
-                from_ref = edge_cfg.from_
-                to_ref = edge_cfg.to
-                from_refs = [from_ref] if isinstance(from_ref, str) else from_ref
-                to_refs = [to_ref] if isinstance(to_ref, str) else to_ref
-                from_steps = [
-                    self._resolve_graph_step_ref(ref, step_map, builder) for ref in from_refs
-                ]
-                to_steps = [self._resolve_graph_step_ref(ref, step_map, builder) for ref in to_refs]
-                for from_step in from_steps:
-                    path = builder.edge_from(from_step)
-                    if edge_cfg.label:
-                        path = path.label(edge_cfg.label)
-                    if edge_cfg.transform:
-                        path = path.transform(edge_cfg.transform)
-                    if len(to_steps) == 1:
-                        builder.add(path.to(to_steps[0]))
-                    else:
-                        builder.add(path.to(*to_steps))
-
-            has_incoming: set[str] = set()
-            has_outgoing: set[str] = set()
-            for edge_cfg in self._graph_config.edges:
-                to_refs = [edge_cfg.to] if isinstance(edge_cfg.to, str) else edge_cfg.to
-                from_refs = [edge_cfg.from_] if isinstance(edge_cfg.from_, str) else edge_cfg.from_
-                for ref in to_refs:
-                    if ref not in ("start", "end"):
-                        has_incoming.add(ref)
-                for ref in from_refs:
-                    if ref not in ("start", "end"):
-                        has_outgoing.add(ref)
-
-            for step_id, step in step_map.items():
-                if step_id not in has_incoming:
-                    builder.add(builder.edge_from(builder.start_node).to(step))
-                if step_id not in has_outgoing:
-                    builder.add(builder.edge_from(step).to(builder.end_node))
-
-            return builder.build()
-        except Exception as exc:
-            raise ValueError(
-                f"Failed to build graph from config at {config_path_str}: {exc}"
-            ) from exc
-
-    def _resolve_graph_step_ref(self, ref: str, step_map: dict[str, Any], builder: Any) -> Any:
-        """Resolve a step reference string to a pydantic-graph node object."""
-        if ref == "start":
-            return builder.start_node
-        if ref == "end":
-            return builder.end_node
-        if ref not in step_map:
-            available = ["start", "end", *step_map.keys()]
-            raise ValueError(
-                f"Graph edge references unknown step '{ref}'. Available steps: {available}"
-            )
-        return step_map[ref]
-
-    def _build_graph(self) -> Any:
-        """Build pydantic-graph from current pool nodes and their Talk connections."""
-        from pydantic_graph import GraphBuilder, StepContext
-        from pydantic_graph.id_types import NodeID
-
-        builder = GraphBuilder(state_type=Any, output_type=Any)
-        step_map: dict[str, Any] = {}
-        for node in self.nodes.values():
-
-            async def _step(
-                ctx: StepContext[Any, Any, Any],
-                node: MessageNode[Any, Any] = node,
-            ) -> Any:
-                if ctx.inputs is None:
-                    result = await node.run(*ctx.state.args, **ctx.state.kwargs)
-                else:
-                    result = await node.run_message(ctx.inputs)
-                return result
-
-            step = builder.step(call=_step, node_id=NodeID(node.name))
-            step_map[node.name] = step
-        for node in self.nodes.values():
-            for talk in node.connections.get_connections():
-                source_step = step_map[talk.source.name]
-                for target in talk.targets:
-                    target_step = step_map[target.name]
-                    path = builder.edge_from(source_step)
-                    if talk.queued:
-                        path = path.label(talk.queue_strategy or "queued")
-                    builder.add(path.to(target_step))
-        return builder.build(validate_graph_structure=False)
+    # _load_graph_config, _build_graph_from_config, _resolve_graph_step_ref,
+    # _build_graph removed as part of eliminating pool-level agent creation.
+    # The config-based graph (graph: YAML section) cannot function without
+    # runtime agent instances to look up.
 
     @property
     def graph(self) -> Any:
         """The pool's pydantic-graph topology.
 
-        When the manifest contains a ``graph:`` section (native syntax) or
-        legacy ``teams:`` / ``connections:`` that were translated to a graph,
-        the graph is built from the YAML config during :meth:`__aenter__`.
-
-        Otherwise the graph is built lazily on first access from the runtime
-        pool topology (all registered nodes and their Talk connections) and
-        is rebuilt automatically when the registry changes.
+        Graph building was removed as part of eliminating pool-level agent
+        creation. Config-based graphs (``graph:`` YAML section) and runtime
+        graphs (built from Talk connections) both required runtime agent
+        instances to look up.
 
         Returns:
-            An immutable pydantic-graph.
-
-        Raises:
-            RuntimeError: If a config-based graph has not yet been built
-                (pool context not entered).
+            Always None in the current implementation.
         """
-        if self._graph_config is not None:
-            if self._graph is None:
-                raise RuntimeError(
-                    "Config-based graph not yet initialized. "
-                    "Enter the AgentPool async context first."
-                )
-            return self._graph
-        has_connections = any(node.connections.get_connections() for node in self.nodes.values())
-        if not has_connections:
-            return None
-        if self._graph is None or self._graph_dirty:
-            self._graph = self._build_graph()
-            self._graph_dirty = False
-        return self._graph
-
-    @overload
-    def get_agent[TResult = str](
-        self,
-        agent: AgentName | Agent[Any, str],
-        *,
-        output_type: type[TResult] = str,  # type: ignore[assignment]
-    ) -> BaseAgent[TPoolDeps, TResult]: ...
-
-    @overload
-    def get_agent[TCustomDeps, TResult = str](
-        self,
-        agent: AgentName | Agent[Any, str],
-        *,
-        deps_type: type[TCustomDeps],
-        output_type: type[TResult] = str,  # type: ignore[assignment]
-    ) -> BaseAgent[TCustomDeps, TResult]: ...
-
-    def get_agent(
-        self,
-        agent: AgentName | Agent[Any, str],
-        *,
-        deps_type: Any | None = None,
-        output_type: Any = str,
-    ) -> BaseAgent[Any, Any]:
-        """Get or configure an agent from the pool.
-
-        This method provides flexible agent configuration with dependency injection:
-        - Without deps: Agent uses pool's shared dependencies
-        - With deps: Agent uses provided custom dependencies
-
-        Args:
-            agent: Either agent name or instance
-            deps_type: Optional custom dependencies type (overrides shared deps)
-            output_type: Optional type for structured responses
-
-        Returns:
-            Either:
-            - Agent[TPoolDeps] when using pool's shared deps
-            - Agent[TCustomDeps] when custom deps provided
-
-        Raises:
-            KeyError: If agent name not found
-            ValueError: If configuration is invalid
-        """
-        from agentpool.agents.base_agent import BaseAgent
-
-        if isinstance(agent, BaseAgent):
-            base = agent
-        else:
-            # Try agents first, then nodes (which includes teams)
-            agents = self.get_agents()
-            if agent in agents:
-                base = agents[agent]
-            elif agent in self.nodes:
-                base = self.nodes[agent]  # type: ignore[assignment]
-            else:
-                raise KeyError(agent)
-        # Use custom deps if provided, otherwise use shared deps
-        # base.context.data = deps if deps is not None else self.shared_deps
-        if isinstance(base, BaseAgent):
-            base.deps_type = deps_type
-        base.agent_pool = self
-        if isinstance(base, SupportsStructuredOutput):
-            base.to_structured(output_type)
-        return base
+        return None
 
     def get_job(self, name: str) -> Job[Any, Any]:
         return self._tasks[name]
@@ -1346,53 +897,9 @@ class AgentPool[TPoolDeps = None](BaseRegistry[NodeName, MessageNode[Any, Any]])
     def register_task(self, name: str, task: Job[Any, Any]) -> None:
         self._tasks.register(name, task)
 
-    async def add_agent(self, agent: BaseAgent[Any, Any]) -> None:
-        """Add a new permanent agent to the pool."""
-        from agentpool.agents.events import resolve_event_handlers
-
-        if agent.agent_pool is not None:
-            raise ValueError("Agent is already part of a pool")
-        for handler in resolve_event_handlers(self.event_handlers):
-            agent.event_handler.add_handler(handler)
-        # Add MCP aggregating provider from manager
-        agent.tools.add_provider(self.mcp.get_aggregating_provider())
-        if self.skills_instruction_provider:
-            agent.tools.add_provider(self.skills_instruction_provider)
-        agent = await self.exit_stack.enter_async_context(agent)
-        self.register(agent.name, agent)
-
-    def get_mermaid_diagram(self, include_details: bool = True) -> str:
-        """Generate mermaid flowchart of all agents and their connections.
-
-        Args:
-            include_details: Whether to show connection details (types, queues, etc)
-        """
-        declare_lines = []
-        connect_lines = []
-        # Add all connections as edges
-        for agent in self.all_agents.values():
-            declare_lines.append(f"    {agent.name}[{agent.display_name}]")
-            for talk in agent.connections.get_connections():
-                source = talk.source.name
-                for target in talk.targets:
-                    if include_details:
-                        details: list[str] = []
-                        details.append(talk.connection_type)
-                        if talk.queued:
-                            details.append(f"queued({talk.queue_strategy})")
-                        if fn := talk.filter_condition:
-                            details.append(f"filter:{get_fn_name(fn)}")
-                        if fn := talk.stop_condition:
-                            details.append(f"stop:{get_fn_name(fn)}")
-                        if fn := talk.exit_condition:
-                            details.append(f"exit:{get_fn_name(fn)}")
-
-                        label = f"|{' '.join(details)}|" if details else ""
-                        connect_lines.append(f"    {source}--{label}-->{target.name}")
-                    else:
-                        connect_lines.append(f"    {source}-->{target.name}")
-        all_lines = ["flowchart LR", *declare_lines, *connect_lines]
-        return "\n".join(all_lines)
+    # get_agent, add_agent, get_mermaid_diagram removed as part of eliminating
+    # pool-level agent creation. These methods depended on runtime agent
+    # instances (self._items, self.all_agents, self.register).
 
 
 if __name__ == "__main__":
@@ -1400,7 +907,6 @@ if __name__ == "__main__":
     async def main() -> None:
         path = "src/agentpool/config_resources/agents.yml"
         async with AgentPool(path) as pool:
-            agent = pool.get_agent("overseer")
-            print(agent)
+            print(f"AgentPool loaded with agents: {list(pool.agent_configs.keys())}")
 
     anyio.run(main)
