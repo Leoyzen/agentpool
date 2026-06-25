@@ -43,14 +43,15 @@ logger = get_logger(__name__)
 
 
 class AgentPool[TPoolDeps = None]:
-    """Configuration-driven agent orchestration hub.
+    """Configuration store and service manager for agent orchestration.
 
     Manages agent configurations, shared dependencies, MCP servers,
-    skills, storage, and session orchestration. Agents are defined in
-    YAML config and created on-demand by callers — the pool no longer
-    eagerly instantiates agent instances.
+    skills, storage, and session orchestration. This is a pure config
+    store — no agent instances are created at the pool level. Agents
+    are defined in YAML config and instantiated on a per-session basis
+    by ``SessionPool``, which is the exclusive execution path.
 
-    Config-only APIs:
+    Config metadata APIs:
     - ``main_agent_name``: Resolved main agent name from config
     - ``main_agent_config``: Main agent's ``AnyAgentConfig``
     - ``agent_configs``: All agent configs from the manifest
