@@ -510,21 +510,8 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
                                 except anyio.WouldBlock:
                                     break
                         else:
-                            event_queue = run_ctx.event_queue
-                            while not acp_done.is_set():
-                                try:
-                                    item = await asyncio.wait_for(
-                                        event_queue.get(), timeout=0.05
-                                    )
-                                    await send_stream.send(item)
-                                except TimeoutError:
-                                    continue
-                            while True:
-                                try:
-                                    item = event_queue.get_nowait()
-                                    await send_stream.send(item)
-                                except asyncio.QueueEmpty:
-                                    break
+                            logger.warning("No EventBus stream available for ACP agent — secondary events will not be forwarded")
+                            return
                     except (
                         anyio.EndOfStream,
                         anyio.ClosedResourceError,

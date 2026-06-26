@@ -177,14 +177,10 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             tool_call_id=self.tool_call_id or "",
             tool_input=self.tool_input,
         )
-        # Use run_ctx.event_bus when available (session pool mode), else event_queue (standalone)
-        if self.run_ctx is not None:
-            if self.run_ctx.event_bus is not None:
-                await self.run_ctx.event_bus.publish(self.run_ctx.session_id, progress_event)
-            else:
-                await self.run_ctx.event_queue.put(progress_event)
+        if self.run_ctx is not None and self.run_ctx.event_bus is not None:
+            await self.run_ctx.event_bus.publish(self.run_ctx.session_id, progress_event)
         else:
-            logger.debug("report_progress called with no active run context — event dropped")
+            logger.debug("report_progress called with no active run context or event_bus — event dropped")
 
     @property
     def events(self) -> StreamEventEmitter:
