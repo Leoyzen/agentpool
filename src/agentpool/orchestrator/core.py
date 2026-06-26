@@ -89,6 +89,7 @@ class EventEnvelope:
 
 
 logger = get_logger(__name__)
+_coalescing_logger = get_logger("agentpool.orchestrator.eventbus.coalescing")
 
 # Constants
 DEFAULT_QUEUE_MAXSIZE: Final[int] = 1000
@@ -108,7 +109,9 @@ class SessionBusyError(Exception):
     """Raised when trying to resume a session that has an active run."""
 
     def __init__(self, session_id: str, run_id: str) -> None:
-        super().__init__(f"Session '{session_id}' already has an active run '{run_id}'. Wait for it to complete or cancel it first.")
+        super().__init__(
+            f"Session '{session_id}' already has an active run '{run_id}'. Wait for it to complete or cancel it first."
+        )
         self.session_id = session_id
         self.run_id = run_id
 
@@ -129,7 +132,11 @@ class CheckpointMismatchError(Exception):
             parts.append(f"missing results for: {sorted(missing)}")
         if extra:
             parts.append(f"unexpected results for: {sorted(extra)}")
-        msg = f"Checkpoint mismatch for session '{session_id}': " + "; ".join(parts) + f". Expected tool_call_ids: {sorted(expected)}, provided: {sorted(provided)}."
+        msg = (
+            f"Checkpoint mismatch for session '{session_id}': "
+            + "; ".join(parts)
+            + f". Expected tool_call_ids: {sorted(expected)}, provided: {sorted(provided)}."
+        )
         super().__init__(msg)
         self.session_id = session_id
         self.expected = expected
@@ -353,7 +360,11 @@ def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
         List of merged (or passthrough) envelopes ready for dispatch.
     """
     # Drop PartDeltaEvent with delta=None
-    filtered: list[EventEnvelope] = [env for env in envelopes if not (isinstance(env.event, PartDeltaEvent) and env.event.delta is None)]
+    filtered: list[EventEnvelope] = [
+        env
+        for env in envelopes
+        if not (isinstance(env.event, PartDeltaEvent) and env.event.delta is None)
+    ]
 
     result: list[EventEnvelope] = []
     for key, group in groupby(filtered, key=lambda env: _merge_key(env.event)):
@@ -410,7 +421,9 @@ class EventBus:
             max_coalesce_buffer: Maximum number of batchable events to buffer per session
                 before flushing. Prevents unbounded latency on long same-type sequences.
         """
-        self._subscribers: dict[str, list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]]] = {}
+        self._subscribers: dict[
+            str, list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]]
+        ] = {}
         self._stream_pairs: dict[int, anyio.abc.ObjectSendStream[EventEnvelope]] = {}
         self._session_tree: dict[str, list[str]] = {}
         self._lock = anyio.Lock()
@@ -425,7 +438,9 @@ class EventBus:
         self._buf_lock = anyio.Lock()
         self._max_buffer = max_coalesce_buffer
 
-    async def subscribe(self, session_id: str, scope: str = "session") -> anyio.abc.ObjectReceiveStream[EventEnvelope]:
+    async def subscribe(
+        self, session_id: str, scope: str = "session"
+    ) -> anyio.abc.ObjectReceiveStream[EventEnvelope]:
         """Subscribe to events for a session.
 
         New subscribers receive replayed historical events from the replay
@@ -449,7 +464,9 @@ class EventBus:
         Returns:
             A memory object receive stream to consume events from.
         """
-        send_stream, receive_stream = anyio.create_memory_object_stream(max_buffer_size=self._max_queue_size)
+        send_stream, receive_stream = anyio.create_memory_object_stream(
+            max_buffer_size=self._max_queue_size
+        )
 
         async with self._lock:
             self._subscribers.setdefault(session_id, []).append((send_stream, scope))
@@ -488,7 +505,9 @@ class EventBus:
         async with self._lock:
             send_to_close = self._stream_pairs.pop(id(receive_stream), None)
             if send_to_close is not None and session_id in self._subscribers:
-                self._subscribers[session_id] = [(s, sc) for s, sc in self._subscribers[session_id] if s is not send_to_close]
+                self._subscribers[session_id] = [
+                    (s, sc) for s, sc in self._subscribers[session_id] if s is not send_to_close
+                ]
                 if not self._subscribers[session_id]:
                     del self._subscribers[session_id]
 
@@ -513,7 +532,9 @@ class EventBus:
             children = self._session_controller.get_children(parent_id)
         else:
             children = self._session_tree.get(parent_id, [])
-        return child_id in children or any(self._is_descendant(child_id, child) for child in children)
+        return child_id in children or any(
+            self._is_descendant(child_id, child) for child in children
+        )
 
     def _are_siblings(self, sid1: str, sid2: str) -> bool:
         """Check if two sessions share the same parent."""
@@ -526,9 +547,15 @@ class EventBus:
         if scope == "session":
             return published_sid == subscriber_sid
         if scope == "descendants":
-            return published_sid == subscriber_sid or self._is_descendant(published_sid, subscriber_sid)
+            return published_sid == subscriber_sid or self._is_descendant(
+                published_sid, subscriber_sid
+            )
         if scope == "subtree":
-            return published_sid == subscriber_sid or published_sid == self._get_parent(subscriber_sid) or self._are_siblings(published_sid, subscriber_sid)
+            return (
+                published_sid == subscriber_sid
+                or published_sid == self._get_parent(subscriber_sid)
+                or self._are_siblings(published_sid, subscriber_sid)
+            )
         if scope == "all":
             return True
         return published_sid == subscriber_sid
@@ -573,12 +600,14 @@ class EventBus:
             dead_set = set(dead_streams)
             async with self._lock:
                 for subscriber_sid in list(self._subscribers):
-                    self._subscribers[subscriber_sid] = [item for item in self._subscribers[subscriber_sid] if item[0] not in dead_set]
+                    self._subscribers[subscriber_sid] = [
+                        item
+                        for item in self._subscribers[subscriber_sid]
+                        if item[0] not in dead_set
+                    ]
                     if not self._subscribers[subscriber_sid]:
                         del self._subscribers[subscriber_sid]
-                dead_ids = {
-                    sid for sid, stream in self._stream_pairs.items() if stream in dead_set
-                }
+                dead_ids = {sid for sid, stream in self._stream_pairs.items() if stream in dead_set}
                 for sid in dead_ids:
                     self._stream_pairs.pop(sid, None)
 
@@ -599,7 +628,19 @@ class EventBus:
         async with self._buf_lock:
             batch = self._buffers.pop(session_id, [])
             self._last_keys.pop(session_id, None)
-        for merged in _merge_envelopes(batch):
+
+        if not batch:
+            _coalescing_logger.debug("Buffer drain no-op (empty buffer)", session_id=session_id)
+            return
+
+        merged_envelopes = _merge_envelopes(batch)
+        _coalescing_logger.debug(
+            "Buffer drained",
+            session_id=session_id,
+            event_count=len(batch),
+            merged_count=len(merged_envelopes),
+        )
+        for merged in merged_envelopes:
             await self._send(session_id, merged)
 
     async def publish(self, session_id: str, event: Any) -> None:
@@ -625,12 +666,20 @@ class EventBus:
 
         # Immediate events: drain buffer then send directly
         if _is_immediate(event):
+            buffered_count = len(self._buffers.get(session_id, []))
+            _coalescing_logger.debug(
+                "Immediate event drains buffer",
+                session_id=session_id,
+                event_type=type(event).__name__,
+                buffered_count=buffered_count,
+            )
             await self._drain_buffer(session_id)
             await self._send(session_id, envelope)
             return
 
         # Drop PartDeltaEvent with delta=None entirely
         if isinstance(event, PartDeltaEvent) and event.delta is None:
+            _coalescing_logger.debug("None-delta PartDeltaEvent dropped", session_id=session_id)
             return
 
         key = _merge_key(event)
@@ -638,6 +687,13 @@ class EventBus:
         # Passthrough events (key is None but not a None-delta PartDeltaEvent):
         # drain buffer then send individually
         if key is None:
+            buffered_count = len(self._buffers.get(session_id, []))
+            _coalescing_logger.debug(
+                "Passthrough event drains buffer",
+                session_id=session_id,
+                event_type=type(event).__name__,
+                buffered_count=buffered_count,
+            )
             await self._drain_buffer(session_id)
             await self._send(session_id, envelope)
             return
@@ -648,6 +704,20 @@ class EventBus:
         async with self._buf_lock:
             buf = self._buffers.setdefault(session_id, [])
             last_key = self._last_keys.get(session_id)
+            if last_key is not None and last_key != key:
+                _coalescing_logger.debug(
+                    "Type-change flush triggered",
+                    session_id=session_id,
+                    old_key=last_key,
+                    new_key=key,
+                )
+            if last_key is not None and len(buf) >= self._max_buffer:
+                _coalescing_logger.warning(
+                    "Coalescing buffer cap reached, flushing",
+                    session_id=session_id,
+                    cap=self._max_buffer,
+                    event_type=type(event).__name__,
+                )
             if last_key != key or len(buf) >= self._max_buffer:
                 prev_batch = buf.copy()
                 buf.clear()
@@ -672,6 +742,13 @@ class EventBus:
             session_id: The session to close subscriptions for.
         """
         # Drain coalescing buffer before closing subscribers
+        buffered_count = len(self._buffers.get(session_id, []))
+        if buffered_count:
+            _coalescing_logger.debug(
+                "Draining buffer before session close",
+                session_id=session_id,
+                event_count=buffered_count,
+            )
         await self._drain_buffer(session_id)
 
         self._replay_buffers.pop(session_id, None)
@@ -770,7 +847,9 @@ class SessionController:
             raise ValueError("session_id cannot be empty or whitespace")
 
         async with self._lock:
-            return await self._get_or_create_session_locked(session_id, agent_name, parent_session_id, lifecycle_policy, **metadata)
+            return await self._get_or_create_session_locked(
+                session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
+            )
 
     def _state_to_data(self, state: SessionState) -> SessionData:
         """Convert SessionState to persistable SessionData.
@@ -935,7 +1014,11 @@ class SessionController:
 
                     # Add pool-level providers
                     if self.pool is not None:
-                        agent.tools.add_provider(self._mcp_pool.get_aggregating_provider() if self._mcp_pool is not None else self.pool.mcp.get_aggregating_provider())
+                        agent.tools.add_provider(
+                            self._mcp_pool.get_aggregating_provider()
+                            if self._mcp_pool is not None
+                            else self.pool.mcp.get_aggregating_provider()
+                        )
                         if self.pool.skills_instruction_provider:
                             agent.tools.add_provider(self.pool.skills_instruction_provider)
                         agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -985,7 +1068,11 @@ class SessionController:
 
                 # Add pool-level providers to per-session agent
                 if self.pool is not None:
-                    agent.tools.add_provider(self._mcp_pool.get_aggregating_provider() if self._mcp_pool is not None else self.pool.mcp.get_aggregating_provider())
+                    agent.tools.add_provider(
+                        self._mcp_pool.get_aggregating_provider()
+                        if self._mcp_pool is not None
+                        else self.pool.mcp.get_aggregating_provider()
+                    )
                     if self.pool.skills_instruction_provider:
                         agent.tools.add_provider(self.pool.skills_instruction_provider)
                     agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -1012,7 +1099,11 @@ class SessionController:
 
                 # Add pool-level providers
                 if self.pool is not None:
-                    agent.tools.add_provider(self._mcp_pool.get_aggregating_provider() if self._mcp_pool is not None else self.pool.mcp.get_aggregating_provider())
+                    agent.tools.add_provider(
+                        self._mcp_pool.get_aggregating_provider()
+                        if self._mcp_pool is not None
+                        else self.pool.mcp.get_aggregating_provider()
+                    )
                     if self.pool.skills_instruction_provider:
                         agent.tools.add_provider(self.pool.skills_instruction_provider)
                     agent.tools.add_provider(self.pool.skills_tools_provider)
@@ -1092,7 +1183,9 @@ class SessionController:
             await self._mark_session_closed(session_id)
         # Remove from parent's children list
         if session.parent_session_id and session.parent_session_id in self._children:
-            self._children[session.parent_session_id] = [cid for cid in self._children[session.parent_session_id] if cid != session_id]
+            self._children[session.parent_session_id] = [
+                cid for cid in self._children[session.parent_session_id] if cid != session_id
+            ]
 
     @staticmethod
     def _should_checkpoint_on_close(data: SessionData | None) -> bool:
@@ -1233,7 +1326,10 @@ class SessionController:
             if children:
                 for child_id in children:
                     child_session = self._sessions.get(child_id)
-                    if child_session is not None and child_session.lifecycle_policy == "independent":
+                    if (
+                        child_session is not None
+                        and child_session.lifecycle_policy == "independent"
+                    ):
                         continue
                     await self._close_session_unlocked(child_id)
 
@@ -1243,7 +1339,9 @@ class SessionController:
                 await self._mark_session_closed(session_id)
             # Remove from parent's children list
             if session.parent_session_id and session.parent_session_id in self._children:
-                self._children[session.parent_session_id] = [cid for cid in self._children[session.parent_session_id] if cid != session_id]
+                self._children[session.parent_session_id] = [
+                    cid for cid in self._children[session.parent_session_id] if cid != session_id
+                ]
 
         turn_completed = False
         acquired = False
@@ -1324,7 +1422,9 @@ class SessionController:
         Returns:
             List of session states matching the agent name, excluding closing sessions.
         """
-        return [s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing]
+        return [
+            s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing
+        ]
 
     async def receive_request(
         self,
@@ -1376,7 +1476,9 @@ class SessionController:
                     )
                     run_handle.start(task)
 
-                    def _cleanup_on_done(_t: asyncio.Task[None], rid: str = run_handle.run_id) -> None:
+                    def _cleanup_on_done(
+                        _t: asyncio.Task[None], rid: str = run_handle.run_id
+                    ) -> None:
                         self._cleanup_run(rid)
 
                     task.add_done_callback(_cleanup_on_done)
@@ -1622,7 +1724,11 @@ class SessionController:
                             continue
                         expired = self._check_expired_calls(data)
                         if expired:
-                            remaining = [c for c in data.pending_deferred_calls if c.tool_call_id not in {e.tool_call_id for e in expired}]
+                            remaining = [
+                                c
+                                for c in data.pending_deferred_calls
+                                if c.tool_call_id not in {e.tool_call_id for e in expired}
+                            ]
                             updated = data.model_copy(update={"pending_deferred_calls": remaining})
                             await self.store.save(updated)
                             logger.info(
@@ -1774,7 +1880,9 @@ class TurnRunner:
             from agentpool.mcp_server.manager import _current_input_provider
 
             _elicitation_token = _current_input_provider.set(input_provider)
-        agent = await self.sessions.get_or_create_session_agent(session_id, input_provider=input_provider)
+        agent = await self.sessions.get_or_create_session_agent(
+            session_id, input_provider=input_provider
+        )
         _session = self.sessions.get_session(session_id)
 
         from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var, _in_turn_context
@@ -1848,10 +1956,14 @@ class TurnRunner:
             _use_run_stream = False
 
         _stream_callable = agent.run_stream if _use_run_stream else agent._run_stream_once
-        assert _stream_callable is not None, "Expected run_stream or _run_stream_once to be available"
+        assert _stream_callable is not None, (
+            "Expected run_stream or _run_stream_once to be available"
+        )
         sig = inspect.signature(_stream_callable)
         stream_params = set(sig.parameters)
-        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
         # input_provider was popped for get_or_create_session_agent;
         # include it back if _run_stream_once also accepts it.
         stream_kwargs = dict(kwargs)
@@ -1884,7 +1996,9 @@ class TurnRunner:
                         if isinstance(event, StreamCompleteEvent):
                             stream_completed = True
                 else:
-                    async for event in agent._run_stream_once(run_ctx, *prompts, session_id=session_id, **stream_kwargs):
+                    async for event in agent._run_stream_once(
+                        run_ctx, *prompts, session_id=session_id, **stream_kwargs
+                    ):
                         if isinstance(event, StreamCompleteEvent):
                             stream_completed = True
                         await self._publish_event(session_id, event)
@@ -1909,7 +2023,9 @@ class TurnRunner:
                                 if isinstance(event, StreamCompleteEvent):
                                     stream_completed = True
                         else:
-                            async for event in agent._run_stream_once(run_ctx, *current_prompts, session_id=session_id, **stream_kwargs):
+                            async for event in agent._run_stream_once(
+                                run_ctx, *current_prompts, session_id=session_id, **stream_kwargs
+                            ):
                                 if isinstance(event, StreamCompleteEvent):
                                     stream_completed = True
                                 await self._publish_event(session_id, event)
@@ -2551,7 +2667,9 @@ class SessionPool:
             if parent_data is not None:
                 metadata.setdefault("project_id", parent_data.project_id)
                 metadata.setdefault("cwd", parent_data.cwd)
-        state, _was_created = await self.sessions.get_or_create_session(session_id, agent_name, parent_session_id, lifecycle_policy, **metadata)
+        state, _was_created = await self.sessions.get_or_create_session(
+            session_id, agent_name, parent_session_id, lifecycle_policy, **metadata
+        )
         return state
 
     async def create_team_from_config(
@@ -2792,7 +2910,9 @@ class SessionPool:
             SessionNotFoundError: If agent config is not found.
             RuntimeError: If agent.run() fails (pending_calls remain uncleared).
         """
-        agent = await self._reconstruct_native_agent(session_data.session_id, session_data.agent_name)
+        agent = await self._reconstruct_native_agent(
+            session_data.session_id, session_data.agent_name
+        )
 
         # Detect agent config drift between checkpoint and resume.
         # The hash check is advisory: if we can't compute the current hash
@@ -3008,7 +3128,11 @@ class SessionPool:
 
         await self.sessions.close_session(session_id)
         await self.event_bus.close_session(session_id)
-        has_turn_state = session_id in self.turns._post_turn_injections or session_id in self.turns._post_turn_prompts or session_id in self.turns._injection_locks
+        has_turn_state = (
+            session_id in self.turns._post_turn_injections
+            or session_id in self.turns._post_turn_prompts
+            or session_id in self.turns._injection_locks
+        )
         if has_turn_state:
             lock = await self.turns._get_injection_lock(session_id)
             async with lock:
