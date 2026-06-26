@@ -59,10 +59,7 @@ class EventEnvelope:
         return getattr(self.event, name)
 
     def __repr__(self) -> str:
-        return (
-            f"EventEnvelope(source_session_id={self.source_session_id!r}, "
-            f"event={self.event!r})"
-        )
+        return f"EventEnvelope(source_session_id={self.source_session_id!r}, event={self.event!r})"
 
 
 logger = get_logger(__name__)
@@ -208,9 +205,7 @@ class EventBus:
             replay_buffer_size: Maximum number of events retained per session for replay.
             session_controller: Optional session controller for hierarchy queries.
         """
-        self._subscribers: dict[
-            str, list[tuple[asyncio.Queue[EventEnvelope | None], str]]
-        ] = {}
+        self._subscribers: dict[str, list[tuple[asyncio.Queue[EventEnvelope | None], str]]] = {}
         self._session_tree: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
         self._max_queue_size = max_queue_size
@@ -244,9 +239,7 @@ class EventBus:
         Returns:
             A queue to consume events from.
         """
-        queue: asyncio.Queue[EventEnvelope | None] = asyncio.Queue(
-            maxsize=self._max_queue_size
-        )
+        queue: asyncio.Queue[EventEnvelope | None] = asyncio.Queue(maxsize=self._max_queue_size)
 
         # 1. Register subscriber and capture replay buffer atomically
         # (inside the same lock to prevent duplicate delivery)
@@ -488,10 +481,11 @@ class SessionController:
         self._mcp_max_processes: int = 100
         self._mcp_process_count: int = 0
         self._runs: dict[str, RunHandle] = {}
-        self._runs_lock: asyncio.Lock = asyncio.Lock()
+        self._runs_lock: asyncio.Lock() = asyncio.Lock()
         self._max_concurrent_runs: int | None = max_concurrent_runs
         self._turn_runner: TurnRunner | None = None
         self._pending_run_ids: dict[str, str] = {}
+        self._todo_lock: asyncio.Lock = asyncio.Lock()
 
     async def get_or_create_session(
         self,
@@ -589,6 +583,23 @@ class SessionController:
             metadata=metadata,
         )
         self._sessions[session_id] = state
+
+        # Clear todos for new top-level sessions only (not subagents)
+        # This prevents accumulation of todos from previous sessions
+        # Use dedicated lock to prevent race conditions with concurrent sessions
+        if parent_session_id is None and hasattr(self.pool, "todos") and self.pool.todos.entries:
+            async with self._todo_lock:
+                # Double-check after acquiring lock
+                if self.pool.todos.entries:
+                    cleared_count = len(self.pool.todos.entries)
+                    self.pool.todos.clear()
+                    logger.info(
+                        "Cleared todos for new top-level session",
+                        session_id=session_id,
+                        agent_name=state.agent_name,
+                        cleared_entries=cleared_count,
+                    )
+
         if self.store is not None:
             await self.store.save(self._state_to_data(state))
         if parent_session_id:
@@ -741,7 +752,7 @@ class SessionController:
                         "Failed to load session for per-session agent",
                         session_id=session_id,
                     )
-                   # Add pool-level providers to per-session agent
+                # Add pool-level providers to per-session agent
                 # (same as shared agents get in AgentPool.__aenter__)
                 if self.pool is not None:
                     agent.tools.add_provider(self.pool.mcp.get_aggregating_provider())
@@ -871,9 +882,7 @@ class SessionController:
                 expired.append(call)
         return expired
 
-    async def _save_close_checkpoint(
-        self, session_id: str, data: SessionData
-    ) -> bool:
+    async def _save_close_checkpoint(self, session_id: str, data: SessionData) -> bool:
         """Save session data with checkpointed status before close.
 
         Marks the session as ``"checkpointed"`` so it can be located by
@@ -1363,12 +1372,11 @@ class SessionController:
                         expired = self._check_expired_calls(data)
                         if expired:
                             remaining = [
-                                c for c in data.pending_deferred_calls
+                                c
+                                for c in data.pending_deferred_calls
                                 if c.tool_call_id not in {e.tool_call_id for e in expired}
                             ]
-                            updated = data.model_copy(
-                                update={"pending_deferred_calls": remaining}
-                            )
+                            updated = data.model_copy(update={"pending_deferred_calls": remaining})
                             await self.store.save(updated)
                             logger.info(
                                 "Removed expired deferred calls",
@@ -1567,6 +1575,7 @@ class TurnRunner:
         # generic mock that does not delegate to _run_stream_once,
         # fall back to _run_stream_once directly.
         from unittest.mock import MagicMock as _MagicMock
+
         _run_stream = getattr(agent, "run_stream", None)
         _use_run_stream: bool = True
         if _run_stream is None:
@@ -1577,13 +1586,15 @@ class TurnRunner:
             # A bare MagicMock without a side_effect is a generic mock
             # agent; use _run_stream_once (the test's target) instead.
             _use_run_stream = callable(_run_stream._mock_side_effect or _run_stream.side_effect)
-        elif isinstance(_run_stream, object) and hasattr(_run_stream, '__call__'):
+        elif isinstance(_run_stream, object) and hasattr(_run_stream, "__call__"):
             _use_run_stream = True
         else:
             _use_run_stream = False
 
         _stream_callable = _run_stream if _use_run_stream else agent._run_stream_once
-        assert _stream_callable is not None, "Expected run_stream or _run_stream_once to be available"
+        assert _stream_callable is not None, (
+            "Expected run_stream or _run_stream_once to be available"
+        )
         sig = inspect.signature(_stream_callable)
         stream_params = set(sig.parameters)
         has_var_keyword = any(
@@ -2306,9 +2317,7 @@ class SessionPool:
             return lock
 
     @contextlib.asynccontextmanager
-    async def _with_resume_lock(
-        self, session_id: str
-    ) -> AsyncIterator[SessionState | None]:
+    async def _with_resume_lock(self, session_id: str) -> AsyncIterator[SessionState | None]:
         """Acquire per-session resume lock with state validation.
 
         Ensures only one resume runs per session at a time and that
@@ -2338,9 +2347,7 @@ class SessionPool:
 
             yield session
 
-    async def _load_checkpoint_data(
-        self, session_id: str
-    ) -> CheckpointData:
+    async def _load_checkpoint_data(self, session_id: str) -> CheckpointData:
         """Load checkpoint data for a session.
 
         Args:
@@ -2515,9 +2522,7 @@ class SessionPool:
                 manage their own message history).
             results: DeferredToolResults for resolving pending deferred calls.
         """
-        agent = await self._reconstruct_acp_agent(
-            session_data.session_id, session_data.agent_name
-        )
+        agent = await self._reconstruct_acp_agent(session_data.session_id, session_data.agent_name)
         try:
             # ACP agents receive the resumed session context through run()
             run_fn: Any = agent.run
@@ -2577,12 +2582,8 @@ class SessionPool:
             raise SessionBusyError(session_id, session.current_run_id)
 
         # Validate deferred_tool_results cover all pending_deferred_calls
-        pending_call_ids: set[str] = {
-            call.tool_call_id for call in data.pending_deferred_calls
-        }
-        provided_call_ids: set[str] = set(
-            getattr(deferred_tool_results, "calls", {}).keys()
-        )
+        pending_call_ids: set[str] = {call.tool_call_id for call in data.pending_deferred_calls}
+        provided_call_ids: set[str] = set(getattr(deferred_tool_results, "calls", {}).keys())
 
         missing = pending_call_ids - provided_call_ids
         extra = provided_call_ids - pending_call_ids
