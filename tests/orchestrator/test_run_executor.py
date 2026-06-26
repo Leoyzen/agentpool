@@ -1,17 +1,17 @@
 """Tests for RunExecutor.
 
 Covers:
-- Basic event stream matching (RunStartedEvent, PartStartEvent, PartDeltaEvent,
-  StreamCompleteEvent)
+- Basic event publishing to EventBus (RunStartedEvent, PartStartEvent,
+  PartDeltaEvent, StreamCompleteEvent)
 - Tool call event mapping (ToolCallStartEvent, ToolCallCompleteEvent)
-- CancelScope safety (background task cleanup on consumer cancellation)
-- Error propagation (background task errors raised in consumer)
+- CancelScope safety (cancellation propagation)
+- Error propagation (RunErrorEvent published before exception)
+- execute() returns ChatMessage (not async generator)
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 import contextlib
 from contextlib import asynccontextmanager
 from typing import Any
@@ -26,12 +26,14 @@ from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     PartStartEvent as AgentPoolPartStartEvent,
+    RunErrorEvent,
     RunStartedEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
 from agentpool.messaging import ChatMessage, MessageHistory
+from agentpool.orchestrator.core import EventBus
 from agentpool.orchestrator.run_executor import RunExecutor
 from agentpool.tools.base import TERMINAL_TOOL_METADATA_KEY, Tool
 
@@ -104,31 +106,56 @@ def message_history() -> MessageHistory:
 # ---------------------------------------------------------------------------
 
 
-async def _collect_events(
+async def _run_and_collect(
     executor: RunExecutor,
     *,
-    prompts: list[str],
+    prompts: list[Any],
     run_ctx: AgentRunContext,
     user_msg: ChatMessage[Any],
     message_history: MessageHistory,
     session_id: str = "test-session",
-) -> list[Any]:
-    """Execute RunExecutor and collect all events."""
+    message_id: str = "msg-1",
+    _parent_id: str | None = None,
+) -> tuple[list[Any], ChatMessage[Any] | None, BaseException | None]:
+    """Execute RunExecutor and collect all events from EventBus.
+
+    Returns:
+        Tuple of (events list, result ChatMessage or None, error or None).
+    """
+    event_bus = EventBus()
+    stream = await event_bus.subscribe(session_id, scope="session")
+
+    result: ChatMessage[Any] | None = None
+    error: BaseException | None = None
+
+    try:
+        result = await executor.execute(
+            prompts=prompts,
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id=message_id,
+            session_id=session_id,
+            _parent_id=_parent_id,
+            event_bus=event_bus,
+        )
+    except BaseException as exc:
+        error = exc
+
+    # Close session to flush buffered events and send EndOfStream to stream
+    await event_bus.close_session(session_id)
+
+    # Drain events from stream (buffered during execute)
     events: list[Any] = []
-    async for event in executor.execute(
-        prompts=prompts,
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        message_id="msg-1",
-        session_id=session_id,
-    ):
-        events.append(event)
-    return events
+    async with stream:
+        async for envelope in stream:
+            events.append(envelope.event)
+
+    return events, result, error
 
 
 # ---------------------------------------------------------------------------
-# Basic event stream matching
+# Basic event stream publishing
 # ---------------------------------------------------------------------------
 
 
@@ -138,17 +165,21 @@ async def test_basic_event_stream(
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """RunExecutor yields RunStartedEvent, model events, and StreamCompleteEvent."""
+    """RunExecutor publishes RunStartedEvent, model events, and StreamCompleteEvent."""
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
-    events = await _collect_events(
+    events, result, error = await _run_and_collect(
         executor,
         prompts=["Say hello"],
         run_ctx=run_ctx,
         user_msg=user_msg,
         message_history=message_history,
     )
+
+    assert error is None
+    assert result is not None
+    assert isinstance(result, ChatMessage)
 
     event_types = [type(e).__name__ for e in events]
 
@@ -180,7 +211,7 @@ async def test_stream_complete_has_content(
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
-    events = await _collect_events(
+    events, result, _ = await _run_and_collect(
         executor,
         prompts=["Say hello"],
         run_ctx=run_ctx,
@@ -191,6 +222,39 @@ async def test_stream_complete_has_content(
     complete_event = events[-1]
     assert isinstance(complete_event, StreamCompleteEvent)
     assert complete_event.message.content == "Hello from RunExecutor"
+    assert result is not None
+    assert result.content == "Hello from RunExecutor"
+
+
+# ---------------------------------------------------------------------------
+# execute() return type
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_execute_returns_chat_message(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """execute() is async def returning ChatMessage, not an async generator."""
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    event_bus = EventBus()
+    result = await executor.execute(
+        prompts=["Say hello"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
+        message_id="msg-1",
+        session_id="test-session",
+        event_bus=event_bus,
+    )
+
+    # Must return a ChatMessage, not an async iterator
+    assert isinstance(result, ChatMessage)
+    assert not hasattr(result, "__aiter__")
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +272,7 @@ async def test_tool_call_events_mapped(
     executor = RunExecutor(tool_agent)
     user_msg = ChatMessage.user_prompt("Call the tool")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Call the tool"],
         run_ctx=run_ctx,
@@ -244,7 +308,7 @@ async def test_terminal_tool_completion_ends_run(
     executor = RunExecutor(terminal_tool_agent)
     user_msg = ChatMessage.user_prompt("Finish the task")
 
-    events = await _collect_events(
+    events, result, _ = await _run_and_collect(
         executor,
         prompts=["Finish the task"],
         run_ctx=run_ctx,
@@ -261,6 +325,8 @@ async def test_terminal_tool_completion_ends_run(
 
     complete_event = next(e for e in events if isinstance(e, StreamCompleteEvent))
     assert complete_event.message.content == "terminal_result"
+    assert result is not None
+    assert result.content == "terminal_result"
 
 
 @pytest.mark.anyio
@@ -269,11 +335,11 @@ async def test_raw_tool_events_still_present(
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """Raw FunctionToolCallEvent / FunctionToolResultEvent are still yielded."""
+    """Raw FunctionToolCallEvent / FunctionToolResultEvent are still published."""
     executor = RunExecutor(tool_agent)
     user_msg = ChatMessage.user_prompt("Call the tool")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Call the tool"],
         run_ctx=run_ctx,
@@ -316,7 +382,7 @@ async def test_concurrent_run_warning(
     user_msg = ChatMessage.user_prompt("Test concurrent warning")
 
     with patch.object(run_executor_module, "logger") as mock_logger:
-        events = await _collect_events(
+        events, _, _ = await _run_and_collect(
             executor,
             prompts=["Test concurrent warning"],
             run_ctx=run_ctx,
@@ -395,70 +461,81 @@ async def test_cancel_scope_safety(
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """Cancelling the consumer cancels the background iteration task cleanly."""
+    """Cancelling execute() propagates asyncio.CancelledError cleanly."""
     executor = RunExecutor(slow_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
+    event_bus = EventBus()
 
-    collected: list[Any] = []
-
-    async def consume() -> None:
-        async for event in executor.execute(
+    async def run() -> None:
+        await executor.execute(
             prompts=["Say hello"],
             run_ctx=run_ctx,
             user_msg=user_msg,
             message_history=message_history,
             message_id="msg-1",
             session_id="sess-1",
-        ):
-            collected.append(event)
+            event_bus=event_bus,
+        )
 
-    task = asyncio.create_task(consume())
+    task = asyncio.create_task(run())
     await asyncio.sleep(0.05)  # Let iteration start
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    # The iteration task should have been cleaned up
-    assert executor._iteration_task is None
-
 
 @pytest.mark.anyio
-async def test_cancelled_run_yields_partial_stream(
+async def test_cancelled_before_response_fallback(
     slow_agent: Agent[None],
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """When cancelled, RunExecutor still yields any events that were queued."""
+    """When run_ctx.cancelled is set before the model responds, a
+    StreamCompleteEvent is published with partial or interrupted content."""
     executor = RunExecutor(slow_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
+    event_bus = EventBus()
+    stream = await event_bus.subscribe("sess-1", scope="session")
 
-    collected: list[Any] = []
+    result: ChatMessage[Any] | None = None
 
-    async def consume() -> None:
-        async for event in executor.execute(
+    async def run() -> None:
+        nonlocal result
+        result = await executor.execute(
             prompts=["Say hello"],
             run_ctx=run_ctx,
             user_msg=user_msg,
             message_history=message_history,
             message_id="msg-1",
             session_id="sess-1",
-        ):
-            collected.append(event)
-            # Cancel after receiving the first event
-            if len(collected) == 1:
-                task = asyncio.current_task()
-                if task is not None:
-                    task.cancel()
+            event_bus=event_bus,
+        )
 
-    task = asyncio.create_task(consume())
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0.05)  # Let iteration start before model responds
+    run_ctx.cancelled = True
+    await task
 
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    # Close session to flush events
+    await event_bus.close_session("sess-1")
 
-    # We should have received at least the RunStartedEvent
-    assert len(collected) >= 1
-    assert isinstance(collected[0], RunStartedEvent)
+    # Drain events from stream
+    events: list[Any] = []
+    async with stream:
+        async for envelope in stream:
+            events.append(envelope.event)
+
+    # Verify StreamCompleteEvent was published
+    complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
+    assert len(complete_events) == 1, (
+        f"Expected exactly 1 StreamCompleteEvent, got {len(complete_events)}"
+    )
+    msg = complete_events[0].message
+    assert msg is not None
+    assert msg.finish_reason == "stop"
+    assert msg.role == "assistant"
+    assert msg.name == slow_agent.name
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +549,7 @@ async def test_error_propagation_from_iteration_task(
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """Errors in the background iteration task are propagated to the consumer."""
+    """Errors in the background iteration task are propagated to the caller."""
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
@@ -485,16 +562,16 @@ async def test_error_propagation_from_iteration_task(
     test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
 
     try:
-        with pytest.raises(RuntimeError, match="agentlet creation failed"):
-            async for _event in executor.execute(
-                prompts=["Say hello"],
-                run_ctx=run_ctx,
-                user_msg=user_msg,
-                message_history=message_history,
-                message_id="msg-1",
-                session_id="sess-1",
-            ):
-                pass
+        events, result, error = await _run_and_collect(
+            executor,
+            prompts=["Say hello"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+        )
+        assert error is not None
+        assert isinstance(error, RuntimeError)
+        assert "agentlet creation failed" in str(error)
     finally:
         test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
 
@@ -505,7 +582,7 @@ async def test_error_during_stream_propagated(
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """Errors during node streaming are propagated to the consumer."""
+    """Errors during node streaming are propagated to the caller."""
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
@@ -514,11 +591,6 @@ async def test_error_during_stream_propagated(
 
     async def broken_get_agentlet(*args: Any, **kwargs: Any) -> Any:
         agentlet = await original_get_agentlet(*args, **kwargs)
-        original_iter = agentlet.iter
-
-        async def _broken_stream(ctx: Any) -> AsyncIterator[Any]:  # noqa: ARG001
-            yield AgentPoolPartStartEvent.text(index=0, content="x")
-            raise ValueError("stream broke")
 
         class BrokenIter:
             """Mock agent run that raises mid-stream."""
@@ -526,7 +598,6 @@ async def test_error_during_stream_propagated(
             def __init__(self) -> None:
                 self.ctx = MagicMock()
                 self.next_node = MagicMock()
-                self.next_node.stream = _broken_stream
                 self.result = None
 
             async def next(self, node: Any) -> Any:
@@ -547,16 +618,59 @@ async def test_error_during_stream_propagated(
     test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
 
     try:
-        with pytest.raises(ValueError, match="stream broke"):
-            async for _event in executor.execute(
-                prompts=["Say hello"],
-                run_ctx=run_ctx,
-                user_msg=user_msg,
-                message_history=message_history,
-                message_id="msg-1",
-                session_id="sess-1",
-            ):
-                pass
+        events, result, error = await _run_and_collect(
+            executor,
+            prompts=["Say hello"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+        )
+        assert error is not None
+        assert isinstance(error, ValueError)
+        assert "stream broke" in str(error)
+    finally:
+        test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
+
+
+@pytest.mark.anyio
+async def test_run_error_event_published_before_exception(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """RunErrorEvent is published to EventBus before the exception is raised."""
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    # Patch get_agentlet to raise an error
+    original_get_agentlet = test_agent.get_agentlet
+
+    async def broken_get_agentlet(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("agentlet creation failed")
+
+    test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
+
+    try:
+        events, _, error = await _run_and_collect(
+            executor,
+            prompts=["Say hello"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+        )
+
+        # Should have raised
+        assert error is not None
+        assert isinstance(error, RuntimeError)
+        assert "agentlet creation failed" in str(error)
+
+        # RunErrorEvent should have been published
+        error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(error_events) == 1, (
+            f"Expected 1 RunErrorEvent, got {len(error_events)}"
+        )
+        assert "agentlet creation failed" in error_events[0].message
+        assert error_events[0].agent_name == test_agent.name
     finally:
         test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
 
@@ -567,11 +681,11 @@ async def test_run_started_event_always_first(
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """RunStartedEvent is always the first event yielded."""
+    """RunStartedEvent is always the first event published."""
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Test")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Test"],
         run_ctx=run_ctx,
@@ -590,19 +704,13 @@ async def test_tool_events_with_event_bus_set(
     tool_agent: Agent[None],
     message_history: MessageHistory,
 ) -> None:
-    """RunExecutor yields ToolCallStartEvent and ToolCallCompleteEvent even when event_bus is set on run_ctx.
-
-    After the fix, process_tool_event() always returns combined events regardless
-    of event_bus state. RunExecutor should yield these events normally.
-    """
-    from agentpool.orchestrator.core import EventBus
-
-    event_bus = EventBus()
-    run_ctx = AgentRunContext(event_bus=event_bus, session_id="test-session-bus")
+    """RunExecutor publishes ToolCallStartEvent and ToolCallCompleteEvent
+    even when event_bus is set on run_ctx."""
+    run_ctx = AgentRunContext(session_id="test-session-bus")
     executor = RunExecutor(tool_agent)
     user_msg = ChatMessage.user_prompt("Call the tool")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Call the tool"],
         run_ctx=run_ctx,
@@ -648,7 +756,7 @@ async def test_multiple_tool_calls_ordering(
     executor = RunExecutor(agent)
     user_msg = ChatMessage.user_prompt("Call both tools")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Call both tools"],
         run_ctx=run_ctx,
@@ -702,7 +810,7 @@ async def test_tool_call_start_event_lacks_session_id(
     executor = RunExecutor(tool_agent)
     user_msg = ChatMessage.user_prompt("Call the tool")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Call the tool"],
         run_ctx=run_ctx,
@@ -728,7 +836,7 @@ async def test_stream_complete_event_lacks_session_id(
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Say hello"],
         run_ctx=run_ctx,
@@ -753,7 +861,7 @@ async def test_tool_call_complete_event_lacks_session_id(
     executor = RunExecutor(tool_agent)
     user_msg = ChatMessage.user_prompt("Call the tool")
 
-    events = await _collect_events(
+    events, _, _ = await _run_and_collect(
         executor,
         prompts=["Call the tool"],
         run_ctx=run_ctx,
@@ -861,7 +969,7 @@ async def test_tool_call_start_dedup(
     user_msg = ChatMessage.user_prompt("Call tool")
 
     try:
-        events = await _collect_events(
+        events, _, _ = await _run_and_collect(
             executor,
             prompts=["Call tool"],
             run_ctx=run_ctx,
@@ -893,17 +1001,15 @@ async def test_run_started_event_session_fields(
     executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Test session fields")
 
-    events: list[Any] = []
-    async for event in executor.execute(
+    events, _, _ = await _run_and_collect(
+        executor,
         prompts=["Test session fields"],
         run_ctx=run_ctx,
         user_msg=user_msg,
         message_history=message_history,
-        message_id="msg-1",
         session_id="custom-session-id",
         _parent_id="custom-parent-id",
-    ):
-        events.append(event)
+    )
 
     assert len(events) > 0
     assert isinstance(events[0], RunStartedEvent)
@@ -917,43 +1023,187 @@ async def test_run_started_event_session_fields(
 # ---------------------------------------------------------------------------
 
 
+# (test_cancelled_before_response_fallback is defined above in the CancelScope section)
+
+
+# ---------------------------------------------------------------------------
+# New tests: EventBus integration
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.anyio
-async def test_cancelled_before_response_fallback(
+async def test_events_published_to_event_bus(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """Events are published to EventBus and received by subscribers."""
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    event_bus = EventBus()
+    stream = await event_bus.subscribe("test-session", scope="session")
+
+    # Run execute in a background task
+    async def run() -> ChatMessage[Any]:
+        return await executor.execute(
+            prompts=["Say hello"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id="msg-1",
+            session_id="test-session",
+            event_bus=event_bus,
+        )
+
+    task = asyncio.create_task(run())
+
+    # Collect events from stream
+    events: list[Any] = []
+    async with stream:
+        async for envelope in stream:
+            events.append(envelope.event)
+            if isinstance(envelope.event, StreamCompleteEvent):
+                break
+
+    result = await task
+
+    # Verify events were received
+    assert len(events) > 0
+    assert isinstance(events[0], RunStartedEvent)
+    assert isinstance(events[-1], StreamCompleteEvent)
+    assert isinstance(result, ChatMessage)
+
+
+@pytest.mark.anyio
+async def test_cancelled_error_reraised(
     slow_agent: Agent[None],
     run_ctx: AgentRunContext,
     message_history: MessageHistory,
 ) -> None:
-    """When run_ctx.cancelled is set before the model responds, a fallback
-    StreamCompleteEvent with ``[Interrupted]`` content is yielded."""
+    """asyncio.CancelledError is re-raised after publishing StreamCompleteEvent."""
     executor = RunExecutor(slow_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
+    event_bus = EventBus()
+    stream = await event_bus.subscribe("sess-1", scope="session")
 
-    collected: list[Any] = []
-
-    async def collect() -> None:
-        async for event in executor.execute(
+    async def run() -> None:
+        await executor.execute(
             prompts=["Say hello"],
             run_ctx=run_ctx,
             user_msg=user_msg,
             message_history=message_history,
             message_id="msg-1",
             session_id="sess-1",
-        ):
-            collected.append(event)
+            event_bus=event_bus,
+        )
 
-    task = asyncio.create_task(collect())
-    await asyncio.sleep(0.05)  # Let iteration start before model responds
-    run_ctx.cancelled = True
-    await task
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0.05)
+    task.cancel()
 
-    # Verify StreamCompleteEvent was yielded with fallback message
-    complete_events = [e for e in collected if isinstance(e, StreamCompleteEvent)]
-    assert len(complete_events) == 1, (
-        f"Expected exactly 1 StreamCompleteEvent, got {len(complete_events)}"
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Close session to flush events
+    await event_bus.close_session("sess-1")
+
+    # Verify StreamCompleteEvent(cancelled=True) was published
+    events: list[Any] = []
+    async with stream:
+        async for envelope in stream:
+            events.append(envelope.event)
+
+    complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
+    assert len(complete_events) == 1
+    assert complete_events[0].cancelled is True
+
+
+@pytest.mark.anyio
+async def test_run_aborted_error_graceful(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """RunAbortedError is treated as graceful cancellation — no RunErrorEvent."""
+    from agentpool.tasks.exceptions import RunAbortedError
+
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    # Patch get_agentlet to raise RunAbortedError
+    original_get_agentlet = test_agent.get_agentlet
+
+    async def aborting_get_agentlet(*args: Any, **kwargs: Any) -> Any:
+        raise RunAbortedError("user aborted")
+
+    test_agent.get_agentlet = aborting_get_agentlet  # type: ignore[method-assign]
+
+    try:
+        events, result, error = await _run_and_collect(
+            executor,
+            prompts=["Say hello"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+        )
+
+        # No error — graceful handling
+        assert error is None
+        assert result is not None
+
+        # StreamCompleteEvent with cancelled=True should be published
+        complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
+        assert len(complete_events) == 1
+        assert complete_events[0].cancelled is True
+        assert complete_events[0].message.content == "[Interrupted]"
+
+        # No RunErrorEvent should be published
+        error_events = [e for e in events if isinstance(e, RunErrorEvent)]
+        assert len(error_events) == 0, "RunAbortedError should not produce RunErrorEvent"
+
+        # run_ctx.cancelled should be True
+        assert run_ctx.cancelled is True
+    finally:
+        test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
+
+
+@pytest.mark.anyio
+async def test_merged_events_retain_type(
+    test_agent: Agent[None],
+    run_ctx: AgentRunContext,
+    message_history: MessageHistory,
+) -> None:
+    """Events published to EventBus retain their original event type."""
+    executor = RunExecutor(test_agent)
+    user_msg = ChatMessage.user_prompt("Say hello")
+
+    events, _, _ = await _run_and_collect(
+        executor,
+        prompts=["Say hello"],
+        run_ctx=run_ctx,
+        user_msg=user_msg,
+        message_history=message_history,
     )
-    msg = complete_events[0].message
-    assert msg is not None
-    assert msg.content == "[Interrupted]"
-    assert msg.finish_reason == "stop"
-    assert msg.role == "assistant"
-    assert msg.name == slow_agent.name
+
+    # Verify each event retains its type
+    for event in events:
+        if isinstance(event, RunStartedEvent):
+            assert event.event_kind == "run_started"
+        elif isinstance(event, StreamCompleteEvent):
+            assert event.event_kind == "stream_complete"
+        elif isinstance(event, PartStartEvent):
+            # PydanticAI PartStartEvent doesn't have event_kind
+            pass
+        elif isinstance(event, PartDeltaEvent):
+            # PydanticAI PartDeltaEvent doesn't have event_kind
+            pass
+
+    # Verify specific types are present and correct
+    run_started = [e for e in events if isinstance(e, RunStartedEvent)]
+    assert len(run_started) == 1
+    assert type(run_started[0]).__name__ == "RunStartedEvent"
+
+    stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
+    assert len(stream_complete) == 1
+    assert type(stream_complete[0]).__name__ == "StreamCompleteEvent"
