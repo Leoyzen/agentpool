@@ -68,11 +68,8 @@ class SubagentTools(StaticResourceProvider):
     def __init__(
         self,
         name: str = "subagent_tools",
-        *,
-        batch_stream_deltas: bool = False,
     ) -> None:
         super().__init__(name=name)
-        self._batch_stream_deltas = batch_stream_deltas
         for tool in [
             self.create_tool(
                 self.list_available_nodes, category="search", read_only=True, idempotent=True

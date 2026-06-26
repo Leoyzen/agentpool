@@ -62,7 +62,6 @@ class AgentRunContext:
         cancelled: Whether the run has been cancelled.
         current_task: The asyncio.Task for the current run, if any.
         depth: Current delegation depth (0 = top-level run).
-        event_queue: Queue for streaming events from this run.
         event_bus: Optional event bus for cross-session event routing.
         injection_manager: Manages prompt injection and queuing for this run.
         session_id: Session ID for this run.
@@ -81,9 +80,6 @@ class AgentRunContext:
 
     depth: int = 0
     """Current delegation depth (0 = top-level run)."""
-
-    event_queue: asyncio.Queue[Any] = field(default_factory=asyncio.Queue)
-    """Queue for streaming events from this run."""
 
     event_bus: EventBus | None = None
     """Optional event bus for cross-session event routing."""
@@ -133,7 +129,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
     """Model name in provider:model format (e.g., 'anthropic:claude-haiku-4-5')."""
 
     run_ctx: AgentRunContext | None = None
-    """Reference to the per-run context for accessing run-isolated state like event_queue."""
+    """Reference to the per-run context for accessing run-isolated state."""
 
     @property
     def native_agent(self) -> Agent[TDeps, Any]:

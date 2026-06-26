@@ -220,9 +220,6 @@ async def test_emit_publishes_exactly_once_to_event_bus() -> None:
     # No additional events should be on the EventBus queue
     assert _stream_empty(queue)
 
-    # run_ctx.event_queue should be empty (no dual-consumer fallback)
-    assert run_ctx.event_queue.empty()
-
 
 @pytest.mark.anyio
 async def test_emit_multiple_events_each_published_once() -> None:
@@ -256,4 +253,3 @@ async def test_emit_multiple_events_each_published_once() -> None:
 
     assert len(received) == 3
     assert [ev.run_id for ev in received] == ["run-0", "run-1", "run-2"]
-    assert run_ctx.event_queue.empty()

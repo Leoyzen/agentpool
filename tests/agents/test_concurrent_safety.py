@@ -220,8 +220,8 @@ async def test_concurrent_cancellation_isolation(native_agent: AgentPoolSession)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_event_queue_isolation(native_agent: AgentPoolSession) -> None:
-    """Each concurrent call must have isolated event queue.
+async def test_concurrent_session_stream_isolation(native_agent: AgentPoolSession) -> None:
+    """Each concurrent call must have isolated streams.
 
     Events emitted by one call should not appear in another call's stream.
     """

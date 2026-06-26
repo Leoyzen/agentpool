@@ -189,19 +189,12 @@ class SubagentToolsetConfig(BaseToolsetConfig):
     )
     """Optional tool filter to enable/disable specific tools."""
 
-    batch_stream_deltas: bool = Field(
-        default=False,
-        title="Batch stream deltas",
-    )
-    """Batch consecutive text/thinking deltas for fewer UI updates."""
-
     def get_provider(self) -> ResourceProvider:
         """Create subagent tools provider."""
         from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 
         provider = SubagentTools(
             name="subagent_tools",
-            batch_stream_deltas=self.batch_stream_deltas,
         )
         if self.tools is not None:
             from agentpool.resource_providers import FilteringResourceProvider
