@@ -81,7 +81,7 @@ async def test_task_tool_return_format():
         yield StreamCompleteEvent(message=ChatMessage(role="assistant", content="Task result"))
 
     mock_agent.run_stream.side_effect = mock_stream
-    ctx.pool.nodes = {"child_agent": mock_agent}
+    ctx.pool.manifest.agents = {"child_agent": mock_agent}
     ctx.node.session_id = "parent_session"
     ctx.events.emit_event = AsyncMock()
     ctx.create_child_session = AsyncMock(return_value="child_session_123")
@@ -126,7 +126,7 @@ async def test_task_tool_async_mode_return_format():
             self.run_stream = MagicMock()
 
     mock_agent = MockStreamingAgent()
-    ctx.pool.nodes = {"child_agent": mock_agent}
+    ctx.pool.manifest.agents = {"child_agent": mock_agent}
 
     # Mock internal_fs
     ctx.internal_fs.mkdirs = MagicMock()

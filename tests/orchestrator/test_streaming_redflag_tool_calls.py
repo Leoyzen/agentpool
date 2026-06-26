@@ -80,7 +80,7 @@ async def test_tool_call_only_response_has_no_text_deltas() -> None:
     manifest = AgentsManifest(agents={"test_agent": agent_config})
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         # Create a tool that simulates a failed task delegation
         failing_tool = Tool.from_callable(_failing_tool, name_override="failing_tool")
@@ -167,7 +167,7 @@ async def test_tool_error_does_not_break_stream() -> None:
     manifest = AgentsManifest(agents={"test_agent": agent_config})
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         # Register a tool that RETURNS an error string (the FIXED behaviour)
         def _broken_tool() -> str:
@@ -213,7 +213,7 @@ async def test_text_response_yields_deltas() -> None:
     manifest = AgentsManifest(agents={"test_agent": agent_config})
 
     async with AgentPool(manifest) as pool:
-        agent = pool.get_agent("test_agent")
+        agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         # Normal text response — avoid built-in tools so we get immediate text
         await agent.set_model(

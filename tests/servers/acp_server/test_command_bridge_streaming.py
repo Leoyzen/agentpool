@@ -30,8 +30,7 @@ async def test_session_command_immediate_execution():
         return f"Response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    agent_pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     mock_client = AsyncMock()
     mock_acp_agent = AsyncMock()
 
@@ -68,8 +67,7 @@ async def test_immediate_send_with_slow_command():
         return f"Response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    agent_pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     mock_client = AsyncMock()
     mock_acp_agent = AsyncMock()
 
@@ -130,7 +128,7 @@ async def test_immediate_send_error_handling(caplog: pytest.LogCaptureFixture):
         return f"Response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=agent_pool)
-    agent_pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     mock_client = AsyncMock()
 
     # Track created tasks to wait for them

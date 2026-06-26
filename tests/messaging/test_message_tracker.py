@@ -2,18 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool import Agent, AgentPool
+from agentpool import Agent, AgentPool, Team
 
 
 async def test_simple_sequential_chain():
     """Test basic sequential chaining."""
     async with AgentPool() as pool:
         agent1 = Agent("agent1", model="test")
-        await pool.add_agent(agent1)
         agent2 = Agent("agent2", model="test")
-        await pool.add_agent(agent2)
         agent3 = Agent("agent3", model="test")
-        await pool.add_agent(agent3)
         agent1 >> agent2 >> agent3
         async with pool.track_message_flow() as tracker:
             msg = await agent1.run("test")
@@ -27,13 +24,9 @@ async def test_parallel_to_sequential():
     """Test parallel flows connecting to single target."""
     async with AgentPool() as pool:
         agent1 = Agent("agent1", model="test")
-        await pool.add_agent(agent1)
         agent2 = Agent("agent2", model="test")
-        await pool.add_agent(agent2)
         agent3 = Agent("agent3", model="test")
-        await pool.add_agent(agent3)
         agent4 = Agent("agent4", model="test")
-        await pool.add_agent(agent4)
         agent1 >> [agent2, agent3] >> agent4
         async with pool.track_message_flow() as tracker:
             msg = await agent1.run("test")
@@ -52,9 +45,7 @@ async def test_callback_chain():
     """Test chaining with a callback function."""
     async with AgentPool() as pool:
         agent1 = Agent("agent1", model="test")
-        await pool.add_agent(agent1)
         agent2 = Agent("agent2", model="test")
-        await pool.add_agent(agent2)
 
         def process(msg: str) -> str:
             return f"Processed: {msg}"
@@ -72,11 +63,8 @@ async def test_message_flow_tracker():
     # Setup a simple agent chain
     async with AgentPool() as pool:
         agent1 = Agent("agent1", system_prompt="You are agent 1", model="test")
-        await pool.add_agent(agent1)
         agent2 = Agent("agent2", system_prompt="You are agent 2", model="test")
-        await pool.add_agent(agent2)
         agent3 = Agent("agent3", system_prompt="You are agent 3", model="test")
-        await pool.add_agent(agent3)
 
         # Create chain: agent1 >> agent2 >> agent3
         agent1 >> agent2
@@ -111,11 +99,8 @@ async def test_message_flow_tracker_parallel():
     """Test tracking parallel message flows."""
     async with AgentPool() as pool:
         agent1 = Agent("agent1", model="test")
-        await pool.add_agent(agent1)
         agent2 = Agent("agent2", model="test")
-        await pool.add_agent(agent2)
         agent3 = Agent("agent3", model="test")
-        await pool.add_agent(agent3)
 
         # Create parallel flows: agent1 >> [agent2, agent3]
         agent1 >> [agent2, agent3]
@@ -142,14 +127,11 @@ async def test_message_flow_tracker_nested():
     """Test tracking flow through nested teams."""
     async with AgentPool() as pool:
         agent1 = Agent("agent1", model="test")
-        await pool.add_agent(agent1)
         agent2 = Agent("agent2", model="test")
-        await pool.add_agent(agent2)
         agent3 = Agent("agent3", model="test")
-        await pool.add_agent(agent3)
 
-        # Create nested team
-        team = pool.create_team([agent2, agent3], name="team")
+        # Create nested team using Team constructor instead of pool.create_team()
+        team = Team([agent2, agent3])
         agent1 >> team
 
         async with pool.track_message_flow() as tracker:

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
+from agentpool import AgentPool, AgentsManifest, Team, TeamRun
 
 
 if TYPE_CHECKING:
@@ -63,20 +63,21 @@ async def test_parallel_execution():
     manifest = AgentsManifest.from_yaml(TEST_CONFIG)
 
     async with AgentPool(manifest) as pool:
-        agent_1 = pool.get_agent("agent_1", output_type=_TestOutput)
-        agent_2 = pool.get_agent("agent_2", output_type=_TestOutput)
-        group: Team[Any] = pool.create_team([agent_1, agent_2])
+        agent_1 = pool.manifest.agents["agent_1"].get_agent(pool=pool)
+        agent_2 = pool.manifest.agents["agent_2"].get_agent(pool=pool)
+        group = Team([agent_1, agent_2])
 
-        prompt = "Test input"
-        responses = await group.execute(prompt)
-        # Verify execution
-        assert len(responses) == 2
-        assert all(r.success for r in responses)
-        assert all(r.message.data.message == f"Response to: {prompt}" for r in responses)  # type: ignore
+        async with agent_1, agent_2:
+            prompt = "Test input"
+            responses = await group.execute(prompt)
+            # Verify execution
+            assert len(responses) == 2
+            assert all(r.success for r in responses)
+            assert all(r.message.data.message == f"Response to: {prompt}" for r in responses)  # type: ignore
 
-        # Verify agent names
-        agent_names = {r.message.name for r in responses}  # type: ignore
-        assert agent_names == {"agent_1", "agent_2"}
+            # Verify agent names
+            agent_names = {r.message.name for r in responses}  # type: ignore
+            assert agent_names == {"agent_1", "agent_2"}
 
 
 async def test_sequential_execution():
@@ -84,48 +85,27 @@ async def test_sequential_execution():
     manifest: AgentsManifest = AgentsManifest.from_yaml(TEST_CONFIG)
 
     async with AgentPool(manifest) as pool:
-        agent_1 = pool.get_agent("agent_1", output_type=_TestOutput)
-        agent_2 = pool.get_agent("agent_2", output_type=_TestOutput)
-        group: TeamRun[Any, Any] = pool.create_team_run([agent_1, agent_2])
+        agent_1 = pool.manifest.agents["agent_1"].get_agent(pool=pool)
+        agent_2 = pool.manifest.agents["agent_2"].get_agent(pool=pool)
+        group: TeamRun[Any, Any] = TeamRun([agent_1, agent_2])
 
-        prompt = "Test input"
-        responses = await group.execute(prompt)
+        async with agent_1, agent_2:
+            prompt = "Test input"
+            responses = await group.execute(prompt)
 
-        # Verify execution order
-        assert len(responses) == 2
-        assert all(r.success for r in responses)
-        agent_order = [r.message.name for r in responses]  # type: ignore
-        assert agent_order == ["agent_1", "agent_2"]
+            # Verify execution order
+            assert len(responses) == 2
+            assert all(r.success for r in responses)
+            agent_order = [r.message.name for r in responses]  # type: ignore
+            assert agent_order == ["agent_1", "agent_2"]
 
-        # Verify message chain
-        first_response = responses[0].message.data.message  # type: ignore
-        assert first_response == f"Response to: {prompt}"
+            # Verify message chain
+            first_response = responses[0].message.data.message  # type: ignore
+            assert first_response == f"Response to: {prompt}"
 
-        second_response = responses[1].message.data.message  # type: ignore
-        expected_input = "Response to: Test input"  # Just care about the content
-        assert expected_input in second_response
-
-
-# # async def test_shared_context():
-#     """Test that AgentGroup properly sets shared context."""
-#     manifest = AgentsManifest.from_yaml(TEST_CONFIG)
-#     shared_data = {"key": "shared_value"}
-
-#     async with AgentPool(manifest) as pool:
-#         # Get agents before group creation
-#         agent1 = pool.get_agent("agent_1")
-#         agent2 = pool.get_agent("agent_2")
-
-#         # Verify no shared context before group
-#         assert agent1.context.data is None
-#         assert agent2.context.data is None
-
-#         # Create team with shared context
-#         _group = pool.create_team([agent1, agent2], shared_deps=shared_data)
-
-#         # Verify shared context was set for both agents
-#         assert agent1.context.data == shared_data
-#         assert agent2.context.data == shared_data
+            second_response = responses[1].message.data.message  # type: ignore
+            expected_input = "Response to: Test input"  # Just care about the content
+            assert expected_input in second_response
 
 
 if __name__ == "__main__":

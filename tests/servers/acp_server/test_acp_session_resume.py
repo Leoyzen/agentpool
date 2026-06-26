@@ -31,9 +31,18 @@ def mock_agent_pool_with_agent():
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+
+    from agentpool.models.manifest import AgentsManifest
+
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+
+    pool = AgentPool(manifest)
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     return pool, agent
 
 
@@ -173,14 +182,19 @@ async def test_resume_session_exception_returns_empty_response(mock_acp_agent, m
 @pytest.mark.unit
 async def test_resume_session_passes_mcp_servers_to_constructor():
     """Test that resume_session passes mcp_servers to the ACPSession constructor."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
@@ -224,14 +238,19 @@ async def test_resume_session_passes_mcp_servers_to_constructor():
 @pytest.mark.unit
 async def test_resume_session_initializes_mcp_servers():
     """Test that resume_session calls initialize_mcp_servers on the session."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
@@ -271,14 +290,19 @@ async def test_resume_session_initializes_mcp_servers():
 async def test_resume_session_with_none_mcp_servers_calls_initialize():
     """Test that resume_session still calls initialize_mcp_servers when
     mcp_servers is None (matching create_session behaviour)."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
@@ -323,14 +347,19 @@ async def test_resume_session_does_not_call_load_session():
     get_or_create_session_agent(), so resume_session no longer
     calls agent.load_session() directly.
     """
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool
@@ -371,14 +400,19 @@ async def test_resume_session_is_idempotent():
     """Test that calling resume_session twice with the same session_id
     returns the cached session on the second call without constructing
     a new ACPSession."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def _callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
     pool._session_pool = session_pool

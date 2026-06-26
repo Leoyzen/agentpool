@@ -6,7 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.usage import RunUsage
 
-from agentpool import Agent, AgentPool
+from agentpool import AgentPool
+from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.manifest import AgentsManifest
 from agentpool_server.openai_api_server.server import (
     OpenAIAPIServer,
     _serialize_completion_usage,
@@ -19,13 +21,10 @@ from collections.abc import AsyncGenerator
 @pytest.fixture
 async def client() -> AsyncGenerator[TestClient, None]:
     """Create a test client backed by a minimal agent pool with a session pool."""
-
-    def callback(message: str) -> str:
-        return f"Echo: {message}"
-
-    agent = Agent.from_callback(name="libarian", callback=callback)
-    pool = AgentPool()
-    pool.register("libarian", agent)
+    manifest = AgentsManifest(agents={
+        "libarian": NativeAgentConfig(model="test"),
+    })
+    pool = AgentPool(manifest)
     async with pool:
         server = OpenAIAPIServer(pool, docs=False)
         yield TestClient(server.app)
@@ -66,7 +65,8 @@ class TestChatCompletions:
         assert response.status_code == 200
         data = response.json()
         assert data["model"] == "libarian"
-        assert data["choices"][0]["message"]["content"] == "Echo: test"
+        # TestModel returns "I am a test response"
+        assert "test" in data["choices"][0]["message"]["content"].lower()
 
 
 class TestResponses:

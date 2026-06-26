@@ -864,7 +864,7 @@ class TestInputProviderFlow:
         assert state_a.input_provider is not state_b.input_provider
 
         # The shared agent must NOT be mutated
-        shared_agent = session_pool.pool.get_agent("test-agent")
+        shared_agent = session_pool.pool.manifest.agents["test-agent"].get_agent(pool=pool)
         assert shared_agent._input_provider is None
 
 

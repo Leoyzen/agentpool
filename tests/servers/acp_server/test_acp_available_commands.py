@@ -20,13 +20,19 @@ from agentpool_server.acp_server.session import ACPSession
 
 def _make_pool_and_agent() -> tuple[AgentPool, Agent]:
     """Create a simple pool with one agent."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     return pool, agent
 
 

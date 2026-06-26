@@ -25,14 +25,19 @@ from agentpool_server.acp_server.session import ACPSession
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     # Create and register a skill command
     skill = Skill(
         name="test-skill",
@@ -81,14 +86,19 @@ async def test_initialize_does_not_expose_skill_commands(
 
 async def test_initialize_without_skills_no_commands():
     """Test that initialize response has no slash_commands field."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     mock_connection = Mock()
     acp_agent = AgentPoolACPAgent(client=mock_connection, default_agent=agent)
 

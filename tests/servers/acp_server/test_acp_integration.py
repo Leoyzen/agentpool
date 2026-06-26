@@ -19,14 +19,20 @@ from agentpool_server.acp_server.session import ACPSession
 @pytest.fixture
 async def agent_pool():
     """Create a real agent pool from config."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     # Create a simple test agent with pool reference
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
+    # pool.register() removed; agent created from callback/config above
     return pool
 
 
@@ -34,7 +40,7 @@ async def test_acp_server_creation(agent_pool: AgentPool):
     """Test that ACP server can be created from agent pool."""
     server = ACPServer(pool=agent_pool)
     assert server.pool is agent_pool
-    assert len(server.pool.get_agents()) > 0
+    assert len(server.pool.manifest.agents) > 0
 
 
 async def test_agent_switching_workflow(agent_pool: AgentPool, mock_acp_agent):
@@ -50,9 +56,7 @@ async def test_agent_switching_workflow(agent_pool: AgentPool, mock_acp_agent):
     agent1 = Agent.from_callback(name="agent1", callback=callback1, agent_pool=multi_pool)
     agent2 = Agent.from_callback(name="agent2", callback=callback2, agent_pool=multi_pool)
 
-    multi_pool.register("agent1", agent1)
-    multi_pool.register("agent2", agent2)
-    mock_client = AsyncMock()
+    # pool.register() removed; agents created from callback/config abovemock_client = AsyncMock()
     capabilities = ClientCapabilities(fs=None, terminal=False)
 
     session = ACPSession(

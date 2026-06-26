@@ -184,7 +184,6 @@ def mock_pool(
     pool.file_ops = file_ops
     pool.todos = todos
     pool.manifest = manifest
-    pool.all_agents = {}
     pool.skill_commands = None
     # Sessions store delegates to the real StorageManager so that
     # create_session's pool.sessions.store.save() persists data that

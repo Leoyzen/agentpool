@@ -20,7 +20,7 @@ class TestGetAgentRoleConfigOption:
     def test_single_agent_no_role(self):
         """Single agent pool should not expose agent_role option."""
         pool = MagicMock()
-        pool.all_agents = {"solo": MagicMock(name="solo")}
+        pool.manifest.agents = {"solo": MagicMock(name="solo")}
         agent = MagicMock()
         agent.name = "solo"
         agent.agent_pool = pool
@@ -37,7 +37,7 @@ class TestGetAgentRoleConfigOption:
         agent_b = MagicMock()
         agent_b.name = "agent_b"
         agent_b.display_name = "Agent B"
-        pool.all_agents = {"agent_a": agent_a, "agent_b": agent_b}
+        pool.manifest.agents = {"agent_a": agent_a, "agent_b": agent_b}
         agent = MagicMock()
         agent.name = "agent_a"
         agent.agent_pool = pool
@@ -80,7 +80,7 @@ class TestSwapSessionAgent:
         default_agent = MagicMock()
         default_agent.name = "default"
         default_agent.agent_pool = pool
-        pool.all_agents = {"default": default_agent}
+        pool.manifest.agents = {"default": default_agent}
 
         client = MagicMock()
         acp_agent = AgentPoolACPAgent(client=client, default_agent=default_agent)

@@ -7,7 +7,7 @@ import anyio
 from llmling_models import function_to_model
 import pytest
 
-from agentpool import Agent, AgentPool, ChatMessage
+from agentpool import Agent, ChatMessage
 from agentpool.utils.time_utils import get_now
 
 
@@ -19,37 +19,34 @@ async def delayed_processor(msg: str, delay: float = 0.1) -> str:
 
 async def test_single_execution():
     """Test single background execution."""
-    async with AgentPool() as pool:
-        # Create agents with delayed processors
-        model = function_to_model(functools.partial(delayed_processor, delay=0.1))
-        agent1 = Agent("agent1", model=model)
-        await pool.add_agent(agent1)
-        model = function_to_model(functools.partial(delayed_processor, delay=0.2))
-        agent2 = Agent("agent2", model=model)
-        await pool.add_agent(agent2)
+    # Create agents with delayed processors
+    model = function_to_model(functools.partial(delayed_processor, delay=0.1))
+    agent1 = Agent("agent1", model=model)
+    model = function_to_model(functools.partial(delayed_processor, delay=0.2))
+    agent2 = Agent("agent2", model=model)
 
-        run = agent1 | agent2
-        input_text = "test message"
+    run = agent1 | agent2
+    input_text = "test message"
 
-        # Start background execution and get stats - now with await
-        stats = await run.run_in_background(input_text)
-        assert run.is_busy()
+    # Start background execution and get stats - now with await
+    stats = await run.run_in_background(input_text)
+    assert run.is_busy()
 
-        # Wait for completion and get final message
-        result = await run.wait()
-        assert not run.is_busy()
+    # Wait for completion and get final message
+    result = await run.wait()
+    assert not run.is_busy()
 
-        # Verify result
-        assert isinstance(result, ChatMessage)
-        assert result.content.startswith("Processed:")
-        # Should be from the last agent in the chain
-        assert result.name == "agent2"
+    # Verify result
+    assert isinstance(result, ChatMessage)
+    assert result.content.startswith("Processed:")
+    # Should be from the last agent in the chain
+    assert result.name == "agent2"
 
-        # Verify stats captured all messages
-        messages: list[ChatMessage[Any]] = []
-        for talk in stats:
-            messages.extend(talk.stats.messages)
-        assert len(messages) == 2  # One from each agent
+    # Verify stats captured all messages
+    messages: list[ChatMessage[Any]] = []
+    for talk in stats:
+        messages.extend(talk.stats.messages)
+    assert len(messages) == 2  # One from each agent
 
 
 # async def test_continuous_execution():
@@ -83,51 +80,45 @@ async def test_error_handling(caplog: pytest.LogCaptureFixture):
         msg = "Test error"
         raise ValueError(msg)
 
-    async with AgentPool() as pool:
-        agent = Agent.from_callback(failing_processor, name="failing_agent")
-        pool.register(agent.name, agent)
+    agent = Agent.from_callback(failing_processor, name="failing_agent")
 
-        run = agent
-        _stats = await run.run_in_background("test", max_count=1)
-        # await anyio.sleep(1)
-        # Should return None if execution failed
-        result = await run.wait()
-        assert result is None
+    run = agent
+    _stats = await run.run_in_background("test", max_count=1)
+    # await anyio.sleep(1)
+    # Should return None if execution failed
+    result = await run.wait()
+    assert result is None
 
 
 async def test_cancellation():
     """Test cancellation of background execution."""
-    async with AgentPool() as pool:
-        model = function_to_model(functools.partial(delayed_processor, delay=0.5))
-        agent = Agent("agent", model=model)
-        await pool.add_agent(agent)
-        run = agent
-        _stats = await run.run_in_background("test", max_count=None)  # Run indefinitely
-        # Let it run briefly
-        await anyio.sleep(0.1)
-        # Cancel execution
-        await run.stop()
-        assert not run.is_busy()
-        # Should not be able to wait() after cancellation
-        with pytest.raises(RuntimeError):
-            await run.wait()
+    model = function_to_model(functools.partial(delayed_processor, delay=0.5))
+    agent = Agent("agent", model=model)
+    run = agent
+    _stats = await run.run_in_background("test", max_count=None)  # Run indefinitely
+    # Let it run briefly
+    await anyio.sleep(0.1)
+    # Cancel execution
+    await run.stop()
+    assert not run.is_busy()
+    # Should not be able to wait() after cancellation
+    with pytest.raises(RuntimeError):
+        await run.wait()
 
 
 async def test_timing_accuracy():
     """Test that timing information is accurate."""
-    async with AgentPool() as pool:
-        model = function_to_model(functools.partial(delayed_processor, delay=0.2))
-        agent = Agent("agent", model=model)
-        await pool.add_agent(agent)
-        run = agent
-        start = get_now()
-        _stats = await run.run_in_background("test", max_count=1)
-        # Wait should return message
-        result = await run.wait()
-        assert isinstance(result, ChatMessage)
-        # Message should have timestamp
-        assert result.timestamp >= start
-        assert result.timestamp < get_now()
+    model = function_to_model(functools.partial(delayed_processor, delay=0.2))
+    agent = Agent("agent", model=model)
+    run = agent
+    start = get_now()
+    _stats = await run.run_in_background("test", max_count=1)
+    # Wait should return message
+    result = await run.wait()
+    assert isinstance(result, ChatMessage)
+    # Message should have timestamp
+    assert result.timestamp >= start
+    assert result.timestamp < get_now()
 
 
 if __name__ == "__main__":

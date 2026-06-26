@@ -20,7 +20,7 @@ async def test_create_session_binds_requested_agent(
     """`POST /session` should pass the requested agent into SessionPool."""
     reviewer = Mock()
     reviewer.description = "Reviewer"
-    server_state.pool.all_agents = {
+    server_state.pool.manifest.agents = {
         "test-agent": server_state.agent,
         "rebuttal_agent": reviewer,
     }
@@ -43,7 +43,7 @@ async def test_create_session_rejects_unknown_agent(
     server_state,
 ) -> None:
     """Unknown session agents should fail before creating mixed-agent state."""
-    server_state.pool.all_agents = {"test-agent": server_state.agent}
+    server_state.pool.manifest.agents = {"test-agent": server_state.agent}
 
     response = await async_client.post(
         "/session",

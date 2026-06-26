@@ -12,13 +12,6 @@ async def pool():
     pool = AgentPool()
 
     async with pool:
-        agent = Agent("agent1", model=TestModel())
-        await pool.add_agent(agent)
-        agent = Agent("agent2", model=TestModel())
-        await pool.add_agent(agent)
-        agent = Agent("agent3", model=TestModel())
-        await pool.add_agent(agent)
-
         yield pool
 
 
@@ -27,9 +20,9 @@ async def test_registry_captures_agent_interaction(pool: AgentPool):
     messages = []
     pool.connection_registry.message_flow.connect(messages.append)
 
-    # Get agents and set up connection
-    agent1 = pool.get_agent("agent1")
-    agent2 = pool.get_agent("agent2")
+    # Create agents directly
+    agent1 = Agent("agent1", model=TestModel())
+    agent2 = Agent("agent2", model=TestModel())
     agent1.connect_to(agent2, name="test_talk")
     await agent1.run("Test message")
 
@@ -44,10 +37,10 @@ async def test_chained_communication(pool: AgentPool):
     messages = []
     pool.connection_registry.message_flow.connect(messages.append)
 
-    # Set up chain: agent1 -> agent2 -> agent3
-    agent1 = pool.get_agent("agent1")
-    agent2 = pool.get_agent("agent2")
-    agent3 = pool.get_agent("agent3")
+    # Create agents directly
+    agent1 = Agent("agent1", model=TestModel())
+    agent2 = Agent("agent2", model=TestModel())
+    agent3 = Agent("agent3", model=TestModel())
 
     # Create chain with named connections
     agent1.connect_to(agent2, name="chain1")
@@ -69,10 +62,10 @@ async def test_broadcast_communication(pool: AgentPool):
     messages = []
     pool.connection_registry.message_flow.connect(messages.append)
 
-    # Set up broadcast: agent1 -> [agent2, agent3]
-    agent1 = pool.get_agent("agent1")
-    agent2 = pool.get_agent("agent2")
-    agent3 = pool.get_agent("agent3")
+    # Create agents directly
+    agent1 = Agent("agent1", model=TestModel())
+    agent2 = Agent("agent2", model=TestModel())
+    agent3 = Agent("agent3", model=TestModel())
 
     # Create individual connections for broadcast
     agent1.connect_to(agent2, name="broadcast1")

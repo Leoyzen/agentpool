@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool import Agent, AgentPool
+from agentpool import AgentPool
+from agentpool.models.agents import NativeAgentConfig
+from agentpool.models.manifest import AgentsManifest
 from agentpool_server.agui_server import AGUIServer
 
 
@@ -16,21 +18,12 @@ EXPECTED_ROUTES = 3  # 2 agents + 1 root endpoint
 
 @pytest.fixture
 def simple_agent_pool():
-    """Create a simple agent pool for testing."""
-
-    def callback1(message: str) -> str:
-        return f"Agent1: {message}"
-
-    def callback2(message: str) -> str:
-        return f"Agent2: {message}"
-
-    agent1 = Agent.from_callback(name="agent1", callback=callback1)
-    agent2 = Agent.from_callback(name="agent2", callback=callback2)
-
-    pool = AgentPool()
-    pool.register("agent1", agent1)
-    pool.register("agent2", agent2)
-    return pool
+    """Create a simple agent pool with manifest-based config."""
+    manifest = AgentsManifest(agents={
+        "agent1": NativeAgentConfig(model="test"),
+        "agent2": NativeAgentConfig(model="test"),
+    })
+    return AgentPool(manifest)
 
 
 async def test_agui_server_creation(simple_agent_pool: AgentPool):
@@ -39,7 +32,7 @@ async def test_agui_server_creation(simple_agent_pool: AgentPool):
     assert server.pool is simple_agent_pool
     assert server.host == "localhost"
     assert server.port == TEST_PORT_BASE
-    assert len(server.pool.get_agents()) == AGENT_COUNT
+    assert len(server.pool.manifest.agents) == AGENT_COUNT
 
 
 async def test_agui_server_initialization(simple_agent_pool: AgentPool):
@@ -49,7 +42,7 @@ async def test_agui_server_initialization(simple_agent_pool: AgentPool):
     async with server:
         # Pool should be initialized
         assert server.pool is not None
-        assert len(server.pool.get_agents()) == AGENT_COUNT
+        assert len(server.pool.manifest.agents) == AGENT_COUNT
 
 
 async def test_agui_server_base_url(simple_agent_pool: AgentPool):
@@ -123,7 +116,7 @@ async def test_agui_server_from_config(tmp_path):
     server = AGUIServer.from_config(config_path, host="localhost", port=port)
     assert server.host == "localhost"
     assert server.port == port
-    assert len(server.pool.get_agents()) >= 1
+    assert len(server.pool.manifest.agents) >= 1
 
 
 async def test_agui_server_name_generation(simple_agent_pool: AgentPool):

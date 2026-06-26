@@ -19,14 +19,19 @@ from agentpool_server.acp_server.session_manager import ACPSessionManager
 @pytest.fixture
 def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     skill = Skill(
         name="test-skill",
         description="A test skill",

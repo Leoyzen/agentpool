@@ -51,7 +51,7 @@ def mock_pool_with_skills(sample_command: SkillCommand) -> MagicMock:
     pool = MagicMock()
     pool.skill_commands = SkillCommandRegistry()
     pool.skill_commands.register("test-skill", sample_command)
-    pool.all_agents = {}
+    pool.manifest.agents = {}
     pool.manifest.config_file_path = "/test/config.yml"
     return pool
 
@@ -61,7 +61,7 @@ def mock_pool_no_skills() -> MagicMock:
     """Create a mock pool without skill commands."""
     pool = MagicMock()
     pool.skill_commands = None
-    pool.all_agents = {}
+    pool.manifest.agents = {}
     pool.manifest.config_file_path = "/test/config.yml"
     return pool
 

@@ -50,7 +50,7 @@ def _server_state(tmp_path: Path) -> ServerState:
     pool.file_ops = file_ops
     pool.todos = todos
     pool.manifest = manifest
-    pool.all_agents = {}
+    pool.manifest.agents = {}
     pool.skill_commands = None
     pool.skill_provider = None
     pool.skills = None

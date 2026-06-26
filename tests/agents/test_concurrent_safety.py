@@ -433,13 +433,15 @@ async def native_agent():
     from pydantic_ai.models.test import TestModel
 
     from agentpool import Agent, AgentPool
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.manifest import AgentsManifest
 
     model = TestModel(custom_output_text="Test response")
     agent = Agent(name="test_agent", model=model)
 
-    pool = AgentPool()
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+    pool = AgentPool(manifest)
     async with pool:
-        await pool.add_agent(agent)
         session_pool = pool.session_pool
         assert session_pool is not None
         yield AgentPoolSession(agent=agent, pool=pool, session_pool=session_pool)

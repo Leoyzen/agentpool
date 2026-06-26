@@ -139,7 +139,7 @@ class ToolCallTestHarness:
         manifest = AgentsManifest(agents={"harness_test_agent": agent_config})
         # Create pool and session
         async with AgentPool(manifest) as pool:
-            agent = pool.all_agents["harness_test_agent"]
+            agent = pool.manifest.agents["harness_test_agent"]
             capabilities = ClientCapabilities(fs=None, terminal=False)
             session = ACPSession(
                 session_id=self.session_id,
@@ -150,7 +150,7 @@ class ToolCallTestHarness:
                 client_capabilities=capabilities,
             )
             # Override agent.env AFTER session creation
-            for agent in pool.get_agents().values():
+            for agent in pool.manifest.agents.values():
                 agent.env = self.mock_env
             # Clear and execute
             self.client.clear()
@@ -183,7 +183,7 @@ class ToolCallTestHarness:
         )
         manifest = AgentsManifest(agents={"harness_test_agent": agent_config})
         async with AgentPool(manifest) as pool:
-            harness_agent = pool.all_agents["harness_test_agent"]
+            harness_agent = pool.manifest.agents["harness_test_agent"]
             capabilities = ClientCapabilities(fs=None, terminal=False)
             session = ACPSession(
                 session_id=self.session_id,
@@ -194,7 +194,7 @@ class ToolCallTestHarness:
                 client_capabilities=capabilities,
             )
 
-            for agent in pool.get_agents().values():
+            for agent in pool.manifest.agents.values():
                 agent.env = self.mock_env
             self.client.clear()
             content_blocks = [TextContentBlock(text=prompt)]

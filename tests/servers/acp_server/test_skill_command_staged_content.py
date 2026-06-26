@@ -29,14 +29,22 @@ def agent_pool_with_skill() -> AgentPool:
     """Create an agent pool with a skill command registered."""
     from unittest.mock import MagicMock
 
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+
+    from agentpool.models.manifest import AgentsManifest
+
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     # Provide a mock SessionPool so process_prompt can route through it
     mock_session_pool = MagicMock()
     mock_session_pool.sessions = MagicMock()
@@ -178,14 +186,19 @@ async def test_skill_command_no_instructions_returns_end_turn():
     When a skill command executes but finds no instructions, nothing is
     staged, so end_turn is appropriate.
     """
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
+
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"
 
     agent = Agent.from_callback(name="test_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("test_agent", agent)
-
+    # pool.register() removed; agent created from callback/config above
     # Create a skill with NO instructions
     skill = Skill(
         name="empty-skill",

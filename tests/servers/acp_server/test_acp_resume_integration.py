@@ -58,7 +58,7 @@ def session_manager(mock_agent: MagicMock, mock_session_store: MagicMock) -> ACP
     session_pool.sessions.store = mock_session_store
 
     pool = MagicMock()
-    pool.all_agents = {"test_agent": mock_agent}
+    pool.manifest.agents = {"test_agent": mock_agent}
     pool.storage = MagicMock()
     pool.session_pool = session_pool
 

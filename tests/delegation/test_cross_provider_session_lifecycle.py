@@ -99,7 +99,7 @@ agents:
             pytest.skip("Pool has no SessionManager")
         pool.session_pool.sessions.store = store  # type: ignore[union-attr]
 
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         child_session_id_from_spawn: str | None = None
 
         async for event in orch.run_stream("Delegate", session_id="ses_test"):
@@ -185,7 +185,7 @@ agents:
     spawn_count = 0
 
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_count += 1
@@ -310,7 +310,7 @@ agents:
     spawn_depth_default: int | None = None
 
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         async for event in orch.run_stream("Delegate", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 spawn_depth_default = event.depth
@@ -342,13 +342,16 @@ async def test_acp_child_session_inherits_parent_project_and_cwd() -> None:
     from agentpool.orchestrator.core import SessionPool
     from agentpool_server.acp_server.session_manager import ACPSessionManager
 
-    pool = AgentPool()
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.manifest import AgentsManifest
+
+    manifest = AgentsManifest(agents={"acp_agent": NativeAgentConfig(model="test")})
+    pool = AgentPool(manifest)
 
     def simple_callback(message: str) -> str:
         return f"Response: {message}"
 
     agent = Agent.from_callback(name="acp_agent", callback=simple_callback, agent_pool=pool)
-    pool.register("acp_agent", agent)
 
     store = MemorySessionStore()
     session_pool = SessionPool(pool=pool, store=store)
@@ -430,7 +433,7 @@ agents:
       - type: subagent
 """)
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         tools_provider = SubagentTools()
 
         ctx = AgentContext(node=orch)
@@ -479,8 +482,8 @@ agents:
             pytest.skip("Pool has no SessionManager")
         pool.session_pool.sessions.store = store  # type: ignore[union-attr]
 
-        main_agent = pool.get_agent("main")
-        worker = pool.get_agent("worker")
+        main_agent = pool.manifest.agents["main"].get_agent(pool=pool)
+        worker = pool.manifest.agents["worker"].get_agent(pool=pool)
         assert isinstance(main_agent, Agent)
         assert isinstance(worker, Agent)
 
@@ -810,13 +813,14 @@ agents:
     all_child_ids: list[str] = []
 
     async with AgentPool(manifest) as pool:
-        # Register the inner team in the pool so subagent can find it
-        pool.register("work_team", inner_team)
+        # Add team to manifest so subagent tool can find it
+        from agentpool_config.teams import TeamConfig
+        pool.manifest.teams["work_team"] = TeamConfig(mode="parallel", members=["alpha", "beta"])
         inner_team.agent_pool = pool
         agent_a.agent_pool = pool
         agent_b.agent_pool = pool
 
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         async for event in orch.run_stream("Delegate to team", session_id="ses_test"):
             if isinstance(event, SpawnSessionStart):
                 all_child_ids.append(event.child_session_id)

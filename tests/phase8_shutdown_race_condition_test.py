@@ -33,7 +33,7 @@ async def test_shutdown_with_active_session_no_error(manifest: AgentsManifest) -
 
     async with AgentPool(manifest=manifest) as pool:
         # Start a session (creates RunHandle and active state)
-        async with pool.get_agent("test-agent") as agent:
+        async with pool.manifest.agents["test-agent"].get_agent(pool=pool) as agent:
             # Send a request to create an active session
             await agent.run("Hello")
 

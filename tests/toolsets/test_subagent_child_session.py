@@ -75,7 +75,7 @@ agents:
     spawn_count = 0
 
     async with AgentPool(manifest) as pool:
-        orchestrator = pool.get_agent("orchestrator")
+        orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         async for envelope in orchestrator.run_stream("Delegate", session_id="ses_test"):
             event = envelope.event if isinstance(envelope, EventEnvelope) else envelope
@@ -119,7 +119,7 @@ agents:
     child_session_ids_from_run_started: list[str] = []
 
     async with AgentPool(manifest) as pool:
-        orchestrator = pool.get_agent("orchestrator")
+        orchestrator = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
         assert pool.session_pool is not None
 
         # Subscribe to parent with descendants scope to catch child events
@@ -186,7 +186,7 @@ agents:
         assert pool.session_pool is not None
         pool.session_pool.sessions.store = store
 
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         child_session_id_from_spawn: str | None = None
 
@@ -236,7 +236,7 @@ agents:
       - type: subagent
 """)
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         tools_provider = SubagentTools()
 
@@ -283,7 +283,7 @@ agents:
       - type: subagent
 """)
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         tools_provider = SubagentTools()
 
@@ -336,7 +336,7 @@ agents:
     spawn_depth: int | None = None
 
     async with AgentPool(manifest) as pool:
-        orch = pool.get_agent("orchestrator")
+        orch = pool.manifest.agents["orchestrator"].get_agent(pool=pool)
 
         # With depth=0 (default top-level), child should be depth=1
         async for envelope in orch.run_stream("Delegate", session_id="ses_test"):

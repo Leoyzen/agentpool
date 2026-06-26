@@ -86,7 +86,7 @@ async def test_child_session_agent_inherits_parent_mcp_providers() -> None:
         parent_session_id = "parent-mcp-inherit-test"
         child_session_id = "child-mcp-inherit-test"
 
-        base_agent = pool.get_agent("test_agent")
+        base_agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         # Create parent session and get its per-session agent
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
@@ -157,7 +157,7 @@ async def test_child_session_agent_does_not_inherit_non_mcp_providers() -> None:
         parent_session_id = "parent-non-mcp-test"
         child_session_id = "child-non-mcp-test"
 
-        base_agent = pool.get_agent("test_agent")
+        base_agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
         parent_agent = await session_pool.sessions.get_or_create_session_agent(
@@ -220,7 +220,7 @@ async def test_child_session_agent_shares_base_agent_mcp() -> None:
         parent_session_id = "parent-mcp-share-test"
         child_session_id = "child-mcp-share-test"
 
-        base_agent = pool.get_agent("test_agent")
+        base_agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
 
         await session_pool.create_session(parent_session_id, agent_name="test_agent")
         await session_pool.sessions.get_or_create_session_agent(parent_session_id)

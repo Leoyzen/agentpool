@@ -318,7 +318,7 @@ class TestMixedMode:
             basic_manifest,
             enable_session_pool=True,
         ) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="enabled"))
             result = await agent.run("hello", session_id="ses_test")
@@ -333,7 +333,7 @@ class TestMixedMode:
         from pydantic_ai.models.test import TestModel
 
         async with AgentPool(basic_manifest) as pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="disabled"))
             result = await agent.run("hello", session_id="ses_test")
@@ -426,7 +426,7 @@ class TestRestart:
         pool = AgentPool(basic_manifest)
 
         async with pool:
-            agent = pool.get_agent("test_agent")
+            agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
             assert isinstance(agent, Agent)
             await agent.set_model(TestModel(custom_output_text="before"))
             result_before = await agent.run("hello", session_id="ses_test")

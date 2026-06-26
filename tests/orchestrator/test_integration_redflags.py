@@ -715,7 +715,7 @@ async def test_shared_agent_inject_prompt_fallback_triggers_auto_resume() -> Non
         await asyncio.sleep(0.2)
 
         # 2. Get the shared agent from pool (simulates ctx.agent in BackgroundTaskProvider)
-        shared_agent = pool.get_agent("test_agent")
+        shared_agent = pool.manifest.agents["test_agent"].get_agent(pool=pool)
         # Verify shared agent has no fixed session_id
         assert shared_agent._events.session_id is None, (
             "Shared agent should not have a fixed session_id for this test"
