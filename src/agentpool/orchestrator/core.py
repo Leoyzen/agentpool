@@ -533,19 +533,18 @@ class EventBus:
             return True
         return published_sid == subscriber_sid
 
-    async def publish(self, session_id: str, event: Any) -> None:
-        """Publish an event to all subscribers for a session.
+    async def _send(self, session_id: str, envelope: EventEnvelope) -> None:
+        """Send a single envelope to all matching subscribers.
 
-        Uses hybrid backpressure: if a subscriber's send stream blocks for
-        more than 0.1s, drops the oldest buffered event. After 3 consecutive
-        timeouts, closes and drops the subscriber entirely.
+        Appends to the replay buffer, collects target subscribers under
+        ``_lock``, then sends to each target with hybrid backpressure
+        (0.1s timeout → ``send_nowait`` → drop subscriber). Cleans up
+        dead streams afterwards.
 
         Args:
             session_id: The session that produced the event.
-            event: The event to broadcast.
+            envelope: The pre-constructed event envelope to broadcast.
         """
-        envelope = EventEnvelope(source_session_id=session_id, event=event)
-
         async with self._lock:
             if session_id not in self._replay_buffers:
                 self._replay_buffers[session_id] = deque(maxlen=self._replay_buffer_size)
@@ -577,7 +576,9 @@ class EventBus:
                     self._subscribers[subscriber_sid] = [item for item in self._subscribers[subscriber_sid] if item[0] not in dead_set]
                     if not self._subscribers[subscriber_sid]:
                         del self._subscribers[subscriber_sid]
-                dead_ids = {sid for sid, stream in self._stream_pairs.items() if stream in dead_set}
+                dead_ids = {
+                    sid for sid, stream in self._stream_pairs.items() if stream in dead_set
+                }
                 for sid in dead_ids:
                     self._stream_pairs.pop(sid, None)
 
@@ -585,15 +586,94 @@ class EventBus:
             with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                 await stream.aclose()
 
+    async def _drain_buffer(self, session_id: str) -> None:
+        """Atomically pop all buffered events and dispatch them.
+
+        Pops the buffer and last-key under ``_buf_lock``, then merges and
+        sends outside the lock. ``_send()`` acquires ``_lock`` internally.
+        Idempotent — a second caller gets an empty list.
+
+        Args:
+            session_id: The session whose buffer to drain.
+        """
+        async with self._buf_lock:
+            batch = self._buffers.pop(session_id, [])
+            self._last_keys.pop(session_id, None)
+        for merged in _merge_envelopes(batch):
+            await self._send(session_id, merged)
+
+    async def publish(self, session_id: str, event: Any) -> None:
+        """Publish an event to all subscribers for a session.
+
+        Coalescing logic:
+        - **Immediate** events (lifecycle): drain buffer, then send directly.
+        - **Batchable** events (text/thinking/tool_call deltas, progress,
+          plan updates): buffer per-session. Flush on type-change or when
+          buffer cap is reached.
+        - **Passthrough** events (SubAgentEvent, CustomEvent,
+          ToolResultMetadataEvent): drain buffer, then send individually.
+          ``PartDeltaEvent`` with ``delta=None`` is dropped entirely.
+
+        Lock hierarchy: ``_buf_lock`` is acquired briefly then released
+        before ``_send()`` acquires ``_lock``. Never nested.
+
+        Args:
+            session_id: The session that produced the event.
+            event: The event to broadcast.
+        """
+        envelope = EventEnvelope(source_session_id=session_id, event=event)
+
+        # Immediate events: drain buffer then send directly
+        if _is_immediate(event):
+            await self._drain_buffer(session_id)
+            await self._send(session_id, envelope)
+            return
+
+        # Drop PartDeltaEvent with delta=None entirely
+        if isinstance(event, PartDeltaEvent) and event.delta is None:
+            return
+
+        key = _merge_key(event)
+
+        # Passthrough events (key is None but not a None-delta PartDeltaEvent):
+        # drain buffer then send individually
+        if key is None:
+            await self._drain_buffer(session_id)
+            await self._send(session_id, envelope)
+            return
+
+        # Batchable events: buffer with type-change trigger + buffer cap
+        should_flush = False
+        prev_batch: list[EventEnvelope] = []
+        async with self._buf_lock:
+            buf = self._buffers.setdefault(session_id, [])
+            last_key = self._last_keys.get(session_id)
+            if last_key != key or len(buf) >= self._max_buffer:
+                prev_batch = buf.copy()
+                buf.clear()
+                buf.append(envelope)
+                self._last_keys[session_id] = key
+                should_flush = True
+            else:
+                buf.append(envelope)
+
+        # _buf_lock released here. _send() acquires _lock internally.
+        if should_flush and prev_batch:
+            for merged in _merge_envelopes(prev_batch):
+                await self._send(session_id, merged)
+
     async def close_session(self, session_id: str) -> None:
         """Close all subscriptions for a session.
 
-        Closes all send streams to signal EndOfStream to consumers.
-        Clears the replay buffer for the session.
+        Drains the coalescing buffer first, then closes all send streams
+        to signal EndOfStream to consumers, and clears the replay buffer.
 
         Args:
             session_id: The session to close subscriptions for.
         """
+        # Drain coalescing buffer before closing subscribers
+        await self._drain_buffer(session_id)
+
         self._replay_buffers.pop(session_id, None)
 
         async with self._lock:
