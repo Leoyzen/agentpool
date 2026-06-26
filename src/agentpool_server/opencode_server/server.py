@@ -487,6 +487,10 @@ if __name__ == "__main__":
     async def main() -> None:
         pool = AgentPool(config_resources.ACP_ASSISTANT)
         async with pool:
-            run_server(pool.main_agent)
+            assert pool.session_pool is not None
+            agent = await pool.session_pool.sessions.get_or_create_session_agent(
+                "opencode-main", pool.main_agent_name
+            )
+            run_server(agent)
 
     asyncio.run(main())

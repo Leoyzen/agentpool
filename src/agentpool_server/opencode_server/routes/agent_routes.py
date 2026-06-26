@@ -126,7 +126,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
     """
     pool = state.agent.agent_pool
     assert pool is not None, "AgentPool is not initialized"
-    default_name = pool.main_agent.name
+    default_name = pool.main_agent_name
     agents = [
         Agent(
             name=name,

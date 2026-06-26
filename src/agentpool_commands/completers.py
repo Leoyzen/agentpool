@@ -33,16 +33,16 @@ def get_available_agents(
         return []
 
     if agent_type == "all":
-        return list(pool.all_agents.keys())
-    # Filter by AGENT_TYPE attribute
-    return [name for name, agent in pool.all_agents.items() if agent_type == agent.AGENT_TYPE]
+        return list(pool.manifest.agents.keys())
+    # Filter by type discriminator
+    return [name for name, config in pool.manifest.agents.items() if agent_type == config.type]
 
 
 def get_available_nodes(ctx: CompletionContext[NodeContext[Any]]) -> list[str]:
     """Get available node names."""
     if ctx.command_context.context.pool is None:
         return []
-    return list(ctx.command_context.context.pool.nodes.keys())
+    return list(ctx.command_context.context.pool.manifest.agents.keys())
 
 
 async def get_model_names(ctx: CompletionContext[AgentContext[Any]]) -> list[str]:

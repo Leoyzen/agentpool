@@ -233,22 +233,28 @@ class ACPServer(BaseServer):
             server.log.info("ACP session agent", agent=agent)
         return server
 
-    def _resolve_default_agent(self) -> BaseAgent[Any, Any]:
+    async def _resolve_default_agent(self) -> BaseAgent[Any, Any]:
         """Resolve the default agent from name or get pool's default agent.
 
         Returns:
             The resolved agent instance
 
         Raises:
-            RuntimeError: If no agents are available
+            RuntimeError: If no agents are available or SessionPool not available
             ValueError: If specified agent doesn't exist
         """
-        # Use specified agent name or fall back to pool's default agent
-        if self.agent:
-            if self.agent not in self.pool.manifest.agents:
-                raise ValueError(f"Agent {self.agent!r} not found in pool")
-            return self.pool.all_agents[self.agent]
-        return self.pool.main_agent
+        session_pool = self.pool.session_pool
+        if session_pool is None:
+            msg = "SessionPool not available"
+            raise RuntimeError(msg)
+
+        agent_name = self.agent if self.agent else self.pool.main_agent_name
+        if self.agent and self.agent not in self.pool.manifest.agents:
+            raise ValueError(f"Agent {self.agent!r} not found in pool")
+
+        return await session_pool.sessions.get_or_create_session_agent(
+            "acp-default", agent_name
+        )
 
     async def _start_async(self) -> None:
         """Start the ACP server (blocking async - runs until stopped)."""
@@ -257,7 +263,7 @@ class ACPServer(BaseServer):
         )
         self.log.info("Starting ACP server", transport=transport_name)
         # Resolve agent instance from name
-        default_agent = self._resolve_default_agent()
+        default_agent = await self._resolve_default_agent()
         self.log.info("Using default agent", agent=default_agent.name)
         create_acp_agent = functools.partial(
             AgentPoolACPAgent,
@@ -352,7 +358,7 @@ class ACPServer(BaseServer):
         self.agent = agent_name
         self.config_path = config_path
         # 6. Resolve and return the default agent instance
-        default_agent = self._resolve_default_agent()
+        default_agent = await self._resolve_default_agent()
         self.log.info(
             "Pool swapped successfully", agent_names=agent_names, default_agent=default_agent.name
         )

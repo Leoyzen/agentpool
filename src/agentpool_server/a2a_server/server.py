@@ -88,8 +88,9 @@ class A2AServer(HTTPServer):
             async def agent_handler(request: Request, agent_name: str = agent_name) -> Response:
                 """Handle A2A requests for a specific agent."""
                 try:
-                    # Get the agent from pool
-                    agent = self.pool.all_agents.get(agent_name)
+                    # Get the agent from SessionPool
+                    sp = self.pool.session_pool
+                    agent = await sp.sessions.get_or_create_session_agent(f"a2a-{agent_name}", agent_name) if sp else None
                     if agent is None:
                         error = {"error": f"Agent '{agent_name}' not found"}
                         return JSONResponse(error, status_code=404)

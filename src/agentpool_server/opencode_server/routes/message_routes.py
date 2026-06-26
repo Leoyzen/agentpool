@@ -416,24 +416,22 @@ async def _process_message_locked(  # noqa: PLR0915
     # (or any name that matches the session agent) means "use my session
     # agent" — no delegation needed.
     #
-    # NOTE: Subagents from state.pool.all_agents are shared singleton
-    # instances.  Input providers are stored on SessionState and passed
-    # to agents at run time via SessionController — never mutated on the
-    # shared agent itself.  Per-session subagent instances are NOT feasible
-    # due to MCP subprocess overhead.  If OpenCode ever supports direct
-    # multi-agent selection, this must be redesigned via AgentPool's
-    # delegation/team mechanism instead.
+    # Delegate agent resolution (for subagent requests).
+    # Uses SessionPool's get_or_create_session_agent to create per-session
+    # agent instances.  Each delegate agent name gets a unique sub-session
+    # ID derived from the main session ID, ensuring per-agent isolation.
     if state.pool is not None:
-        all_agents = state.pool.all_agents
         # Only delegate to a different agent from the pool — if the request
         # names the same agent as the session's default, the per-session
         # instance is already the right one.
-        if agent_name in all_agents and all_agents[agent_name] is not agent:
-            agent_config = getattr(state, "_agent_config", None)
-            if agent_config is not None and agent_name == getattr(agent_config, "name", None):
-                pass  # Use per-session agent, don't replace with pool singleton
-            else:
-                agent = all_agents[agent_name]
+        if agent_name in state.pool.manifest.agents:
+            current_agent_name = getattr(state.agent, "name", None)
+            if agent_name != current_agent_name:
+                session_pool = state.pool.session_pool
+                if session_pool is not None:
+                    agent = await session_pool.sessions.get_or_create_session_agent(
+                        f"{session_id}-agent-{agent_name}", agent_name
+                    )
     # Get input provider for this session — stored on SessionState, NOT on agent.
     # SessionController passes input_provider to the agent via kwargs at run time.
     input_provider = state.ensure_input_provider(session_id)

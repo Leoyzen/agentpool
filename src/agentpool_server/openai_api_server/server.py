@@ -171,8 +171,8 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
     async def list_models(self) -> dict[str, Any]:
         """List available agents as models."""
         models = []
-        for name, agent in self.pool.all_agents.items():
-            info = OpenAIModelInfo(id=name, created=0, description=agent.description)
+        for name, agent_cfg in self.pool.manifest.agents.items():
+            info = OpenAIModelInfo(id=name, created=0, description=agent_cfg.description or "")
             models.append(info)
         return {"object": "list", "data": models}
 
@@ -181,7 +181,7 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         from fastapi import HTTPException, Response
         from fastapi.responses import StreamingResponse
 
-        if request.model not in self.pool.all_agents:
+        if request.model not in self.pool.manifest.agents:
             raise HTTPException(404, f"Model {request.model} not found")
 
         session_pool = self.pool.session_pool
@@ -233,7 +233,7 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         if session_pool is None:
             raise HTTPException(500, "SessionPool not available")
 
-        if req_body.model not in self.pool.all_agents:
+        if req_body.model not in self.pool.manifest.agents:
             raise HTTPException(404, f"Model {req_body.model} not found")
 
         try:
@@ -286,7 +286,7 @@ if __name__ == "__main__":
     import anyio
     import httpx
 
-    from agentpool import Agent, AgentPool
+    from agentpool import AgentPool
 
     async def test_completions() -> None:
         """Test the chat completions API."""
@@ -335,9 +335,12 @@ if __name__ == "__main__":
 
     async def main() -> None:
         """Run server and test both endpoints."""
+        from agentpool.models.agents import NativeAgentConfig
+
         pool = AgentPool()
-        agent = Agent(name="gpt-5-mini", model="openai:gpt-5-mini")
-        await pool.add_agent(agent)
+        pool.manifest.agents["gpt-5-mini"] = NativeAgentConfig(
+            name="gpt-5-mini", model="openai:gpt-5-mini"
+        )
         async with (
             OpenAIAPIServer(pool, host="0.0.0.0", port=8000) as server,
             server.run_context(),
