@@ -1293,12 +1293,18 @@ class SessionController:
                 logger.exception("Session cleanup failed")
 
     async def _cleanup_expired_sessions(self) -> None:
-        """Close all sessions that have exceeded TTL."""
+        """Close all sessions that have exceeded TTL.
+
+        Sessions with an active run are never expired — the run itself
+        is proof of activity regardless of ``last_active_at`` age.
+        """
         now = time.monotonic()
         expired_sessions: list[str] = []
 
         async with self._lock:
             for session_id, session in list(self._sessions.items()):
+                if session.current_run_id is not None:
+                    continue
                 if now - session.last_active_at > self._session_ttl_seconds:
                     expired_sessions.append(session_id)
 
