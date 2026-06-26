@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 import typer as t
 
 from agentpool_cli import resolve_agent_config
 from agentpool_cli.log import get_logger
-
-
-if TYPE_CHECKING:
-    from agentpool import ChatMessage
 
 
 logger = get_logger(__name__)
@@ -25,7 +21,7 @@ def api_command(
     port: Annotated[int, t.Option(help="Port to listen on")] = 8000,
     cors: Annotated[bool, t.Option(help="Enable CORS")] = True,
     show_messages: Annotated[
-        bool, t.Option("--show-messages", help="Show message activity")
+        bool, t.Option("--show-messages", help="Show message activity (deprecated, no-op)")
     ] = False,
     docs: Annotated[bool, t.Option(help="Enable API documentation")] = True,
 ) -> None:
@@ -41,9 +37,6 @@ def api_command(
     from agentpool_server.openai_api_server.server import OpenAIAPIServer
 
     logger.info("Server PID", pid=os.getpid())
-
-    def on_message(message: ChatMessage[Any]) -> None:
-        print(message.format(style="simple"))
 
     try:
         config_path = resolve_agent_config(config)
@@ -71,9 +64,8 @@ def api_command(
         # providers can resolve relative schema/prompt paths against the YAML directory.
         pool = AgentPool(manifest)
 
-    if show_messages:
-        for agent in pool.all_agents.values():
-            agent.message_sent.connect(on_message)
+    # show_messages is disabled: agent instances are no longer created at pool level.
+    # Session-level event monitoring is available via EventBus instead.
 
     server = OpenAIAPIServer(pool, cors=cors, docs=docs)
 

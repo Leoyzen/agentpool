@@ -132,6 +132,18 @@ class SessionLifecyclePolicy:
         return policy in cls.VALID
 
 
+def _create_cancel_scope() -> anyio.CancelScope | None:
+    """Create CancelScope if an event loop is running, else return None.
+
+    Allows SessionState to be instantiated in synchronous contexts (e.g. tests)
+    where no async event loop is available.
+    """
+    try:
+        return anyio.CancelScope()
+    except anyio.NoEventLoopError:
+        return None
+
+
 @dataclass
 class SessionState:
     """Per-session state managed by the session pool.
@@ -160,9 +172,9 @@ class SessionState:
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     is_closing: bool = False
     parent_session_id: str | None = None
-    cancel_scope: anyio.CancelScope = field(default_factory=anyio.CancelScope)
     lifecycle_policy: str = field(default_factory=SessionLifecyclePolicy.default)
     current_run_id: str | None = None
+    cancel_scope: anyio.CancelScope | None = field(default_factory=_create_cancel_scope)
     _request_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _turn_owner_task: asyncio.Task[Any] | None = None
     input_provider: Any | None = None

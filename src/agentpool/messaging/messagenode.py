@@ -389,7 +389,6 @@ class MessageNode[TDeps, TResult](ABC):
             target = Agent.from_callback(target)
             if pool := self.agent_pool:
                 target.agent_pool = pool
-                pool.register(target.name, target)
         # we are explicit here just to make disctinction clear, we only want sequences
         # of message units
         if isinstance(target, Sequence) and not isinstance(target, BaseTeam):
@@ -400,7 +399,6 @@ class MessageNode[TDeps, TResult](ABC):
                         other = Agent.from_callback(t)
                         if pool := self.agent_pool:
                             other.agent_pool = pool
-                            pool.register(other.name, other)
                         targets.append(other)
                     case MessageNode():
                         targets.append(t)

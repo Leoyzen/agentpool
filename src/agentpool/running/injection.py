@@ -96,19 +96,26 @@ def inject_nodes[T, **P](
             logger.error(msg)
             raise NodeInjectionError(msg)
 
-        # Get node from pool
-        if name not in pool.nodes:
-            available = ", ".join(sorted(pool.nodes))
+        # Validate node name against manifest config
+        if name not in pool.manifest.agents:
+            available = ", ".join(sorted(pool.manifest.agents))
             msg = (
-                f"No node named {name!r} found in pool.\n"
+                f"No node named {name!r} found in configuration.\n"
                 f"Available nodes: {available}\n"
                 f"Check your YAML configuration or node name."
             )
             logger.error(msg)
             raise NodeInjectionError(msg)
 
-        nodes[name] = pool.nodes[name]
-        logger.debug("Injecting node", node=nodes[name], name=name)
+        # Note: pool.nodes (runtime MessageNode instances) was removed as
+        # part of eliminating pool-level agent creation.  Node injection
+        # can no longer provide runtime instances from the pool.  Callers
+        # should pass node instances directly or use SessionPool-based
+        # resolution.
+        logger.debug(
+            "Node validated from config, no runtime instance available",
+            name=name,
+        )
 
     logger.debug("Injection complete.", nodes=sorted(nodes))
     return nodes

@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated
 
 import typer as t
 
 from agentpool_cli import resolve_agent_config
 from agentpool_cli.log import get_logger
-
-
-if TYPE_CHECKING:
-    from agentpool import ChatMessage
 
 
 logger = get_logger(__name__)
@@ -24,7 +20,7 @@ def agui_command(
     host: Annotated[str, t.Option(help="Host to bind server to")] = "localhost",
     port: Annotated[int, t.Option(help="Port to listen on")] = 8002,
     show_messages: Annotated[
-        bool, t.Option("--show-messages", help="Show message activity")
+        bool, t.Option("--show-messages", help="Show message activity (deprecated, no-op)")
     ] = False,
 ) -> None:
     """Run agents as an AG-UI server.
@@ -42,9 +38,6 @@ def agui_command(
 
     logger.info("Server PID", pid=os.getpid())
 
-    def on_message(message: ChatMessage[Any]) -> None:
-        print(message.format(style="simple"))
-
     try:
         config_path = resolve_agent_config(config)
     except ValueError as e:
@@ -56,9 +49,8 @@ def agui_command(
 
     async def run_server() -> None:
         async with AgentPool(manifest) as pool:
-            if show_messages:
-                for agent in pool.all_agents.values():
-                    agent.message_sent.connect(on_message)
+            # show_messages is disabled: agent instances are no longer created at pool level.
+            # Session-level event monitoring is available via EventBus instead.
 
             server = AGUIServer(pool, host=host, port=port)
             async with server:
@@ -66,7 +58,7 @@ def agui_command(
                     "AG-UI server started",
                     host=host,
                     port=port,
-                    agents=list(pool.all_agents.keys()),
+                    agents=list(pool.manifest.agents.keys()),
                 )
                 # List agent routes
                 for name, url in server.list_agent_routes().items():

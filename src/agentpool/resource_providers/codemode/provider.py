@@ -156,7 +156,6 @@ if __name__ == "__main__":
     import anyio
 
     from agentpool import Agent
-    from agentpool.delegation.pool import AgentPool
 
     static_provider = FSSpecTools()
     provider = CodeModeResourceProvider([static_provider])
@@ -166,20 +165,18 @@ if __name__ == "__main__":
         for tool in await provider.get_tools():
             print(f"- {tool.name}: {tool.description[:100]}...")
 
-        async with AgentPool() as pool:
-            agent: Agent[None, str] = Agent(
-                model="openai:gpt-5-nano", event_handlers=["simple"], retries=1
+        agent: Agent[None, str] = Agent(
+            model="openai:gpt-5-nano", event_handlers=["simple"], retries=1
+        )
+        async with agent:
+            agent.tools.add_provider(provider)
+            prompt = (
+                "Call list_directory with path='.'. "
+                "Write: async def main(): "
+                "result = await list_directory(path='.'); "
+                "return result"
             )
-            pool.register("test_agent", agent)
-            async with agent:
-                agent.tools.add_provider(provider)
-                prompt = (
-                    "Call list_directory with path='.'. "
-                    "Write: async def main(): "
-                    "result = await list_directory(path='.'); "
-                    "return result"
-                )
-                result = await agent.run(prompt)
-                print(f"Result: {result}")
+            result = await agent.run(prompt)
+            print(f"Result: {result}")
 
     anyio.run(main)
