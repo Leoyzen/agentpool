@@ -171,6 +171,13 @@ class RunExecutor:
                 Publishes all node-level events directly to *event_bus*.
                 """
                 nonlocal iteration_error, response_msg
+                # Capture the current task for _interrupt() compatibility.
+                # execute() no longer yields events, so the caller can't set
+                # _iteration_task from outside. The task must self-register.
+                _task = asyncio.current_task()
+                if _task is not None:
+                    self._iteration_task = _task
+                    self._agent._iteration_task = _task
                 pending_tcs: dict[str, BaseToolCallPart] = {}
                 emitted_tool_starts: set[str] = set()
                 terminal_tool_completed = False
@@ -350,6 +357,8 @@ class RunExecutor:
                     logger.exception("Agent iteration failed")
                     iteration_error = exc
                 finally:
+                    self._iteration_task = None
+                    self._agent._iteration_task = None
                     if self._run_handle is not None:
                         self._run_handle.active_agent_run = None
 

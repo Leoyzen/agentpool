@@ -17,6 +17,7 @@ from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run import RunHandle
 from agentpool.orchestrator.run_executor import RunExecutor
@@ -74,16 +75,33 @@ async def _collect_events(
     session_id: str = "test-session",
 ) -> list[Any]:
     """Execute RunExecutor and collect all events."""
+    from agentpool.agents.events import RunErrorEvent
+    from agentpool.orchestrator.core import EventBus
+
+    event_bus = EventBus()
+    run_ctx.event_bus = event_bus
+    stream = await event_bus.subscribe(session_id, scope="session")
+
     events: list[Any] = []
-    async for event in executor.execute(
-        prompts=prompts,
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        message_id="msg-1",
-        session_id=session_id,
-    ):
-        events.append(event)
+
+    execute_task = asyncio.ensure_future(
+        executor.execute(
+            prompts=prompts,
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id="msg-1",
+            session_id=session_id,
+            event_bus=event_bus,
+        )
+    )
+
+    async for envelope in stream:
+        events.append(envelope.event)
+        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
+            break
+
+    await execute_task
     return events
 
 
@@ -142,16 +160,20 @@ async def test_active_agent_run_none_after_exception(
     test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
 
     try:
+        from agentpool.orchestrator.core import EventBus
+
+        event_bus = EventBus()
+        run_ctx.event_bus = event_bus
         with pytest.raises(RuntimeError, match="agentlet creation failed"):
-            async for _event in executor.execute(
+            await executor.execute(
                 prompts=["Say hello"],
                 run_ctx=run_ctx,
                 user_msg=user_msg,
                 message_history=message_history,
                 message_id="msg-1",
                 session_id="sess-1",
-            ):
-                pass
+                event_bus=event_bus,
+            )
     finally:
         test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
 
@@ -220,19 +242,36 @@ async def test_active_agent_run_none_after_cancellation(
     run_handle: RunHandle,
 ) -> None:
     """active_agent_run must be None after consumer cancellation."""
+    from contextlib import suppress
+
+    from agentpool.orchestrator.core import EventBus
+
     executor = RunExecutor(slow_agent, run_handle=run_handle)
     user_msg = ChatMessage.user_prompt("Say hello")
 
+    event_bus = EventBus()
+    run_ctx.event_bus = event_bus
+    stream = await event_bus.subscribe("sess-1", scope="session")
+
     async def consume() -> None:
-        async for event in executor.execute(
-            prompts=["Say hello"],
-            run_ctx=run_ctx,
-            user_msg=user_msg,
-            message_history=message_history,
-            message_id="msg-1",
-            session_id="sess-1",
-        ):
-            pass
+        execute_task = asyncio.ensure_future(
+            executor.execute(
+                prompts=["Say hello"],
+                run_ctx=run_ctx,
+                user_msg=user_msg,
+                message_history=message_history,
+                message_id="msg-1",
+                session_id="sess-1",
+                event_bus=event_bus,
+            )
+        )
+        try:
+            async for _envelope in stream:
+                pass
+        finally:
+            execute_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await execute_task
 
     task = asyncio.create_task(consume())
     await asyncio.sleep(0.05)  # Let iteration start

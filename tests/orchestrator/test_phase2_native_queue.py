@@ -135,16 +135,33 @@ async def _collect_run_executor_events(
     session_id: str = "test-session",
 ) -> list[Any]:
     """Execute RunExecutor and collect all events."""
+    from agentpool.agents.events import RunErrorEvent
+    from agentpool.orchestrator.core import EventBus
+
+    event_bus = EventBus()
+    run_ctx.event_bus = event_bus
+    stream = await event_bus.subscribe(session_id, scope="session")
+
     events: list[Any] = []
-    async for event in executor.execute(
-        prompts=prompts,
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        message_id="msg-1",
-        session_id=session_id,
-    ):
-        events.append(event)
+
+    execute_task = asyncio.ensure_future(
+        executor.execute(
+            prompts=prompts,
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id="msg-1",
+            session_id=session_id,
+            event_bus=event_bus,
+        )
+    )
+
+    async for envelope in stream:
+        events.append(envelope.event)
+        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
+            break
+
+    await execute_task
     return events
 
 

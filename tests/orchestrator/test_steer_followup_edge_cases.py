@@ -22,7 +22,7 @@ from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent
+from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import SessionController, TurnRunner
 from agentpool.orchestrator.run import RunHandle, RunStatus
@@ -348,16 +348,20 @@ async def test_active_agent_run_cleared_on_undrained_error() -> None:
     test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
 
     try:
+        from agentpool.orchestrator.core import EventBus
+
+        event_bus = EventBus()
+        run_ctx.event_bus = event_bus
         with pytest.raises(UndrainedPendingMessagesError):
-            async for _event in executor.execute(
+            await executor.execute(
                 prompts=["Say hello"],
                 run_ctx=run_ctx,
                 user_msg=user_msg,
                 message_history=message_history,
                 message_id="msg-1",
                 session_id="sess-undrained",
-            ):
-                pass
+                event_bus=event_bus,
+            )
     finally:
         test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
 
@@ -531,9 +535,12 @@ async def test_run_agentlet_core_non_event_bus_branch() -> None:
         model=TestModel(custom_output_text="response from non-eventbus path"),
     )
 
+    from agentpool.orchestrator.core import EventBus
+
+    event_bus = EventBus()
     run_ctx = AgentRunContext(
         session_id="sess-non-eventbus",
-        event_bus=None,  # Explicitly None → RunExecutor still works
+        event_bus=event_bus,
     )
     user_msg = ChatMessage.user_prompt("test prompt")
     message_history = MessageHistory()
@@ -541,17 +548,26 @@ async def test_run_agentlet_core_non_event_bus_branch() -> None:
     executor = RunExecutor(agent)
     events: list[Any] = []
     response_msg: Any = None
-    async for event in executor.execute(
-        prompts=["test prompt"],
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        message_id="msg-non-eb",
-        session_id="sess-non-eventbus",
-    ):
-        events.append(event)
-        if isinstance(event, StreamCompleteEvent):
-            response_msg = event.message
+
+    stream = await event_bus.subscribe("sess-non-eventbus", scope="session")
+    execute_task = asyncio.ensure_future(
+        executor.execute(
+            prompts=["test prompt"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id="msg-non-eb",
+            session_id="sess-non-eventbus",
+            event_bus=event_bus,
+        )
+    )
+    async for envelope in stream:
+        events.append(envelope.event)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            response_msg = envelope.event.message
+        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
+            break
+    await execute_task
 
     assert response_msg is not None, "Response message should not be None"
     assert "response from non-eventbus path" in str(response_msg.content), (

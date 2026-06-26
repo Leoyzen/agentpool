@@ -16,7 +16,7 @@ import pytest
 
 from agentpool import Agent, ChatMessage
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent, ToolCallCompleteEvent, ToolCallStartEvent
+from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent, ToolCallCompleteEvent, ToolCallStartEvent
 from agentpool.agents.native_agent.helpers import process_tool_event
 from agentpool.messaging import MessageHistory
 from agentpool.orchestrator.core import EventBus
@@ -55,23 +55,38 @@ async def _collect_run_executor_events(
     deps: Any | None = None,
 ) -> tuple[list[Any], ChatMessage[Any] | None]:
     """Execute via RunExecutor and collect all events + final response."""
+    import asyncio
+
     executor = RunExecutor(agent)
+
+    event_bus = EventBus()
+    run_ctx.event_bus = event_bus
+    stream = await event_bus.subscribe(session_id, scope="session")
+
     events: list[Any] = []
     response: ChatMessage[Any] | None = None
-    async for event in executor.execute(
-        prompts=prompts,
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        message_id=message_id,
-        session_id=session_id,
-        _parent_id=parent_id,
-        input_provider=input_provider,
-        deps=deps,
-    ):
-        events.append(event)
-        if isinstance(event, StreamCompleteEvent):
-            response = event.message
+
+    execute_task = asyncio.ensure_future(
+        executor.execute(
+            prompts=prompts,
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id=message_id,
+            session_id=session_id,
+            _parent_id=parent_id,
+            input_provider=input_provider,
+            deps=deps,
+            event_bus=event_bus,
+        )
+    )
+    async for envelope in stream:
+        events.append(envelope.event)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            response = envelope.event.message
+        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
+            break
+    await execute_task
     return events, response
 
 

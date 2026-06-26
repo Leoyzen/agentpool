@@ -20,7 +20,7 @@ import anyio
 from upathtools.filesystems import IsolatedMemoryFileSystem
 
 from agentpool.agents.context import AgentContext, AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent, resolve_event_handlers
+from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent, resolve_event_handlers
 from agentpool.agents.modes import ModeInfo
 from agentpool.common_types import IndividualEventHandler
 from agentpool.log import get_logger
@@ -948,8 +948,8 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                 return
 
         # --- Path B: Standalone / in-turn react loop ---
-        # Creates a lightweight per-run context and processes prompts without
-        # SessionPool / EventBus.  Session history is still logged.
+        # Creates a lightweight per-run context and processes prompts with
+        # EventBus-based event delivery. Session history is still logged.
         # When _run_ctx is provided (from SessionPool), the existing run
         # context is reused and session logging is skipped.
         if _run_ctx is not None:
@@ -970,68 +970,113 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
             # Create per-run context for state isolation
             run_ctx = AgentRunContext(deps=deps, depth=depth)
-            # Reset cancellation state and track current task
         run_ctx.cancelled = False
         self._cancelled = False
         run_ctx.current_task = asyncio.current_task()
+
+        # Create local EventBus if not already set by SessionController
+        _created_local_bus = run_ctx.event_bus is None
+        if _created_local_bus:
+            from agentpool.orchestrator.core import EventBus
+
+            local_bus: EventBus = EventBus()
+            run_ctx.event_bus = local_bus
+        else:
+            local_bus = run_ctx.event_bus
+            assert local_bus is not None  # type narrowing for type checker
+
+        # Subscribe to EventBus to receive events
+        stream = await local_bus.subscribe(effective_session_id, scope="session")
 
         # RFC-0021: reset only via the token from set(); never set(None) (breaks nesting).
         # token is initialized so finally always has a bound name; reset only if set() succeeded.
         token: Token[AgentRunContext | None] | None = None
         try:
             token = _current_run_ctx_var.set(run_ctx)
-            # Native agents use PydanticAI's PendingMessageDrainCapability for
-            # enqueue/asap/when_idle handling.  Non-native agents still need
-            # the manual follow-up loop.
-            if self.AGENT_TYPE == "native":
-                # Process initial prompts directly, skip manual follow-up loop
-                async for event in self._run_stream_once(
-                    run_ctx,
-                    *prompts,
-                    store_history=store_history,
-                    message_id=message_id,
-                    session_id=effective_session_id,
-                    parent_session_id=parent_session_id,
-                    parent_id=parent_id,
-                    message_history=message_history,
-                    input_provider=input_provider,
-                    wait_for_connections=wait_for_connections,
-                    deps=deps,
-                    event_handlers=event_handlers,
-                ):
-                    yield event
-            else:
-                # Queue the initial prompts (skip if no injection_manager)
-                if run_ctx.injection_manager is not None:
-                    run_ctx.injection_manager.insert_queued(prompts)
-                # Process queued prompts until queue is empty
-                while (
-                    run_ctx.injection_manager is not None
-                    and run_ctx.injection_manager.has_queued()
-                    and not run_ctx.cancelled
-                ):
-                    current_prompts = run_ctx.injection_manager.pop_queued()
-                    if current_prompts is None:
-                        break
-                    async for event in self._run_stream_once(
-                        run_ctx,
-                        *current_prompts,
-                        store_history=store_history,
-                        message_id=message_id,
-                        session_id=effective_session_id,
-                        parent_session_id=parent_session_id,
-                        parent_id=parent_id,
-                        message_history=message_history,
-                        input_provider=input_provider,
-                        wait_for_connections=wait_for_connections,
-                        deps=deps,
-                        event_handlers=event_handlers,
-                    ):
-                        yield event
+            async with anyio.create_task_group() as tg:
+                # Start execution in background — events go to EventBus
+                if self.AGENT_TYPE == "native":
+                    # Native agents: _stream_events() calls executor.execute()
+                    # which publishes events directly to EventBus. The
+                    # _run_stream_once() generator yields nothing (events
+                    # are on EventBus). We publish any yielded events for
+                    # test/mock agents that override _run_stream_once.
+                    async def _native_runner() -> None:
+                        try:
+                            async for event in self._run_stream_once(
+                                run_ctx,
+                                *prompts,
+                                store_history=store_history,
+                                message_id=message_id,
+                                session_id=effective_session_id,
+                                parent_session_id=parent_session_id,
+                                parent_id=parent_id,
+                                message_history=message_history,
+                                input_provider=input_provider,
+                                wait_for_connections=wait_for_connections,
+                                deps=deps,
+                                event_handlers=event_handlers,
+                            ):
+                                await local_bus.publish(effective_session_id, event)
+                        finally:
+                            with anyio.CancelScope(shield=True):
+                                if _created_local_bus:
+                                    await local_bus.close_session(effective_session_id)
+                                else:
+                                    await local_bus.unsubscribe(effective_session_id, stream)
 
-                    # After each iteration, flush unconsumed injections to queue
-                    if run_ctx.injection_manager is not None:
-                        run_ctx.injection_manager.flush_pending_to_queue()
+                    tg.start_soon(_native_runner)
+                else:
+                    # Non-native agents: _run_stream_once() still yields events
+                    # (they don't use RunExecutor). Each yielded event is
+                    # published to EventBus.
+                    async def _non_native_publisher() -> None:
+                        try:
+                            if run_ctx.injection_manager is not None:
+                                run_ctx.injection_manager.insert_queued(prompts)
+                            while (
+                                run_ctx.injection_manager is not None
+                                and run_ctx.injection_manager.has_queued()
+                                and not run_ctx.cancelled
+                            ):
+                                current_prompts = run_ctx.injection_manager.pop_queued()
+                                if current_prompts is None:
+                                    break
+                                async for event in self._run_stream_once(
+                                    run_ctx,
+                                    *current_prompts,
+                                    store_history=store_history,
+                                    message_id=message_id,
+                                    session_id=effective_session_id,
+                                    parent_session_id=parent_session_id,
+                                    parent_id=parent_id,
+                                    message_history=message_history,
+                                    input_provider=input_provider,
+                                    wait_for_connections=wait_for_connections,
+                                    deps=deps,
+                                    event_handlers=event_handlers,
+                                ):
+                                    await local_bus.publish(effective_session_id, event)
+                                if run_ctx.injection_manager is not None:
+                                    run_ctx.injection_manager.flush_pending_to_queue()
+                        finally:
+                            with anyio.CancelScope(shield=True):
+                                if _created_local_bus:
+                                    await local_bus.close_session(effective_session_id)
+                                else:
+                                    await local_bus.unsubscribe(effective_session_id, stream)
+
+                    tg.start_soon(_non_native_publisher)
+
+                # Consumer: yield events from EventBus subscription
+                async for envelope in stream:
+                    event = envelope.event
+                    yield event
+                    if isinstance(event, (StreamCompleteEvent, RunErrorEvent)):
+                        break
+
+                # Cancel the task group after consumer exits
+                tg.cancel_scope.cancel()
         finally:
             if token is not None:
                 # Suppress ValueError when token was created in a different async
@@ -1164,43 +1209,46 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             self.log.exception("Agent stream failed")
             raise
 
-        # Post-processing after stream completes
-        if final_message is not None:
-            # Execute post-run hooks
-            if self.hooks:
-                prompt_str = (
-                    user_msg.content if isinstance(user_msg.content, str) else str(user_msg.content)
-                )
-                await self.hooks.run_post_run_hooks(
-                    agent_name=self.name,
-                    prompt=prompt_str,
-                    result=final_message.content,
-                    session_id=session_id,
-                )
+        # Pick up result from side channel when _stream_events yielded nothing
+        # (native agents: events went directly to EventBus via executor.execute)
+        if final_message is None and run_ctx.terminal_tool_result is not None:
+            final_message = run_ctx.terminal_tool_result
 
-            # Emit signal (always - for event handlers).
-            # Skip when run_ctx has an event_bus (SessionPool-managed runs);
-            # the Path A wrapper in run_stream() handles emission in that case.
-            # We check event_bus rather than _in_turn_context because
-            # _in_turn_context remains True for nested route_message calls
-            # triggered by Talk, but the outer Path A wrapper won't emit for
-            # those nested agents.
-            if run_ctx.event_bus is None:
-                await self.message_sent.emit(final_message)
-            # Route to connected agents (always - they decide what to do with it)
-            await self.connections.route_message(final_message, wait=wait_for_connections)
-            # Conditional persistence based on store_history
-            # TODO: Verify store_history semantics across all use cases:
-            #   - Should subagent tool calls set store_history=False?
-            #   - Should forked/ephemeral runs always skip persistence?
-            #   - Should signals still fire when store_history=False?
-            #   Current behavior: store_history controls both DB logging AND conversation context
-            if store_history:
-                # Log to persistent storage and add to conversation context
-                # Note: user_msg was already added at the start of the run
-                # Use extend_last=True to include both user_msg and final_message in _last_messages
-                await self.log_message(final_message)
-                conversation.add_chat_messages([final_message], extend_last=True)
+        # Post-processing after stream completes — shielded to prevent
+        # TaskGroup cancellation from interrupting hooks/routing/persistence
+        if final_message is not None:
+            with anyio.CancelScope(shield=True):
+                # Execute post-run hooks
+                if self.hooks:
+                    prompt_str = (
+                        user_msg.content if isinstance(user_msg.content, str) else str(user_msg.content)
+                    )
+                    await self.hooks.run_post_run_hooks(
+                        agent_name=self.name,
+                        prompt=prompt_str,
+                        result=final_message.content,
+                        session_id=session_id,
+                    )
+
+                # Emit signal (always - for event handlers).
+                # Skip when run_ctx has an event_bus (SessionPool-managed runs);
+                # the Path A wrapper in run_stream() handles emission in that case.
+                if run_ctx.event_bus is None:
+                    await self.message_sent.emit(final_message)
+                # Route to connected agents (always - they decide what to do with it)
+                await self.connections.route_message(final_message, wait=wait_for_connections)
+                # Conditional persistence based on store_history
+                # TODO: Verify store_history semantics across all use cases:
+                #   - Should subagent tool calls set store_history=False?
+                #   - Should forked/ephemeral runs always skip persistence?
+                #   - Should signals still fire when store_history=False?
+                #   Current behavior: store_history controls both DB logging AND conversation context
+                if store_history:
+                    # Log to persistent storage and add to conversation context
+                    # Note: user_msg was already added at the start of the run
+                    # Use extend_last=True to include both user_msg and final_message in _last_messages
+                    await self.log_message(final_message)
+                    conversation.add_chat_messages([final_message], extend_last=True)
 
     async def _execute_slash_command_streaming(
         self, command_text: str

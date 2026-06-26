@@ -1438,7 +1438,9 @@ class SessionController:
         if session is None:
             raise ValueError("Session not found")
         if agent is not None:
-            agent_type = getattr(agent, "AGENT_TYPE", "native")
+            from agentpool.agents.base_agent import BaseAgent
+
+            agent_type = agent.AGENT_TYPE if isinstance(agent, BaseAgent) else "native"
         else:
             agent_type = session.metadata.get("agent_type", "unknown")
         return RunHandle(
@@ -1775,7 +1777,7 @@ class TurnRunner:
         agent = await self.sessions.get_or_create_session_agent(session_id, input_provider=input_provider)
         _session = self.sessions.get_session(session_id)
 
-        from agentpool.agents.base_agent import _current_run_ctx_var, _in_turn_context
+        from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var, _in_turn_context
         from agentpool.orchestrator.run import RunHandle, RunStatus
 
         run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
@@ -1788,7 +1790,7 @@ class TurnRunner:
         # Get or create RunHandle (create if called directly, not via receive_request)
         run_handle = self.sessions._runs.get(run_id)
         created_run_handle = False
-        agent_type = getattr(agent, "AGENT_TYPE", "native")
+        agent_type = agent.AGENT_TYPE if isinstance(agent, BaseAgent) else "native"
         if run_handle is None:
             run_handle = RunHandle(
                 run_id=run_id,
@@ -1826,27 +1828,6 @@ class TurnRunner:
             _session.current_run_id = run_id
         self._runs[run_ctx.run_id] = run_ctx
 
-        # Consume events from run_ctx.event_queue and publish to EventBus.
-        # This is needed because StreamEventEmitter no longer has a global
-        # EventBus set, so tool events go into run_ctx.event_queue.
-        async def _consume_event_queue() -> None:
-            """Consume events from run_ctx.event_queue and publish to EventBus."""
-            try:
-                while True:
-                    event = await run_ctx.event_queue.get()
-                    if event is None:
-                        break
-                    await self._publish_event(session_id, event)
-            except asyncio.CancelledError:
-                pass
-
-        event_consumer: asyncio.Task[None] | None = None
-        if agent_type != "native":
-            event_consumer = asyncio.create_task(
-                _consume_event_queue(),
-                name=f"event_consumer_{session_id}",
-            )
-
         turn_start = time.monotonic()
         # Use run_stream (public API) when the agent is a real instance
         # so that patches applied to run_stream are triggered.  For bare
@@ -1855,22 +1836,18 @@ class TurnRunner:
         # fall back to _run_stream_once directly.
         from unittest.mock import MagicMock as _MagicMock
 
-        _run_stream = getattr(agent, "run_stream", None)
         _use_run_stream: bool = True
-        if _run_stream is None:
-            # Agent has no run_stream at all (e.g. _MockNativeAgent);
-            # fall back to _run_stream_once directly.
+        if isinstance(agent, _MagicMock):
+            # Bare MagicMock in unit tests — use _run_stream_once directly
             _use_run_stream = False
-        elif isinstance(_run_stream, _MagicMock):
-            # A bare MagicMock without a side_effect is a generic mock
-            # agent; use _run_stream_once (the test's target) instead.
-            _use_run_stream = callable(_run_stream._mock_side_effect or _run_stream.side_effect)
-        elif isinstance(_run_stream, object) and hasattr(_run_stream, "__call__"):
+        elif isinstance(agent, BaseAgent):
+            # Real agent — use run_stream (public API)
             _use_run_stream = True
         else:
+            # Unknown object — try _run_stream_once as fallback
             _use_run_stream = False
 
-        _stream_callable = _run_stream if _use_run_stream else agent._run_stream_once
+        _stream_callable = agent.run_stream if _use_run_stream else agent._run_stream_once
         assert _stream_callable is not None, "Expected run_stream or _run_stream_once to be available"
         sig = inspect.signature(_stream_callable)
         stream_params = set(sig.parameters)
@@ -1906,7 +1883,6 @@ class TurnRunner:
                     ):
                         if isinstance(event, StreamCompleteEvent):
                             stream_completed = True
-                        await self._publish_event(session_id, event)
                 else:
                     async for event in agent._run_stream_once(run_ctx, *prompts, session_id=session_id, **stream_kwargs):
                         if isinstance(event, StreamCompleteEvent):
@@ -1916,7 +1892,7 @@ class TurnRunner:
                 # After _run_stream_once completes, handle unconsumed injections.
                 # Native agents use PydanticAI's PendingMessageDrainCapability
                 # instead of the manual flush/queue loop.
-                if getattr(agent, "AGENT_TYPE", "native") != "native":
+                if isinstance(agent, BaseAgent) and agent.AGENT_TYPE != "native":
                     run_ctx.injection_manager.flush_pending_to_queue()
                     while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
                         current_prompts = run_ctx.injection_manager.pop_queued()
@@ -1932,7 +1908,6 @@ class TurnRunner:
                             ):
                                 if isinstance(event, StreamCompleteEvent):
                                     stream_completed = True
-                                await self._publish_event(session_id, event)
                         else:
                             async for event in agent._run_stream_once(run_ctx, *current_prompts, session_id=session_id, **stream_kwargs):
                                 if isinstance(event, StreamCompleteEvent):
@@ -1998,12 +1973,6 @@ class TurnRunner:
             if _session is not None:
                 _session._turn_owner_task = None
             _in_turn_context.set(False)
-
-            # Cancel the event consumer task
-            if event_consumer is not None:
-                event_consumer.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await event_consumer
 
             turn_end = time.monotonic()
             self._turn_timings.append((turn_start, turn_end))

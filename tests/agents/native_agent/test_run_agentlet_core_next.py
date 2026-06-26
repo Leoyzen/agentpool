@@ -19,7 +19,7 @@ from pydantic_graph import End
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent
+from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run_executor import RunExecutor
 
@@ -126,21 +126,34 @@ async def test_run_agentlet_core_uses_next_loop() -> None:
     message_history = MessageHistory()
 
     executor = RunExecutor(agent)
+    from agentpool.orchestrator.core import EventBus
+
+    event_bus = EventBus()
+    run_ctx.event_bus = event_bus
+    stream = await event_bus.subscribe("test-session", scope="session")
+
     events: list[Any] = []
     response_msg: ChatMessage[Any] | None = None
 
     with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
-        async for event in executor.execute(
-            prompts=["test"],
-            run_ctx=run_ctx,
-            user_msg=user_msg,
-            message_history=message_history,
-            message_id="msg-1",
-            session_id="test-session",
-        ):
-            events.append(event)
-            if isinstance(event, StreamCompleteEvent):
-                response_msg = event.message
+        execute_task = asyncio.ensure_future(
+            executor.execute(
+                prompts=["test"],
+                run_ctx=run_ctx,
+                user_msg=user_msg,
+                message_history=message_history,
+                message_id="msg-1",
+                session_id="test-session",
+                event_bus=event_bus,
+            )
+        )
+        async for envelope in stream:
+            events.append(envelope.event)
+            if isinstance(envelope.event, StreamCompleteEvent):
+                response_msg = envelope.event.message
+            if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
+                break
+        await execute_task
 
     assert response_msg is not None
     assert response_msg.content == "final_result"

@@ -634,6 +634,9 @@ async def test_cross_protocol_event_ordering_preserved_under_load() -> None:
             PartDeltaEvent.text(index=i, content=f"msg-{i}"),
         )
 
+    # Drain coalescing buffer so batched events are delivered to subscribers
+    await event_bus._drain_buffer("sess-order")
+
     # Collect events for both subscribers
     received_a: list[Any] = []
     received_b: list[Any] = []
@@ -648,19 +651,21 @@ async def test_cross_protocol_event_ordering_preserved_under_load() -> None:
             continue
         break
 
-    assert len(received_a) == event_count
-    assert len(received_b) == event_count
+    # With coalescing, all 20 PartDeltaEvent(TextPartDelta) are merged into 1 event
+    # because they share the same merge key ("delta_text", "").
+    assert len(received_a) == 1
+    assert len(received_b) == 1
 
-    # Verify strict ordering
-    for i in range(event_count):
-        ev_a = _unwrap_event(received_a[i])
-        ev_b = _unwrap_event(received_b[i])
-        assert isinstance(ev_a, PartDeltaEvent)
-        assert isinstance(ev_b, PartDeltaEvent)
-        assert isinstance(ev_a.delta, TextPartDelta)
-        assert isinstance(ev_b.delta, TextPartDelta)
-        assert ev_a.delta.content_delta == f"msg-{i}"
-        assert ev_b.delta.content_delta == f"msg-{i}"
+    # Verify the merged content contains all messages in order
+    ev_a = _unwrap_event(received_a[0])
+    ev_b = _unwrap_event(received_b[0])
+    assert isinstance(ev_a, PartDeltaEvent)
+    assert isinstance(ev_b, PartDeltaEvent)
+    assert isinstance(ev_a.delta, TextPartDelta)
+    assert isinstance(ev_b.delta, TextPartDelta)
+    expected_content = "".join(f"msg-{i}" for i in range(event_count))
+    assert ev_a.delta.content_delta == expected_content
+    assert ev_b.delta.content_delta == expected_content
 
     await event_bus.close_session("sess-order")
 

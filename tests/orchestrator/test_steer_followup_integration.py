@@ -12,6 +12,7 @@ Tests:
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,7 +20,7 @@ from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent
+from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.core import SessionController, TurnRunner
@@ -312,26 +313,39 @@ async def test_run_executor_next_loop_fires_after_node_run_hooks(
         agent_type="native",
     )
 
+    from agentpool.orchestrator.core import EventBus
+
+    event_bus = EventBus()
+    run_ctx.event_bus = event_bus
+    stream = await event_bus.subscribe("sess-next-loop", scope="session")
+
     executor = RunExecutor(test_agent, run_handle=run_handle)
 
     events: list[object] = []
     response_content: str | None = None
     agent_run_was_set: bool = False
 
-    async for event in executor.execute(
-        prompts=["Verify after_node_run hook path"],
-        run_ctx=run_ctx,
-        user_msg=user_msg,
-        message_history=message_history,
-        message_id="msg-next-loop",
-        session_id="sess-next-loop",
-    ):
-        events.append(event)
+    execute_task = asyncio.ensure_future(
+        executor.execute(
+            prompts=["Verify after_node_run hook path"],
+            run_ctx=run_ctx,
+            user_msg=user_msg,
+            message_history=message_history,
+            message_id="msg-next-loop",
+            session_id="sess-next-loop",
+            event_bus=event_bus,
+        )
+    )
+    async for envelope in stream:
+        events.append(envelope.event)
         # Capture the agent_run being set during iteration
         if run_handle.active_agent_run is not None:
             agent_run_was_set = True
-        if isinstance(event, StreamCompleteEvent):
-            response_content = str(event.message.content)
+        if isinstance(envelope.event, StreamCompleteEvent):
+            response_content = str(envelope.event.message.content)
+        if isinstance(envelope.event, (StreamCompleteEvent, RunErrorEvent)):
+            break
+    await execute_task
 
     # Verify execution completed
     assert len(events) > 0, "RunExecutor should yield events"
@@ -386,16 +400,20 @@ async def test_run_executor_next_loop_clears_agent_run_on_error(
     test_agent.get_agentlet = broken_get_agentlet  # type: ignore[method-assign]
 
     try:
+        from agentpool.orchestrator.core import EventBus
+
+        event_bus = EventBus()
+        run_ctx.event_bus = event_bus
         with pytest.raises(RuntimeError, match="agentlet creation failed"):
-            async for _event in executor.execute(
+            await executor.execute(
                 prompts=["test"],
                 run_ctx=run_ctx,
                 user_msg=user_msg,
                 message_history=message_history,
                 message_id="msg-err",
                 session_id="sess-next-error",
-            ):
-                pass
+                event_bus=event_bus,
+            )
     finally:
         test_agent.get_agentlet = original_get_agentlet  # type: ignore[method-assign]
 

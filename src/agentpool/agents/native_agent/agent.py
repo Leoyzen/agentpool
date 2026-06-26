@@ -946,9 +946,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if run_ctx is None:
             raise RuntimeError("run_ctx required in state.kwargs for graph execution")
 
+        # Get or create EventBus for graph path — events flow through EventBus
+        # instead of state.event_queue.
+        from agentpool.orchestrator.core import EventBus
+
+        event_bus = run_ctx.event_bus
+        if event_bus is None:
+            event_bus = EventBus()
+            run_ctx.event_bus = event_bus
+
         executor = RunExecutor(self)
-        result: ChatMessage[Any] | None = None
-        async for event in executor.execute(
+        result = await executor.execute(
             prompts=list(prompts),
             run_ctx=run_ctx,
             user_msg=kw["user_msg"],
@@ -958,13 +966,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             _parent_id=kw.get("parent_session_id"),
             input_provider=kw.get("input_provider"),
             deps=kw.get("deps"),
-        ):
-            await state.event_queue.put(event)
-            if isinstance(event, StreamCompleteEvent):
-                result = event.message
-
-        if result is None:
-            raise RuntimeError("RunExecutor.execute() completed without a StreamCompleteEvent")
+            event_bus=event_bus,
+        )
 
         state.result = result
         return result
@@ -1010,7 +1013,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         executor = RunExecutor(self)
 
-        async for event in executor.execute(
+        # Get or create EventBus — events go directly to EventBus via
+        # executor.execute(), which publishes them fire-and-forget.
+        # _stream_events() yields nothing; the caller (_run_stream_once)
+        # picks up the result via run_ctx.terminal_tool_result side channel.
+        event_bus = run_ctx.event_bus
+        if event_bus is None:
+            from agentpool.orchestrator.core import EventBus
+
+            event_bus = EventBus()
+            run_ctx.event_bus = event_bus
+
+        result = await executor.execute(
             prompts=list(prompts),
             run_ctx=run_ctx,
             user_msg=user_msg,
@@ -1020,13 +1034,17 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             _parent_id=parent_session_id,
             input_provider=input_provider,
             deps=deps,
-        ):
-            # Wire iteration_task for _interrupt() compatibility.
-            # executor._iteration_task becomes non-None after the first
-            # event (RunStartedEvent) is yielded.
-            if executor._iteration_task is not None and self._iteration_task is None:
-                self._iteration_task = executor._iteration_task
-            yield event
+            event_bus=event_bus,
+        )
+
+        # Store result for _run_stream_once() to pick up — avoids race
+        # condition with EventBus consumer cancelling TaskGroup.
+        run_ctx.terminal_tool_result = result
+
+        # Use return; yield pattern to remain an async generator
+        # (yielding nothing — events are on EventBus).
+        return  # noqa: RET504
+        yield  # type: ignore[unreachable]  # Keep generator signature
 
     def register_worker(
         self,
