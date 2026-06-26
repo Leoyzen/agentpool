@@ -8,19 +8,39 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
 import inspect
+from itertools import groupby
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
 
 import anyio
+from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
 
 from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import SessionResumeEvent, StreamCompleteEvent
+from agentpool.agents.events import (
+    CompactionEvent,
+    CustomEvent,
+    PartDeltaEvent,
+    PlanUpdateEvent,
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    SessionResumeEvent,
+    SpawnSessionStart,
+    StreamCompleteEvent,
+    SubAgentEvent,
+    ToolCallCompleteEvent,
+    ToolCallContentItem,
+    ToolCallDeferredEvent,
+    ToolCallProgressEvent,
+    ToolCallStartEvent,
+    ToolResultMetadataEvent,
+)
 from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -191,6 +211,177 @@ class SessionState:
         self.is_closing = value
 
 
+# ---------------------------------------------------------------------------
+# Event coalescing infrastructure (Task 1 — fields + functions only)
+# ---------------------------------------------------------------------------
+
+# Lock hierarchy:
+#   _buf_lock  — guards _buffers, _last_keys (coalescing state)
+#   _lock      — guards _subscribers, _stream_pairs, _replay_buffers (subscriber state)
+# NEVER nest: _buf_lock → _lock is correct; _lock → _buf_lock is a DEADLOCK.
+
+
+def _is_immediate(event: Any) -> bool:
+    """Check if an event is a lifecycle event that bypasses coalescing.
+
+    Immediate events are dispatched right away and trigger a buffer drain
+    of any pending batchable events for the session.
+
+    Returns:
+        True if the event is an immediate lifecycle event.
+    """
+    match event:
+        case (
+            RunStartedEvent()
+            | RunErrorEvent()
+            | RunFailedEvent()
+            | StreamCompleteEvent()
+            | SpawnSessionStart()
+            | CompactionEvent()
+            | SessionResumeEvent()
+            | ToolCallStartEvent()
+            | ToolCallCompleteEvent()
+            | ToolCallDeferredEvent()
+        ):
+            return True
+        case _:
+            return False
+
+
+def _merge_key(event: Any) -> tuple[str, str] | None:
+    """Compute the coalescing merge key for an event.
+
+    Returns:
+        A tuple key for batchable events, or None for passthrough events.
+        Passthrough events are dispatched individually (after draining the buffer).
+    """
+    match event:
+        case PartDeltaEvent(delta=TextPartDelta()):
+            return ("delta_text", "")
+        case PartDeltaEvent(delta=ThinkingPartDelta()):
+            return ("delta_thinking", "")
+        case PartDeltaEvent(delta=ToolCallPartDelta(tool_call_id=tcid)):
+            return ("delta_tool_call", tcid)
+        case PartDeltaEvent():
+            # delta is None — classified as passthrough, will be dropped in _merge_envelopes
+            return None
+        case ToolCallProgressEvent(tool_call_id=tcid, status=status):
+            return ("progress", f"{tcid}:{status}")
+        case PlanUpdateEvent():
+            return ("plan", "")
+        case _:
+            return None
+
+
+def _merge_text_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
+    """Concatenate TextPartDelta content_delta strings. Uses first event's index."""
+    parts: list[str] = []
+    for event in events:
+        if isinstance(event.delta, TextPartDelta) and event.delta.content_delta is not None:
+            parts.append(event.delta.content_delta)
+    return PartDeltaEvent(
+        index=events[0].index,
+        delta=TextPartDelta(content_delta="".join(parts)),
+    )
+
+
+def _merge_thinking_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
+    """Concatenate ThinkingPartDelta content_delta strings. Uses first event's index."""
+    parts: list[str] = []
+    for event in events:
+        if isinstance(event.delta, ThinkingPartDelta) and event.delta.content_delta is not None:
+            parts.append(event.delta.content_delta)
+    return PartDeltaEvent(
+        index=events[0].index,
+        delta=ThinkingPartDelta(content_delta="".join(parts)),
+    )
+
+
+def _merge_tool_call_deltas(events: list[PartDeltaEvent]) -> PartDeltaEvent:
+    """Concatenate ToolCallPartDelta args_delta strings.
+
+    Uses first event's index and tool_call_id.
+    """
+    parts: list[str] = []
+    tool_call_id = ""
+    for event in events:
+        delta = event.delta
+        if isinstance(delta, ToolCallPartDelta) and isinstance(delta.args_delta, str):
+            parts.append(delta.args_delta)
+            if not tool_call_id:
+                tool_call_id = delta.tool_call_id
+    return PartDeltaEvent(
+        index=events[0].index,
+        delta=ToolCallPartDelta(args_delta="".join(parts), tool_call_id=tool_call_id),
+    )
+
+
+def _merge_progress_events(events: list[ToolCallProgressEvent]) -> ToolCallProgressEvent:
+    """Concatenate items sequences from progress events.
+
+    Uses last event's title, status, replace_content, and tool_name.
+    Items with duplicate TerminalContentItem.terminal_id are kept (consumer handles dedup).
+    """
+    all_items: list[ToolCallContentItem] = []
+    for event in events:
+        all_items.extend(event.items)
+    last = events[-1]
+    return ToolCallProgressEvent(
+        tool_call_id=last.tool_call_id,
+        status=last.status,
+        title=last.title,
+        items=all_items,
+        replace_content=last.replace_content,
+        tool_name=last.tool_name,
+    )
+
+
+def _rebind(template: EventEnvelope, new_event: Any) -> EventEnvelope:
+    """Create new EventEnvelope with merged event, preserving source_session_id."""
+    return EventEnvelope(source_session_id=template.source_session_id, event=new_event)
+
+
+def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
+    """Merge a list of envelopes using itertools.groupby.
+
+    Groups consecutive envelopes by _merge_key. For batchable groups, merges
+    events into a single event. For passthrough groups (key is None), extends
+    without merging. For the ("plan", "") key, keeps the last event (last-wins).
+    Drops PartDeltaEvent instances where delta is None.
+
+    Returns:
+        List of merged (or passthrough) envelopes ready for dispatch.
+    """
+    # Drop PartDeltaEvent with delta=None
+    filtered: list[EventEnvelope] = [env for env in envelopes if not (isinstance(env.event, PartDeltaEvent) and env.event.delta is None)]
+
+    result: list[EventEnvelope] = []
+    for key, group in groupby(filtered, key=lambda env: _merge_key(env.event)):
+        group_list = list(group)
+        if key is None:
+            # Passthrough: extend without merging
+            result.extend(group_list)
+        elif key[0] == "plan":
+            # Last-wins: keep last event
+            result.append(group_list[-1])
+        else:
+            events = [env.event for env in group_list]
+            match key[0]:
+                case "delta_text":
+                    merged = _merge_text_deltas(events)
+                case "delta_thinking":
+                    merged = _merge_thinking_deltas(events)
+                case "delta_tool_call":
+                    merged = _merge_tool_call_deltas(events)
+                case "progress":
+                    merged = _merge_progress_events(events)
+                case _:
+                    result.extend(group_list)
+                    continue
+            result.append(_rebind(group_list[0], merged))
+    return result
+
+
 class EventBus:
     """PubSub event bus for cross-turn event streaming.
 
@@ -208,6 +399,7 @@ class EventBus:
         max_queue_size: int = DEFAULT_QUEUE_MAXSIZE,
         replay_buffer_size: int = 100,
         session_controller: SessionController | None = None,
+        max_coalesce_buffer: int = 20,
     ) -> None:
         """Initialize the event bus.
 
@@ -215,6 +407,8 @@ class EventBus:
             max_queue_size: Maximum buffer size for subscriber memory streams.
             replay_buffer_size: Maximum number of events retained per session for replay.
             session_controller: Optional session controller for hierarchy queries.
+            max_coalesce_buffer: Maximum number of batchable events to buffer per session
+                before flushing. Prevents unbounded latency on long same-type sequences.
         """
         self._subscribers: dict[str, list[tuple[anyio.abc.ObjectSendStream[EventEnvelope], str]]] = {}
         self._stream_pairs: dict[int, anyio.abc.ObjectSendStream[EventEnvelope]] = {}
@@ -224,6 +418,12 @@ class EventBus:
         self._replay_buffer_size = replay_buffer_size
         self._session_controller = session_controller
         self._replay_buffers: dict[str, deque[EventEnvelope]] = {}
+
+        # Coalescing state (Task 1 — infrastructure only, not yet wired into publish)
+        self._buffers: dict[str, list[EventEnvelope]] = {}
+        self._last_keys: dict[str, tuple[str, str]] = {}
+        self._buf_lock = anyio.Lock()
+        self._max_buffer = max_coalesce_buffer
 
     async def subscribe(self, session_id: str, scope: str = "session") -> anyio.abc.ObjectReceiveStream[EventEnvelope]:
         """Subscribe to events for a session.

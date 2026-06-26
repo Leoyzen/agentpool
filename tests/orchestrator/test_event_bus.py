@@ -1,7 +1,7 @@
 """Unit tests for EventBus (SessionPool Group 2.10).
 
 Tests pub/sub semantics, bounded stream dropping, EndOfStream-based
-shutdown, and subscriber lifecycle management.
+shutdown, subscriber lifecycle management, and event coalescing infrastructure.
 """
 
 from __future__ import annotations
@@ -13,9 +13,48 @@ from typing import Any
 import anyio
 import pytest
 
-from agentpool.agents.events import PartDeltaEvent, PartStartEvent, RunStartedEvent
-from agentpool.orchestrator.core import EventBus
-from pydantic_ai import PartEndEvent, TextPart, TextPartDelta
+from agentpool.agents.events import (
+    CompactionEvent,
+    CustomEvent,
+    PartDeltaEvent,
+    PartStartEvent,
+    PlanUpdateEvent,
+    RunErrorEvent,
+    RunFailedEvent,
+    RunStartedEvent,
+    SessionResumeEvent,
+    SpawnSessionStart,
+    StreamCompleteEvent,
+    SubAgentEvent,
+    TerminalContentItem,
+    TextContentItem,
+    ToolCallCompleteEvent,
+    ToolCallDeferredEvent,
+    ToolCallProgressEvent,
+    ToolCallStartEvent,
+    ToolResultMetadataEvent,
+)
+from agentpool.messaging import ChatMessage
+from agentpool.orchestrator.core import (
+    EventBus,
+    EventEnvelope,
+    _is_immediate,
+    _merge_envelopes,
+    _merge_key,
+    _merge_progress_events,
+    _merge_text_deltas,
+    _merge_thinking_deltas,
+    _merge_tool_call_deltas,
+    _rebind,
+)
+from pydantic_ai import (
+    PartEndEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+    ToolCallPartDelta,
+)
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -605,3 +644,564 @@ async def test_grandchild_events_visible_with_descendants_scope(
     assert received is not None
     assert isinstance(received.event, RunStartedEvent)
     assert received.event.run_id == "run-grandchild"
+
+
+# ---------------------------------------------------------------------------
+# Event coalescing infrastructure (Task 1)
+# ---------------------------------------------------------------------------
+
+
+# --- _is_immediate ---
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        RunStartedEvent(session_id="s", run_id="r"),
+        RunErrorEvent(message="err"),
+        RunFailedEvent(run_id="r", session_id="s", exception=ValueError("test")),
+        StreamCompleteEvent(message=ChatMessage(content="done", role="assistant")),
+        SpawnSessionStart(
+            child_session_id="c",
+            parent_session_id="p",
+            spawn_mechanism="task",
+            source_name="agent",
+            source_type="agent",
+            description="test",
+        ),
+        CompactionEvent(session_id="s"),
+        SessionResumeEvent(session_id="s", resolved_call_count=0),
+        ToolCallStartEvent(tool_call_id="tc1", tool_name="bash", title="test"),
+        ToolCallCompleteEvent(
+            tool_name="bash",
+            tool_call_id="tc1",
+            tool_input={},
+            tool_result="ok",
+            agent_name="a",
+            message_id="m",
+        ),
+        ToolCallDeferredEvent(
+            tool_call_id="tc1",
+            tool_name="bash",
+            deferred_strategy="block",
+            status="pending",
+        ),
+    ],
+    ids=[
+        "run_started",
+        "run_error",
+        "run_failed",
+        "stream_complete",
+        "spawn_session_start",
+        "compaction",
+        "session_resume",
+        "tool_call_start",
+        "tool_call_complete",
+        "tool_call_deferred",
+    ],
+)
+def test_immediate_returns_true_for_lifecycle_events(event: Any) -> None:
+    """All 10 lifecycle event types are classified as immediate."""
+    assert _is_immediate(event) is True
+
+
+def test_immediate_returns_false_for_text_delta() -> None:
+    """PartDeltaEvent with TextPartDelta is not immediate."""
+    event = PartDeltaEvent.text(0, "hello")
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_thinking_delta() -> None:
+    """PartDeltaEvent with ThinkingPartDelta is not immediate."""
+    event = PartDeltaEvent.thinking(0, "thinking")
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_tool_call_delta() -> None:
+    """PartDeltaEvent with ToolCallPartDelta is not immediate."""
+    event = PartDeltaEvent.tool_call(0, "args", "tc1")
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_tool_call_progress() -> None:
+    """ToolCallProgressEvent is not immediate."""
+    event = ToolCallProgressEvent(tool_call_id="tc1")
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_plan_update() -> None:
+    """PlanUpdateEvent is not immediate."""
+    event = PlanUpdateEvent(entries=[])
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_subagent_event() -> None:
+    """SubAgentEvent is not immediate."""
+    event = SubAgentEvent(
+        source_name="agent",
+        source_type="agent",
+        event=RunStartedEvent(session_id="s", run_id="r"),
+    )
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_custom_event() -> None:
+    """CustomEvent is not immediate."""
+    event = CustomEvent(event_data="test")
+    assert _is_immediate(event) is False
+
+
+def test_immediate_returns_false_for_tool_result_metadata() -> None:
+    """ToolResultMetadataEvent is not immediate."""
+    event = ToolResultMetadataEvent(tool_call_id="tc1", metadata={})
+    assert _is_immediate(event) is False
+
+
+# --- _merge_key (classify) ---
+
+
+def test_classify_text_delta() -> None:
+    """PartDeltaEvent with TextPartDelta has merge key ('delta_text', '')."""
+    event = PartDeltaEvent.text(0, "hello")
+    assert _merge_key(event) == ("delta_text", "")
+
+
+def test_classify_thinking_delta() -> None:
+    """PartDeltaEvent with ThinkingPartDelta has merge key ('delta_thinking', '')."""
+    event = PartDeltaEvent.thinking(0, "thinking")
+    assert _merge_key(event) == ("delta_thinking", "")
+
+
+def test_classify_tool_call_delta() -> None:
+    """PartDeltaEvent with ToolCallPartDelta has merge key ('delta_tool_call', tool_call_id)."""
+    event = PartDeltaEvent.tool_call(0, "args", "tc1")
+    assert _merge_key(event) == ("delta_tool_call", "tc1")
+
+
+def test_classify_tool_call_progress() -> None:
+    """ToolCallProgressEvent has merge key ('progress', 'tool_call_id:status')."""
+    event = ToolCallProgressEvent(tool_call_id="tc1", status="in_progress")
+    assert _merge_key(event) == ("progress", "tc1:in_progress")
+
+
+def test_classify_plan_update() -> None:
+    """PlanUpdateEvent has merge key ('plan', '')."""
+    event = PlanUpdateEvent(entries=[])
+    assert _merge_key(event) == ("plan", "")
+
+
+def test_classify_subagent_returns_none() -> None:
+    """SubAgentEvent is passthrough (merge key None)."""
+    event = SubAgentEvent(
+        source_name="agent",
+        source_type="agent",
+        event=RunStartedEvent(session_id="s", run_id="r"),
+    )
+    assert _merge_key(event) is None
+
+
+def test_classify_custom_returns_none() -> None:
+    """CustomEvent is passthrough (merge key None)."""
+    event = CustomEvent(event_data="test")
+    assert _merge_key(event) is None
+
+
+def test_classify_tool_result_metadata_returns_none() -> None:
+    """ToolResultMetadataEvent is passthrough (merge key None)."""
+    event = ToolResultMetadataEvent(tool_call_id="tc1", metadata={})
+    assert _merge_key(event) is None
+
+
+def test_classify_none_delta_returns_none() -> None:
+    """PartDeltaEvent with delta=None is passthrough (merge key None)."""
+    event: Any = PartDeltaEvent(index=0, delta=None)  # type: ignore[call-arg]
+    assert _merge_key(event) is None
+
+
+# --- _merge_text_deltas ---
+
+
+def test_merge_text_deltas_concatenates_content() -> None:
+    """Multiple text deltas are concatenated into a single content_delta."""
+    events = [
+        PartDeltaEvent.text(0, "hello "),
+        PartDeltaEvent.text(0, "world"),
+        PartDeltaEvent.text(0, "!"),
+    ]
+    merged = _merge_text_deltas(events)
+    assert isinstance(merged, PartDeltaEvent)
+    assert isinstance(merged.delta, TextPartDelta)
+    assert merged.delta.content_delta == "hello world!"
+
+
+def test_merge_text_deltas_uses_first_index() -> None:
+    """Merged text delta uses the first event's index."""
+    events = [
+        PartDeltaEvent.text(5, "a"),
+        PartDeltaEvent.text(7, "b"),
+    ]
+    merged = _merge_text_deltas(events)
+    assert merged.index == 5
+
+
+def test_merge_text_deltas_single_event() -> None:
+    """Merging a single text delta returns the same content."""
+    events = [PartDeltaEvent.text(0, "solo")]
+    merged = _merge_text_deltas(events)
+    assert isinstance(merged.delta, TextPartDelta)
+    assert merged.delta.content_delta == "solo"
+
+
+# --- _merge_thinking_deltas ---
+
+
+def test_merge_thinking_deltas_concatenates_content() -> None:
+    """Multiple thinking deltas are concatenated into a single content_delta."""
+    events = [
+        PartDeltaEvent.thinking(0, "think "),
+        PartDeltaEvent.thinking(0, "more"),
+    ]
+    merged = _merge_thinking_deltas(events)
+    assert isinstance(merged, PartDeltaEvent)
+    assert isinstance(merged.delta, ThinkingPartDelta)
+    assert merged.delta.content_delta == "think more"
+
+
+def test_merge_thinking_deltas_uses_first_index() -> None:
+    """Merged thinking delta uses the first event's index."""
+    events = [
+        PartDeltaEvent.thinking(3, "a"),
+        PartDeltaEvent.thinking(7, "b"),
+    ]
+    merged = _merge_thinking_deltas(events)
+    assert merged.index == 3
+
+
+# --- _merge_tool_call_deltas ---
+
+
+def test_merge_tool_call_deltas_concatenates_args() -> None:
+    """Multiple tool_call deltas are concatenated into a single args_delta."""
+    events = [
+        PartDeltaEvent.tool_call(0, '{"path"', "tc1"),
+        PartDeltaEvent.tool_call(0, ': "foo"}', "tc1"),
+    ]
+    merged = _merge_tool_call_deltas(events)
+    assert isinstance(merged, PartDeltaEvent)
+    assert isinstance(merged.delta, ToolCallPartDelta)
+    assert merged.delta.args_delta == '{"path": "foo"}'
+
+
+def test_merge_tool_call_deltas_uses_first_index_and_tool_call_id() -> None:
+    """Merged tool_call delta uses first event's index and tool_call_id."""
+    events = [
+        PartDeltaEvent.tool_call(2, "a", "tc-first"),
+        PartDeltaEvent.tool_call(5, "b", "tc-second"),
+    ]
+    merged = _merge_tool_call_deltas(events)
+    assert merged.index == 2
+    assert isinstance(merged.delta, ToolCallPartDelta)
+    assert merged.delta.tool_call_id == "tc-first"
+
+
+# --- _merge_progress_events ---
+
+
+def test_merge_progress_events_concatenates_items() -> None:
+    """Items from all progress events are concatenated."""
+    events = [
+        ToolCallProgressEvent(
+            tool_call_id="tc1",
+            status="in_progress",
+            items=[TerminalContentItem(terminal_id="t1")],
+        ),
+        ToolCallProgressEvent(
+            tool_call_id="tc1",
+            status="in_progress",
+            items=[TextContentItem(text="output")],
+        ),
+    ]
+    merged = _merge_progress_events(events)
+    assert len(merged.items) == 2
+    assert isinstance(merged.items[0], TerminalContentItem)
+    assert isinstance(merged.items[1], TextContentItem)
+
+
+def test_merge_progress_events_uses_last_fields() -> None:
+    """Merged progress event uses last event's title, status, replace_content, tool_name."""
+    events = [
+        ToolCallProgressEvent(
+            tool_call_id="tc1",
+            status="in_progress",
+            title="first",
+            replace_content=False,
+            tool_name="bash",
+            items=[],
+        ),
+        ToolCallProgressEvent(
+            tool_call_id="tc1",
+            status="completed",
+            title="last",
+            replace_content=True,
+            tool_name="read",
+            items=[],
+        ),
+    ]
+    merged = _merge_progress_events(events)
+    assert merged.title == "last"
+    assert merged.status == "completed"
+    assert merged.replace_content is True
+    assert merged.tool_name == "read"
+
+
+def test_merge_progress_events_keeps_duplicate_terminal_ids() -> None:
+    """Duplicate terminal_id items are kept (no dedup)."""
+    events = [
+        ToolCallProgressEvent(
+            tool_call_id="tc1",
+            status="in_progress",
+            items=[TerminalContentItem(terminal_id="t1")],
+        ),
+        ToolCallProgressEvent(
+            tool_call_id="tc1",
+            status="in_progress",
+            items=[TerminalContentItem(terminal_id="t1")],
+        ),
+    ]
+    merged = _merge_progress_events(events)
+    assert len(merged.items) == 2
+    # Both items should be TerminalContentItem with terminal_id="t1"
+    for item in merged.items:
+        assert isinstance(item, TerminalContentItem)
+        assert item.terminal_id == "t1"
+
+
+# --- _merge_envelopes ---
+
+
+def test_merge_envelopes_groups_consecutive_text_deltas() -> None:
+    """Consecutive text deltas are merged into a single envelope."""
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "hello ")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "world")),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 1
+    assert isinstance(result[0].event, PartDeltaEvent)
+    assert isinstance(result[0].event.delta, TextPartDelta)
+    assert result[0].event.delta.content_delta == "hello world"
+    assert result[0].source_session_id == "s1"
+
+
+def test_merge_envelopes_type_change_creates_separate_groups() -> None:
+    """Type change (text→thinking) creates two separate merged groups."""
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "text")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.thinking(0, "think")),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 2
+    assert isinstance(result[0].event.delta, TextPartDelta)
+    assert result[0].event.delta.content_delta == "text"
+    assert isinstance(result[1].event.delta, ThinkingPartDelta)
+    assert result[1].event.delta.content_delta == "think"
+
+
+def test_merge_envelopes_drops_none_delta() -> None:
+    """PartDeltaEvent with delta=None is dropped, not merged or dispatched."""
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "keep")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent(index=0, delta=None)),  # type: ignore[call-arg]
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "this")),
+    ]
+    result = _merge_envelopes(envelopes)
+    # None delta is dropped; remaining two text deltas are merged
+    assert len(result) == 1
+    assert isinstance(result[0].event.delta, TextPartDelta)
+    assert result[0].event.delta.content_delta == "keepthis"
+
+
+def test_merge_envelopes_plan_last_wins() -> None:
+    """PlanUpdateEvent groups use last-wins strategy."""
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PlanUpdateEvent(entries=[])),
+        EventEnvelope(source_session_id="s1", event=PlanUpdateEvent(entries=[])),
+        EventEnvelope(source_session_id="s1", event=PlanUpdateEvent(entries=[])),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 1
+    assert isinstance(result[0].event, PlanUpdateEvent)
+
+
+def test_merge_envelopes_passthrough_extends_without_merging() -> None:
+    """Passthrough events (SubAgentEvent, CustomEvent) are not merged."""
+    sub_event = SubAgentEvent(
+        source_name="agent",
+        source_type="agent",
+        event=RunStartedEvent(session_id="s", run_id="r"),
+    )
+    custom_event = CustomEvent(event_data="test")
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=sub_event),
+        EventEnvelope(source_session_id="s1", event=custom_event),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 2
+    assert isinstance(result[0].event, SubAgentEvent)
+    assert isinstance(result[1].event, CustomEvent)
+
+
+def test_merge_envelopes_empty_list_returns_empty() -> None:
+    """Empty envelope list returns empty result."""
+    result = _merge_envelopes([])
+    assert result == []
+
+
+def test_merge_envelopes_tool_call_progress_merged() -> None:
+    """Consecutive ToolCallProgressEvents with same key are merged."""
+    envelopes = [
+        EventEnvelope(
+            source_session_id="s1",
+            event=ToolCallProgressEvent(
+                tool_call_id="tc1",
+                status="in_progress",
+                title="first",
+                items=[TerminalContentItem(terminal_id="t1")],
+            ),
+        ),
+        EventEnvelope(
+            source_session_id="s1",
+            event=ToolCallProgressEvent(
+                tool_call_id="tc1",
+                status="in_progress",
+                title="second",
+                items=[TextContentItem(text="out")],
+            ),
+        ),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 1
+    assert isinstance(result[0].event, ToolCallProgressEvent)
+    assert len(result[0].event.items) == 2
+    assert result[0].event.title == "second"
+
+
+def test_merge_envelopes_different_tool_call_ids_not_merged() -> None:
+    """ToolCallProgressEvents with different tool_call_id are not merged."""
+    envelopes = [
+        EventEnvelope(
+            source_session_id="s1",
+            event=ToolCallProgressEvent(
+                tool_call_id="tc1",
+                status="in_progress",
+                items=[],
+            ),
+        ),
+        EventEnvelope(
+            source_session_id="s1",
+            event=ToolCallProgressEvent(
+                tool_call_id="tc2",
+                status="in_progress",
+                items=[],
+            ),
+        ),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 2
+
+
+def test_merge_envelopes_different_status_not_merged() -> None:
+    """ToolCallProgressEvents with different status are not merged."""
+    envelopes = [
+        EventEnvelope(
+            source_session_id="s1",
+            event=ToolCallProgressEvent(
+                tool_call_id="tc1",
+                status="in_progress",
+                items=[],
+            ),
+        ),
+        EventEnvelope(
+            source_session_id="s1",
+            event=ToolCallProgressEvent(
+                tool_call_id="tc1",
+                status="completed",
+                items=[],
+            ),
+        ),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 2
+
+
+def test_merge_envelopes_retains_event_type() -> None:
+    """Merged events retain their original event type (no wrapper)."""
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "a")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "b")),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 1
+    # The merged event should still be a PartDeltaEvent, not a wrapper
+    assert type(result[0].event) is PartDeltaEvent
+
+
+def test_merge_envelopes_non_consecutive_same_key_not_merged() -> None:
+    """Events with same merge key but separated by different key are not merged."""
+    envelopes = [
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "a")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.thinking(0, "b")),
+        EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "c")),
+    ]
+    result = _merge_envelopes(envelopes)
+    # Three groups: [text "a"], [thinking "b"], [text "c"]
+    assert len(result) == 3
+    assert isinstance(result[0].event.delta, TextPartDelta)
+    assert result[0].event.delta.content_delta == "a"
+    assert isinstance(result[1].event.delta, ThinkingPartDelta)
+    assert result[1].event.delta.content_delta == "b"
+    assert isinstance(result[2].event.delta, TextPartDelta)
+    assert result[2].event.delta.content_delta == "c"
+
+
+def test_merge_envelopes_preserves_source_session_id() -> None:
+    """Merged envelopes preserve the source_session_id from the template."""
+    envelopes = [
+        EventEnvelope(source_session_id="custom-session", event=PartDeltaEvent.text(0, "a")),
+        EventEnvelope(source_session_id="custom-session", event=PartDeltaEvent.text(0, "b")),
+    ]
+    result = _merge_envelopes(envelopes)
+    assert len(result) == 1
+    assert result[0].source_session_id == "custom-session"
+
+
+# --- _rebind ---
+
+
+def test_rebind_preserves_source_session_id() -> None:
+    """_rebind creates new envelope with same source_session_id."""
+    template = EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "old"))
+    new_event = PartDeltaEvent.text(0, "new")
+    result = _rebind(template, new_event)
+    assert result.source_session_id == "s1"
+    assert result.event is new_event
+
+
+def test_rebind_uses_new_event() -> None:
+    """_rebind uses the provided new_event, not the template's event."""
+    template = EventEnvelope(
+        source_session_id="s1",
+        event=RunStartedEvent(session_id="s", run_id="old"),
+    )
+    new_event = RunStartedEvent(session_id="s", run_id="new")
+    result = _rebind(template, new_event)
+    assert result.event is new_event
+    assert result.event.run_id == "new"
+
+
+def test_rebind_creates_new_envelope_instance() -> None:
+    """_rebind returns a new EventEnvelope, not the template."""
+    template = EventEnvelope(source_session_id="s1", event=PartDeltaEvent.text(0, "old"))
+    new_event = PartDeltaEvent.text(0, "new")
+    result = _rebind(template, new_event)
+    assert result is not template
