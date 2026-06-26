@@ -383,18 +383,18 @@ async def test_session_close_during_steer_race_no_crash(
     turn_runner: TurnRunner,
     mock_pool: MagicMock,
 ) -> None:
-    """Session close between active_agent_run check and enqueue — no crash.
+    """Run exists but agent_run not ready — queue instead of recurse.
 
-    Edge case: When the session is closing, steer() gracefully falls
-    through to receive_request instead of crashing. The TOCTOU-safe
-    pattern (reading active_agent_run into a local variable) prevents
-    double-read races.
+    Edge case: When run_id is set but active_agent_run is None (PydanticAI
+    iteration hasn't started yet), steer() queues the message and triggers
+    auto-resume instead of delegating to receive_request.  This prevents
+    infinite recursion (steer → receive_request → steer).
     """
     agent = _make_native_agent()
     await _setup_session_with_agent(controller, "sess-race", agent, mock_pool)
 
     run_handle = _make_run_handle("sess-race", "native")
-    # active_agent_run is NOT set (session is idle/closing)
+    # active_agent_run is NOT set (agent_run not yet ready)
     run_handle.active_agent_run = None
     run_handle.status = RunStatus.running
     controller._runs[run_handle.run_id] = run_handle
@@ -403,16 +403,17 @@ async def test_session_close_during_steer_race_no_crash(
     assert session is not None
     session.current_run_id = run_handle.run_id
 
-    # Spy on receive_request to verify delegation
-    controller.receive_request = AsyncMock(return_value=None)  # type: ignore[method-assign]
-
-    # steer() should delegate to receive_request (no crash)
+    # steer() should queue the message, NOT delegate to receive_request
+    # (which would cause infinite recursion).
+    # Suppress auto-resume errors in the test mock environment.
+    turn_runner._safe_auto_resume = AsyncMock(return_value=None)  # type: ignore[method-assign]
     result = await turn_runner.steer("sess-race", "race-steer-to-idle")
 
-    assert result is False, "Steer on idle session should return False (delegated)"
-    controller.receive_request.assert_called_once_with(  # type: ignore[attr-defined]
-        "sess-race", "race-steer-to-idle", priority="steer"
-    )
+    assert result is False, "Steer on run without agent_run should return False (queued)"
+    # The message should be queued in _post_turn_injections
+    queued = turn_runner._post_turn_injections.get("sess-race", [])
+    assert len(queued) == 1, f"Expected 1 queued injection, got {len(queued)}"
+    assert queued[0] == "race-steer-to-idle"
 
 
 @pytest.mark.anyio

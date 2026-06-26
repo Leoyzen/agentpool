@@ -2322,7 +2322,21 @@ class TurnRunner:
                     if agent_run is not None:
                         agent_run.enqueue(message, priority="asap")
                         return True
-            # Native idle: delegate to receive_request
+                    # Run exists but agent_run not yet ready (PydanticAI
+                    # iteration hasn't started).  Queue the message instead
+                    # of calling receive_request(priority="steer") — that
+                    # would re-enter steer() and recurse infinitely because
+                    # the run_id is still set.
+                    self._post_turn_injections.setdefault(session_id, []).append(message)
+                    logger.debug(
+                        "Queued steer for run without agent_run, triggering auto-resume",
+                        session_id=session_id,
+                        run_id=run_id,
+                    )
+                    async with await self._get_session_task_group(session_id) as tg:
+                        tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
+                    return False
+            # Native idle (no run at all): delegate to receive_request
             await self.sessions.receive_request(session_id, message, priority="steer", **kwargs)
             return False
 
@@ -2385,7 +2399,18 @@ class TurnRunner:
                     if agent_run is not None:
                         agent_run.enqueue(message, priority="when_idle")
                         return True
-            # Native idle: delegate to receive_request
+                    # Run exists but agent_run not yet ready — queue to
+                    # avoid the same recursion as steer().
+                    self._post_turn_prompts.setdefault(session_id, []).append((message,))
+                    logger.debug(
+                        "Queued followup for run without agent_run, triggering auto-resume",
+                        session_id=session_id,
+                        run_id=run_id,
+                    )
+                    async with await self._get_session_task_group(session_id) as tg:
+                        tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
+                    return False
+            # Native idle (no run at all): delegate to receive_request
             await self.sessions.receive_request(session_id, message, priority="followup", **kwargs)
             return False
 
