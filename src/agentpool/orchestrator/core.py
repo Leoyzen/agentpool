@@ -3626,6 +3626,107 @@ class SessionPool:
         # within SessionController.close_session() under its lock.
         logger.debug("No in-flight checkpoint operations to await")
 
+    # ------------------------------------------------------------------
+    # RunHandle delegation helpers (feature-flag gated)
+    # ------------------------------------------------------------------
+
+    def _use_run_turn_for_session(self, session_id: str) -> bool:
+        """Check if the RunTurn path should be used for a session.
+
+        Delegates to :meth:`SessionController._use_run_turn` using the
+        agent registered for the session.
+
+        Returns:
+            True if the RunTurn path should be used.
+        """
+        session = self.sessions.get_session(session_id)
+        if session is None:
+            return False
+        agent = self.sessions._session_agents.get(session_id)
+        if agent is None:
+            agent = session.agent
+        return self.sessions._use_run_turn(agent)
+
+    def _get_active_run_handle(self, session_id: str) -> RunHandle | None:
+        """Get the active RunHandle for a session, if any.
+
+        Returns:
+            The RunHandle, or None if no active run exists.
+        """
+        session = self.sessions.get_session(session_id)
+        if session is None or session.current_run_id is None:
+            return None
+        return self.sessions._runs.get(session.current_run_id)
+
+    def _create_run_handle(
+        self,
+        session: SessionState,
+        agent: BaseAgent[Any, Any],
+        session_id: str,
+    ) -> RunHandle:
+        """Create and register a RunHandle without a background task.
+
+        Unlike :meth:`SessionController._start_run_handle`, this does
+        NOT create an asyncio task to consume ``start()``. The caller
+        is responsible for draining ``start()``.
+
+        Returns:
+            The newly created and registered RunHandle.
+        """
+        event_bus = self.event_bus
+        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        run_handle = RunHandle(
+            run_id=uuid.uuid4().hex,
+            session_id=session_id,
+            agent_type=agent.AGENT_TYPE,
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+        self.sessions._runs[run_handle.run_id] = run_handle
+        session.current_run_id = run_handle.run_id
+        return run_handle
+
+    async def _process_prompt_run_turn(
+        self,
+        session_id: str,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Handle process_prompt via the RunHandle path.
+
+        If no active run exists, creates a RunHandle and drains
+        ``start()`` to completion. If a run is active, steers the
+        message into it.
+        """
+        session, _ = await self.sessions.get_or_create_session(session_id)
+        if session.is_closing:
+            return
+        agent = self.sessions._session_agents.get(session_id)
+        if agent is None:
+            return
+        content = " ".join(str(p) for p in prompts) if prompts else ""
+
+        run_id = session.current_run_id
+        if run_id is not None:
+            run_handle = self.sessions._runs.get(run_id)
+            if run_handle is not None:
+                run_handle.steer(content)
+            return
+
+        run_handle = self._create_run_handle(session, agent, session_id)
+        try:
+            async for _event in run_handle.start(content):
+                pass
+        finally:
+            session.current_run_id = None
+            self.sessions._runs.pop(run_handle.run_id, None)
+
+    # ------------------------------------------------------------------
+    # SessionPool public methods
+    # ------------------------------------------------------------------
+
     async def process_prompt(
         self,
         session_id: str,
@@ -3637,11 +3738,18 @@ class SessionPool:
         Main entry point for protocol handlers.
         Events are delivered exclusively via EventBus.
 
+        When ``AGENTPOOL_USE_RUN_TURN`` is set, delegates to
+        :meth:`_process_prompt_run_turn` which uses RunHandle.start().
+        Otherwise, uses the legacy TurnRunner path.
+
         Args:
             session_id: The session to process the prompt for.
             *prompts: Prompts to process.
             **kwargs: Additional arguments passed to the agent.
         """
+        if self._use_run_turn_for_session(session_id):
+            await self._process_prompt_run_turn(session_id, *prompts, **kwargs)
+            return
         # Keep blocking behavior for backward compatibility during migration.
         # Protocol handlers that need fire-and-forget should use receive_request().
         self.turns._last_error = None
@@ -3664,6 +3772,12 @@ class SessionPool:
         Creates a background task that processes the prompt through
         the turn runner. Protocol handlers should subscribe to the
         EventBus *before* calling this method so no events are dropped.
+
+        When ``AGENTPOOL_USE_RUN_TURN`` is set,
+        :meth:`SessionController.receive_request` handles the flag
+        internally: idle sessions create a RunHandle, busy sessions
+        call ``RunHandle.steer()`` or ``RunHandle.followup()``.
+        When the flag is off, the legacy TurnRunner path is used.
 
         Args:
             session_id: Target session.
@@ -3718,6 +3832,11 @@ class SessionPool:
         Convenience method for tests and standalone clients that want
         an async iterator over session events.
 
+        When ``AGENTPOOL_USE_RUN_TURN`` is set and no active run exists,
+        yields events directly from ``RunHandle.start()``. If a run is
+        already active, steers the message and falls back to EventBus.
+        When the flag is off, uses the legacy EventBus-based path.
+
         Args:
             session_id: The session to process the prompt for.
             *prompts: Prompts to process.
@@ -3729,6 +3848,12 @@ class SessionPool:
         Yields:
             Events published to the EventBus for this session.
         """
+        if self._use_run_turn_for_session(session_id):
+            async for event in self._run_stream_run_turn(
+                session_id, *prompts, scope=scope, **kwargs
+            ):
+                yield event
+            return
         stream = await self.event_bus.subscribe(session_id, scope=scope)
         process_task = asyncio.create_task(self.process_prompt(session_id, *prompts, **kwargs))
         receive_task: asyncio.Task[Any] | None = None
@@ -3774,6 +3899,54 @@ class SessionPool:
                     await process_task
             await self.event_bus.unsubscribe(session_id, stream)
 
+    async def _run_stream_run_turn(
+        self,
+        session_id: str,
+        *prompts: str,
+        scope: str = "session",
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Handle run_stream via the RunHandle path.
+
+        If no active run exists, creates a RunHandle and yields events
+        directly from ``start()``. If a run is active, steers the
+        message and yields from the EventBus subscription.
+        """
+        session, _ = await self.sessions.get_or_create_session(session_id)
+        if session.is_closing:
+            return
+        agent = self.sessions._session_agents.get(session_id)
+        if agent is None:
+            return
+        content = " ".join(str(p) for p in prompts) if prompts else ""
+
+        run_id = session.current_run_id
+        if run_id is not None:
+            # Active run — steer and use EventBus
+            run_handle = self.sessions._runs.get(run_id)
+            if run_handle is not None:
+                run_handle.steer(content)
+            stream = await self.event_bus.subscribe(session_id, scope=scope)
+            try:
+                while True:
+                    try:
+                        event = await stream.receive()
+                    except anyio.EndOfStream:
+                        break
+                    yield event.event
+            finally:
+                await self.event_bus.unsubscribe(session_id, stream)
+            return
+
+        # No active run — create RunHandle and yield from start()
+        run_handle = self._create_run_handle(session, agent, session_id)
+        try:
+            async for event in run_handle.start(content):
+                yield event
+        finally:
+            session.current_run_id = None
+            self.sessions._runs.pop(run_handle.run_id, None)
+
     async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Inject a message into a session.
 
@@ -3794,6 +3967,11 @@ class SessionPool:
         Returns:
             True if injected into active turn, False if queued.
         """
+        if self._use_run_turn_for_session(session_id):
+            run_handle = self._get_active_run_handle(session_id)
+            if run_handle is not None:
+                return run_handle.steer(message)
+            return False
         session = self.sessions.get_session(session_id)
         if session is not None and session.agent is not None:
             agent_type: str = getattr(session.agent, "AGENT_TYPE", "native")
@@ -3819,6 +3997,12 @@ class SessionPool:
         Returns:
             True if queued into active turn, False if stored for later.
         """
+        if self._use_run_turn_for_session(session_id):
+            run_handle = self._get_active_run_handle(session_id)
+            if run_handle is not None:
+                message = prompts[0] if prompts else ""
+                return run_handle.followup(str(message))
+            return False
         session = self.sessions.get_session(session_id)
         if session is not None and session.agent is not None:
             agent_type: str = getattr(session.agent, "AGENT_TYPE", "native")
@@ -3846,6 +4030,11 @@ class SessionPool:
         Returns:
             True if delivered into active turn, False if queued for idle.
         """
+        if self._use_run_turn_for_session(session_id):
+            run_handle = self._get_active_run_handle(session_id)
+            if run_handle is not None:
+                return run_handle.steer(message)
+            return False
         return await self.turns.steer(session_id, message, **kwargs)
 
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
@@ -3866,6 +4055,11 @@ class SessionPool:
         Returns:
             True if delivered into active turn, False if queued for idle.
         """
+        if self._use_run_turn_for_session(session_id):
+            run_handle = self._get_active_run_handle(session_id)
+            if run_handle is not None:
+                return run_handle.followup(message)
+            return False
         return await self.turns.followup(session_id, message, **kwargs)
 
     async def get_messages(
