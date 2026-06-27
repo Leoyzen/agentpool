@@ -32,7 +32,7 @@ from agentpool.utils.time_utils import get_now
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
     from contextvars import Token
     from datetime import datetime
 
@@ -66,6 +66,8 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool, Team, TeamRun
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
+    from agentpool.orchestrator.core import EventBus, SessionState
+    from agentpool.orchestrator.run import RunHandle
     from agentpool.orchestrator.turn import Turn
     from agentpool.sessions import SessionData
     from agentpool.talk.stats import MessageStats
@@ -475,6 +477,86 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             A Turn instance that can be executed via execute().
         """
         ...
+
+    def create_run(
+        self,
+        prompt: str,
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+        event_bus: EventBus,
+        session: SessionState,
+    ) -> RunHandle:
+        """Construct a RunHandle for v2 session-level execution.
+
+        This is the v2 entry point that replaces the legacy ``run()``
+        method for session-managed runs. It only constructs the
+        RunHandle — no execution happens here. The caller is
+        responsible for calling ``run_handle.start(prompt)`` to begin
+        the idle/wake/turn loop, or for using :meth:`create_run_stream`
+        which wraps that pattern.
+
+        Args:
+            prompt: Initial user prompt for the first turn. Not used
+                during construction; pass it to ``start()`` when ready.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history for the first turn.
+            event_bus: Event bus for publishing stream events.
+            session: Per-session state containing the turn lock.
+
+        Returns:
+            A RunHandle wired with agent, event_bus, session, and
+            run_ctx, ready to be started via ``start(prompt)``.
+        """
+        from agentpool.orchestrator.run import RunHandle
+
+        return RunHandle(
+            run_id=run_ctx.run_id,
+            session_id=run_ctx.session_id,
+            agent_type=self.AGENT_TYPE,
+            agent=self,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+            _message_history=list(message_history),
+        )
+
+    async def create_run_stream(
+        self,
+        prompt: str,
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+        event_bus: EventBus,
+        session: SessionState,
+    ) -> AsyncGenerator[RichAgentStreamEvent]:
+        """Run agent with streaming output via the v2 RunHandle lifecycle.
+
+        This is the v2 streaming wrapper around :meth:`create_run` and
+        ``RunHandle.start()``. It constructs a RunHandle, starts the
+        idle/wake/turn loop, yields all stream events, and closes the
+        handle when the stream completes.
+
+        Args:
+            prompt: Initial user prompt for the first turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history for the first turn.
+            event_bus: Event bus for publishing stream events.
+            session: Per-session state containing the turn lock.
+
+        Yields:
+            Stream events from the turn execution.
+        """
+        async with self.create_run(
+            prompt=prompt,
+            run_ctx=run_ctx,
+            message_history=message_history,
+            event_bus=event_bus,
+            session=session,
+        ) as run_handle:
+            async for event in run_handle.start(prompt):
+                yield event
+                if isinstance(event, StreamCompleteEvent):
+                    run_handle.close()
+                    break
 
     async def run_iter(
         self,

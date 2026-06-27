@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import inspect
 from itertools import groupby
+import os
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
@@ -1449,32 +1450,101 @@ class SessionController:
             s for s in self._sessions.values() if s.agent_name == agent_name and not s.is_closing
         ]
 
-    async def receive_request(
-        self,
-        session_id: str,
-        content: Any,
-        priority: str = "when_idle",
-        **kwargs: Any,
-    ) -> RunHandle | None:
-        """Receive an incoming request for a session.
+    def _use_run_turn(self, agent: BaseAgent[Any, Any] | None) -> bool:
+        """Check whether the new RunTurn code path should be used.
 
-        If the session is idle, creates a RunHandle and starts execution.
-        If the session has an active run, delegates to inject_prompt or queue_prompt.
+        Returns True only when both conditions hold:
+        - ``AGENTPOOL_USE_RUN_TURN`` env var is set to a truthy value.
+        - The agent is a native :class:`Agent` instance.
 
         Args:
+            agent: The agent resolved for the session, or None.
+
+        Returns:
+            True if the new RunTurn path should be used.
+        """
+        if agent is None:
+            return False
+        from agentpool.agents.native_agent import Agent
+
+        if not isinstance(agent, Agent):
+            return False
+        return os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+    async def _consume_run(self, run_handle: RunHandle, initial_prompt: str) -> None:
+        """Drive a RunHandle.start() async generator to completion.
+
+        Events are published to the EventBus inside ``start()``, so this
+        coroutine only needs to keep the generator alive.
+
+        Args:
+            run_handle: The run handle whose ``start()`` to consume.
+            initial_prompt: The first user prompt.
+        """
+        async for _event in run_handle.start(initial_prompt):
+            pass
+
+    def _start_run_handle(
+        self,
+        session: SessionState,
+        agent: BaseAgent[Any, Any],
+        session_id: str,
+        content: str,
+    ) -> RunHandle:
+        """Create, register, and launch a RunHandle via the new path.
+
+        Args:
+            session: The session state.
+            agent: The native agent instance.
+            session_id: The session identifier.
+            content: The initial prompt text.
+
+        Returns:
+            The newly created RunHandle.
+        """
+        event_bus = self._turn_runner.event_bus if self._turn_runner is not None else None
+        run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
+        run_handle = RunHandle(
+            run_id=uuid.uuid4().hex,
+            session_id=session_id,
+            agent_type=agent.AGENT_TYPE,
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+        self._runs[run_handle.run_id] = run_handle
+        session.current_run_id = run_handle.run_id
+        task = asyncio.create_task(self._consume_run(run_handle, content))
+        task.add_done_callback(
+            lambda _t, rid=run_handle.run_id: self._cleanup_run(rid)
+        )
+        return run_handle
+
+    async def _receive_request_turn_runner(
+        self,
+        session: SessionState,
+        session_id: str,
+        content: Any,
+        priority: str,
+        **kwargs: Any,
+    ) -> RunHandle | None:
+        """Handle receive_request via the legacy TurnRunner path.
+
+        Args:
+            session: The resolved session state.
             session_id: Target session.
             content: Message / prompt content.
-            priority: ``"when_idle"`` to queue, ``"asap"`` to inject into active turn.
-                Aliases: ``"steer"`` → ``"asap"``, ``"followup"`` → ``"when_idle"``.
-            **kwargs: Additional arguments passed to the turn runner (e.g. input_provider).
+            priority: ``"when_idle"`` or ``"asap"`` (aliases accepted).
+            **kwargs: Additional arguments for the turn runner.
 
         Returns:
             The RunHandle if a new run was started, otherwise None.
         """
-        session = self.get_session(session_id)
-        if session is None:
-            return None
-
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None
@@ -1520,6 +1590,53 @@ class SessionController:
                 await self._turn_runner.steer(session_id, content, **kwargs)
             else:
                 await self._turn_runner.followup(session_id, content, **kwargs)
+        return None
+
+    async def receive_request(
+        self,
+        session_id: str,
+        content: Any,
+        priority: str = "when_idle",
+        **kwargs: Any,
+    ) -> RunHandle | None:
+        """Receive an incoming request for a session.
+
+        When ``AGENTPOOL_USE_RUN_TURN`` is set and the agent is a native
+        :class:`Agent`, routes through the new RunHandle path (idle creates
+        a RunHandle, busy calls ``steer()`` / ``followup()``). Otherwise,
+        falls back to the legacy TurnRunner path.
+
+        Args:
+            session_id: Target session.
+            content: Message / prompt content.
+            priority: ``"when_idle"`` to queue, ``"asap"`` to inject into active turn.
+                Aliases: ``"steer"`` → ``"asap"``, ``"followup"`` → ``"when_idle"``.
+            **kwargs: Additional arguments passed to the turn runner (e.g. input_provider).
+
+        Returns:
+            The RunHandle if a new run was started, otherwise None.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        agent = self._session_agents.get(session_id)
+        if not self._use_run_turn(agent) or agent is None:
+            return await self._receive_request_turn_runner(
+                session, session_id, content, priority, **kwargs
+            )
+        # New RunTurn path
+        resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
+        async with session._request_lock:
+            if session.closing or session.is_closing:
+                return None
+            if session.current_run_id is None:
+                return self._start_run_handle(session, agent, session_id, str(content))
+        run = self._runs.get(session.current_run_id) if session.current_run_id else None
+        if run is not None:
+            if resolved == "asap":
+                run.steer(str(content))
+            else:
+                run.followup(str(content))
         return None
 
     def cancel_run_for_session(self, session_id: str) -> None:
