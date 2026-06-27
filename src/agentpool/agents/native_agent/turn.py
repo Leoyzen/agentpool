@@ -16,7 +16,7 @@ from pydantic_ai import CallToolsNode, ModelRequestNode
 from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_graph import End
 
-from agentpool.agents.events.events import RunErrorEvent, ToolCallCompleteEvent
+from agentpool.agents.events.events import RunErrorEvent, RunStartedEvent, ToolCallCompleteEvent
 from agentpool.agents.native_agent.helpers import extract_text_from_messages
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage
@@ -120,6 +120,11 @@ class NativeTurn(Turn):
 
         agent_run: Any = None
         try:
+            yield RunStartedEvent(
+                agent_name=self._agent.name,
+                run_id=self._run_ctx.run_id or self._message_id,
+                session_id=self._run_ctx.session_id,
+            )
             async with agentlet.iter(
                 self._prompts,
                 deps=agent_deps,

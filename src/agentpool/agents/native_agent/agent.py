@@ -1011,11 +1011,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             event_bus = EventBus()
             run_ctx.event_bus = event_bus
 
+        # Convert MessageHistory to list[ModelMessage] for pydantic-ai
+        model_messages: list[ModelMessage] = []
+        for chat_msg in message_history.get_history():
+            model_messages.extend(chat_msg.messages)
+
         turn = NativeTurn(
             agent=self,
             prompts=list(prompts),
             run_ctx=run_ctx,
-            message_history=message_history,
+            message_history=model_messages,
         )
         async for event in turn.execute():
             await event_bus.publish(session_id, event)
