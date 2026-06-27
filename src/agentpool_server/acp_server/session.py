@@ -191,7 +191,7 @@ class ACPSession:
     manager: ACPSessionManager | None = None
     """Session manager for managing sessions. Used for session management commands."""
 
-    subagent_display_mode: Literal["legacy", "zed"] = "legacy"
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
     """How to display subagent output:
     - 'legacy': Default display mode using tool_box semantics
     - 'zed': Zed-compatible display mode
