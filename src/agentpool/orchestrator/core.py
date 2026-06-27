@@ -1497,7 +1497,7 @@ class SessionController:
                     task = asyncio.create_task(
                         self._turn_runner.run_loop(session_id, content, **kwargs),
                     )
-                    run_handle.start(task)
+                    run_handle._start_task(task)
 
                     def _cleanup_on_done(
                         _t: asyncio.Task[None], rid: str = run_handle.run_id
@@ -1938,7 +1938,7 @@ class TurnRunner:
             )
             self.sessions._runs[run_id] = run_handle
             created_run_handle = True
-        run_handle.start(asyncio.current_task())
+        run_handle._start_task(asyncio.current_task())
 
         # Use RunHandle's run_ctx as the authoritative context
         run_ctx = run_handle.run_ctx
