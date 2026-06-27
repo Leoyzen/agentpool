@@ -46,6 +46,7 @@ from acp.schema import (
     Usage,
     UsageUpdate,
 )
+from acp.schema.tool_call import SubagentRunInfo
 from acp.utils import generate_tool_title, infer_tool_kind, to_acp_content_blocks
 from agentpool.agents.events import (
     CompactionEvent,
@@ -680,12 +681,23 @@ class ACPEventConverter:
                     _meta = self._build_subagent_field_meta(
                         child_session_id=child_session_id, message_start_index=0
                     )
+                    run_mode: Literal["foreground", "background"]
+                    match spawn_mechanism:
+                        case "task":
+                            run_mode = "background"
+                        case "spawn":
+                            run_mode = "foreground"
                     yield ToolCallStart(
                         tool_call_id=tool_call_id,
                         title=f"{source_name}: {description}" if description else source_name,
                         kind="subagent",
                         status="pending",
                         field_meta=_meta,
+                        subagent=SubagentRunInfo(
+                            child_session_id=child_session_id,
+                            run_mode=run_mode,
+                            display_name=source_name,
+                        ),
                     )
 
 

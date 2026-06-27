@@ -76,6 +76,11 @@
       'kind': 'subagent',
       'session_update': 'tool_call',
       'status': 'pending',
+      'subagent': dict({
+        'child_session_id': 'sub_001',
+        'display_name': 'researcher',
+        'run_mode': 'foreground',
+      }),
       'title': 'researcher: Research task',
       'tool_call_id': '00000000-0000-0000-0000-000000000001',
     }),

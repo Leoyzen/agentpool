@@ -133,6 +133,30 @@ class AgentRunContext:
     steer_callback: Callable[[str, str], Awaitable[bool]] | None = None
     """Set by TurnRunner, allows tools to call steer() via run_ctx."""
 
+    async def complete_background_task(self, child_session_id: str, message: str) -> None:
+        """Signal that a background child task has completed.
+
+        Calls steer_callback first (if set), then pops and sets the done_event.
+        Ordering is critical: steer BEFORE signal to prevent RunExecutor
+        from waking before the steer message is queued.
+        """
+        if self.steer_callback is not None:
+            try:
+                await self.steer_callback(self.session_id, message)
+            except Exception:
+                logger.exception(
+                    "steer_callback raised in complete_background_task",
+                    child_session_id=child_session_id,
+                )
+        else:
+            logger.warning(
+                "complete_background_task called without steer_callback",
+                child_session_id=child_session_id,
+            )
+        event = self.child_done_events.pop(child_session_id, None)
+        if event is not None:
+            event.set()
+
 
 @dataclass(kw_only=True)
 class AgentContext[TDeps = Any](NodeContext[TDeps]):
@@ -180,7 +204,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         session_id = self.run_ctx.session_id
         if not session_id:
             return None
-        pool = getattr(self.node, "agent_pool", None)
+        pool = self.node.agent_pool
         if pool is None or pool.session_pool is None:
             return None
         return pool.session_pool.sessions.get_session(session_id)
@@ -208,7 +232,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         """Get event emitter with context automatically injected."""
         from agentpool.agents.events import StreamEventEmitter
 
-        event_bus = getattr(self.run_ctx, "event_bus", None) if self.run_ctx else None
+        event_bus = self.run_ctx.event_bus if self.run_ctx else None
         return StreamEventEmitter(self, event_bus=event_bus)
 
     async def handle_confirmation(self, tool: Tool, args: dict[str, Any]) -> ConfirmationResult:
@@ -250,6 +274,10 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         agent_name: str,
         agent_type: str,
         parent_session_id: str | None = None,
+        *,
+        spawn_mechanism: str = "foreground",
+        description: str = "",
+        tool_call_id: str | None = None,
         **metadata: Any,
     ) -> str:
         """Create a child session for a subagent delegation.
@@ -261,16 +289,26 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         standalone or test runs) a new session ID is generated without
         persistence.
 
+        When ``run_ctx`` is set (i.e. the agent is running inside a pooled
+        session), a ``SpawnSessionStart`` event is auto-emitted and a
+        ``done_event`` is registered on ``run_ctx.child_done_events`` so
+        that callers can await subagent completion.
+
         Args:
             agent_name: Name of the child agent.
             agent_type: Type of the child agent (``"native"``, ``"claude"``, etc.).
             parent_session_id: Explicit parent session ID.  When *None* the
                 current node's ``session_id`` is used as the parent.
+            spawn_mechanism: How the subagent is created — ``"foreground"``
+                for synchronous delegation, ``"task"`` for background.
+            description: Human-readable description of the spawn operation.
+            tool_call_id: ID of the tool call that triggered the spawn.
             **metadata: Additional metadata to attach to the child session.
 
         Returns:
             The child session ID string.
         """
+        child_sid: str
         pool = self.node.agent_pool
         if pool is not None and pool.session_pool is not None:
             effective_parent = parent_session_id or self.node._events.session_id
@@ -286,11 +324,46 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                     agent_type=agent_type,
                     **metadata,
                 )
-                return child_session.session_id
-        # Fallback: no pool, no session_pool, or no parent — generate ephemeral ID.
-        from agentpool.utils.identifiers import generate_session_id
+                child_sid = child_session.session_id
+            else:
+                from agentpool.utils.identifiers import generate_session_id
 
-        return generate_session_id()
+                child_sid = generate_session_id()
+        else:
+            # Fallback: no pool, no session_pool — generate ephemeral ID.
+            from agentpool.utils.identifiers import generate_session_id
+
+            child_sid = generate_session_id()
+
+        # Auto-emit SpawnSessionStart and register done_event when running
+        # inside a pooled session (run_ctx is set).  In standalone/test mode
+        # (run_ctx is None) this is skipped.
+        if self.run_ctx is not None:
+            child_depth = self.run_ctx.depth + 1
+            if child_depth > MAX_SUBAGENT_DEPTH:
+                raise SubagentDepthError(
+                    f"Subagent depth {child_depth} exceeds limit {MAX_SUBAGENT_DEPTH}",
+                )
+            from agentpool.agents.events.events import SpawnSessionStart
+
+            event_spawn_mechanism: Literal["task", "spawn"] = (
+                "task" if spawn_mechanism == "task" else "spawn"
+            )
+            spawn_event = SpawnSessionStart(
+                child_session_id=child_sid,
+                parent_session_id=self.run_ctx.session_id,
+                tool_call_id=tool_call_id or self.tool_call_id,
+                spawn_mechanism=event_spawn_mechanism,
+                source_name=agent_name,
+                source_type="agent",
+                depth=child_depth,
+                description=description,
+            )
+            await self.events.emit_event(spawn_event)
+            done_event = anyio.Event()
+            self.run_ctx.child_done_events[child_sid] = done_event
+
+        return child_sid
 
     @property
     def overlay_fs(self) -> OverlayFileSystem:
