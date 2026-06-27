@@ -18,6 +18,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
+import warnings
 
 import anyio
 from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
@@ -1645,6 +1646,14 @@ class SessionController:
         Args:
             session_id: The session whose run should be cancelled.
         """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
+            warnings.warn(
+                "cancel_run_for_session is deprecated when AGENTPOOL_USE_RUN_TURN is enabled. "
+                "Use RunHandle methods directly.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return
         session = self.get_session(session_id)
         if session is None:
             return
@@ -1661,7 +1670,7 @@ class SessionController:
         session_id: str,
         initial_prompt: Any,
         agent: BaseAgent[Any, Any] | None = None,
-    ) -> RunHandle:
+    ) -> RunHandle | None:
         """Create a new RunHandle for a session.
 
         Args:
@@ -1671,11 +1680,19 @@ class SessionController:
                 instead of ``session.metadata["agent_type"]``.
 
         Returns:
-            A new RunHandle.
+            A new RunHandle, or None when AGENTPOOL_USE_RUN_TURN is enabled.
 
         Raises:
             ValueError: If the session does not exist.
         """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
+            warnings.warn(
+                "_create_run is deprecated when AGENTPOOL_USE_RUN_TURN is enabled. "
+                "Use RunHandle methods directly.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return None
         session = self.get_session(session_id)
         if session is None:
             raise ValueError("Session not found")
@@ -1699,6 +1716,14 @@ class SessionController:
         Args:
             run_id: The run ID to clean up.
         """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
+            warnings.warn(
+                "_cleanup_run is deprecated when AGENTPOOL_USE_RUN_TURN is enabled. "
+                "Use RunHandle methods directly.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return
         run_handle = self._runs.pop(run_id, None)
         if run_handle is not None:
             run_handle.complete_event.set()
