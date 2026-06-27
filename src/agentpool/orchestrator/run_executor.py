@@ -344,6 +344,15 @@ class RunExecutor:
                     logger.debug("Run aborted by user — treating as graceful cancellation")
                     run_ctx.cancelled = True
                     # Do NOT set iteration_error — route to graceful completion path
+                    # Capture partial messages (tool calls, partial results) so they
+                    # enter conversation history. Without this, the tool call that
+                    # triggered the abort (e.g. question_for_user) is lost, leaving
+                    # a dangling tool call with no result in the next turn's history.
+                    if iteration_messages is None:
+                        try:
+                            iteration_messages = agent_run.all_messages()
+                        except Exception:
+                            logger.debug("Could not retrieve agent_run messages after RunAbortedError")
                 except asyncio.CancelledError:
                     logger.debug("Agent iteration task cancelled")
                     raise
@@ -371,7 +380,26 @@ class RunExecutor:
 
             # Fallback: cancelled before any response was produced (e.g. RunAbortedError)
             if response_msg is None:
-                response_msg = _make_interrupted_msg()
+                # Build response from captured iteration messages if available,
+                # so the assistant response includes partial content (tool calls,
+                # text generated before abort) instead of a bare [Interrupted].
+                if iteration_messages is not None:
+                    partial_content = extract_text_from_messages(
+                        iteration_messages,
+                        include_interruption_note=True,
+                    )
+                    response_msg = ChatMessage(
+                        content=partial_content,
+                        role="assistant",
+                        name=self._agent.name,
+                        message_id=message_id,
+                        session_id=session_id,
+                        parent_id=user_msg.message_id,
+                        response_time=time.perf_counter() - start_time,
+                        finish_reason="stop",
+                    )
+                else:
+                    response_msg = _make_interrupted_msg()
                 await event_bus.publish(
                     session_id,
                     StreamCompleteEvent(message=response_msg, cancelled=True),
