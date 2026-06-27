@@ -1,78 +1,104 @@
 ## ADDED Requirements
 
-### Requirement: Session-level work stream for post-turn messages
-Each session SHALL have an `anyio.MemoryObjectStream[WorkItem]` as the sole channel for delivering post-turn messages (steer, followup, background task results). The stream SHALL be created when the session is initialized and closed when the session is destroyed.
+### Requirement: Background task registration via pending_background_tasks counter
+Tools that spawn background tasks SHALL increment `run_ctx.pending_background_tasks` before spawning and decrement it in `finally` when the task completes. The `background_tasks_complete` asyncio.Event SHALL be initially set (via custom factory, not `default_factory=asyncio.Event` which creates an unset event) and cleared when counter > 0 and set when counter returns to 0. A `steer_callback` on `AgentRunContext` SHALL provide tools with a path to call `steer()` without direct `TurnRunner` access.
 
-#### Scenario: Work stream created on session init
-- **WHEN** a `SessionState` is created
-- **THEN** it SHALL have a `work_send`/`work_receive` pair of `anyio.MemoryObjectStream`
+#### Scenario: Tool increments on spawn
+- **WHEN** a tool spawns a background task
+- **THEN** `run_ctx.pending_background_tasks` SHALL be incremented by 1 before `asyncio.create_task()`
+- **AND** `run_ctx.background_tasks_complete` SHALL be cleared
 
-#### Scenario: Work stream closed on session destroy
-- **WHEN** a session is closed
-- **THEN** the `work_send` stream SHALL be closed, causing `EndOfStream` on the receive side
+#### Scenario: Tool decrements on completion
+- **WHEN** a background task completes (success, error, or cancellation)
+- **THEN** `run_ctx.pending_background_tasks` SHALL be decremented by 1 in a `finally` block
+- **AND** if counter reaches 0, `run_ctx.background_tasks_complete` SHALL be set
 
-### Requirement: WorkItem typed union for all post-turn messages
-All post-turn messages SHALL be one of a typed `WorkItem` union: `SteerItem` (for steer/background-task messages) or `FollowupItem` (for followup/inject messages).
+#### Scenario: Counter defaults to 0
+- **WHEN** an `AgentRunContext` is created
+- **THEN** `pending_background_tasks` SHALL be 0
+- **AND** `background_tasks_complete` SHALL be set (via custom factory `_create_set_event()`, NOT `default_factory=asyncio.Event` which creates an unset event)
+- **AND** `steer_callback` SHALL be None (set by `TurnRunner` when creating the `RunHandle`)
 
-#### Scenario: SteerItem carries message and kwargs
-- **WHEN** `steer()` is called
-- **THEN** a `SteerItem(message, kwargs)` SHALL be written to the work stream
+### Requirement: RunExecutor waits for background tasks before StreamCompleteEvent
+After `agent_iteration_task` completes and before `StreamCompleteEvent` is published, `RunExecutor.execute()` SHALL check `run_ctx.pending_background_tasks`. If > 0, it SHALL `await run_ctx.background_tasks_complete.wait()`. No timeout SHALL be used — the wait blocks indefinitely until the counter reaches 0 or the session is cancelled.
 
-#### Scenario: FollowupItem carries prompts and kwargs
-- **WHEN** `followup()` is called
-- **THEN** a `FollowupItem(prompts, kwargs)` SHALL be written to the work stream
+#### Scenario: No background tasks → immediate StreamCompleteEvent
+- **WHEN** `run_ctx.pending_background_tasks == 0` after agent iteration
+- **THEN** `StreamCompleteEvent` SHALL be published immediately (no wait)
 
-### Requirement: steer() writes to work stream instead of TOCTOU branching
-The `steer()` method SHALL use `match session.turn_state` to route messages. In `RUNNING` state, it SHALL enqueue directly via `agent_run.enqueue()`. In all other states, it SHALL write a `SteerItem` to the work stream. It SHALL NOT call `receive_request()` for the idle case.
+#### Scenario: Background tasks pending → wait
+- **WHEN** `run_ctx.pending_background_tasks > 0` after agent iteration
+- **THEN** `RunExecutor` SHALL `await run_ctx.background_tasks_complete.wait()` before proceeding
 
-#### Scenario: steer during RUNNING state enqueues directly
-- **WHEN** `steer()` is called and `turn_state == RUNNING`
-- **THEN** the message SHALL be enqueued via `agent_run.enqueue(priority="asap")`
+#### Scenario: Session close during wait → cancelled StreamCompleteEvent
+- **WHEN** session is closed while waiting for background tasks
+- **THEN** `run_ctx.cancelled` SHALL be set to True
+- **AND** `background_tasks_complete` SHALL be set (to unblock the wait)
+- **AND** `StreamCompleteEvent(cancelled=True)` SHALL be published
 
-#### Scenario: steer during non-RUNNING state writes to work stream
-- **WHEN** `steer()` is called and `turn_state != RUNNING`
-- **THEN** a `SteerItem` SHALL be written to `session.work_send`
+#### Scenario: No timeout used
+- **WHEN** RunExecutor is waiting for background tasks
+- **THEN** no timeout SHALL be applied — `await event.wait()` blocks indefinitely
 
-#### Scenario: steer returns True for RUNNING, False otherwise
-- **WHEN** `steer()` is called
-- **THEN** it SHALL return `True` if the message was delivered in-turn, `False` if queued
+### Requirement: Re-iteration with queued steer messages
+When background tasks complete and their steer messages were queued (because `agent_run` was None when `steer()` was called), `RunExecutor` SHALL re-iterate with the queued messages as new prompts. The re-iteration happens within the same `execute()` call, before `StreamCompleteEvent` is published.
 
-### Requirement: followup() always writes to work stream
-The `followup()` method SHALL always write a `FollowupItem` to the work stream, regardless of turn state.
+#### Scenario: Steer message queued during wait → re-iterate
+- **WHEN** a background task completes and calls `steer()` while `agent_run is None` (iteration has exited)
+- **AND** `run_ctx` is not completed (RunExecutor still in execute())
+- **THEN** the steer message SHALL be appended to `run_ctx.queued_steer_messages`
+- **AND** after `background_tasks_complete` is set, RunExecutor SHALL re-iterate with queued messages as prompts
 
-#### Scenario: followup writes FollowupItem
-- **WHEN** `followup()` is called
-- **THEN** a `FollowupItem` SHALL be written to `session.work_send`
+#### Scenario: No queued messages → proceed to StreamCompleteEvent
+- **WHEN** `background_tasks_complete` is set and `queued_steer_messages` is empty
+- **THEN** `StreamCompleteEvent` SHALL be published immediately
 
-### Requirement: run_loop consumes from work stream with timeout
-The `run_loop()` method SHALL consume `WorkItem`s from the work stream after each `_run_turn_unlocked()` call, using a configurable timeout (default 30s). If no item arrives before the timeout, `run_loop` SHALL exit.
+#### Scenario: Re-iteration spawns new background tasks → loop continues
+- **WHEN** re-iteration with steer messages spawns new background tasks
+- **THEN** the counter SHALL be reset to 0 before re-iteration
+- **AND** the wait loop SHALL continue until all new background tasks complete and no more steer messages are queued
 
-#### Scenario: run_loop processes SteerItem from work stream
-- **WHEN** `run_loop` receives a `SteerItem` from the work stream
-- **THEN** it SHALL call `_run_turn_unlocked(session_id, message)` with the item's message
+### Requirement: steer() routes to queued_steer_messages when RunExecutor is waiting
+When `steer()` is called and `agent_run is None` but `run_ctx` is not completed (RunExecutor in wait loop), the message SHALL be written to `run_ctx.queued_steer_messages` instead of `_post_turn_injections`.
 
-#### Scenario: run_loop processes FollowupItem from work stream
-- **WHEN** `run_loop` receives a `FollowupItem` from the work stream
-- **THEN** it SHALL call `_run_turn_unlocked(session_id, *prompts)` with the item's prompts
+#### Scenario: Steer during active iteration → enqueue asap (unchanged)
+- **WHEN** `steer()` is called and `agent_run is not None`
+- **THEN** the message SHALL be enqueued via `agent_run.enqueue(priority="asap")` (existing behavior, unchanged)
 
-#### Scenario: run_loop exits on timeout
-- **WHEN** no `WorkItem` arrives within the configured timeout
-- **THEN** `run_loop` SHALL exit cleanly
+#### Scenario: Steer during RunExecutor wait → queue for re-iteration
+- **WHEN** `steer()` is called, `agent_run is None`, and `run_ctx.completed == False`
+- **THEN** the message SHALL be appended to `run_ctx.queued_steer_messages`
 
-#### Scenario: run_loop exits on EndOfStream
-- **WHEN** the work stream is closed (session destroyed)
-- **THEN** `run_loop` SHALL exit cleanly
+#### Scenario: Steer after execute() returned → existing fallback (unchanged)
+- **WHEN** `steer()` is called, `agent_run is None`, and `run_ctx.completed == True`
+- **THEN** the message SHALL fall through to `_post_turn_injections` (existing behavior, unchanged)
 
-### Requirement: Work stream provides backpressure via max_buffer_size
-The work stream SHALL have a configurable `max_buffer_size` (default 256). If the stream buffer is full, `send_nowait` SHALL raise `anyio.WouldBlock`, allowing callers to apply their own backpressure.
+### Requirement: Single StreamCompleteEvent per execute() call
+`RunExecutor.execute()` SHALL publish exactly one `StreamCompleteEvent` per call, after all background tasks and re-iterations are complete. Intermediate iteration results SHALL NOT produce separate `StreamCompleteEvent`s.
 
-#### Scenario: Full stream raises WouldBlock
-- **WHEN** the work stream buffer is full and a caller tries to send
-- **THEN** the caller SHALL receive `anyio.WouldBlock`
+#### Scenario: Initial iteration + re-iteration → single StreamCompleteEvent
+- **WHEN** initial iteration completes, background task completes, re-iteration runs
+- **THEN** exactly one `StreamCompleteEvent` SHALL be published with the final response
 
-### Requirement: _post_turn_injections, _post_turn_prompts, _safe_auto_resume, _trigger_auto_resume removed
-The dictionary-based queuing mechanisms and the auto-resume task spawning SHALL be removed. The work stream and the inline consume loop in `run_loop` replace all of them.
+### Requirement: Session close unblocks background task wait
+When a session is closed (via `close_session()`), `run_ctx.cancelled` SHALL be set to True and `background_tasks_complete` SHALL be set **BEFORE** the existing 30-second `complete_event.wait()` call in `close_session()`. This immediately unblocks any `event.wait()` in RunExecutor. The flags SHALL NOT be set in `_run_turn_unlocked()`'s finally block — the finally block runs AFTER `execute()` returns, so it cannot unblock the wait loop, and setting `cancelled = True` there would incorrectly mark every normal completion as cancelled.
 
-#### Scenario: Queued work processed within same run_loop
-- **WHEN** a background task calls `steer()` during `run_loop`'s consume loop
-- **THEN** the `SteerItem` SHALL be processed within the same `run_loop`, before it exits
+#### Scenario: close_session during background task wait
+- **WHEN** `close_session()` is called while RunExecutor is waiting for background tasks
+- **THEN** `run_ctx.cancelled` SHALL be set to True BEFORE the 30-second `complete_event.wait()`
+- **AND** `run_ctx.background_tasks_complete` SHALL be set
+- **AND** RunExecutor SHALL exit the wait loop and publish `StreamCompleteEvent(cancelled=True)`
+- **AND** `close_session()` SHALL return quickly (not wait 30 seconds)
+
+### Requirement: Message history propagated to re-iteration
+When re-iterating with queued steer messages, `RunExecutor` SHALL update the `message_history` passed to `agentlet.iter()` with the messages from the prior iteration (captured via `agent_run.all_messages()`). This ensures the agent sees the full conversation context including prior iterations' responses. The capture SHALL happen **INSIDE** the `async with agentlet.iter(...)` block (before `__aexit__` is called), not after the block exits, because `all_messages()` may be unreliable after context manager cleanup.
+
+#### Scenario: Re-iteration sees prior iteration's response
+- **WHEN** re-iteration runs with steer messages
+- **THEN** the `message_history` passed to `agentlet.iter()` SHALL include all messages from the prior iteration
+- **AND** the agent SHALL be able to reference its prior response in the new iteration
+
+#### Scenario: iteration_messages captured inside async with block
+- **WHEN** `agent_iteration_task` captures `iteration_messages`
+- **THEN** the capture SHALL happen inside the `async with agentlet.iter(...)` block
+- **AND** if an exception occurs inside the block, `iteration_messages` may not be captured (acceptable — error paths don't need re-iteration)

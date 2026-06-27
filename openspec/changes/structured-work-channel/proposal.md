@@ -1,27 +1,37 @@
 ## Why
 
-Background tasks spawned during an agent turn (e.g., code review, web search) often complete after the turn has ended. The current `steer()` and `followup()` mechanisms rely on TOCTOU-prone `is None` checks on `session.current_run_id` and `run_handle.active_agent_run` to decide whether a message should be injected into the active turn or queued for later. This race condition causes background task completion messages to be processed in a separate `run_loop` that the ACP client never sees (it already received `turn_complete`). The turn lifecycle fundamentally doesn't reflect reality: the turn ends before all work spawned during it is done.
+Background tasks (subagents, code review, web search) spawned during an agent turn often complete after the agent has finished its response. The current `steer()` mechanism has two windows:
+
+1. **During iteration** (`agent_run` active): `steer()` → `agent_run.enqueue(asap)` → PydanticAI picks up the message mid-turn. This already works correctly.
+2. **After iteration, before `StreamCompleteEvent`** (`agent_run` cleared in `finally`, RunExecutor still in `execute()`): `steer()` sees `agent_run is None` → falls through to `_post_turn_injections` or `receive_request()`. The result is processed in a **new turn** with its own `StreamCompleteEvent` → ACP client sees `end_turn` and stops listening. The background task's result is lost.
+
+The root cause is that `RunExecutor.execute()` publishes `StreamCompleteEvent` immediately after iteration completes, without waiting for background tasks. The turn declares completion before all work spawned during it is done.
 
 ## What Changes
 
-- **New structured work channel**: Replace `_post_turn_injections`/`_post_turn_prompts` dicts with a `anyio.create_memory_object_stream` on `SessionState`, unifying steer/followup/background-task messages into a single ordered channel with backpressure.
-- **Explicit turn state machine**: Replace TOCTOU `current_run_id is None` + `active_agent_run is None` branching with a typed `TurnState` enum (`IDLE`, `BOOTING`, `RUNNING`, `TEARDOWN`), eliminating the implicit "window" states where code cannot correctly determine what to do.
-- **`run_loop` consumes from the work stream**: Instead of a fixed-iteration auto-resume loop that polls dictionaries, `run_loop` blocks on `work_receive.receive()` with timeout, allowing natural extension of the turn lifecycle to cover background task completion.
-- **Remove dead code**: The `_post_turn_injections`/`_post_turn_prompts` dicts, `_safe_auto_resume`, and `_trigger_auto_resume` become unnecessary once the work stream is in place.
-- **Red-flag test passes**: `test_background_task_wakeup_within_turn` (already committed) stops failing.
+- **`pending_background_tasks: int` counter** on `AgentRunContext` — tools increment before spawning, decrement in `finally` on completion
+- **`background_tasks_complete: asyncio.Event`** on `AgentRunContext` — set when counter reaches 0, cleared when counter > 0 (initially set via custom factory)
+- **`queued_steer_messages: list[str]`** on `AgentRunContext` — collects steer messages that arrive after iteration exits but before `StreamCompleteEvent`
+- **`steer_callback: Callable | None`** on `AgentRunContext` — set by `TurnRunner`, allows tools to call `steer()` without direct `TurnRunner` reference
+- **Re-iteration loop in `RunExecutor.execute()`** — after iteration completes, if counter > 0, wait for `background_tasks_complete`. When event fires, check `queued_steer_messages`. If non-empty, start a new iteration with those messages as prompts. Repeat until counter=0 and queue empty. Then publish `StreamCompleteEvent`.
+- **`steer()` routing unchanged for active `agent_run`** — mid-turn injection via `enqueue(asap)` already works
+- **`steer()` routing for post-iteration window** — when `agent_run is None` but `run_ctx` is still alive (RunExecutor waiting), write to `run_ctx.queued_steer_messages` instead of `_post_turn_injections`
+- **`close_session()` unblock** — set `cancelled=True` + `background_tasks_complete.set()` BEFORE the existing 30s wait, to immediately unblock the wait loop
+- **No timeout** — `await event.wait()` blocks indefinitely. Session close is the sole exit
+- **Zero changes to**: `run_loop`, `_process_queued_work`, EventBus, protocol converters
 
 ## Capabilities
 
 ### New Capabilities
-- `structured-work-channel`: Per-session `anyio.MemoryObjectStream[WorkItem]` for all post-turn message delivery (steer, followup, background task notifications), with typed WorkItem union.
-- `turn-state-machine`: Explicit `TurnState` enum eliminating TOCTOU race conditions in steer/followup routing.
+- `background-task-lifecycle`: Counter-based background task tracking with re-iteration support in RunExecutor
 
 ### Modified Capabilities
-- *(none — this is entirely new infrastructure, no existing spec behavior changes)*
+- *(none)*
 
 ## Impact
 
-- **Core module** (`src/agentpool/orchestrator/core.py`): ~100 lines changed. `SessionState` gains `work_send`/`work_receive` and `turn_state` fields. `steer()`/`followup()` simplified to single-channel pattern. `run_loop()` rewritten to consume from work stream. `_process_queued_work` simplified. `_safe_auto_resume`, `_trigger_auto_resume` removed.
-- **ACP event converter** (`acp_server/event_converter.py`): No changes — the fix is protocol-agnostic.
-- **TurnRunner constructor** (`core.py`): `enable_auto_resume` parameter may change behavior (stream consumption replaces polling).
-- **Test files**: Red-flag test already exists. Existing steer/followup/auto-resume tests need minor adaptation for the new channel pattern.
+- **`src/agentpool/agents/context.py`**: +4 fields (`pending_background_tasks`, `background_tasks_complete`, `queued_steer_messages`, `steer_callback`) + `_create_set_event()` factory
+- **`src/agentpool/orchestrator/run_executor.py`**: ~35 lines added (wait loop + re-iteration + `iteration_messages` capture inside `async with` block)
+- **`src/agentpool/orchestrator/core.py`**: ~10 lines changed — `steer()` routing (~5 lines for `queued_steer_messages` path) + `close_session()` unblock (~5 lines before the 30s wait) + `steer_callback` wiring in `_run_turn_unlocked`
+- **Tool implementations**: +1 increment/decrement per background task spawn (opt-in, minimal)
+- **No changes to**: `run_loop`, `_process_queued_work`, `_safe_auto_resume`, EventBus, ACP/OpenCode/AG-UI converters

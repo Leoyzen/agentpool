@@ -319,7 +319,8 @@ async def test_run_executor_next_loop_fires_after_node_run_hooks(
     run_ctx.event_bus = event_bus
     stream = await event_bus.subscribe("sess-next-loop", scope="session")
 
-    executor = RunExecutor(test_agent, run_handle=run_handle)
+    run_ctx._run_handle = run_handle
+    executor = RunExecutor(test_agent)
 
     events: list[object] = []
     response_content: str | None = None
@@ -389,7 +390,8 @@ async def test_run_executor_next_loop_clears_agent_run_on_error(
         agent_type="native",
     )
 
-    executor = RunExecutor(test_agent, run_handle=run_handle)
+    run_ctx._run_handle = run_handle
+    executor = RunExecutor(test_agent)
 
     # Patch get_agentlet to raise immediately
     original_get_agentlet = test_agent.get_agentlet

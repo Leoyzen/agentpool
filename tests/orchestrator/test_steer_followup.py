@@ -289,3 +289,113 @@ async def test_non_native_followup_queues_via_injection_manager(
 
     run_ctx.injection_manager.queue.assert_called_once_with("acp followup message")
     run_ctx.injection_manager.inject.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Native steer active → enqueue(asap), queued_steer_messages untouched
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_native_steer_active_does_not_touch_queued_steer_messages(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """When steer is called on a native agent with an active AgentRun,
+    it enqueues via agent_run.enqueue(asap) and does NOT touch
+    queued_steer_messages — mid-turn injection, no re-iteration."""
+    agent = _make_native_agent()
+    await _setup_session_with_agent(controller, "sess-7", agent, mock_pool)
+
+    mock_agent_run = MagicMock()
+    mock_agent_run.enqueue = MagicMock()
+    run_ctx = AgentRunContext()
+    run_handle = _make_run_handle("sess-7", "native", run_ctx=run_ctx)
+    run_handle.active_agent_run = mock_agent_run
+    run_handle.status = RunStatus.running
+    controller._runs[run_handle.run_id] = run_handle
+
+    session = controller.get_session("sess-7")
+    assert session is not None
+    session.current_run_id = run_handle.run_id
+
+    result = await turn_runner.steer("sess-7", "mid-turn steer")
+
+    assert result is True
+    mock_agent_run.enqueue.assert_called_once_with("mid-turn steer", priority="asap")
+    assert run_ctx.queued_steer_messages == []
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Native steer — agent_run is None, run not completed → queued_steer_messages
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_native_steer_post_iteration_queue(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """When steer is called and agent_run is None (RunExecutor in wait loop)
+    but run_ctx.completed is False, the message is appended to
+    queued_steer_messages and returns False."""
+    agent = _make_native_agent()
+    await _setup_session_with_agent(controller, "sess-8", agent, mock_pool)
+
+    run_ctx = AgentRunContext()
+    run_ctx.completed = False
+    run_handle = _make_run_handle("sess-8", "native", run_ctx=run_ctx)
+    run_handle.active_agent_run = None  # RunExecutor between iterations
+    run_handle.status = RunStatus.running
+    controller._runs[run_handle.run_id] = run_handle
+
+    session = controller.get_session("sess-8")
+    assert session is not None
+    session.current_run_id = run_handle.run_id
+
+    result = await turn_runner.steer("sess-8", "post-iteration steer")
+
+    assert result is False
+    assert run_ctx.queued_steer_messages == ["post-iteration steer"]
+    # _post_turn_injections should NOT be used in this path
+    assert "sess-8" not in turn_runner._post_turn_injections
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Native steer — agent_run is None, run completed → _post_turn_injections fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_native_steer_completed_run_fallback(
+    controller: SessionController,
+    turn_runner: TurnRunner,
+    mock_pool: MagicMock,
+) -> None:
+    """When steer is called and agent_run is None AND run_ctx.completed is True,
+    the message falls through to _post_turn_injections (existing behavior)."""
+    agent = _make_native_agent()
+    await _setup_session_with_agent(controller, "sess-9", agent, mock_pool)
+
+    run_ctx = AgentRunContext()
+    run_ctx.completed = True
+    run_handle = _make_run_handle("sess-9", "native", run_ctx=run_ctx)
+    run_handle.active_agent_run = None
+    run_handle.status = RunStatus.running
+    controller._runs[run_handle.run_id] = run_handle
+
+    session = controller.get_session("sess-9")
+    assert session is not None
+    session.current_run_id = run_handle.run_id
+
+    # Mock auto-resume to avoid side effects
+    turn_runner._safe_auto_resume = AsyncMock()  # type: ignore[method-assign]
+
+    result = await turn_runner.steer("sess-9", "completed-run steer")
+
+    assert result is False
+    assert turn_runner._post_turn_injections["sess-9"] == ["completed-run steer"]
+    # queued_steer_messages should NOT be used when this path
+    assert run_ctx.queued_steer_messages == []

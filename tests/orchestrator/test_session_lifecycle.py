@@ -19,7 +19,8 @@ import anyio
 
 import pytest
 
-from agentpool.agents.events import RunFailedEvent, RunStartedEvent
+from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
+from agentpool.messaging.messages import ChatMessage
 from agentpool.orchestrator.core import (
     EventBus,
     SessionController,
@@ -777,3 +778,126 @@ async def test_process_prompt_fallback_with_kwargs(
     # When kwargs are passed, it should go through the legacy path
     await session_pool.process_prompt("sess-4", "hello", extra_kwarg=True)
     # Should complete without error
+
+
+# ============================================================================
+# close_session background task unblock
+# ============================================================================
+
+
+@pytest.mark.anyio
+async def test_close_session_unblocks_background_task_wait(
+    session_pool: SessionPool,
+    mock_pool: MagicMock,
+) -> None:
+    """close_session sets cancelled + background_tasks_complete so the run finishes promptly.
+
+    Given: A run with a pending background task (background_tasks_complete cleared).
+    When:  close_session() is called during the wait.
+    Then:  close_session returns in < 5s (not 30s) and StreamCompleteEvent(cancelled=True) is published.
+    """
+    stream_started = asyncio.Event()
+
+    async def stream_with_bg_wait(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamCompleteEvent]:
+        stream_started.set()
+        # Simulate a pending background task
+        run_ctx.background_tasks_complete.clear()
+        # Wait for background tasks to complete (or be unblocked by close_session)
+        await asyncio.wait_for(
+            run_ctx.background_tasks_complete.wait(), timeout=10.0
+        )
+        yield StreamCompleteEvent(
+            message=ChatMessage(content="done", role="assistant"),
+            cancelled=run_ctx.cancelled,
+            session_id="sess-bg-1",
+        )
+
+    agent = MockAgent()
+    agent._stream_impl = stream_with_bg_wait
+
+    await _setup_session(session_pool.sessions, "sess-bg-1", agent, mock_pool)
+
+    # Subscribe to event bus before starting the run
+    event_queue = await session_pool.event_bus.subscribe("sess-bg-1")
+    events: list[Any] = []
+
+    async def _consume() -> None:
+        try:
+            while True:
+                envelope = await asyncio.wait_for(
+                    event_queue.receive(), timeout=2.0
+                )
+                events.append(envelope)
+        except (asyncio.TimeoutError, anyio.EndOfStream):
+            pass
+
+    consumer = asyncio.create_task(_consume())
+
+    # Start a run
+    await session_pool.sessions.receive_request(
+        "sess-bg-1", "hello", priority="when_idle"
+    )
+    await asyncio.wait_for(stream_started.wait(), timeout=1.0)
+
+    # Call close_session — should unblock the background task wait
+    # This should complete in well under 30s because we set background_tasks_complete
+    await asyncio.wait_for(session_pool.close_session("sess-bg-1"), timeout=5.0)
+
+    # Wait for consumer to finish (gets EndOfStream from event_bus.close_session)
+    await asyncio.wait_for(consumer, timeout=3.0)
+
+    # Assert StreamCompleteEvent(cancelled=True) was published
+    complete_events = [
+        e
+        for e in events
+        if isinstance(getattr(e, "event", e), StreamCompleteEvent)
+    ]
+    assert len(complete_events) >= 1, (
+        f"Expected at least 1 StreamCompleteEvent, got {len(complete_events)} "
+        f"(total events: {len(events)})"
+    )
+    assert complete_events[0].event.cancelled is True
+
+
+@pytest.mark.anyio
+async def test_close_session_no_pending_background_tasks(
+    session_pool: SessionPool,
+    mock_pool: MagicMock,
+) -> None:
+    """close_session works normally when no background tasks are pending.
+
+    Given: A run that completes with no pending background tasks.
+    When:  close_session() is called after the run completes.
+    Then:  close_session returns promptly and the session is closed (no regression).
+    """
+    agent = MockAgent()
+
+    async def quick_stream(
+        run_ctx: AgentRunContext,
+        *prompts: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamCompleteEvent]:
+        yield StreamCompleteEvent(
+            message=ChatMessage(content="done", role="assistant"),
+            cancelled=False,
+            session_id="sess-bg-2",
+        )
+
+    agent._stream_impl = quick_stream
+    await _setup_session(session_pool.sessions, "sess-bg-2", agent, mock_pool)
+
+    # Start a run and let it complete
+    await session_pool.sessions.receive_request(
+        "sess-bg-2", "hello", priority="when_idle"
+    )
+    await asyncio.sleep(0.1)  # Let it complete
+
+    # close_session should proceed without waiting (no pending background tasks)
+    await asyncio.wait_for(session_pool.close_session("sess-bg-2"), timeout=5.0)
+
+    # Session should be closed
+    assert session_pool.sessions.get_session("sess-bg-2") is None

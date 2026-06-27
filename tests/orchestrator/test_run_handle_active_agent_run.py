@@ -118,7 +118,8 @@ async def test_active_agent_run_none_after_normal_completion(
     run_handle: RunHandle,
 ) -> None:
     """active_agent_run must be None after normal execute() completion."""
-    executor = RunExecutor(test_agent, run_handle=run_handle)
+    run_ctx._run_handle = run_handle
+    executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
     await _collect_events(
@@ -148,7 +149,8 @@ async def test_active_agent_run_none_after_exception(
     run_handle: RunHandle,
 ) -> None:
     """active_agent_run must be None when execution raises."""
-    executor = RunExecutor(test_agent, run_handle=run_handle)
+    run_ctx._run_handle = run_handle
+    executor = RunExecutor(test_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
     # Patch get_agentlet to raise immediately
@@ -246,7 +248,8 @@ async def test_active_agent_run_none_after_cancellation(
 
     from agentpool.orchestrator.core import EventBus
 
-    executor = RunExecutor(slow_agent, run_handle=run_handle)
+    run_ctx._run_handle = run_handle
+    executor = RunExecutor(slow_agent)
     user_msg = ChatMessage.user_prompt("Say hello")
 
     event_bus = EventBus()

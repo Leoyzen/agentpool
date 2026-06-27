@@ -43,7 +43,6 @@ if TYPE_CHECKING:
     from agentpool.agents.context import AgentRunContext
     from agentpool.agents.native_agent.agent import Agent
     from agentpool.orchestrator.core import EventBus
-    from agentpool.orchestrator.run import RunHandle
 
 
 logger = get_logger(__name__)
@@ -54,12 +53,10 @@ class RunExecutor:
 
     Args:
         agent: The native Agent instance whose agentlet will be executed.
-        run_handle: Optional handle for tracking active agent run state.
     """
 
-    def __init__(self, agent: Agent[Any, Any], run_handle: RunHandle | None = None) -> None:
+    def __init__(self, agent: Agent[Any, Any]) -> None:
         self._agent = agent
-        self._run_handle = run_handle
         self._iteration_task: asyncio.Task[Any] | None = None
 
     async def execute(  # noqa: PLR0915, C901
@@ -132,6 +129,7 @@ class RunExecutor:
 
         iteration_error: BaseException | None = None
         response_msg: ChatMessage[Any] | None = None
+        iteration_messages: list[Any] | None = None
 
         try:
             await event_bus.publish(
@@ -165,12 +163,12 @@ class RunExecutor:
                 history_list = history_list[:-1]
             history = [m for run in history_list for m in run.to_pydantic_ai()]
 
-            async def agent_iteration_task() -> None:
+            async def agent_iteration_task(steer_prompts: list[str] | None = None) -> None:
                 """Background task that drives ``agentlet.iter()`` with ``next()``.
 
                 Publishes all node-level events directly to *event_bus*.
                 """
-                nonlocal iteration_error, response_msg
+                nonlocal iteration_error, response_msg, iteration_messages
                 # Capture the current task for _interrupt() compatibility.
                 # execute() no longer yields events, so the caller can't set
                 # _iteration_task from outside. The task must self-register.
@@ -197,13 +195,13 @@ class RunExecutor:
 
                 try:
                     async with agentlet.iter(
-                        prompts,
+                        steer_prompts if steer_prompts is not None else prompts,
                         deps=agent_deps,
                         message_history=history,
                         usage_limits=self._agent._default_usage_limits,
                     ) as agent_run:
-                        if self._run_handle is not None:
-                            self._run_handle.active_agent_run = agent_run
+                        if run_ctx._run_handle is not None:
+                            run_ctx._run_handle.active_agent_run = agent_run
                         node = agent_run.next_node
 
                         while True:
@@ -295,6 +293,8 @@ class RunExecutor:
                             if isinstance(node, End):
                                 break
 
+                        iteration_messages = agent_run.all_messages()
+
                     # Build final response message
                     if run_ctx.cancelled:
                         partial_content = extract_text_from_messages(
@@ -359,8 +359,8 @@ class RunExecutor:
                 finally:
                     self._iteration_task = None
                     self._agent._iteration_task = None
-                    if self._run_handle is not None:
-                        self._run_handle.active_agent_run = None
+                    if run_ctx._run_handle is not None:
+                        run_ctx._run_handle.active_agent_run = None
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(agent_iteration_task)
@@ -378,9 +378,35 @@ class RunExecutor:
                 )
                 return response_msg
 
+            # === RE-ITERATION LOOP ===
+            while True:
+                if run_ctx.cancelled:
+                    break
+                if run_ctx.pending_background_tasks > 0:
+                    await run_ctx.background_tasks_complete.wait()
+                    if run_ctx.cancelled:
+                        break
+                if not run_ctx.queued_steer_messages:
+                    break
+                # Re-iterate with queued steer messages
+                steer_msgs = run_ctx.queued_steer_messages.copy()
+                run_ctx.queued_steer_messages.clear()
+                run_ctx.pending_background_tasks = 0
+                run_ctx.background_tasks_complete.set()
+                if iteration_messages:
+                    history = iteration_messages
+                iteration_messages = None
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(agent_iteration_task, steer_msgs)
+                if iteration_error is not None:
+                    raise iteration_error  # noqa: TRY301
+                if response_msg is None:
+                    response_msg = _make_interrupted_msg()
+                    break
+
             await event_bus.publish(
                 session_id,
-                StreamCompleteEvent(message=response_msg),
+                StreamCompleteEvent(message=response_msg, cancelled=run_ctx.cancelled),
             )
             return response_msg
 

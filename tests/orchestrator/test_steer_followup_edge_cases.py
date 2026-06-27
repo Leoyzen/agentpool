@@ -304,7 +304,8 @@ async def test_active_agent_run_cleared_on_undrained_error() -> None:
         agent_type="native",
     )
 
-    executor = RunExecutor(test_agent, run_handle=run_handle)
+    run_ctx._run_handle = run_handle
+    executor = RunExecutor(test_agent)
 
     # Build a mock first node whose stream is an empty async iterable
     first_node = MagicMock(spec=ModelRequestNode)
@@ -410,9 +411,11 @@ async def test_session_close_during_steer_race_no_crash(
     result = await turn_runner.steer("sess-race", "race-steer-to-idle")
 
     assert result is False, "Steer on run without agent_run should return False (queued)"
-    # The message should be queued in _post_turn_injections
-    queued = turn_runner._post_turn_injections.get("sess-race", [])
-    assert len(queued) == 1, f"Expected 1 queued injection, got {len(queued)}"
+    # The message should be queued in run_ctx.queued_steer_messages
+    # (new path replaces old _post_turn_injections routing for native agents
+    # with an active run_ctx that hasn't completed)
+    queued = run_handle.run_ctx.queued_steer_messages
+    assert len(queued) == 1, f"Expected 1 queued steer message, got {len(queued)}"
     assert queued[0] == "race-steer-to-idle"
 
 

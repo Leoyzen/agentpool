@@ -1913,7 +1913,8 @@ class TurnRunner:
         run_ctx = run_handle.run_ctx
         # Wire run_handle for RunExecutor lifecycle management.
         # RunExecutor.execute() uses run_handle to set/clear active_agent_run.
-        run_ctx._run_handle = run_handle  # type: ignore[attr-defined]
+        run_ctx._run_handle = run_handle
+        run_ctx.steer_callback = self.steer
         run_ctx.deps = kwargs.get("deps")
         run_ctx.depth = kwargs.get("depth", 0)
         run_ctx.run_id = run_id
@@ -2279,7 +2280,7 @@ class TurnRunner:
 
         return False
 
-    async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:
+    async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:  # noqa: PLR0911
         """Inject a steer message with agent-type-aware routing.
 
         Routes based on agent type (native vs non-native) and session state
@@ -2322,6 +2323,12 @@ class TurnRunner:
                     if agent_run is not None:
                         agent_run.enqueue(message, priority="asap")
                         return True
+                    # RunExecutor may be in wait loop — queue for re-iteration
+                    if run_handle.run_ctx is not None:
+                        run_ctx = run_handle.run_ctx
+                        if not run_ctx.completed:
+                            run_ctx.queued_steer_messages.append(message)
+                            return False
                     # Run exists but agent_run not yet ready (PydanticAI
                     # iteration hasn't started).  Queue the message instead
                     # of calling receive_request(priority="steer") — that
@@ -3145,6 +3152,11 @@ class SessionPool:
                     run_handle = self.sessions._runs.get(run_id)
 
             if run_handle is not None:
+                # Unblock any background-task wait loop inside the run so
+                # complete_event can be set promptly instead of waiting 30s.
+                if run_handle.run_ctx is not None:
+                    run_handle.run_ctx.cancelled = True
+                    run_handle.run_ctx.background_tasks_complete.set()
                 try:
                     await asyncio.wait_for(run_handle.complete_event.wait(), timeout=30.0)
                 except TimeoutError:
