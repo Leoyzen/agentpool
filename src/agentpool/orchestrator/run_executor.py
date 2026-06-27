@@ -416,6 +416,11 @@ class RunExecutor:
                         await ev.wait()
                     if run_ctx.cancelled:
                         break
+                    # Yield once after child_done_events fire so that
+                    # complete_background_task (which sets the event in a
+                    # finally block) has a chance to run steer() and append
+                    # to queued_steer_messages before we check it below.
+                    await anyio.sleep(0)
                 if not run_ctx.queued_steer_messages:
                     break
                 # Re-iterate with queued steer messages
