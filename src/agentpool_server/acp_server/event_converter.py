@@ -134,6 +134,14 @@ class SubagentSessionInfo(BaseModel):
 
 
 @dataclass
+class SubagentContext:
+    """Parent context for a child session converter."""
+
+    parent_tool_call_id: str
+    subagent_type: str
+
+
+@dataclass
 class ACPEventConverter:
     """Converts agent stream events to ACP session updates.
 
@@ -150,8 +158,8 @@ class ACPEventConverter:
     """
 
     # Deprecated: kept for backward compatibility of constructor calls
-    subagent_display_mode: Literal["legacy", "zed"] = "legacy"
-    """How to display subagent output. "legacy" (default) or "zed"."""
+    subagent_display_mode: Literal["legacy", "zed", "qwen"] = "legacy"
+    """How to display subagent output. "legacy" (default), "zed", or "qwen"."""
 
     # Feature flag for TurnCompleteUpdate emission
     client_supports_turn_complete: bool = False
@@ -161,6 +169,9 @@ class ACPEventConverter:
     When False (default), no TurnCompleteUpdate is emitted for backward
     compatibility with clients that do not handle the update type.
     """
+
+    subagent_context: SubagentContext | None = None
+    """Parent context for child session converters. None for root sessions."""
 
     # Internal state
     _tool_states: dict[str, _ToolState] = field(default_factory=dict)
@@ -232,6 +243,17 @@ class ACPEventConverter:
 
         Idempotent — safe to call multiple times.
         """
+
+    @property
+    def subagent_meta(self) -> dict[str, Any] | None:
+        """Build _meta dict for subagent notifications. None for root sessions."""
+        if self.subagent_context is None:
+            return None
+        return {
+            "parentToolCallId": self.subagent_context.parent_tool_call_id,
+            "subagentType": self.subagent_context.subagent_type,
+            "provenance": "subagent",
+        }
 
     # =========================================================================
     # V2_EXTENSION: ACP V2 protocol hooks (no-op on V1)
@@ -693,6 +715,14 @@ class ACPEventConverter:
                         kind="other",
                         status="pending",
                         field_meta=_meta,
+                    )
+                elif self.subagent_display_mode == "qwen":
+                    tool_call_id = event.tool_call_id or str(uuid.uuid4())
+                    yield ToolCallStart(
+                        tool_call_id=tool_call_id,
+                        title=f"{source_name}: {description}" if description else source_name,
+                        kind="other",
+                        status="pending",
                     )
 
 

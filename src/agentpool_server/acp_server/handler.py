@@ -21,7 +21,7 @@ from acp.agent.acp_requests import ACPRequests
 from acp.schema.capabilities import ClientCapabilities
 from agentpool.agents.events.events import SpawnSessionStart
 from agentpool.log import get_logger
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentpool_server.acp_server.event_converter import ACPEventConverter, SubagentContext
 from agentpool_server.acp_server.input_provider import ACPInputProvider
 from agentpool_server.mixins import ConsumerShutdown, ProtocolEventConsumerMixin
 
@@ -121,8 +121,21 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 if event.spawn_mechanism == "task":
                     # Skip background tasks in non-zed modes only.
                     # Zed mode needs background task sessions too for card display.
-                    if self._event_converter_template.subagent_display_mode != "zed":
+                    if self._event_converter_template.subagent_display_mode not in ("zed", "qwen"):
                         return
+                # Create child converter with subagent context
+                client_supports_turn_complete = (
+                    self.client_capabilities is not None
+                    and self.client_capabilities.turn_complete is True
+                )
+                self._converters[child_sid] = ACPEventConverter(
+                    subagent_display_mode=self._event_converter_template.subagent_display_mode,
+                    client_supports_turn_complete=client_supports_turn_complete,
+                    subagent_context=SubagentContext(
+                        parent_tool_call_id=event.tool_call_id or "",
+                        subagent_type=event.source_name or "",
+                    ),
+                )
                 await self.start_event_consumer(child_sid)
                 # Register parent-child relationship BEFORE starting closure
                 # so the closure can safely pop the entry.
@@ -234,6 +247,8 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         Args:
             session_id: The session whose consumer is starting.
         """
+        if session_id in self._converters:
+            return  # Already created by _on_spawn_session_start
         client_supports_turn_complete = (
             self.client_capabilities is not None and self.client_capabilities.turn_complete is True
         )
@@ -269,6 +284,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 notification = SessionNotification(
                     session_id=effective_sid,
                     update=update,
+                    field_meta=converter.subagent_meta,
                 )
                 await self.client.session_update(notification)
         except (ConnectionResetError, BrokenPipeError) as e:
