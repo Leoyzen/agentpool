@@ -487,6 +487,20 @@ class EventBus:
 
         return receive_stream
 
+    def clear_replay_buffer(self, session_id: str) -> None:
+        """Clear the replay buffer for a session.
+
+        Removes all historical events from the replay buffer so that
+        new subscribers only receive events from this point forward.
+        This should be called at the start of each turn to prevent
+        stale events (including terminal events like StreamCompleteEvent)
+        from previous turns being replayed to new subscribers.
+
+        Args:
+            session_id: The session whose replay buffer to clear.
+        """
+        self._replay_buffers.pop(session_id, None)
+
     async def unsubscribe(
         self,
         session_id: str,
@@ -1973,6 +1987,13 @@ class TurnRunner:
         if _session is not None:
             _session._turn_owner_task = asyncio.current_task()
         _in_turn_context.set(True)
+        # Clear the replay buffer at the start of each turn so that
+        # new subscribers (e.g. run_stream's consumer) only receive
+        # events from THIS turn. Without this, stale events from
+        # previous turns (including StreamCompleteEvent) would be
+        # replayed, causing the consumer to prematurely break and
+        # cancel the native runner.
+        self.event_bus.clear_replay_buffer(session_id)
         # Track whether the agent already produced a StreamCompleteEvent.
         # If it did, subsequent exceptions (e.g. CancelledError from
         # generator cleanup) are NOT run failures — the agent completed
