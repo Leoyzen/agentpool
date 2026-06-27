@@ -22,7 +22,7 @@ from agentpool.orchestrator.core import SessionController, TurnRunner
 from .test_phase2_native_queue import _MockNonNativeAgent
 
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.deprecated]
 
 
 # ---------------------------------------------------------------------------

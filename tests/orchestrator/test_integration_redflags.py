@@ -45,6 +45,7 @@ async def _setup_session(
     return state
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_post_turn_inject_prompt_triggers_auto_resume_with_per_session_agent() -> None:
     """inject_prompt AFTER run_loop ends MUST trigger auto-resume for per-session agent.
@@ -113,6 +114,7 @@ async def test_post_turn_inject_prompt_triggers_auto_resume_with_per_session_age
     )
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_session_pool_inject_prompt_triggers_auto_resume() -> None:
     """SessionPool.inject_prompt() after run_loop MUST trigger auto-resume."""
@@ -161,6 +163,7 @@ async def test_session_pool_inject_prompt_triggers_auto_resume() -> None:
     )
 
 
+@pytest.mark.deprecated
 @pytest.mark.integration
 async def test_real_agentpool_sessionpool_inject_prompt_auto_resume() -> None:
     """Real AgentPool with SessionPool must auto-resume after inject_prompt."""
@@ -256,6 +259,7 @@ async def test_per_session_agent_session_id_set() -> None:
             pass
 
 
+@pytest.mark.deprecated
 @pytest.mark.integration
 async def test_turn_complete_update_after_auto_resume() -> None:
     """TurnCompleteUpdate MUST be emitted after each turn, including auto-resume turns."""
@@ -665,6 +669,7 @@ async def test_diagnostic_print_session_tree_state() -> None:
     assert pool.event_bus._session_tree == {}, "BUG: EventBus._session_tree is empty"
 
 
+@pytest.mark.deprecated
 @pytest.mark.integration
 async def test_shared_agent_inject_prompt_fallback_triggers_auto_resume() -> None:
     """Shared agent inject_prompt without session_id MUST fallback to SessionPool auto-resume.

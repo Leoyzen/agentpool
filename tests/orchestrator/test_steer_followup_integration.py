@@ -120,6 +120,7 @@ def _make_run_handle(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_steer_integration_enqueues_asap_through_turn_runner(
     controller: SessionController,
@@ -166,6 +167,7 @@ async def test_steer_integration_enqueues_asap_through_turn_runner(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_followup_integration_enqueues_when_idle_through_turn_runner(
     controller: SessionController,
@@ -210,6 +212,7 @@ async def test_followup_integration_enqueues_when_idle_through_turn_runner(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_native_agent_skips_manual_followup_loop_gating(
     controller: SessionController,

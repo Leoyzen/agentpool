@@ -666,6 +666,7 @@ async def test_event_bus_high_throughput_publish() -> None:
 # ============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.slow
 async def test_turn_runner_injection_overflow(
     mock_pool: MagicMock,
@@ -707,6 +708,7 @@ async def test_turn_runner_injection_overflow(
     await session_pool.shutdown()
 
 
+@pytest.mark.deprecated
 @pytest.mark.slow
 async def test_turn_runner_concurrent_injections(
     mock_pool: MagicMock,
@@ -750,6 +752,7 @@ async def test_turn_runner_concurrent_injections(
     await session_pool.shutdown()
 
 
+@pytest.mark.deprecated
 @pytest.mark.slow
 async def test_turn_runner_no_resource_leak_after_overflow(
     mock_pool: MagicMock,

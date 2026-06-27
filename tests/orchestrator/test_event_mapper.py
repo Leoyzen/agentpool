@@ -224,3 +224,41 @@ def test_tool_kind_map_lookup() -> None:
     assert result is not None
     assert isinstance(result, ToolCallStartEvent)
     assert result.kind == "execute"
+
+
+@pytest.mark.unit
+def test_result_without_start_returns_none() -> None:
+    """Given a FunctionToolResultEvent with no preceding start, map_event returns None."""
+    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+
+    result_event = FunctionToolResultEvent(
+        part=ToolReturnPart(
+            tool_name="bash",
+            tool_call_id="tc-orphan",
+            content="orphan result",
+        ),
+    )
+
+    result = mapper.map_event(result_event)
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_string_args_parsed_to_dict() -> None:
+    """Given a ToolCallPart with JSON string args, map_event parses them into raw_input dict."""
+    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+
+    event = FunctionToolCallEvent(
+        part=ToolCallPart(
+            tool_name="bash",
+            args='{"command": "echo hello"}',
+            tool_call_id="tc-str-args",
+        ),
+    )
+
+    result = mapper.map_event(event)
+
+    assert result is not None
+    assert isinstance(result, ToolCallStartEvent)
+    assert result.raw_input == {"command": "echo hello"}

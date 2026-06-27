@@ -13,7 +13,7 @@ import pytest
 from agentpool.orchestrator import SessionPool
 
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.deprecated]
 
 
 @pytest.fixture

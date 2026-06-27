@@ -14,7 +14,7 @@ import pytest
 from agentpool.orchestrator.core import SessionController
 
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.deprecated]
 
 
 # ---------------------------------------------------------------------------

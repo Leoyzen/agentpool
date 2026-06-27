@@ -385,3 +385,189 @@ async def test_initial_status_is_idle() -> None:
     assert handle._closing is False
     assert handle._message_queue == []
     assert handle._message_history == []
+
+
+@pytest.mark.unit
+async def test_cancel_with_cancel_fn_delegates() -> None:
+    """Given a RunHandle with _cancel_fn set, cancel() calls the cancel function."""
+    handle = _make_run_handle()
+    cancel_called = False
+
+    def _cancel_fn() -> None:
+        nonlocal cancel_called
+        cancel_called = True
+
+    handle._cancel_fn = _cancel_fn
+    mock_task = MagicMock()
+    mock_task.done.return_value = False
+    handle.run_ctx.current_task = mock_task
+
+    handle.cancel()
+
+    assert cancel_called is True
+    assert handle.run_ctx.cancelled is True
+    assert handle._idle_event.is_set()
+    # current_task.cancel() should NOT be called because _cancel_fn took priority
+    mock_task.cancel.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_cancel_with_current_task_cancels_task() -> None:
+    """Given a RunHandle with current_task set and no _cancel_fn, cancel()
+    cancels the task.
+    """
+    handle = _make_run_handle()
+    mock_task = MagicMock()
+    mock_task.done.return_value = False
+    handle.run_ctx.current_task = mock_task
+
+    handle.cancel()
+
+    assert handle.run_ctx.cancelled is True
+    assert handle._idle_event.is_set()
+    mock_task.cancel.assert_called_once()
+
+
+@pytest.mark.unit
+async def test_cancel_with_done_task_does_not_cancel() -> None:
+    """Given a RunHandle with current_task already done, cancel() does not
+    re-cancel it.
+    """
+    handle = _make_run_handle()
+    mock_task = MagicMock()
+    mock_task.done.return_value = True
+    handle.run_ctx.current_task = mock_task
+
+    handle.cancel()
+
+    assert handle.run_ctx.cancelled is True
+    assert handle._idle_event.is_set()
+    mock_task.cancel.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_start_raises_when_agent_none() -> None:
+    """Given a RunHandle with agent=None, start() raises RuntimeError."""
+    handle = _make_run_handle()
+    handle.agent = None
+
+    with pytest.raises(RuntimeError, match="agent must be set"):
+        # start() is an async generator; need to step into it
+        gen = handle.start("hello")
+        await gen.__anext__()
+
+
+@pytest.mark.unit
+async def test_start_raises_when_event_bus_none() -> None:
+    """Given a RunHandle with event_bus=None, start() raises RuntimeError."""
+    handle = _make_run_handle()
+    handle.event_bus = None
+
+    with pytest.raises(RuntimeError, match="event_bus must be set"):
+        gen = handle.start("hello")
+        await gen.__anext__()
+
+
+@pytest.mark.unit
+async def test_start_raises_when_session_none() -> None:
+    """Given a RunHandle with session=None, start() raises RuntimeError."""
+    handle = _make_run_handle()
+    handle.session = None
+
+    with pytest.raises(RuntimeError, match="session must be set"):
+        gen = handle.start("hello")
+        await gen.__anext__()
+
+
+@pytest.mark.unit
+async def test_multiple_followups_queued_all_become_next_turn_prompts() -> None:
+    """Given multiple followup() calls while idle, all messages become
+    prompts for the next turn.
+    """
+    turn = _StubTurn(events=[_stream_complete_event()], message_history=["m"])
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=turn)
+    handle = _make_run_handle(agent=agent)
+
+    events: list[Any] = []
+    gen = handle.start("initial")
+
+    async def _consume() -> None:
+        async for event in gen:
+            events.append(event)
+
+    consumer_task = asyncio.create_task(_consume())
+    await asyncio.sleep(0.05)
+
+    assert handle._status == RunStatus.idle
+
+    # Queue two followups
+    assert handle.followup("first followup") is True
+    assert handle.followup("second followup") is True
+
+    # Both should be in the queue
+    assert "first followup" in handle._message_queue
+    assert "second followup" in handle._message_queue
+
+    # Let the second turn execute with both prompts
+    await asyncio.sleep(0.05)
+    handle.close()
+    await asyncio.sleep(0.05)
+    await consumer_task
+
+    # Two turns total: initial + combined followups
+    assert agent.create_turn.call_count == 2
+
+    # Second turn should have received both followup messages as prompts
+    second_call = agent.create_turn.call_args_list[1]
+    prompts = second_call.kwargs["prompts"]
+    assert "first followup" in prompts
+    assert "second followup" in prompts
+
+
+@pytest.mark.unit
+async def test_close_is_idempotent() -> None:
+    """Given close() called twice, the second call does not crash and
+    _closing remains True.
+    """
+    handle = _make_run_handle()
+
+    handle.close()
+    assert handle._closing is True
+    assert handle._idle_event.is_set()
+
+    # Second close should not raise
+    handle.close()
+    assert handle._closing is True
+
+
+@pytest.mark.unit
+async def test_steer_returns_false_when_done_status() -> None:
+    """Given a RunHandle with _status=done (post-close), steer() returns False."""
+    handle = _make_run_handle()
+    handle._status = RunStatus.done
+    handle._closing = True
+
+    result = handle.steer("message")
+    assert result is False
+
+
+@pytest.mark.unit
+async def test_followup_returns_false_when_done_status() -> None:
+    """Given a RunHandle with _status=done (post-close), followup() returns False."""
+    handle = _make_run_handle()
+    handle._status = RunStatus.done
+    handle._closing = True
+
+    result = handle.followup("message")
+    assert result is False
+
+
+@pytest.mark.unit
+async def test_cancelled_property_reflects_run_ctx() -> None:
+    """Given run_ctx.cancelled is set, the cancelled property reflects it."""
+    handle = _make_run_handle()
+    assert handle.cancelled is False
+
+    handle.run_ctx.cancelled = True
+    assert handle.cancelled is True

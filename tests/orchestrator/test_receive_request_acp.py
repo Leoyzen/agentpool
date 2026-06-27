@@ -181,6 +181,7 @@ async def test_acp_flag_on_busy_when_idle_calls_followup(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_acp_flag_off_uses_turn_runner(
     controller: SessionController,
@@ -210,6 +211,7 @@ async def test_acp_flag_off_uses_turn_runner(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_native_flag_on_acp_agent_uses_turn_runner(
     controller: SessionController,

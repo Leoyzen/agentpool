@@ -566,6 +566,7 @@ async def test_close_session_acquires_request_lock(
 # ============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_failed_event_published_on_turn_exception(
     controller: SessionController,
@@ -628,6 +629,7 @@ async def test_run_failed_event_published_on_turn_exception(
     assert failed.run_id is not None
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_failed_event_includes_run_id(
     controller: SessionController,
@@ -680,6 +682,7 @@ async def test_run_failed_event_includes_run_id(
     assert failed_events[0].event.run_id == run_handle.run_id
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_failed_event_published_via_receive_request(
     controller: SessionController,
@@ -732,6 +735,7 @@ async def test_run_failed_event_published_via_receive_request(
     assert str(failed.exception) == "receive_request boom"
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_process_prompt_uses_legacy_path(
     session_pool: SessionPool,
@@ -757,6 +761,7 @@ async def test_process_prompt_uses_legacy_path(
     assert session_pool.sessions.get_session("sess-3") is not None
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_process_prompt_fallback_with_kwargs(
     session_pool: SessionPool,

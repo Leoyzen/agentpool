@@ -20,7 +20,7 @@ from agentpool.orchestrator.core import SessionController, TurnRunner
 from agentpool.orchestrator.run import RunHandle, RunStatus
 
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.deprecated]
 
 
 # ---------------------------------------------------------------------------

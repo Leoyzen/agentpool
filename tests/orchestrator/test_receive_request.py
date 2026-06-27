@@ -1,10 +1,12 @@
 """Tests for SessionController.receive_request() RunTurn feature-flag gating.
 
-Covers four scenarios:
+Covers six scenarios:
 1. Flag ON + idle session -> creates RunHandle, registers in _runs.
 2. Flag ON + busy session + asap -> calls RunHandle.steer().
 3. Flag ON + busy session + when_idle -> calls RunHandle.followup().
 4. Flag OFF -> delegates to legacy TurnRunner path.
+5. Session not found -> returns None.
+6. Session closing -> returns None.
 """
 
 from __future__ import annotations
@@ -187,6 +189,7 @@ async def test_flag_on_busy_when_idle_calls_followup(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_flag_off_uses_turn_runner(
     controller: SessionController,
@@ -208,3 +211,50 @@ async def test_flag_off_uses_turn_runner(
 
     mock_turn_runner.steer.assert_awaited_once_with("sess-4", "message")
     mock_turn_runner.followup.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Test 5: Session not found -> returns None
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_session_not_found_returns_none(
+    controller: SessionController,
+    mock_turn_runner: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the session does not exist, receive_request returns None."""
+    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
+    controller._turn_runner = mock_turn_runner
+    controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
+
+    result = await controller.receive_request("nonexistent-session", "hello")
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Session closing -> returns None
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_session_closing_returns_none(
+    controller: SessionController,
+    mock_turn_runner: MagicMock,
+    mock_agent: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the session is closing, receive_request returns None."""
+    monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
+    controller._turn_runner = mock_turn_runner
+    _setup_session(controller, "sess-closing", mock_agent)
+    controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
+
+    # Mark session as closing
+    controller._sessions["sess-closing"].closing = True
+
+    result = await controller.receive_request("sess-closing", "hello")
+
+    assert result is None

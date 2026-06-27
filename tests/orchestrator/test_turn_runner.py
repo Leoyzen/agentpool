@@ -25,7 +25,7 @@ from agentpool.orchestrator.core import (
 )
 
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.deprecated]
 
 
 # ---------------------------------------------------------------------------

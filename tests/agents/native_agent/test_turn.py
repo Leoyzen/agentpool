@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
 
 from agentpool import Agent
@@ -155,6 +156,43 @@ async def test_run_aborted_error_graceful_stop() -> None:
         # No RunErrorEvent should be yielded for RunAbortedError
         assert not any(isinstance(e, RunErrorEvent) for e in events), (
             "RunAbortedError should not produce RunErrorEvent"
+        )
+
+
+# ---------------------------------------------------------------------------
+# UndrainedPendingMessagesError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_undrained_pending_messages_error_graceful_stop() -> None:
+    """UndrainedPendingMessagesError causes graceful stop, no RunErrorEvent."""
+    agent = Agent(
+        name="test-undrained",
+        model=TestModel(custom_output_text="hello"),
+    )
+    async with agent:
+        mock_agentlet = _make_mock_agentlet_raising(
+            UndrainedPendingMessagesError("pending messages undrained"),
+        )
+
+        run_ctx = AgentRunContext(session_id="test-session")
+        turn = NativeTurn(
+            agent=agent,
+            prompts=["test"],
+            run_ctx=run_ctx,
+            message_history=[],
+        )
+
+        events: list[Any] = []
+        with patch.object(agent, "get_agentlet", AsyncMock(return_value=mock_agentlet)):
+            async for event in turn.execute():
+                events.append(event)
+
+        # No RunErrorEvent should be yielded for UndrainedPendingMessagesError
+        assert not any(isinstance(e, RunErrorEvent) for e in events), (
+            "UndrainedPendingMessagesError should not produce RunErrorEvent"
         )
 
 

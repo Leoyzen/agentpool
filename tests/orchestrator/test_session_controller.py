@@ -523,6 +523,7 @@ def test_default_ttl_is_one_hour() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_creates_run_for_idle_session(
     controller: SessionController,
@@ -548,6 +549,7 @@ async def test_receive_request_creates_run_for_idle_session(
     await asyncio.sleep(0.01)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_enqueues_for_active_session(
     controller: SessionController,
@@ -569,6 +571,7 @@ async def test_receive_request_enqueues_for_active_session(
     mock_turn_runner.run_loop.assert_not_awaited()
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_injects_for_active_session_with_asap(
     controller: SessionController,
@@ -588,6 +591,7 @@ async def test_receive_request_injects_for_active_session_with_asap(
     mock_turn_runner.steer.assert_awaited_once_with("sess-1", "urgent")
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_rejects_unknown_session(
     controller: SessionController,
@@ -600,6 +604,7 @@ async def test_receive_request_rejects_unknown_session(
     mock_turn_runner.run_loop.assert_not_awaited()
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_rejects_when_closing(
     controller: SessionController,
@@ -618,6 +623,7 @@ async def test_receive_request_rejects_when_closing(
     mock_turn_runner.run_loop.assert_not_awaited()
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_rejects_when_is_closing(
     controller: SessionController,
@@ -636,6 +642,7 @@ async def test_receive_request_rejects_when_is_closing(
     mock_turn_runner.run_loop.assert_not_awaited()
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_enforces_max_concurrent_runs(
     controller: SessionController,
@@ -664,6 +671,7 @@ async def test_receive_request_enforces_max_concurrent_runs(
     await asyncio.sleep(0.01)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_concurrent_race(
     controller: SessionController,
@@ -693,6 +701,7 @@ async def test_receive_request_concurrent_race(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_cancel_run_for_session_cancels_active_run(
     controller: SessionController,

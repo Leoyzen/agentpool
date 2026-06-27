@@ -559,6 +559,7 @@ async def test_non_native_agent_uses_manual_injection_manager(
         _current_run_ctx_var.reset(token)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_non_native_agent_uses_turn_runner(
     controller: SessionController,
@@ -747,6 +748,7 @@ async def test_native_agent_auto_resumes_with_queued_prompts(
     assert len(completed) >= 1, f"Expected at least one StreamCompleteEvent, got events: {_event_type_names(events)}"
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_native_agent_standalone_inject_prompt_routes_to_session_pool() -> None:
     """Pooled native inject_prompt() delegates to TurnRunner.steer()."""
@@ -772,6 +774,7 @@ async def test_native_agent_standalone_inject_prompt_routes_to_session_pool() ->
     runs.steer.assert_called_once_with("test-session", "injected message")
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_native_agent_standalone_queue_prompt_routes_to_session_pool() -> None:
     """Pooled native queue_prompt() delegates to TurnRunner.followup()."""

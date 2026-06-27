@@ -124,6 +124,7 @@ def _make_run_handle(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_concurrent_steer_all_enqueued_asap(
     controller: SessionController,
@@ -180,6 +181,7 @@ async def test_concurrent_steer_all_enqueued_asap(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_steer_during_tool_execution_enqueues_asap(
     controller: SessionController,
@@ -221,6 +223,7 @@ async def test_steer_during_tool_execution_enqueues_asap(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_multiple_followup_chain_when_idle(
     controller: SessionController,
@@ -378,6 +381,7 @@ async def test_active_agent_run_cleared_on_undrained_error() -> None:
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_session_close_during_steer_race_no_crash(
     controller: SessionController,
@@ -419,6 +423,7 @@ async def test_session_close_during_steer_race_no_crash(
     assert queued[0] == "race-steer-to-idle"
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_session_close_before_steer_guard_returns_false(
     controller: SessionController,
