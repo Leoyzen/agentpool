@@ -78,3 +78,28 @@ def test_coerce_unknown_fallback(caplog: pytest.LogCaptureFixture):
     assert "Unknown" in record.getMessage()
     assert "unknown" in record.getMessage()
     assert "falling back" in record.getMessage()
+
+
+# ---------------------------------------------------------------------------
+# New known values: pass-through
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_coerce_qwen(caplog: pytest.LogCaptureFixture):
+    """'qwen' passes through unchanged with no warning."""
+    caplog.set_level(logging.WARNING)
+    result = _coerce_subagent_display_mode("qwen")
+    assert result == "qwen"
+    assert len(caplog.records) == 0, (
+        f"Expected no warnings, got: {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+@pytest.mark.unit
+def test_pool_server_config_accepts_qwen():
+    """ACPPoolServerConfig accepts 'qwen' without ValidationError."""
+    from agentpool_config.pool_server import ACPPoolServerConfig
+
+    config = ACPPoolServerConfig(subagent_display_mode="qwen")
+    assert config.subagent_display_mode == "qwen"

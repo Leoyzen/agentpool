@@ -7,11 +7,10 @@ session update notifications via ProtocolEventConsumerMixin and ACPEventConverte
 from __future__ import annotations
 
 import asyncio
-
-import anyio
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
+import anyio
 from pydantic_ai import RequestUsage, TextPartDelta
 import pytest
 
@@ -327,6 +326,7 @@ async def test_done_event_none_race_immediate_notification(
     acp_handler._on_spawn_session_start = types.MethodType(  # type: ignore[method-assign]
         _HandlerCls._on_spawn_session_start, acp_handler
     )
+
     # Mock start_event_consumer to not actually start a consumer
     async def _noop_start(sid: str) -> None:
         pass
@@ -629,9 +629,7 @@ async def test_acp_handler_connection_error_stops_consumer(
     _send, _recv = anyio.create_memory_object_stream(max_buffer_size=100)
     mock_event_bus.subscribe = AsyncMock(return_value=_recv)
 
-    mock_client.session_update = AsyncMock(
-        side_effect=ConnectionResetError("connection lost")
-    )
+    mock_client.session_update = AsyncMock(side_effect=ConnectionResetError("connection lost"))
 
     event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello"))
     await _send.send(event)
@@ -643,7 +641,6 @@ async def test_acp_handler_connection_error_stops_consumer(
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
         await asyncio.sleep(0.01)
-
 
     assert "sess-1" not in acp_handler._session_groups
     mock_event_bus.unsubscribe.assert_awaited()
@@ -745,3 +742,161 @@ async def test_acp_handler_no_child_consumers_created(
         if len(acp_handler._converters) == 0 or "sess-1" not in acp_handler._consumer_streams:
             break
         await asyncio.sleep(0.01)
+
+
+# ---------------------------------------------------------------------------
+# Handler integration: subagent context, field_meta, nesting
+# ---------------------------------------------------------------------------
+
+
+async def test_on_spawn_creates_child_converter_with_subagent_context(
+    acp_handler: ACPProtocolHandler,
+    mock_client: AsyncMock,
+) -> None:
+    """_on_spawn_session_start creates child converter with SubagentContext.
+
+    Given: An ACPProtocolHandler with restored _on_spawn_session_start.
+    When: A SpawnSessionStart event is processed.
+    Then: A child converter is created with the correct subagent_context.
+    """
+    import types
+
+    from agentpool_server.acp_server.handler import ACPProtocolHandler as _HandlerCls
+
+    # Restore real method (fixture overrides it with AsyncMock)
+    acp_handler._on_spawn_session_start = types.MethodType(  # type: ignore[method-assign]
+        _HandlerCls._on_spawn_session_start, acp_handler
+    )
+
+    # Mock start_event_consumer to not actually start a consumer
+    async def _noop_start(sid: str) -> None:
+        pass
+
+    acp_handler.start_event_consumer = _noop_start  # type: ignore[method-assign]
+
+    spawn = SpawnSessionStart(
+        child_session_id="child-ctx",
+        parent_session_id="sess-1",
+        tool_call_id="tc-ctx-1",
+        spawn_mechanism="spawn",
+        source_name="coder",
+        source_type="agent",
+        depth=1,
+        description="Context test",
+    )
+    envelope = EventEnvelope(source_session_id="sess-1", event=spawn)
+    await acp_handler._on_spawn_session_start("sess-1", envelope)
+
+    child_converter = acp_handler._converters.get("child-ctx")
+    assert child_converter is not None
+    assert child_converter.subagent_context is not None
+    assert child_converter.subagent_context.parent_tool_call_id == "tc-ctx-1"
+    assert child_converter.subagent_context.subagent_type == "coder"
+
+
+async def test_before_consumer_loop_skips_when_converter_exists(
+    acp_handler: ACPProtocolHandler,
+) -> None:
+    """_before_consumer_loop returns early when converter already exists.
+
+    Given: An ACPProtocolHandler.
+    When: _before_consumer_loop is called twice.
+    Then: Only one converter exists for the session (second call returns early).
+    """
+    # First call creates a converter
+    await acp_handler._before_consumer_loop("sess-before")
+    assert "sess-before" in acp_handler._converters
+    first_converter = acp_handler._converters["sess-before"]
+
+    # Second call should return early (converter already exists)
+    await acp_handler._before_consumer_loop("sess-before")
+    assert "sess-before" in acp_handler._converters
+    assert acp_handler._converters["sess-before"] is first_converter
+
+
+async def test_handle_event_stamps_field_meta_on_child_notification(
+    acp_handler: ACPProtocolHandler,
+    mock_client: AsyncMock,
+) -> None:
+    """_handle_event stamps field_meta on SessionNotification for child sessions.
+
+    Given: A child converter with SubagentContext is in _converters.
+    When: A PartDeltaEvent is handled for that child session.
+    Then: The resulting SessionNotification has the correct field_meta dict.
+    """
+    from agentpool_server.acp_server.event_converter import SubagentContext
+
+    child_converter = ACPEventConverter(
+        subagent_context=SubagentContext(parent_tool_call_id="tc-123", subagent_type="coder"),
+    )
+    acp_handler._converters["child-ses"] = child_converter
+
+    event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="hello from child"))
+    envelope = EventEnvelope(source_session_id="child-ses", event=event)
+    await acp_handler._handle_event("child-ses", envelope)
+
+    mock_client.session_update.assert_awaited_once()
+    notification: SessionNotification[Any] = mock_client.session_update.await_args.args[0]
+    assert notification.field_meta == {
+        "parentToolCallId": "tc-123",
+        "subagentType": "coder",
+        "provenance": "subagent",
+    }
+
+
+async def test_root_session_notification_has_field_meta_none(
+    acp_handler: ACPProtocolHandler,
+    mock_client: AsyncMock,
+) -> None:
+    """Root session notifications have field_meta=None.
+
+    Given: A root session converter (no subagent_context).
+    When: A PartDeltaEvent is handled for that session.
+    Then: The resulting SessionNotification has field_meta=None.
+    """
+    # Root converter is created by _before_consumer_loop without subagent_context
+    await acp_handler._before_consumer_loop("sess-root")
+    assert "sess-root" in acp_handler._converters
+    assert acp_handler._converters["sess-root"].subagent_context is None
+
+    event = PartDeltaEvent(index=0, delta=TextPartDelta(content_delta="root message"))
+    envelope = EventEnvelope(source_session_id="sess-root", event=event)
+    await acp_handler._handle_event("sess-root", envelope)
+
+    mock_client.session_update.assert_awaited_once()
+    notification: SessionNotification[Any] = mock_client.session_update.await_args.args[0]
+    assert notification.field_meta is None
+
+
+async def test_nested_subagents_each_have_own_context(
+    acp_handler: ACPProtocolHandler,
+) -> None:
+    """Nested subagent converters each have their own SubagentContext.
+
+    Given: Two levels of child converters in _converters.
+    When: Inspecting their subagent_context values.
+    Then: Each converter has its own context pointing to its parent_tool_call_id.
+    """
+    from agentpool_server.acp_server.event_converter import SubagentContext
+
+    child_converter = ACPEventConverter(
+        subagent_context=SubagentContext(
+            parent_tool_call_id="tc-child", subagent_type="child-agent"
+        ),
+    )
+    grandchild_converter = ACPEventConverter(
+        subagent_context=SubagentContext(
+            parent_tool_call_id="tc-grandchild", subagent_type="grandchild-agent"
+        ),
+    )
+    acp_handler._converters["child-ses"] = child_converter
+    acp_handler._converters["grandchild-ses"] = grandchild_converter
+
+    child_ctx = acp_handler._converters["child-ses"].subagent_context
+    grandchild_ctx = acp_handler._converters["grandchild-ses"].subagent_context
+
+    assert child_ctx is not None
+    assert grandchild_ctx is not None
+    assert child_ctx.parent_tool_call_id == "tc-child"
+    assert grandchild_ctx.parent_tool_call_id == "tc-grandchild"
+    assert grandchild_ctx.parent_tool_call_id != child_ctx.parent_tool_call_id
