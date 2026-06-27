@@ -18,13 +18,25 @@ if TYPE_CHECKING:
 
 
 class RunStatus(Enum):
-    """Lifecycle states for an agent run."""
+    """Lifecycle states for an agent run.
+
+    Values:
+        pending: RunHandle created but not yet started.
+        running: Actively executing.
+        completed: Finished normally.
+        failed: Finished with an error.
+        checkpointed: Run state persisted for later resumption.
+        idle: RunHandle created but no active turn.
+        done: RunHandle closed or cancelled.
+    """
 
     pending = auto()
     running = auto()
     completed = auto()
     failed = auto()
     checkpointed = auto()
+    idle = auto()
+    done = auto()
 
 
 @dataclass
