@@ -690,14 +690,9 @@ class ACPEventConverter:
                     yield ToolCallStart(
                         tool_call_id=tool_call_id,
                         title=f"{source_name}: {description}" if description else source_name,
-                        kind="subagent",
+                        kind="other",
                         status="pending",
                         field_meta=_meta,
-                        subagent=SubagentRunInfo(
-                            child_session_id=child_session_id,
-                            run_mode=run_mode,
-                            display_name=source_name,
-                        ),
                     )
 
 
