@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -29,6 +30,7 @@ from agentpool.agents.acp_agent import ACPAgent
 from agentpool.agents.modes import ConfigOptionChanged, ModeInfo
 from agentpool.log import get_logger
 from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from agentpool.skills.uri_resolver import MAX_PROVIDER_NAME_LENGTH
 from agentpool_commands.base import NodeCommand
 from agentpool_server.acp_server.converters import (
     convert_acp_mcp_server_to_config,
@@ -400,6 +402,27 @@ class ACPSession:
         """Initialize async resources. Must be called after construction."""
         await self.acp_env.__aenter__()
 
+    def _make_provider_name(self, display_name: str) -> str:
+        """Build a provider name that fits within the 63-char DNS-label limit.
+
+        Truncates the session_id (via SHA-256 prefix) when the full name
+        would exceed ``MAX_PROVIDER_NAME_LENGTH``.
+
+        Args:
+            display_name: The MCP server display name to embed.
+
+        Returns:
+            A provider name guaranteed to pass ``_validate_provider_name``.
+        """
+        prefix = "session_"
+        suffix = f"_{display_name}"
+        budget = MAX_PROVIDER_NAME_LENGTH - len(prefix) - len(suffix)
+        if budget >= len(self.session_id):
+            return f"{prefix}{self.session_id}{suffix}"
+        # Truncate session_id to fit — use SHA-256 prefix for collision resistance
+        truncated = hashlib.sha256(self.session_id.encode()).hexdigest()[:budget]
+        return f"{prefix}{truncated}{suffix}"
+
     async def initialize_mcp_servers(self) -> None:
         """Initialize MCP servers if any are configured.
 
@@ -434,7 +457,7 @@ class ACPSession:
                         cfg = convert_acp_mcp_server_to_config(server)
                         provider = MCPResourceProvider(
                             server=cfg,
-                            name=f"session_{self.session_id}_{cfg.display_name}",
+                            name=self._make_provider_name(cfg.display_name),
                             source="node",
                             accessible_roots=getattr(self.agent.env, "accessible_roots", None),
                             transport=transport,
@@ -462,7 +485,7 @@ class ACPSession:
 
                     provider = MCPResourceProvider(
                         server=cfg,
-                        name=f"session_{self.session_id}_{cfg.display_name}",
+                        name=self._make_provider_name(cfg.display_name),
                         source="node",
                         accessible_roots=getattr(self.agent.env, "accessible_roots", None),
                     )
