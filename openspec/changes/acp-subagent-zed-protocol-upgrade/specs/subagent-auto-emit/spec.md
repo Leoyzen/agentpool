@@ -17,10 +17,10 @@
 - **THEN** the emitted `SpawnSessionStart` SHALL have `depth=1`
 
 ### Requirement: MAX_SUBAGENT_DEPTH enforced at create_child_session
-`create_child_session()` SHALL reject child session creation when `child_depth > MAX_SUBAGENT_DEPTH` (where `MAX_SUBAGENT_DEPTH = 1`).
+`create_child_session()` SHALL reject child session creation when `child_depth > MAX_SUBAGENT_DEPTH` (where `MAX_SUBAGENT_DEPTH = 5`). This allows nested background tasks up to 5 levels deep.
 
 #### Scenario: Depth limit exceeded
-- **WHEN** `create_child_session()` is called with `self.run_ctx.depth = 1` (child_depth would be 2)
+- **WHEN** `create_child_session()` is called with `self.run_ctx.depth = 5` (child_depth would be 6)
 - **THEN** a `SubagentDepthError` SHALL be raised
 - **AND** no `SpawnSessionStart` event SHALL be emitted
 

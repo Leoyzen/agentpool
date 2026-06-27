@@ -16,7 +16,7 @@ ACP v1.0.0 released 2026-06-24. Wire protocol stable at version 1. Zed SDK at `=
 - Zed correctly displays subagent completion (no infinite loading)
 - `tool_call_id` flows from `ctx.tool_call_id` → `SpawnSessionStart` → converter → handler, no disconnect
 - `SpawnSessionStart` auto-emitted by `create_child_session()`, eliminating 3 × 15-line boilerplate
-- `MAX_SUBAGENT_DEPTH=1` enforced at framework level
+- `MAX_SUBAGENT_DEPTH=5` enforced at framework level
 - Recursive cancellation propagates to child sessions
 - Error handling in closure (no silent exception swallowing)
 - Memory cleanup (no `_consumer_task_refs` leak)
@@ -62,11 +62,26 @@ ACP v1.0.0 released 2026-06-24. Wire protocol stable at version 1. Zed SDK at `=
 
 **Why**: Zed checks `kind` to trigger subagent UI rendering. OpenCode uses `kind="think"` because it's not an ACP client. AgentPool is an ACP server serving Zed — must use `"subagent"`.
 
-### D5: `run_mode="foreground"` not `"async"`
+### D5: MAX_SUBAGENT_DEPTH=5 (not 1, not configurable)
 
-**Choice**: `SubagentRunInfo.run_mode` set to `"foreground"`.
+**Choice**: Set `MAX_SUBAGENT_DEPTH = 5` as a module-level constant. Depth 0 = root agent, depth 5 = 5th-level subagent. This allows 6 total agents in a chain (root + 5 children).
 
-**Why**: ACP schema (`tool_call.py:56`) only allows `Literal["foreground", "background"]`. `"async"` is not a valid value.
+**Why**: The original limit of 1 was too restrictive for background task scenarios — a background task might need to spawn its own background tasks. 5 balances utility vs. resource consumption (each child session consumes memory, file descriptors, and potentially model API connections). This matches common subagent depth limits in production agent frameworks. Not made configurable via YAML to avoid premature optimization — can be added if users request it.
+
+**Risk**: Deep nesting could cause resource exhaustion if a misbehaving agent recursively spawns children. Mitigated by the hard limit — `SubagentDepthError` at depth 6 stops recursion.
+
+### D6: Background task completion via child_done_events dict (not counter)
+
+**Choice**: Replace `pending_background_tasks: int` + `background_tasks_complete: asyncio.Event` with `child_done_events: dict[str, anyio.Event]` on `AgentRunContext`. Each child session gets its own `anyio.Event` registered at `create_child_session()` time. The `complete_background_task(child_session_id, message)` helper calls `steer_callback` first (queues message), then sets+pops the event (wakes RunExecutor). Framework safety net in `_run_turn_unlocked()` finally block sets the parent's event when child turn completes.
+
+**Alternatives considered**:
+- Keep `pending_background_tasks: int` counter + auto-increment in `create_child_session()` + auto-decrement in `_run_turn_unlocked()` finally: Rejected — decrement in finally fires BEFORE tool's steer callback (race condition: RunExecutor wakes with empty `queued_steer_messages`)
+- `TaskGroup`-managed `_wait_and_steer` tasks: Rejected — `TaskGroup` cannot cross iteration boundaries (TG1 for first iteration exits before child completes; re-iteration loop creates TG2)
+- EventBus-driven `ChildSessionComplete` event: Rejected — overengineered, requires new event type and subscription management
+
+**Why**: `dict[str, anyio.Event]` is simpler than `int + Event` (no manual increment/decrement/clear/set). `complete_background_task()` ensures correct steer-then-signal ordering. Framework safety net in `_run_turn_unlocked()` handles tools that don't call the helper. `anyio.Event` aligns with `_consumer_done_events` pattern already used by `ProtocolEventConsumerMixin`.
+
+**Key ordering**: `complete_background_task()` calls `steer_callback` (step 1, message queued) THEN pops the event from `child_done_events` via `.pop(key, None)` (step 2, removes key from dict) THEN sets the popped event (step 3, wakes RunExecutor, if event is not None). This guarantees RunExecutor always sees queued messages when it wakes. The pop-then-set pattern ensures graceful handling when the key was already popped by another path. The `_run_turn_unlocked()` finally safety net sets the event without steer — but this only fires if the tool didn't call `complete_background_task()`, meaning no result to deliver anyway.
 
 ## Risks / Trade-offs
 
@@ -77,3 +92,6 @@ ACP v1.0.0 released 2026-06-24. Wire protocol stable at version 1. Zed SDK at `=
 - [No error vs normal exit distinction] → Open question: `done_event` doesn't carry exit status. Future: check `RunHandle.status` before deciding `completed` vs `failed`.
 - [PR #855 may deprecate `_meta` extension] → Mitigated: implement behind `zed` display mode feature flag, can migrate to native protocol when RFD merges
 - [Consumer loop exit timing] → Need verification: `SessionPool` must close child session after `StreamCompleteEvent` for `_after_consumer_loop` to fire
+- [child_done_events dict unbounded growth] → Mitigated: events are popped in `complete_background_task()`, `_run_turn_unlocked()` finally, and `close_session()`. If a tool creates a child session but never starts a run, the event lingers — caught by `close_session()` cleanup.
+- [_run_turn_unlocked finally lookup chain failure] → Handled: if parent's `current_run_id` is None or RunHandle not found, the lookup is a no-op (graceful degradation). This happens when parent run already completed — the background task's result goes to `_post_turn_injections` fallback (existing behavior for late steer calls).
+- [RunExecutor wait has no timeout] → Future consideration: if a background task hangs (e.g., child subprocess crashes without triggering the finally safety net), the RunExecutor blocks indefinitely. The `close_session()` safety net mitigates this for session closure, but a stuck background task during normal operation would hang the agent. Consider adding `anyio.fail_after(300)` with a warning log on timeout in a future iteration.
