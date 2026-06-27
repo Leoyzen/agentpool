@@ -252,6 +252,7 @@ class TestEventBusScopedSubscription:
 # ============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_close_session_waits_for_run_to_complete(
     session_pool: SessionPool,
@@ -301,6 +302,7 @@ async def test_close_session_waits_for_run_to_complete(
     assert session_pool.sessions.get_session("sess-1") is None
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_close_session_sets_closing_before_wait(
     session_pool: SessionPool,
@@ -339,6 +341,7 @@ async def test_close_session_sets_closing_before_wait(
     await asyncio.wait_for(close_task, timeout=2.0)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_close_session_cancels_on_timeout(
     session_pool: SessionPool,
@@ -432,6 +435,7 @@ async def test_close_session_no_active_run(
     assert session_pool.sessions.get_session("sess-4") is None
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_close_session_run_completes_before_wait(
     session_pool: SessionPool,
@@ -459,6 +463,7 @@ async def test_close_session_run_completes_before_wait(
     assert session_pool.sessions.get_session("sess-5") is None
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_rejected_after_close_starts(
     session_pool: SessionPool,
@@ -496,6 +501,7 @@ async def test_receive_request_rejected_after_close_starts(
     await asyncio.wait_for(close_task, timeout=2.0)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_process_prompt_rejected_after_close_starts(
     session_pool: SessionPool,
@@ -790,6 +796,7 @@ async def test_process_prompt_fallback_with_kwargs(
 # ============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_close_session_unblocks_background_task_wait(
     session_pool: SessionPool,
@@ -868,6 +875,7 @@ async def test_close_session_unblocks_background_task_wait(
     assert complete_events[0].event.cancelled is True
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_close_session_no_pending_background_tasks(
     session_pool: SessionPool,

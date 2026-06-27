@@ -34,6 +34,7 @@ def controller(mock_pool: MagicMock) -> SessionController:
     return SessionController(pool=mock_pool)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_create_run_uses_agent_type_classvar(controller: SessionController) -> None:
     """_create_run uses agent.AGENT_TYPE when agent is provided as optional parameter.

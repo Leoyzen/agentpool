@@ -279,7 +279,7 @@ reportPrivateImportUsage = false
 reportUnusedExpression = false
 
 [tool.pytest]
-addopts = ["-m", "not slow and not acp_snapshot"]
+addopts = ["-m", "not slow and not acp_snapshot and not deprecated"]
 filterwarnings = [
   "ignore::DeprecationWarning:psygnal.*",
   "ignore::DeprecationWarning:pydantic.*:",

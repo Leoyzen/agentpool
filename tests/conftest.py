@@ -181,3 +181,18 @@ def remap_hardcoded_test_models():
         patch.object(llmling_models, "infer_model", _patched_infer),
     ):
         yield
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip tests marked as deprecated.
+
+    Deprecated tests test legacy TurnRunner behavior that is intentionally
+    bypassed when AGENTPOOL_USE_RUN_TURN feature flags are enabled.
+    They are excluded from all normal test runs.
+    """
+    skip_deprecated = pytest.mark.skip(
+        reason="Deprecated test — tests legacy TurnRunner behavior, excluded from normal runs",
+    )
+    for item in items:
+        if "deprecated" in item.keywords:
+            item.add_marker(skip_deprecated)

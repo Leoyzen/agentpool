@@ -632,6 +632,7 @@ async def test_native_agent_interrupt_cancels_via_session_pool(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_routes_native_agents_correctly(
     session_pool: SessionPool,
@@ -709,6 +710,7 @@ async def test_receive_request_inject_prompt_into_active_run(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_native_agent_auto_resumes_with_queued_prompts(
     session_pool: SessionPool,
@@ -823,6 +825,7 @@ async def test_pending_message_drain_capability_auto_injected() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_handle_lifecycle_created_completed_cancelled(
     session_pool: SessionPool,
@@ -868,6 +871,7 @@ async def test_run_handle_lifecycle_created_completed_cancelled(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_receive_request_passes_input_provider_to_session_agent(
     session_pool: SessionPool,

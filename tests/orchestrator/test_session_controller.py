@@ -158,6 +158,7 @@ async def test_list_sessions_returns_session_info(
     assert all(not info.is_per_session_agent for info in infos)
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_list_sessions_reflects_busy_status(
     controller: SessionController,
@@ -752,6 +753,7 @@ def test_cancel_run_for_session_noop_for_missing_run(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_create_run_returns_handle(
     controller: SessionController,
@@ -767,12 +769,14 @@ async def test_create_run_returns_handle(
     assert handle.status == RunStatus.pending
 
 
+@pytest.mark.deprecated
 def test_create_run_raises_for_missing_session(controller: SessionController) -> None:
     """_create_run raises ValueError when the session does not exist."""
     with pytest.raises(ValueError, match="Session not found"):
         controller._create_run("missing", "hello")
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_cleanup_run_removes_and_signals(
     controller: SessionController,

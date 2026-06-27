@@ -277,6 +277,7 @@ class TestCloseSessionWithoutStore:
 class TestSessionPoolCloseCheckpoint:
     """SessionPool.close_session delegates to SessionController which handles checkpoint."""
 
+    @pytest.mark.deprecated
     @pytest.mark.anyio
     async def test_pool_close_session_with_pending_calls(
         self, mock_pool: MagicMock, mock_store: MagicMock

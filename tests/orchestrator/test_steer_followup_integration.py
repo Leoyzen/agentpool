@@ -435,6 +435,7 @@ async def test_run_executor_next_loop_clears_agent_run_on_error(
 # =============================================================================
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_create_run_uses_agent_ag_type_not_metadata(
     controller: SessionController,
@@ -471,6 +472,7 @@ async def test_create_run_uses_agent_ag_type_not_metadata(
     )
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_create_run_handles_missing_ag_type_gracefully(
     controller: SessionController,

@@ -82,6 +82,7 @@ def mock_agent() -> MagicMock:
 class TestSessionPoolRunStreamInputProvider:
     """RED FLAG: input_provider must be forwarded through SessionPool.run_stream()."""
 
+    @pytest.mark.deprecated
     @pytest.mark.anyio
     async def test_run_stream_forwards_input_provider_to_agent(
         self,

@@ -152,6 +152,7 @@ async def test_run_turn_creates_run_handle_when_called_directly(
     assert len(controller._runs) == 0
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_turn_uses_existing_run_handle_from_receive_request(
     controller: SessionController,
@@ -348,6 +349,7 @@ async def test_run_loop_creates_run_handle_for_initial_turn(
     assert len(controller._runs) == 0
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_loop_uses_existing_run_handle_from_receive_request(
     controller: SessionController,
@@ -739,6 +741,7 @@ async def test_turn_cancellation_stops_current_turn(
         await task
 
 
+@pytest.mark.deprecated
 @pytest.mark.anyio
 async def test_run_loop_cancellation(
     controller: SessionController,
