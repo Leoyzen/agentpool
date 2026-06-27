@@ -1,0 +1,16 @@
+F3: Real Manual QA — APPROVE
+
+Test suites directly related to our changes (ALL PASS):
+- tests/acp/: 181 passed, 17 deselected
+- tests/orchestrator/test_background_task_wakeup.py: 3 passed
+- tests/orchestrator/test_session_lifecycle.py: 27 passed
+- tests/orchestrator/test_child_done_events.py: 18 passed
+- tests/servers/acp_server/test_subagent_events.py: 15 passed
+- Total: 244 passed, 0 failures
+
+Full test suite (tests/acp/ tests/orchestrator/ tests/servers/acp_server/):
+- 868 passed, 100 failed, 12 skipped
+- All 100 failures are PRE-EXISTING (verified by running against commit 1914b4d74 before our changes)
+- Pre-existing failures include: test_close_checkpoint.py (MagicMock issue), test_tool_call_snapshots.py (snapshot issues), test_acp_skill_commands.py (initialization error)
+
+VERDICT: APPROVE — No regressions introduced by our changes
