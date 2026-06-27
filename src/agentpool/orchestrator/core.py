@@ -2030,12 +2030,25 @@ class TurnRunner:
     ) -> None:
         """Initialize the turn runner.
 
+        !!! warning "Deprecated"
+            TurnRunner is being replaced by RunHandle's session-level
+            lifecycle. Set ``AGENTPOOL_USE_RUN_TURN=1`` to use the new
+            code path; steer/followup/run_loop will delegate to
+            RunHandle methods. This class will be removed in a future
+            release.
+
         Args:
             session_controller: The session controller for agent lifecycle.
             enable_auto_resume: Whether to enable auto-resume loop.
             max_auto_resume: Maximum auto-resume iterations.
             replay_buffer_size: Maximum number of events retained per session for replay.
         """
+        warnings.warn(
+            "TurnRunner is deprecated. Set AGENTPOOL_USE_RUN_TURN=1 to "
+            "use the RunHandle lifecycle. See RunHandle.start/steer/followup.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.sessions = session_controller
         self.event_bus = EventBus(
             session_controller=session_controller,
@@ -2437,6 +2450,46 @@ class TurnRunner:
     ) -> None:
         """Run a turn loop until no more post-turn work.
 
+        !!! warning "Deprecated"
+            Delegates to :meth:`RunHandle.start` when
+            ``AGENTPOOL_USE_RUN_TURN`` is set. Otherwise calls
+            :meth:`_legacy_run_loop` for backward compatibility.
+
+        Args:
+            session_id: The session to run the loop for.
+            *initial_prompts: Initial prompts to start the loop.
+            **kwargs: Additional arguments passed to the agent.
+        """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            warnings.warn(
+                "TurnRunner.run_loop() is deprecated. Use RunHandle.start() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            session = self.sessions.get_session(session_id)
+            if session is None or session.current_run_id is None:
+                return
+            run_handle = self.sessions._runs.get(session.current_run_id)
+            if run_handle is None:
+                return
+            content = " ".join(str(p) for p in initial_prompts) if initial_prompts else ""
+            async for _event in run_handle.start(content):
+                pass
+            return
+        await self._legacy_run_loop(session_id, *initial_prompts, **kwargs)
+
+    async def _legacy_run_loop(
+        self,
+        session_id: str,
+        *initial_prompts: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Run a turn loop until no more post-turn work (legacy).
+
         Only one run_loop per session at a time (enforced by SessionState.turn_lock).
         Events are delivered exclusively via EventBus.
 
@@ -2572,8 +2625,43 @@ class TurnRunner:
 
         return False
 
-    async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:  # noqa: PLR0911
+    async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Inject a steer message with agent-type-aware routing.
+
+        !!! warning "Deprecated"
+            Delegates to :meth:`RunHandle.steer` when
+            ``AGENTPOOL_USE_RUN_TURN`` is set. Otherwise calls
+            :meth:`_legacy_steer` for backward compatibility.
+
+        Args:
+            session_id: Target session.
+            message: The steer message to deliver.
+            **kwargs: Additional arguments (ignored in delegate mode).
+
+        Returns:
+            True if delivered into active turn, False if queued for idle.
+        """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            warnings.warn(
+                "TurnRunner.steer() is deprecated. Use RunHandle.steer() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            session = self.sessions.get_session(session_id)
+            if session is None or session.current_run_id is None:
+                return False
+            run_handle = self.sessions._runs.get(session.current_run_id)
+            if run_handle is None:
+                return False
+            return run_handle.steer(message)
+        return await self._legacy_steer(session_id, message, **kwargs)
+
+    async def _legacy_steer(self, session_id: str, message: str, **kwargs: Any) -> bool:  # noqa: PLR0911
+        """Inject a steer message with agent-type-aware routing (legacy).
 
         Routes based on agent type (native vs non-native) and session state
         (active run vs idle):
@@ -2657,6 +2745,41 @@ class TurnRunner:
 
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Queue a follow-up message with agent-type-aware routing.
+
+        !!! warning "Deprecated"
+            Delegates to :meth:`RunHandle.followup` when
+            ``AGENTPOOL_USE_RUN_TURN`` is set. Otherwise calls
+            :meth:`_legacy_followup` for backward compatibility.
+
+        Args:
+            session_id: Target session.
+            message: The follow-up message to deliver.
+            **kwargs: Additional arguments (ignored in delegate mode).
+
+        Returns:
+            True if delivered into active turn, False if queued for idle.
+        """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            warnings.warn(
+                "TurnRunner.followup() is deprecated. Use RunHandle.followup() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            session = self.sessions.get_session(session_id)
+            if session is None or session.current_run_id is None:
+                return False
+            run_handle = self.sessions._runs.get(session.current_run_id)
+            if run_handle is None:
+                return False
+            return run_handle.followup(message)
+        return await self._legacy_followup(session_id, message, **kwargs)
+
+    async def _legacy_followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
+        """Queue a follow-up message with agent-type-aware routing (legacy).
 
         Routes based on agent type (native vs non-native) and session state
         (active run vs idle):

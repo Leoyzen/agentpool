@@ -131,6 +131,10 @@ class RunHandle:
         if session is None:
             raise RuntimeError("session must be set before calling start()")
 
+        # Wire steer_callback so complete_background_task() can inject
+        # messages into the active turn via RunHandle.steer().
+        self.run_ctx.steer_callback = self._steer_callback_wrapper
+
         async with session.turn_lock:
             current_prompts: list[str] = [initial_prompt]
             while not self._closing:
@@ -223,6 +227,25 @@ class RunHandle:
         if self._status == RunStatus.idle:
             self._idle_event.set()
         return True
+
+    async def _steer_callback_wrapper(self, session_id: str, message: str) -> bool:
+        """Adapter wrapping :meth:`steer` for use as :attr:`AgentRunContext.steer_callback`.
+
+        The :attr:`~agentpool.agents.context.AgentRunContext.steer_callback` field
+        expects ``Callable[[str, str], Awaitable[bool]]``, called as
+        ``await callback(session_id, message)`` from
+        :meth:`~agentpool.agents.context.AgentRunContext.complete_background_task`.
+        This adapter discards the ``session_id`` argument (``RunHandle`` is already
+        bound to a single session) and delegates to :meth:`steer`.
+
+        Args:
+            session_id: Ignored; required by the callback signature convention.
+            message: The steer message to inject into the active turn.
+
+        Returns:
+            True if the message was delivered, False otherwise.
+        """
+        return self.steer(message)
 
     def close(self) -> None:
         """Signal the run loop to stop after the current turn."""

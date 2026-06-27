@@ -9,6 +9,7 @@ Provides unified handling for:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import warnings
 
 from agentpool.log import get_logger
 
@@ -53,9 +54,17 @@ class PromptInjectionManager:
     def queue(self, *prompts: PromptCompatible) -> None:
         """Queue prompts to be processed after current run completes.
 
+        .. deprecated::
+            Use RunHandle.followup() instead.
+
         Args:
             *prompts: Prompts to queue (same format as run/run_stream)
         """
+        warnings.warn(
+            "PromptInjectionManager.queue() is deprecated. Use RunHandle.followup() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._queued_prompts.append(prompts)
         logger.debug("Queued prompt", num_parts=len(prompts))
 
@@ -90,10 +99,19 @@ class PromptInjectionManager:
     def flush_pending_to_queue(self) -> None:
         """Move unconsumed injections to the queued prompts.
 
+        .. deprecated::
+            Use RunHandle.followup() instead.
+
         Called at the end of each run iteration. Any injections that weren't
         consumed by tool hooks become regular queued prompts, ensuring they
         still get processed.
         """
+        warnings.warn(
+            "PromptInjectionManager.flush_pending_to_queue() is deprecated."
+            " Use RunHandle.followup() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if not self._pending_injections:
             return
         logger.debug("Flushing unconsumed injections to queue", count=len(self._pending_injections))
@@ -104,9 +122,17 @@ class PromptInjectionManager:
     def pop_queued(self) -> tuple[PromptCompatible, ...] | None:
         """Get the next queued prompt group.
 
+        .. deprecated::
+            Use RunHandle.followup() instead.
+
         Returns:
             Tuple of prompts, or None if queue is empty
         """
+        warnings.warn(
+            "PromptInjectionManager.pop_queued() is deprecated. Use RunHandle.followup() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._queued_prompts.pop(0) if self._queued_prompts else None
 
     def insert_queued(self, prompts: tuple[PromptCompatible, ...]) -> None:
