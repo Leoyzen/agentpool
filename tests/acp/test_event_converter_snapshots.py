@@ -464,3 +464,91 @@ class TestTurnCompleteConditional:
         converter.reset()
 
         assert converter.client_supports_turn_complete is True
+
+
+# ---------------------------------------------------------------------------
+# 9.3: kind="subagent" in zed mode ToolCallStart
+# ---------------------------------------------------------------------------
+
+
+class TestZedModeKindAndMeta:
+    """Tests for kind and field_meta in zed mode converter output."""
+
+    @pytest.mark.anyio
+    async def test_zed_mode_tool_call_start_has_kind_subagent(self):
+        """Zed mode ToolCallStart has kind="subagent".
+
+        Given: A SpawnSessionStart event and a zed-mode converter.
+        When: The event is converted.
+        Then: The yielded ToolCallStart has kind="subagent".
+        """
+        from agentpool.agents.events import SpawnSessionStart
+
+        converter = ACPEventConverter(subagent_display_mode="zed")
+        converter._current_message_id = "test-msg-id"
+
+        event = SpawnSessionStart(
+            child_session_id="child_kind_001",
+            parent_session_id="parent_ses",
+            tool_call_id="tc-kind-test",
+            spawn_mechanism="spawn",
+            source_name="coder",
+            source_type="agent",
+            depth=1,
+            description="Kind test",
+        )
+
+        updates: list[object] = []
+        async for update in converter.convert(event):
+            updates.append(update)
+
+        assert len(updates) == 1
+        tcs = updates[0]
+        dumped = tcs.model_dump(exclude_none=True)  # type: ignore[union-attr]
+        assert dumped.get("kind") == "subagent"
+
+    @pytest.mark.anyio
+    async def test_zed_mode_build_subagent_completed_has_meta_and_tool_name(self):
+        """ToolCallProgress from build_subagent_completed carries field_meta with subagent_session_info and tool_name.
+
+        Given: A zed-mode converter that has processed a SpawnSessionStart (seeding _subagent_tool_call_ids).
+        When: build_subagent_completed is called for the child session.
+        Then: The yielded ToolCallProgress has field_meta with subagent_session_info and tool_name keys.
+        """
+        from agentpool.agents.events import SpawnSessionStart
+
+        converter = ACPEventConverter(subagent_display_mode="zed")
+        converter._current_message_id = "test-msg-id"
+
+        child_sid = "child_meta_001"
+        spawn = SpawnSessionStart(
+            child_session_id=child_sid,
+            parent_session_id="parent_ses",
+            tool_call_id="tc-meta-test",
+            spawn_mechanism="spawn",
+            source_name="researcher",
+            source_type="agent",
+            depth=1,
+            description="Meta test",
+        )
+        # Seed the converter's internal _subagent_tool_call_ids map
+        async for _ in converter.convert(spawn):
+            pass
+
+        # Now call build_subagent_completed
+        progress_updates: list[object] = []
+        async for update in converter.build_subagent_completed(child_session_id=child_sid):
+            progress_updates.append(update)
+
+        assert len(progress_updates) == 1
+        progress = progress_updates[0]
+        dumped = progress.model_dump(exclude_none=True)  # type: ignore[union-attr]
+        field_meta = dumped.get("field_meta")
+        assert field_meta is not None
+        assert isinstance(field_meta, dict)
+        assert "subagent_session_info" in field_meta
+        assert "tool_name" in field_meta
+        assert field_meta["tool_name"] == "task"
+        sub_info = field_meta["subagent_session_info"]
+        assert isinstance(sub_info, dict)
+        assert sub_info.get("session_id") == child_sid
