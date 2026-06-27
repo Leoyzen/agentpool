@@ -569,17 +569,41 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # session/update (turn_complete with stop_reason="cancelled").
         # This is done via EventBus publish in run_handle.fail().
 
+    async def _cancel_subagents(self, parent_sid: str) -> None:
+        """Recursively cancel all child sessions of parent_sid.
+
+        Walks the ``_parent_of`` tree depth-first, popping each child
+        before recursing into its own children to prevent infinite loops
+        on circular entries.  After the subtree is drained, each child's
+        event consumer is stopped via ``stop_event_consumer()``, which
+        cascades cancellation through the mixin's CancelScope.
+
+        Args:
+            parent_sid: The session whose child sessions should be cancelled.
+        """
+        children = [
+            child for child, parent in self._parent_of.items() if parent == parent_sid
+        ]
+        for child_sid in children:
+            self._parent_of.pop(child_sid, None)
+            await self._cancel_subagents(child_sid)
+            await self.stop_event_consumer(child_sid)
+
     async def close_session(self, session_id: str) -> None:
         """Close a session and tear down its event consumer.
 
-        Sends the EventBus sentinel to gracefully stop the consumer loop,
-        waits for it to finish, then delegates to
-        ``SessionPool.close_session()``.
+        Recursively cancels all child (subagent) sessions before stopping
+        the parent's own consumer.  Then sends the EventBus sentinel to
+        gracefully stop the consumer loop, waits for it to finish, and
+        delegates to ``SessionPool.close_session()``.
 
         Args:
             session_id: The session to close.
         """
         session_pool = self.agent_pool.session_pool
+
+        # Cancel all child sessions first (depth-first, pop-before-recurse)
+        await self._cancel_subagents(session_id)
 
         # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
         await self.stop_event_consumer(session_id)

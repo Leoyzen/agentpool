@@ -790,9 +790,9 @@ async def test_close_session_unblocks_background_task_wait(
     session_pool: SessionPool,
     mock_pool: MagicMock,
 ) -> None:
-    """close_session sets cancelled + background_tasks_complete so the run finishes promptly.
+    """close_session sets cancelled + child_done_events so the run finishes promptly.
 
-    Given: A run with a pending background task (background_tasks_complete cleared).
+    Given: A run with a pending child done event (child_done_events["test"] unset).
     When:  close_session() is called during the wait.
     Then:  close_session returns in < 5s (not 30s) and StreamCompleteEvent(cancelled=True) is published.
     """
@@ -804,11 +804,11 @@ async def test_close_session_unblocks_background_task_wait(
         **kwargs: Any,
     ) -> AsyncIterator[StreamCompleteEvent]:
         stream_started.set()
-        # Simulate a pending background task
-        run_ctx.background_tasks_complete.clear()
-        # Wait for background tasks to complete (or be unblocked by close_session)
+        # Simulate a pending child done event
+        run_ctx.child_done_events["test"] = anyio.Event()
+        # Wait for child done event (or be unblocked by close_session)
         await asyncio.wait_for(
-            run_ctx.background_tasks_complete.wait(), timeout=10.0
+            run_ctx.child_done_events["test"].wait(), timeout=10.0
         )
         yield StreamCompleteEvent(
             message=ChatMessage(content="done", role="assistant"),
@@ -843,8 +843,8 @@ async def test_close_session_unblocks_background_task_wait(
     )
     await asyncio.wait_for(stream_started.wait(), timeout=1.0)
 
-    # Call close_session — should unblock the background task wait
-    # This should complete in well under 30s because we set background_tasks_complete
+    # Call close_session — should unblock the child done event wait
+    # This should complete in well under 30s because we set all child_done_events
     await asyncio.wait_for(session_pool.close_session("sess-bg-1"), timeout=5.0)
 
     # Wait for consumer to finish (gets EndOfStream from event_bus.close_session)
@@ -868,9 +868,9 @@ async def test_close_session_no_pending_background_tasks(
     session_pool: SessionPool,
     mock_pool: MagicMock,
 ) -> None:
-    """close_session works normally when no background tasks are pending.
+    """close_session works normally when no child done events are pending.
 
-    Given: A run that completes with no pending background tasks.
+    Given: A run that completes with no pending child done events.
     When:  close_session() is called after the run completes.
     Then:  close_session returns promptly and the session is closed (no regression).
     """
@@ -896,7 +896,7 @@ async def test_close_session_no_pending_background_tasks(
     )
     await asyncio.sleep(0.1)  # Let it complete
 
-    # close_session should proceed without waiting (no pending background tasks)
+    # close_session should proceed without waiting (no pending child done events)
     await asyncio.wait_for(session_pool.close_session("sess-bg-2"), timeout=5.0)
 
     # Session should be closed

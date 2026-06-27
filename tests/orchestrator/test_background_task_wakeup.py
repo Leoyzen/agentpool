@@ -13,6 +13,7 @@ import contextlib
 import time
 from typing import Any, Literal
 
+import anyio
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models import ModelRequestParameters, ModelSettings
@@ -142,6 +143,8 @@ async def test_background_task_wakeup_happy_path() -> None:
     tool_call_count = 0
     bg_tasks: list[asyncio.Task[Any]] = []
 
+    child_sid = "bg-child-happy"
+
     async def spawn_bg_tool() -> str:
         """Tool that spawns a background task on first call only."""
         nonlocal tool_call_count
@@ -149,8 +152,7 @@ async def test_background_task_wakeup_happy_path() -> None:
         if tool_call_count > 1:
             return "already started"
 
-        run_ctx.pending_background_tasks += 1
-        run_ctx.background_tasks_complete.clear()
+        run_ctx.child_done_events[child_sid] = anyio.Event()
 
         async def bg_task() -> None:
             try:
@@ -158,9 +160,9 @@ async def test_background_task_wakeup_happy_path() -> None:
                 if run_ctx.steer_callback is not None:
                     await run_ctx.steer_callback(session_id, "bg result")
             finally:
-                run_ctx.pending_background_tasks -= 1
-                if run_ctx.pending_background_tasks <= 0:
-                    run_ctx.background_tasks_complete.set()
+                event = run_ctx.child_done_events.pop(child_sid, None)
+                if event is not None:
+                    event.set()
 
         bg_tasks.append(asyncio.create_task(bg_task()))
         return "started"
@@ -240,6 +242,8 @@ async def test_background_task_wakeup_cancellation() -> None:
     tool_call_count = 0
     bg_tasks: list[asyncio.Task[Any]] = []
 
+    child_sid = "bg-child-cancel"
+
     async def spawn_bg_and_cancel_tool() -> str:
         """Tool that spawns a background task and a delayed cancellation."""
         nonlocal tool_call_count
@@ -247,8 +251,7 @@ async def test_background_task_wakeup_cancellation() -> None:
         if tool_call_count > 1:
             return "already started"
 
-        run_ctx.pending_background_tasks += 1
-        run_ctx.background_tasks_complete.clear()
+        run_ctx.child_done_events[child_sid] = anyio.Event()
 
         async def bg_task() -> None:
             try:
@@ -256,9 +259,9 @@ async def test_background_task_wakeup_cancellation() -> None:
                 if run_ctx.steer_callback is not None:
                     await run_ctx.steer_callback(session_id, "bg result")
             finally:
-                run_ctx.pending_background_tasks -= 1
-                if run_ctx.pending_background_tasks <= 0:
-                    run_ctx.background_tasks_complete.set()
+                event = run_ctx.child_done_events.pop(child_sid, None)
+                if event is not None:
+                    event.set()
 
         bg_tasks.append(asyncio.create_task(bg_task()))
 
@@ -266,7 +269,9 @@ async def test_background_task_wakeup_cancellation() -> None:
             """Cancel the run after 100ms (during the 200ms wait)."""
             await asyncio.sleep(0.1)
             run_ctx.cancelled = True
-            run_ctx.background_tasks_complete.set()
+            # Unblock the wait by setting all child_done_events
+            for ev in run_ctx.child_done_events.values():
+                ev.set()
 
         bg_tasks.append(asyncio.create_task(cancel_task()))
         return "started"
@@ -333,6 +338,8 @@ async def test_re_iteration_message_history() -> None:
     tool_call_count = 0
     bg_tasks: list[asyncio.Task[Any]] = []
 
+    child_sid = "bg-child-history"
+
     async def spawn_bg_tool() -> str:
         """Tool that spawns a short background task on first call."""
         nonlocal tool_call_count
@@ -340,8 +347,7 @@ async def test_re_iteration_message_history() -> None:
         if tool_call_count > 1:
             return "already started"
 
-        run_ctx.pending_background_tasks += 1
-        run_ctx.background_tasks_complete.clear()
+        run_ctx.child_done_events[child_sid] = anyio.Event()
 
         async def bg_task() -> None:
             try:
@@ -349,9 +355,9 @@ async def test_re_iteration_message_history() -> None:
                 if run_ctx.steer_callback is not None:
                     await run_ctx.steer_callback(session_id, "bg result")
             finally:
-                run_ctx.pending_background_tasks -= 1
-                if run_ctx.pending_background_tasks <= 0:
-                    run_ctx.background_tasks_complete.set()
+                event = run_ctx.child_done_events.pop(child_sid, None)
+                if event is not None:
+                    event.set()
 
         bg_tasks.append(asyncio.create_task(bg_task()))
         return "started"
