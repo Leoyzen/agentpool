@@ -35,6 +35,7 @@ from agentpool.agents.events import (
     StreamCompleteEvent,
 )
 from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
+from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
 from agentpool.orchestrator.run_executor import RunExecutor
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
 
     from exxec import ExecutionEnvironment
     from pydantic_ai import AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.settings import ModelSettings
@@ -75,6 +77,7 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageNode
     from agentpool.models.agents import NativeAgentConfig, ToolMode
+    from agentpool.orchestrator.turn import Turn
     from agentpool.prompts.prompts import PromptType
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
@@ -1070,6 +1073,29 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         else:
             # Direct Model instance assignment (no signal emission)
             self._model = model
+
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Create a NativeTurn for single-cycle execution.
+
+        Args:
+            prompts: Pre-converted prompt strings for this turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history.
+
+        Returns:
+            A NativeTurn instance for single-cycle execution.
+        """
+        return NativeTurn(
+            agent=self,
+            prompts=prompts,
+            run_ctx=run_ctx,
+            message_history=message_history,
+        )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
         """Cancel the current stream task and iteration task.

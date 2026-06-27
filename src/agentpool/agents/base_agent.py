@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from exxec import ExecutionEnvironment
     from fsspec import AbstractFileSystem
     from pydantic_ai import UserContent
+    from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand, CommandStore
     from tokonomics.model_discovery.model_info import ModelInfo
     from upathtools.filesystems import OverlayFileSystem
@@ -65,6 +66,7 @@ if TYPE_CHECKING:
     from agentpool.delegation import AgentPool, Team, TeamRun
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import ChatMessage
+    from agentpool.orchestrator.turn import Turn
     from agentpool.sessions import SessionData
     from agentpool.talk.stats import MessageStats
     from agentpool.ui.base import InputProvider
@@ -452,6 +454,25 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
 
         Args:
             model: New model identifier to use
+        """
+        ...
+
+    @abstractmethod
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Create a Turn for single-cycle execution.
+
+        Args:
+            prompts: Pre-converted prompt strings for this turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history.
+
+        Returns:
+            A Turn instance that can be executed via execute().
         """
         ...
 
