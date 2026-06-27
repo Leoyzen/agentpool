@@ -44,6 +44,7 @@ from pydantic_ai import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from acp import InitializeRequest
 from acp.agent import ACPAgentAPI
 from agentpool.agents.acp_agent.session_state import ACPSessionState
+from agentpool.agents.acp_agent.turn import ACPTurn
 from agentpool.agents.base_agent import BaseAgent
 from agentpool.agents.events import (
     RunStartedEvent,
@@ -72,6 +73,7 @@ if TYPE_CHECKING:
     from evented_config import EventConfig
     from exxec import ExecutionEnvironment
     from pydantic_ai import ThinkingPart, ToolCallPart, UserContent
+    from pydantic_ai.messages import ModelMessage
     from slashed import BaseCommand
     from tokonomics.model_discovery.model_info import ModelInfo
 
@@ -88,6 +90,7 @@ if TYPE_CHECKING:
     from agentpool.hooks import AgentHooks
     from agentpool.messaging import MessageHistory
     from agentpool.models.acp_agents import BaseACPAgentConfig
+    from agentpool.orchestrator.turn import Turn
     from agentpool.resource_providers import ResourceProvider
     from agentpool.sessions import SessionData
     from agentpool.ui.base import InputProvider
@@ -641,6 +644,34 @@ class ACPAgent[TDeps = None](BaseAgent[TDeps, str]):
         """
         self.auto_approve = auto_approve
         self.log.info("Auto-approve mode changed", auto_approve=auto_approve)
+
+    def create_turn(
+        self,
+        prompts: list[str],
+        run_ctx: AgentRunContext,
+        message_history: list[ModelMessage],
+    ) -> Turn:
+        """Create an ACPTurn for single-cycle execution.
+
+        Args:
+            prompts: Pre-converted prompt strings for this turn.
+            run_ctx: Per-run isolated context.
+            message_history: Incoming message history.
+
+        Returns:
+            An ACPTurn instance for single-cycle execution.
+        """
+        # NOTE: self._api (ACPAgentAPI) does not implement ACPClientProtocol fully —
+        # it lacks stream_events() and get_messages(). At runtime this will raise
+        # AttributeError when ACPTurn.execute() calls those methods. An adapter
+        # is needed for full integration.
+        return ACPTurn(
+            acp_client=self._api,
+            prompts=prompts,
+            run_ctx=run_ctx,
+            message_history=message_history,
+            session_id=self._sdk_session_id or run_ctx.session_id,
+        )
 
     async def _interrupt(self, run_ctx: AgentRunContext | None = None) -> None:
         """Send CancelNotification to remote ACP server and cancel local tasks.
