@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
 from agentpool.agents.events import (
-    SpawnSessionStart,
     StreamCompleteEvent,
     SubAgentEvent,
 )
@@ -146,34 +145,21 @@ class WorkersTools(ResourceProvider):
                 msg = f"Agent {agent_name} does not support streaming"
                 raise ToolError(msg)
 
-            agent_type_str = getattr(worker, "agent_type", type(worker).__name__)
+            agent_type_str = (
+                worker.agent_type if isinstance(worker, BaseAgent) else type(worker).__name__
+            )
 
             child_session_id = await ctx.create_child_session(
                 agent_name=agent_name,
                 agent_type=agent_type_str,
                 parent_session_id=parent_session_id,
-                source_name=agent_name,
-                source_type=source_type,
-                depth=child_depth,
-                tool_call_id=ctx.tool_call_id,
-            )
-
-            # Emit SpawnSessionStart so the protocol layer can detect child session
-            # creation. All other stream events flow through TurnRunner → EventBus
-            # and reach the frontend via protocol-layer ``scope="descendants"``
-            # subscription — no manual business-layer forwarding is required.
-            spawn_event = SpawnSessionStart(
-                child_session_id=child_session_id,
-                parent_session_id=parent_session_id,
-                tool_call_id=ctx.tool_call_id,
                 spawn_mechanism="task",
+                description=f"Run {agent_name} worker",
+                tool_call_id=ctx.tool_call_id,
                 source_name=agent_name,
                 source_type=source_type,
                 depth=child_depth,
-                description=f"Run {agent_name} worker",
-                metadata={"prompt": prompt[:200]} if prompt else {},
             )
-            await ctx.events.emit_event(spawn_event)
 
             try:
                 if is_team_node:
@@ -264,34 +250,21 @@ class WorkersTools(ResourceProvider):
                 msg = f"Node {node_name} does not support streaming"
                 raise ToolError(msg)
 
-            agent_type_str = getattr(worker, "agent_type", type(worker).__name__)
+            agent_type_str = (
+                worker.agent_type if isinstance(worker, BaseAgent) else type(worker).__name__
+            )
 
             child_session_id = await ctx.create_child_session(
                 agent_name=node_name,
                 agent_type=agent_type_str,
                 parent_session_id=parent_session_id,
-                source_name=node_name,
-                source_type=source_type,
-                depth=child_depth,
-                tool_call_id=ctx.tool_call_id,
-            )
-
-            # Emit SpawnSessionStart so the protocol layer can detect child session
-            # creation. All other stream events flow through TurnRunner → EventBus
-            # and reach the frontend via protocol-layer ``scope="descendants"``
-            # subscription — no manual business-layer forwarding is required.
-            spawn_event = SpawnSessionStart(
-                child_session_id=child_session_id,
-                parent_session_id=parent_session_id,
-                tool_call_id=ctx.tool_call_id,
                 spawn_mechanism="task",
+                description=f"Run {node_name} worker",
+                tool_call_id=ctx.tool_call_id,
                 source_name=node_name,
                 source_type=source_type,
                 depth=child_depth,
-                description=f"Run {node_name} worker",
-                metadata={"prompt": prompt[:200]} if prompt else {},
             )
-            await ctx.events.emit_event(spawn_event)
 
             if is_team_node:
                 # Teams run directly (SessionPool does not support team sessions)

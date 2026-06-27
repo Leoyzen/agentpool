@@ -382,8 +382,10 @@ class RunExecutor:
             while True:
                 if run_ctx.cancelled:
                     break
-                if run_ctx.pending_background_tasks > 0:
-                    await run_ctx.background_tasks_complete.wait()
+                if bool(run_ctx.child_done_events):
+                    events = list(run_ctx.child_done_events.values())  # snapshot before await
+                    for ev in events:
+                        await ev.wait()
                     if run_ctx.cancelled:
                         break
                 if not run_ctx.queued_steer_messages:
@@ -391,8 +393,7 @@ class RunExecutor:
                 # Re-iterate with queued steer messages
                 steer_msgs = run_ctx.queued_steer_messages.copy()
                 run_ctx.queued_steer_messages.clear()
-                run_ctx.pending_background_tasks = 0
-                run_ctx.background_tasks_complete.set()
+                run_ctx.child_done_events.clear()
                 if iteration_messages:
                     history = iteration_messages
                 iteration_messages = None

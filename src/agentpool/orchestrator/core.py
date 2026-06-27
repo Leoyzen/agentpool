@@ -2074,6 +2074,17 @@ class TurnRunner:
             # and dropping the message in a dead pending queue.
             run_ctx.completed = True
 
+            # Safety net: if this is a child session and the tool didn't call
+            # complete_background_task(), set the parent's done_event anyway.
+            if _session is not None and _session.parent_session_id is not None:
+                parent_session = self.sessions.get_session(_session.parent_session_id)
+                if parent_session is not None and parent_session.current_run_id is not None:
+                    parent_run_handle = self.sessions._runs.get(parent_session.current_run_id)
+                    if parent_run_handle is not None and parent_run_handle.run_ctx is not None:
+                        event = parent_run_handle.run_ctx.child_done_events.pop(_session.session_id, None)
+                        if event is not None:
+                            event.set()
+
             # CRITICAL: Clear session.current_run_id BEFORE any await to prevent
             # race condition where inject_prompt returns True but message
             # gets stuck in pending (flush_pending_to_queue() already passed).
@@ -3156,7 +3167,10 @@ class SessionPool:
                 # complete_event can be set promptly instead of waiting 30s.
                 if run_handle.run_ctx is not None:
                     run_handle.run_ctx.cancelled = True
-                    run_handle.run_ctx.background_tasks_complete.set()
+                    # Snapshot values before setting to avoid dict mutation race.
+                    for ev in list(run_handle.run_ctx.child_done_events.values()):
+                        ev.set()
+                    run_handle.run_ctx.child_done_events.clear()
                 try:
                     await asyncio.wait_for(run_handle.complete_event.wait(), timeout=30.0)
                 except TimeoutError:

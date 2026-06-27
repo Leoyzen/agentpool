@@ -17,10 +17,7 @@ from typing import Any, Literal
 from pydantic_ai import ModelRetry
 
 from agentpool.agents.context import AgentContext  # noqa: TC001
-from agentpool.agents.events import (
-    SpawnSessionStart,
-    StreamCompleteEvent,
-)
+from agentpool.agents.events import StreamCompleteEvent
 from agentpool.agents.exceptions import MAX_DELEGATION_DEPTH, DelegationDepthError
 from agentpool.log import get_logger
 from agentpool.resource_providers import StaticResourceProvider
@@ -205,15 +202,18 @@ class SubagentTools(StaticResourceProvider):
                 raw_model = agent_cfg.model
                 node_model_id = str(raw_model) if raw_model else None
 
-        # Create child session with metadata for TurnRunner event wrapping
+        # Create child session with metadata for TurnRunner event wrapping.
+        # SpawnSessionStart is auto-emitted by create_child_session().
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,
             agent_type=agent_type_str,
             parent_session_id=parent_session_id,
+            spawn_mechanism="task",
+            description=f"Run {agent_or_team} task",
+            tool_call_id=ctx.tool_call_id,
             source_name=agent_or_team,
             source_type=source_type,
             depth=child_depth,
-            tool_call_id=ctx.tool_call_id,
             model_id=node_model_id,
         )
 
@@ -235,25 +235,6 @@ class SubagentTools(StaticResourceProvider):
             if not isinstance(node, SupportsRunStream):
                 msg = f"Team {agent_or_team} does not support streaming"
                 raise ToolError(msg)
-
-        # Emit exactly one SpawnSessionStart for both sync and async modes
-        # Emit SpawnSessionStart so the protocol layer can detect child session
-        # creation. All other stream events flow through TurnRunner → EventBus
-        # and reach the frontend via protocol-layer ``scope="descendants"``
-        # subscription — no manual business-layer forwarding is required.
-        spawn_event = SpawnSessionStart(
-            child_session_id=child_session_id,
-            parent_session_id=parent_session_id,
-            tool_call_id=ctx.tool_call_id,
-            spawn_mechanism="task",
-            source_name=agent_or_team,
-            source_type=source_type,
-            depth=child_depth,
-            description=f"Run {agent_or_team} task",
-            metadata={"prompt": prompt[:200]} if prompt else {},
-            model_id=node_model_id,
-        )
-        await ctx.events.emit_event(spawn_event)
 
         try:
             input_provider = ctx.get_input_provider()

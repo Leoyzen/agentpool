@@ -12,6 +12,7 @@ session updates.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -72,6 +73,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self.client = client
         self.client_capabilities = client_capabilities
         self._converters: dict[str, ACPEventConverter] = {}
+        self._parent_of: dict[str, str] = {}
         self.acp_agent = acp_agent
 
     @property
@@ -116,12 +118,115 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         if isinstance(event, SpawnSessionStart):
             child_sid = event.child_session_id
             if child_sid and child_sid != session_id:
-                if getattr(event, "spawn_mechanism", None) == "task":
+                if event.spawn_mechanism == "task":
                     # Skip background tasks in non-zed modes only.
                     # Zed mode needs background task sessions too for card display.
                     if self._event_converter_template.subagent_display_mode != "zed":
                         return
                 await self.start_event_consumer(child_sid)
+                # Register parent-child relationship BEFORE starting closure
+                # so the closure can safely pop the entry.
+                self._parent_of[child_sid] = session_id
+                done_event = self._consumer_done_events.get(child_sid)
+                if done_event is not None:
+                    task = asyncio.ensure_future(
+                        self._await_child_and_notify(
+                            parent_sid=session_id,
+                            child_sid=child_sid,
+                            done_event=done_event,
+                        )
+                    )
+                    self._consumer_task_refs.append(task)
+                else:
+                    # Race: consumer already finished before we could grab
+                    # the done_event. Notify immediately and clean up.
+                    self._parent_of.pop(child_sid, None)
+                    await self._notify_completed(
+                        parent_sid=session_id, child_sid=child_sid
+                    )
+
+    async def _notify_completed(self, parent_sid: str, child_sid: str) -> None:
+        """Send a subagent completion notification to the parent session.
+
+        Looks up the parent session's converter and calls
+        ``build_subagent_completed()`` to emit a ``ToolCallProgress``
+        with ``status="completed"``, closing the tool call lifecycle
+        started by ``SpawnSessionStart`` in zed mode.
+
+        Args:
+            parent_sid: The parent session that spawned the child.
+            child_sid: The child session that has completed.
+        """
+        converter = self._converters.get(parent_sid)
+        if converter is None:
+            logger.debug(
+                "Parent converter gone, skipping completion notification",
+                parent_sid=parent_sid,
+                child_sid=child_sid,
+            )
+            return
+        try:
+            async for update in converter.build_subagent_completed(
+                child_session_id=child_sid
+            ):
+                from acp.schema import SessionNotification
+
+                notification = SessionNotification(
+                    session_id=parent_sid,
+                    update=update,
+                )
+                await self.client.session_update(notification)
+        except (ConnectionResetError, BrokenPipeError):
+            logger.debug(
+                "Client disconnected during completion notification",
+                parent_sid=parent_sid,
+                child_sid=child_sid,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send subagent completion notification",
+                parent_sid=parent_sid,
+                child_sid=child_sid,
+            )
+
+    async def _await_child_and_notify(
+        self,
+        parent_sid: str,
+        child_sid: str,
+        done_event: anyio.Event,
+    ) -> None:
+        """Wait for a child consumer to finish, then notify the parent.
+
+        Background closure that waits on the child session's
+        ``done_event`` (set by the mixin's finally block when the
+        consumer loop exits), then calls ``_notify_completed`` to
+        deliver the completion notification to the parent session.
+
+        Args:
+            parent_sid: The parent session that spawned the child.
+            child_sid: The child session to wait for.
+            done_event: The child consumer's done event from
+                ``_consumer_done_events``.
+        """
+        try:
+            await done_event.wait()
+            self._parent_of.pop(child_sid, None)
+            await self._notify_completed(parent_sid, child_sid)
+        except (ConnectionResetError, BrokenPipeError):
+            logger.debug(
+                "Client disconnected during child completion notification",
+                child_sid=child_sid,
+            )
+        except Exception:
+            logger.exception(
+                "Error in child completion notification",
+                child_sid=child_sid,
+            )
+        finally:
+            task = asyncio.current_task()
+            if task is not None:
+                with contextlib.suppress(ValueError):
+                    self._consumer_task_refs.remove(task)
 
     async def _before_consumer_loop(self, session_id: str) -> None:
         """Create per-session ACPEventConverter before loop starts.
@@ -195,12 +300,13 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
-        """Clean up per-session converter.
+        """Clean up per-session converter and parent-child tracking.
 
         Args:
             session_id: The session whose consumer has stopped.
         """
         self._converters.pop(session_id, None)
+        self._parent_of.pop(session_id, None)
 
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Backward-compatible wrapper for mixin's consumer loop.

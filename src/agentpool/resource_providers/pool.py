@@ -172,6 +172,8 @@ class PoolResourceProvider(ResourceProvider):
             child_session_id = await ctx.create_child_session(
                 agent_name=agent_name,
                 agent_type="native",
+                description=f"Run {agent_name}",
+                tool_call_id=ctx.tool_call_id,
             )
             agent = await session_pool.sessions.get_or_create_session_agent(
                 child_session_id,
@@ -219,6 +221,8 @@ class PoolResourceProvider(ResourceProvider):
                 child_session_id = await ctx.create_child_session(
                     agent_name=member_name,
                     agent_type="native",
+                    description=f"Run {member_name}",
+                    tool_call_id=ctx.tool_call_id,
                 )
                 member_agent = await session_pool.sessions.get_or_create_session_agent(
                     child_session_id,

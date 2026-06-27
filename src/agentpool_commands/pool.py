@@ -215,8 +215,6 @@ class SpawnCommand(NodeCommand):
             agent_name: Name of the agent to spawn
             task_prompt: Task prompt for the subagent
         """
-        from agentpool.agents.events import SpawnSessionStart
-
         pool = ctx.context.pool
         if pool is None:
             await ctx.output.print("❌ **No agent pool available**")
@@ -236,37 +234,26 @@ class SpawnCommand(NodeCommand):
             return
         agent_config = pool.agent_configs[agent_name]
 
+        # Get AgentContext for typed access to run_ctx and tool_call_id
+        agent_ctx = ctx.context.agent.get_context()
+
         # Get parent session ID from the active run context
         parent_session_id = ""
-        agent_ctx = getattr(ctx.context, "run_ctx", None)
-        if agent_ctx is not None:
-            parent_session_id = getattr(agent_ctx, "session_id", "") or ""
+        if agent_ctx.run_ctx is not None:
+            parent_session_id = agent_ctx.run_ctx.session_id
 
-        child_session_id = await ctx.context.agent.get_context().create_child_session(
+        # SpawnSessionStart is auto-emitted by create_child_session()
+        child_session_id = await agent_ctx.create_child_session(
             agent_name=agent_name,
             agent_type=agent_config.type,
             parent_session_id=parent_session_id,
-            source_name=agent_name,
-            source_type="agent",
-            depth=1,
-        )
-
-        # Emit SpawnSessionStart so the protocol layer can set up the child session UI
-        # Emit SpawnSessionStart so the protocol layer can detect child session
-        # creation. All other stream events flow through TurnRunner → EventBus
-        # and reach the frontend via protocol-layer ``scope="descendants"``
-        # subscription — no manual business-layer forwarding is required.
-        spawn_event = SpawnSessionStart(
-            child_session_id=child_session_id,
-            parent_session_id=parent_session_id,
             spawn_mechanism="spawn",
+            description=f"Spawn {agent_name}",
+            tool_call_id=agent_ctx.tool_call_id,
             source_name=agent_name,
             source_type="agent",
             depth=1,
-            description=f"Spawn {agent_name}",
-            metadata={"prompt": task_prompt[:200]} if task_prompt else {},
         )
-        await ctx.context.agent.get_context().events.emit_event(spawn_event)
 
         # Run the subagent through SessionPool — events flow to EventBus automatically
         async for _event in session_pool.run_stream(child_session_id, task_prompt):
