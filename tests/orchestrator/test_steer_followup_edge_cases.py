@@ -24,7 +24,7 @@ from agentpool import Agent
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.core import SessionController, TurnRunner
+from agentpool.orchestrator.core import SessionController
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.orchestrator.run_executor import RunExecutor
 
@@ -52,12 +52,6 @@ def mock_pool() -> MagicMock:
 def controller(mock_pool: MagicMock) -> SessionController:
     """Return a real SessionController backed by the mock pool."""
     return SessionController(pool=mock_pool)
-
-
-@pytest.fixture
-def turn_runner(controller: SessionController) -> TurnRunner:
-    """Return a TurnRunner with auto-resume enabled."""
-    return TurnRunner(session_controller=controller, enable_auto_resume=True)
 
 
 # ---------------------------------------------------------------------------
@@ -122,159 +116,13 @@ def _make_run_handle(
 # =============================================================================
 # Test 1: Concurrent steer — 5 concurrent calls all enqueued with asap
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_concurrent_steer_all_enqueued_asap(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """5 concurrent steer() calls all enqueue correctly with priority='asap'.
-
-    Edge case: Multiple concurrent steer() calls should not race or lose
-    messages. Each call should result in a separate enqueue() with the
-    correct message and priority.
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-conc", agent, mock_pool)
-
-    mock_agent_run = MagicMock()
-    mock_agent_run.enqueue = MagicMock()
-    run_handle = _make_run_handle("sess-conc", "native")
-    run_handle.active_agent_run = mock_agent_run
-    run_handle.status = RunStatus.running
-    controller._runs[run_handle.run_id] = run_handle
-
-    session = controller.get_session("sess-conc")
-    assert session is not None
-    session.current_run_id = run_handle.run_id
-
-    messages = [f"steer-msg-{i}" for i in range(5)]
-
-    # Fire 5 concurrent steer() calls
-    await asyncio.gather(
-        *(turn_runner.steer("sess-conc", msg) for msg in messages),
-    )
-
-    # All 5 enqueues should have happened with priority="asap"
-    assert mock_agent_run.enqueue.call_count == 5, (
-        f"Expected 5 enqueue calls, got {mock_agent_run.enqueue.call_count}"
-    )
-
-    # Verify each message was enqueued with correct args
-    called_messages: set[str] = set()
-    for call in mock_agent_run.enqueue.call_args_list:
-        args, kwargs = call
-        assert kwargs["priority"] == "asap", f"Expected asap priority, got {kwargs}"
-        called_messages.add(args[0])
-
-    assert called_messages == set(messages), (
-        f"Not all messages were enqueued. Expected {set(messages)}, got {called_messages}"
-    )
-
-
 # =============================================================================
 # Test 2: Steer during tool execution — enqueued asap, drained at
 #         before_model_request
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_steer_during_tool_execution_enqueues_asap(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """Steer message arriving mid-tool is enqueued with asap priority.
-
-    Edge case: When a steer message arrives while a tool is executing,
-    it should be enqueued with priority='asap' so that
-    PendingMessageDrainCapability drains it at the next
-    before_model_request hook.
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-tool", agent, mock_pool)
-
-    mock_agent_run = MagicMock()
-    mock_agent_run.enqueue = MagicMock()
-    run_handle = _make_run_handle("sess-tool", "native")
-    run_handle.active_agent_run = mock_agent_run
-    run_handle.status = RunStatus.running
-    controller._runs[run_handle.run_id] = run_handle
-
-    session = controller.get_session("sess-tool")
-    assert session is not None
-    session.current_run_id = run_handle.run_id
-
-    # Simulate steer arriving during tool execution
-    result = await turn_runner.steer("sess-tool", "mid-tool steer message")
-
-    assert result is True, "Steer into active run should return True"
-    mock_agent_run.enqueue.assert_called_once_with(
-        "mid-tool steer message", priority="asap"
-    )
-
-
 # =============================================================================
 # Test 3: Multiple followup chain — when_idle messages create correct chain
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_multiple_followup_chain_when_idle(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """Multiple followup() calls enqueue with priority='when_idle'.
-
-    Edge case: Multiple when_idle messages should all be enqueued
-    correctly so that PendingMessageDrainCapability drains them in
-    order after each node completes, creating a chain of model requests.
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-chain", agent, mock_pool)
-
-    mock_agent_run = MagicMock()
-    mock_agent_run.enqueue = MagicMock()
-    run_handle = _make_run_handle("sess-chain", "native")
-    run_handle.active_agent_run = mock_agent_run
-    run_handle.status = RunStatus.running
-    controller._runs[run_handle.run_id] = run_handle
-
-    session = controller.get_session("sess-chain")
-    assert session is not None
-    session.current_run_id = run_handle.run_id
-
-    followup_messages = [f"followup-{i}" for i in range(3)]
-
-    for msg in followup_messages:
-        result = await turn_runner.followup("sess-chain", msg)
-        assert result is True, f"Followup {msg} should return True"
-
-    # All 3 enqueues should have happened with priority="when_idle"
-    assert mock_agent_run.enqueue.call_count == 3, (
-        f"Expected 3 enqueue calls, got {mock_agent_run.enqueue.call_count}"
-    )
-
-    # Verify correct priority and messages in order
-    called_messages: list[str] = []
-    for call in mock_agent_run.enqueue.call_args_list:
-        args, kwargs = call
-        assert kwargs["priority"] == "when_idle", (
-            f"Expected when_idle priority, got {kwargs}"
-        )
-        called_messages.append(args[0])
-
-    assert called_messages == followup_messages, (
-        f"Messages enqueued out of order. Expected {followup_messages}, got {called_messages}"
-    )
-
-
 # =============================================================================
 # Test 4: RunHandle cleanup on UndrainedPendingMessagesError
 # =============================================================================
@@ -379,74 +227,6 @@ async def test_active_agent_run_cleared_on_undrained_error() -> None:
 # =============================================================================
 # Test 5: Session close during steer race — TOCTOU-safe, no crash
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_session_close_during_steer_race_no_crash(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """Run exists but agent_run not ready — queue instead of recurse.
-
-    Edge case: When run_id is set but active_agent_run is None (PydanticAI
-    iteration hasn't started yet), steer() queues the message and triggers
-    auto-resume instead of delegating to receive_request.  This prevents
-    infinite recursion (steer → receive_request → steer).
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-race", agent, mock_pool)
-
-    run_handle = _make_run_handle("sess-race", "native")
-    # active_agent_run is NOT set (agent_run not yet ready)
-    run_handle.active_agent_run = None
-    run_handle.status = RunStatus.running
-    controller._runs[run_handle.run_id] = run_handle
-
-    session = controller.get_session("sess-race")
-    assert session is not None
-    session.current_run_id = run_handle.run_id
-
-    # steer() should queue the message, NOT delegate to receive_request
-    # (which would cause infinite recursion).
-    # Suppress auto-resume errors in the test mock environment.
-    turn_runner._safe_auto_resume = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    result = await turn_runner.steer("sess-race", "race-steer-to-idle")
-
-    assert result is False, "Steer on run without agent_run should return False (queued)"
-    # The message should be queued in run_ctx.queued_steer_messages
-    # (new path replaces old _post_turn_injections routing for native agents
-    # with an active run_ctx that hasn't completed)
-    queued = run_handle.run_ctx.queued_steer_messages
-    assert len(queued) == 1, f"Expected 1 queued steer message, got {len(queued)}"
-    assert queued[0] == "race-steer-to-idle"
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_session_close_before_steer_guard_returns_false(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """Session closed before steer() guard check — returns False, no crash.
-
-    Edge case: If the session is already closing when steer() is called,
-    the top-level guard should catch it and return False without crashing.
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-closed", agent, mock_pool)
-
-    session = controller.get_session("sess-closed")
-    assert session is not None
-    session.is_closing = True
-
-    # steer() should return False — session is closing
-    result = await turn_runner.steer("sess-closed", "should-not-deliver")
-    assert result is False, "Steer on closing session should return False"
-
-
 # =============================================================================
 # Test 6: Tool result augmentation preserved — injection_manager.consume()
 # =============================================================================

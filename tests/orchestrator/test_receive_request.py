@@ -1,12 +1,11 @@
-"""Tests for SessionController.receive_request() RunTurn feature-flag gating.
+"""Tests for SessionController.receive_request() RunHandle path.
 
-Covers six scenarios:
+Covers five scenarios:
 1. Flag ON + idle session -> creates RunHandle, registers in _runs.
 2. Flag ON + busy session + asap -> calls RunHandle.steer().
 3. Flag ON + busy session + when_idle -> calls RunHandle.followup().
-4. Flag OFF -> delegates to legacy TurnRunner path.
-5. Session not found -> returns None.
-6. Session closing -> returns None.
+4. Session not found -> returns None.
+5. Session closing -> returns None.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.orchestrator.core import SessionController
+from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
 
 
@@ -45,15 +44,9 @@ def controller(mock_pool: MagicMock) -> SessionController:
 
 
 @pytest.fixture
-def mock_turn_runner() -> MagicMock:
-    """Return a mocked TurnRunner with event_bus, steer, and followup."""
-    tr = MagicMock()
-    tr.event_bus = MagicMock()
-    tr.event_bus.publish = AsyncMock()
-    tr.steer = AsyncMock(return_value=None)
-    tr.followup = AsyncMock(return_value=None)
-    tr.run_loop = AsyncMock(return_value=None)
-    return tr
+def event_bus() -> EventBus:
+    """Return a real EventBus for testing."""
+    return EventBus()
 
 
 @pytest.fixture
@@ -91,13 +84,13 @@ def _setup_session(
 @pytest.mark.anyio
 async def test_flag_on_idle_creates_run_handle(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When flag is ON and session is idle, a RunHandle is created and registered."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-1", mock_agent)
 
     # Patch _use_run_turn to return True (bypass isinstance check)
@@ -111,7 +104,7 @@ async def test_flag_on_idle_creates_run_handle(
     assert result is not None
     assert isinstance(result, RunHandle)
     assert result.agent is mock_agent
-    assert result.event_bus is mock_turn_runner.event_bus
+    assert result.event_bus is event_bus
     assert result.session is controller.get_session("sess-1")
     assert result.run_id in controller._runs
     session = controller.get_session("sess-1")
@@ -127,13 +120,13 @@ async def test_flag_on_idle_creates_run_handle(
 @pytest.mark.anyio
 async def test_flag_on_busy_asap_calls_steer(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When flag is ON and session is busy with asap, RunHandle.steer() is called."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-2", mock_agent)
 
     # Simulate an active run
@@ -160,13 +153,13 @@ async def test_flag_on_busy_asap_calls_steer(
 @pytest.mark.anyio
 async def test_flag_on_busy_when_idle_calls_followup(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When flag is ON and session is busy with when_idle, RunHandle.followup() is called."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-3", mock_agent)
 
     existing_run = MagicMock(spec=RunHandle)
@@ -185,48 +178,19 @@ async def test_flag_on_busy_when_idle_calls_followup(
 
 
 # ---------------------------------------------------------------------------
-# Test 4: Flag OFF -> uses TurnRunner path
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_flag_off_uses_turn_runner(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-    mock_agent: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, the legacy TurnRunner path is used."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    controller._turn_runner = mock_turn_runner
-    _setup_session(controller, "sess-4", mock_agent)
-
-    await controller.get_or_create_session("sess-4", agent_name="agent-a")
-    session = controller.get_session("sess-4")
-    assert session is not None
-    session.current_run_id = "existing-run-id"
-
-    await controller.receive_request("sess-4", "message", priority="asap")
-
-    mock_turn_runner.steer.assert_awaited_once_with("sess-4", "message")
-    mock_turn_runner.followup.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# Test 5: Session not found -> returns None
+# Test 4: Session not found -> returns None
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
 async def test_session_not_found_returns_none(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the session does not exist, receive_request returns None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
 
     result = await controller.receive_request("nonexistent-session", "hello")
@@ -235,24 +199,24 @@ async def test_session_not_found_returns_none(
 
 
 # ---------------------------------------------------------------------------
-# Test 6: Session closing -> returns None
+# Test 5: Session closing -> returns None
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
 async def test_session_closing_returns_none(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the session is closing, receive_request returns None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-closing", mock_agent)
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
 
-    # Mark session as closing
+    # Mark session as closing closing
     controller._sessions["sess-closing"].closing = True
 
     result = await controller.receive_request("sess-closing", "hello")

@@ -1,7 +1,7 @@
 """Provider for worker agent tools.
 
 Worker tools delegate to agents/teams in the pool. All event routing is handled
-by the SessionPool's TurnRunner — the business layer does not manually wrap or
+by the SessionPool — the business layer does not manually wrap or
 forward events. The protocol layer subscribes with ``scope="descendants"`` and
 receives child session events automatically.
 """

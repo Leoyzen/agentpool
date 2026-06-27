@@ -193,6 +193,3 @@ class ACPTurn(Turn):
             )
 
         yield StreamCompleteEvent(message=self._final_message)
-
-        # Flush unconsumed injections to queued prompts
-        self._run_ctx.injection_manager.flush_pending_to_queue()

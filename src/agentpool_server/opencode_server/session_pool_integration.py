@@ -981,8 +981,7 @@ class OpenCodeSessionPoolIntegration(ProtocolEventConsumerMixin):
                 )
                 self._message_registered[session_id] = True
 
-            # Distinguish parent vs child events.  With
-            # TurnRunner._maybe_wrap_event removed, child events arrive
+            # Distinguish parent vs child events.  Child events arrive
             # raw via scope="descendants".
             # Use envelope.source_session_id because many streaming events
             # (e.g.PartDeltaEvent from pydantic-ai) do not carry a

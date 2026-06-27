@@ -1,6 +1,6 @@
 """Event mapper for PydanticAI to AgentPool event translation.
 
-Extracts the inline event mapping logic from RunExecutor into a reusable,
+Extracts the inline event mapping logic into a reusable,
 testable class. Maps PydanticAI stream events to AgentPool
 :class:`RichAgentStreamEvent` types.
 

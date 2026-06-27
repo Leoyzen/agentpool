@@ -1,8 +1,8 @@
 """NativeTurn wraps pydantic-ai iter/next cycle into a single reactive Turn.
 
-Replaces the inline iteration logic in :class:`RunExecutor` with a
-:class:`Turn` subclass that drives ``agentlet.iter()`` + ``agent_run.next()``
-and yields :class:`RichAgentStreamEvent` via :class:`EventMapper`.
+Provides a :class:`Turn` subclass that drives ``agentlet.iter()`` +
+``agent_run.next()`` and yields :class:`RichAgentStreamEvent` via
+:class:`EventMapper`.
 """
 
 from __future__ import annotations

@@ -763,7 +763,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         allows tools or external code to schedule follow-up work.
 
         !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.turns.followup()`` instead.
+            Use ``agent_pool.session_pool.followup()`` instead.
 
         For non-native agents and standalone native agents, the existing
         injection_manager-based path remains unchanged.
@@ -780,11 +780,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Pooled native agents: emit DeprecationWarning, delegate to TurnRunner.followup().
+        # Pooled native agents: delegate to session_pool.followup().
         if self.AGENT_TYPE == "native" and self.agent_pool is not None and self.agent_pool.session_pool is not None:
             warnings.warn(
                 "queue_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.turns.followup() instead.",
+                "Use agent_pool.session_pool.followup() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -795,14 +795,15 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if effective_session_id is not None:
                 combined = "\n".join(str(p) for p in prompts)
                 self.task_manager.fire_and_forget(
-                    session_pool.turns.followup(effective_session_id, combined)
+                    session_pool.followup(effective_session_id, combined)
                 )
                 return
             # Standalone native agents: fall through to legacy path
 
         # Legacy path for non-native agents and standalone native agents
         if run_ctx is not None and run_ctx.injection_manager is not None:
-            run_ctx.injection_manager.queue(*prompts)
+            combined = "\n".join(str(p) for p in prompts)
+            run_ctx.injection_manager.inject(combined)
 
     def inject_prompt(self, message: str, session_id: str | None = None) -> None:
         """Inject a message into the conversation mid-run.
@@ -813,7 +814,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         next iteration.
 
         !!! warning "Deprecated for pooled native agents"
-            Use ``agent_pool.session_pool.turns.steer()`` instead.
+            Use ``agent_pool.session_pool.steer()`` instead.
 
         For non-native agents and standalone native agents, the existing
         injection_manager-based path remains unchanged.
@@ -831,11 +832,11 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         run_ctx = self.get_active_run_context(session_id=session_id)
 
-        # Pooled native agents: emit DeprecationWarning, delegate to TurnRunner.steer().
+        # Pooled native agents: delegate to session_pool.steer().
         if self.AGENT_TYPE == "native" and self.agent_pool is not None and self.agent_pool.session_pool is not None:
             warnings.warn(
                 "inject_prompt() is deprecated for pooled native agents. "
-                "Use agent_pool.session_pool.turns.steer() instead.",
+                "Use agent_pool.session_pool.steer() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -845,7 +846,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             )
             if effective_session_id is not None:
                 self.task_manager.fire_and_forget(
-                    session_pool.turns.steer(effective_session_id, message)
+                    session_pool.steer(effective_session_id, message)
                 )
                 return
             # FALLBACK: effective_session_id is None but session_pool exists.
@@ -857,7 +858,7 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
             if sessions:
                 most_recent = max(sessions, key=lambda s: s.last_active_at)
                 self.task_manager.fire_and_forget(
-                    session_pool.turns.steer(most_recent.session_id, message)
+                    session_pool.steer(most_recent.session_id, message)
                 )
                 return
             # Standalone native agents: fall through to legacy path
@@ -1131,37 +1132,25 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
                     tg.start_soon(_native_runner)
                 else:
                     # Non-native agents: _run_stream_once() still yields events
-                    # (they don't use RunExecutor). Each yielded event is
+                    # (they don't use NativeTurn). Each yielded event is
                     # published to EventBus.
                     async def _non_native_publisher() -> None:
                         try:
-                            if run_ctx.injection_manager is not None:
-                                run_ctx.injection_manager.insert_queued(prompts)
-                            while (
-                                run_ctx.injection_manager is not None
-                                and run_ctx.injection_manager.has_queued()
-                                and not run_ctx.cancelled
+                            async for event in self._run_stream_once(
+                                run_ctx,
+                                *prompts,
+                                store_history=store_history,
+                                message_id=message_id,
+                                session_id=effective_session_id,
+                                parent_session_id=parent_session_id,
+                                parent_id=parent_id,
+                                message_history=message_history,
+                                input_provider=input_provider,
+                                wait_for_connections=wait_for_connections,
+                                deps=deps,
+                                event_handlers=event_handlers,
                             ):
-                                current_prompts = run_ctx.injection_manager.pop_queued()
-                                if current_prompts is None:
-                                    break
-                                async for event in self._run_stream_once(
-                                    run_ctx,
-                                    *current_prompts,
-                                    store_history=store_history,
-                                    message_id=message_id,
-                                    session_id=effective_session_id,
-                                    parent_session_id=parent_session_id,
-                                    parent_id=parent_id,
-                                    message_history=message_history,
-                                    input_provider=input_provider,
-                                    wait_for_connections=wait_for_connections,
-                                    deps=deps,
-                                    event_handlers=event_handlers,
-                                ):
-                                    await local_bus.publish(effective_session_id, event)
-                                if run_ctx.injection_manager is not None:
-                                    run_ctx.injection_manager.flush_pending_to_queue()
+                                await local_bus.publish(effective_session_id, event)
                         finally:
                             with anyio.CancelScope(shield=True):
                                 if _created_local_bus:

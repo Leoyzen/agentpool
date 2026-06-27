@@ -142,7 +142,7 @@ async def test_subagent_event_lineage(test_pool):
     await tools.task(ctx, agent_or_team="child", prompt="Do something", description="test lineage")
 
     # Collect events from the queue — raw events flow through EventBus
-    # with scope=descendants (no SubAgentEvent wrapping in TurnRunner path).
+    # with scope=descendants (no SubAgentEvent wrapping in session path).
     child_events: list[Any] = []
     await asyncio.sleep(0.1)  # Give events time to propagate
 

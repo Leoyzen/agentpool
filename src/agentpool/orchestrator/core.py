@@ -8,17 +8,14 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
-import inspect
 from itertools import groupby
-import os
 import time
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 import uuid
-import warnings
 
 import anyio
 from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
@@ -26,7 +23,6 @@ from pydantic_ai import TextPartDelta, ThinkingPartDelta, ToolCallPartDelta
 from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import (
     CompactionEvent,
-    CustomEvent,
     PartDeltaEvent,
     PlanUpdateEvent,
     RunErrorEvent,
@@ -35,13 +31,11 @@ from agentpool.agents.events import (
     SessionResumeEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
-    SubAgentEvent,
     ToolCallCompleteEvent,
     ToolCallContentItem,
     ToolCallDeferredEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
-    ToolResultMetadataEvent,
 )
 from agentpool.agents.native_agent.checkpoint import CheckpointData
 from agentpool.log import get_logger
@@ -49,7 +43,6 @@ from agentpool.messaging import ChatMessage
 from agentpool.models.pending_interaction import PendingPermission
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.sessions.models import PendingDeferredCall, SessionData
-from agentpool.tasks.exceptions import RunAbortedError
 from agentpool_server.opencode_server.models.session_info import SessionInfo
 
 
@@ -830,7 +823,7 @@ class SessionController:
         self._runs: dict[str, RunHandle] = {}
         self._runs_lock: asyncio.Lock = asyncio.Lock()
         self._max_concurrent_runs: int | None = max_concurrent_runs
-        self._turn_runner: TurnRunner | None = None
+        self._event_bus: EventBus | None = None
         self._pending_run_ids: dict[str, str] = {}
         self._todo_lock: asyncio.Lock = asyncio.Lock()
         self._mcp_pool: MCPConnectionPool | None = None
@@ -987,16 +980,7 @@ class SessionController:
         """
         async with self._lock:
             if session_id in self._session_agents:
-                agent = self._session_agents[session_id]
-                # Update input_provider on cached agent if a new one is provided.
-                # Without this, the agent keeps the stale (or None) input_provider
-                # from when it was first cached, causing elicitation failures.
-                if input_provider is not None:
-                    session = self._sessions.get(session_id)
-                    if session is not None:
-                        session.input_provider = input_provider
-                    agent._input_provider = input_provider
-                return agent
+                return self._session_agents[session_id]
 
             session, _was_created = await self._get_or_create_session_locked(session_id, agent_name)
             agent_name = agent_name or session.agent_name
@@ -1389,119 +1373,22 @@ class SessionController:
 
         logger.info("Closed session (run-turn path)", session_id=session_id)
 
-    async def close_session(self, session_id: str) -> None:  # noqa: PLR0915
+    async def close_session(self, session_id: str) -> None:
         """Close a session and clean up resources.
 
-        When ``AGENTPOOL_USE_RUN_TURN`` is set, delegates to
-        :meth:`_close_session_run_turn` which uses the RunHandle
-        lifecycle (close → turn_lock → complete_event → cancel).
-
-        Otherwise, the legacy path is used:
-
-        Order matters:
-        1. Mark session as closing (prevents new turns from starting)
-        2. Checkpoint-on-close: if pending deferred calls exist, save
-           checkpointed status before releasing resources
-        3. Handle child sessions based on lifecycle policy
-        4. Remove from tracking dicts
-        5. Acquire turn_lock to wait for active turn to complete
-        6. Exit agent context if per-session
-        7. Clean up session state
+        Uses the RunHandle lifecycle:
+        1. Signal ``RunHandle.close()`` (sets ``_closing``, wakes idle loop).
+        2. Mark ``session.closing = True``.
+        3. Cancel the session ``CancelScope``.
+        4. Acquire ``turn_lock`` (30 s timeout) — graceful turn completion.
+        5. Await ``complete_event`` (30 s timeout) — graceful run completion.
+        6. On timeout: call ``RunHandle.cancel()``.
+        7. Clean up tracking dicts and agent context.
 
         Args:
             session_id: The session to close.
         """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
-            await self._close_session_run_turn(session_id)
-            return
-
-        async with self._lock:
-            session = self._sessions.get(session_id)
-            if session is None:
-                return
-
-            session.is_closing = True
-            session.closed_at = time.monotonic()
-
-            # Cancel the session's CancelScope to cascade cancellation
-            # to child sessions and stop any pending operations
-            scope = self._session_scopes.pop(session_id, None)
-            if scope is not None:
-                scope.cancel()
-
-            # Checkpoint-before-close: if pending deferred calls exist, save
-            # checkpoint state before releasing resources so the session can
-            # be resumed later. If the checkpoint save fails, do NOT release
-            # resources (agent stays alive).
-            was_checkpointed = False
-            if self.store is not None:
-                data = await self.store.load(session_id)
-                if self._should_checkpoint_on_close(data):
-                    assert data is not None  # _should_checkpoint_on_close ensures this
-                    checkpoint_ok = await self._save_close_checkpoint(session_id, data)
-                    if not checkpoint_ok:
-                        logger.error(
-                            "Close checkpoint failed - resources NOT released",
-                            session_id=session_id,
-                        )
-                        return  # Keep session alive
-                    was_checkpointed = True
-
-            # Handle child sessions based on lifecycle policy
-            children = self._children.pop(session_id, [])
-            if children:
-                for child_id in children:
-                    child_session = self._sessions.get(child_id)
-                    if (
-                        child_session is not None
-                        and child_session.lifecycle_policy == "independent"
-                    ):
-                        continue
-                    await self._close_session_unlocked(child_id)
-
-            agent = self._session_agents.pop(session_id, None)
-            self._sessions.pop(session_id, None)
-            if self.store is not None and not was_checkpointed:
-                await self._mark_session_closed(session_id)
-            # Remove from parent's children list
-            if session.parent_session_id and session.parent_session_id in self._children:
-                self._children[session.parent_session_id] = [
-                    cid for cid in self._children[session.parent_session_id] if cid != session_id
-                ]
-
-        turn_completed = False
-        acquired = False
-        if session is not None:
-            lock = session.turn_lock
-            try:
-                await asyncio.wait_for(lock.acquire(), timeout=30.0)
-                acquired = True
-                turn_completed = True
-            except TimeoutError:
-                logger.warning(
-                    "Timeout waiting for turn to complete during close_session",
-                    session_id=session_id,
-                )
-            finally:
-                if acquired:
-                    lock.release()
-
-        if agent is not None and session is not None and turn_completed:
-            if session.is_per_session_agent:
-                try:
-                    await agent.__aexit__(None, None, None)
-                except Exception:
-                    logger.exception("Failed to exit agent context", session_id=session_id)
-                finally:
-                    self._decrement_mcp_count(agent)
-        elif agent is not None and session is not None and session.is_per_session_agent:
-            logger.error(
-                "Turn did not complete within timeout - agent context NOT exited",
-                session_id=session_id,
-            )
-            self._decrement_mcp_count(agent)
-
-        logger.info("Closed session", session_id=session_id)
+        await self._close_session_run_turn(session_id)
 
     def get_session(self, session_id: str) -> SessionState | None:
         """Get a session by ID.
@@ -1583,7 +1470,7 @@ class SessionController:
         Returns:
             The newly created RunHandle.
         """
-        event_bus = self._turn_runner.event_bus if self._turn_runner is not None else None
+        event_bus = self._event_bus
         run_ctx = AgentRunContext(session_id=session_id, event_bus=event_bus)
         run_handle = RunHandle(
             run_id=uuid.uuid4().hex,
@@ -1601,73 +1488,6 @@ class SessionController:
             lambda _t, rid=run_handle.run_id: self._cleanup_run(rid)
         )
         return run_handle
-
-    async def _receive_request_turn_runner(
-        self,
-        session: SessionState,
-        session_id: str,
-        content: Any,
-        priority: str,
-        **kwargs: Any,
-    ) -> RunHandle | None:
-        """Handle receive_request via the legacy TurnRunner path.
-
-        Args:
-            session: The resolved session state.
-            session_id: Target session.
-            content: Message / prompt content.
-            priority: ``"when_idle"`` or ``"asap"`` (aliases accepted).
-            **kwargs: Additional arguments for the turn runner.
-
-        Returns:
-            The RunHandle if a new run was started, otherwise None.
-        """
-        async with session._request_lock:
-            if session.closing or session.is_closing:
-                return None
-
-            if self._max_concurrent_runs is not None:
-                async with self._runs_lock:
-                    if len(self._runs) >= self._max_concurrent_runs:
-                        return None
-
-            # Store input_provider on session for auto-resume
-            if "input_provider" in kwargs:
-                session.input_provider = kwargs["input_provider"]
-
-            if session.current_run_id is None:
-                run_handle = self._create_run(session_id, content)
-                self._runs[run_handle.run_id] = run_handle
-                session.current_run_id = run_handle.run_id
-                if self._turn_runner is not None:
-                    self._pending_run_ids[session_id] = run_handle.run_id
-                    task = asyncio.create_task(
-                        self._turn_runner.run_loop(session_id, content, **kwargs),
-                    )
-                    run_handle._start_task(task)
-
-                    def _cleanup_on_done(
-                        _t: asyncio.Task[None], rid: str = run_handle.run_id
-                    ) -> None:
-                        self._cleanup_run(rid)
-
-                    task.add_done_callback(_cleanup_on_done)
-                return run_handle
-
-        # Map user-facing priority aliases to internal values
-        _priority_aliases: dict[str, str] = {
-            "steer": "asap",
-            "followup": "when_idle",
-        }
-        resolved_priority = _priority_aliases.get(priority, priority)
-
-        # Session has an active run - delegate after releasing the request lock
-        if self._turn_runner is not None:
-            if resolved_priority == "asap":
-                await self._turn_runner.steer(session_id, content, **kwargs)
-            else:
-                await self._turn_runner.followup(session_id, content, **kwargs)
-        return None
 
     async def receive_request(
         self,
@@ -1744,19 +1564,11 @@ class SessionController:
                 instead of ``session.metadata["agent_type"]``.
 
         Returns:
-            A new RunHandle, or None when AGENTPOOL_USE_RUN_TURN is enabled.
+            A new RunHandle.
 
         Raises:
             ValueError: If the session does not exist.
         """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
-            warnings.warn(
-                "_create_run is deprecated when AGENTPOOL_USE_RUN_TURN is enabled. "
-                "Use RunHandle methods directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return None
         session = self.get_session(session_id)
         if session is None:
             raise ValueError("Session not found")
@@ -1780,14 +1592,6 @@ class SessionController:
         Args:
             run_id: The run ID to clean up.
         """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
-            warnings.warn(
-                "_cleanup_run is deprecated when AGENTPOOL_USE_RUN_TURN is enabled. "
-                "Use RunHandle methods directly.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return
         run_handle = self._runs.pop(run_id, None)
         if run_handle is not None:
             run_handle.complete_event.set()
@@ -1971,1009 +1775,10 @@ class SessionController:
                 logger.exception("Deferred call cleanup loop failed")
 
 
-class TurnRunner:
-    """Manages turn lifecycle and auto-resume.
-
-    Replaces the implicit turn loop in BaseAgent.run_stream() with an
-    explicit orchestration layer.
-
-    Safety features:
-    - Per-session injection queue locks
-    - Max auto-resume iterations (configurable)
-    - Turn serialization via SessionState.turn_lock
-    - Atomic drain operations
-    """
-
-    def __init__(
-        self,
-        session_controller: SessionController,
-        enable_auto_resume: bool = True,
-        max_auto_resume: int = DEFAULT_MAX_AUTO_RESUME,
-        replay_buffer_size: int = 100,
-    ) -> None:
-        """Initialize the turn runner.
-
-        !!! warning "Deprecated"
-            TurnRunner is being replaced by RunHandle's session-level
-            lifecycle. Set ``AGENTPOOL_USE_RUN_TURN=1`` to use the new
-            code path; steer/followup/run_loop will delegate to
-            RunHandle methods. This class will be removed in a future
-            release.
-
-        Args:
-            session_controller: The session controller for agent lifecycle.
-            enable_auto_resume: Whether to enable auto-resume loop.
-            max_auto_resume: Maximum auto-resume iterations.
-            replay_buffer_size: Maximum number of events retained per session for replay.
-        """
-        warnings.warn(
-            "TurnRunner is deprecated. Set AGENTPOOL_USE_RUN_TURN=1 to "
-            "use the RunHandle lifecycle. See RunHandle.start/steer/followup.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.sessions = session_controller
-        self.event_bus = EventBus(
-            session_controller=session_controller,
-            replay_buffer_size=replay_buffer_size,
-        )
-        self._post_turn_injections: dict[str, list[str]] = {}
-        self._post_turn_prompts: dict[str, list[tuple[Any, ...]]] = {}
-        self._injection_locks: dict[str, asyncio.Lock] = {}
-        self._injection_locks_lock = asyncio.Lock()
-        self._enable_auto_resume = enable_auto_resume
-        self._max_auto_resume = max_auto_resume
-        self._turn_timings: list[tuple[float, float]] = []
-        self._max_turn_timing_history: int = 100
-        self._session_task_groups: dict[str, anyio.TaskGroup] = {}
-        self._cancel_tasks: set[asyncio.Task[Any]] = set()
-        self._runs: dict[str, AgentRunContext] = {}
-        self._last_error: BaseException | None = None
-
-    async def _get_injection_lock(self, session_id: str) -> asyncio.Lock:
-        """Get or create per-session injection lock.
-
-        Always acquires _injection_locks_lock to prevent concurrent creation
-        of locks for the same session_id.
-
-        Args:
-            session_id: The session to get the lock for.
-
-        Returns:
-            The per-session injection lock.
-        """
-        async with self._injection_locks_lock:
-            lock = self._injection_locks.get(session_id)
-            if lock is None:
-                lock = asyncio.Lock()
-                self._injection_locks[session_id] = lock
-            return lock
-
-    async def _get_session_task_group(self, session_id: str) -> anyio.TaskGroup:
-        """Get or create per-session anyio TaskGroup for auto-resume tasks.
-
-        Creates a new TaskGroup if one doesn't exist for the session.
-        This group manages auto-resume task lifecycle.
-
-        Args:
-            session_id: The session to get/create TaskGroup for.
-
-        Returns:
-            The session's anyio TaskGroup.
-        """
-        if session_id not in self._session_task_groups:
-            self._session_task_groups[session_id] = anyio.create_task_group()
-        return self._session_task_groups[session_id]
-
-    async def _safe_auto_resume(self, session_id: str, **kwargs: Any) -> None:
-        """Exception-catching wrapper for auto-resume tasks.
-
-        One auto-resume failure MUST NOT cancel sibling auto-resume tasks
-        in the same session TaskGroup.
-
-        Args:
-            session_id: The session to trigger auto-resume for.
-            **kwargs: Additional arguments passed to _trigger_auto_resume.
-        """
-        try:
-            await self._trigger_auto_resume(session_id, **kwargs)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(
-                "Auto-resume task failed",
-                session_id=session_id,
-            )
-
-    async def _publish_event(self, session_id: str, event: Any) -> None:
-        """Publish event to EventBus.
-
-        Events are wrapped in EventEnvelope by the EventBus with the
-        source_session_id set to the publishing session.
-        """
-        await self.event_bus.publish(session_id, event)
-
-    async def _run_turn_unlocked(
-        self,
-        session_id: str,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Run a single turn - caller MUST hold session.turn_lock.
-
-        Internal method used by both run_turn() (single turn) and run_loop()
-        (auto-resume loop) to avoid reentrancy issues with asyncio.Lock.
-
-        Events are published to the EventBus from two sources:
-        1. The main agent stream (_run_stream_once)
-        2. The run_ctx event_queue (background tasks, inject_prompt, etc.)
-
-        Args:
-            session_id: The session to run the turn for.
-            *prompts: Prompts to pass to the agent.
-            **kwargs: Additional arguments passed to the agent.
-        """
-        # Extract input_provider for agent creation, pass remaining kwargs to _run_stream_once
-        input_provider = kwargs.pop("input_provider", None)
-        # Set ContextVar for PydanticAI MCP elicitation callback, so that
-        # agent-level MCP servers can resolve the InputProvider at runtime.
-        _elicitation_token = None
-        if input_provider is not None:
-            from agentpool.mcp_server.manager import _current_input_provider
-
-            _elicitation_token = _current_input_provider.set(input_provider)
-            # Also set session.input_provider so that AgentContext.get_input_provider()
-            # can find it via Source 2 (session_state.input_provider).
-            # This is critical for the run_stream → process_prompt → run_loop path,
-            # which does NOT go through receive_request (the only place that
-            # previously set session.input_provider).
-            _session_for_provider = self.sessions.get_session(session_id)
-            if _session_for_provider is not None:
-                _session_for_provider.input_provider = input_provider
-        agent = await self.sessions.get_or_create_session_agent(
-            session_id, input_provider=input_provider
-        )
-        _session = self.sessions.get_session(session_id)
-
-        from agentpool.agents.base_agent import BaseAgent, _current_run_ctx_var, _in_turn_context
-        from agentpool.orchestrator.run import RunHandle, RunStatus
-
-        run_id_override = self.sessions._pending_run_ids.pop(session_id, None)
-        # If no pending run_id, check if session already has a current_run_id
-        # (e.g., manually created RunHandle in tests)
-        if run_id_override is None and _session is not None and _session.current_run_id is not None:
-            run_id_override = _session.current_run_id
-        run_id = run_id_override or uuid.uuid4().hex
-
-        # Get or create RunHandle (create if called directly, not via receive_request)
-        run_handle = self.sessions._runs.get(run_id)
-        created_run_handle = False
-        agent_type = agent.AGENT_TYPE if isinstance(agent, BaseAgent) else "native"
-        if run_handle is None:
-            run_handle = RunHandle(
-                run_id=run_id,
-                session_id=session_id,
-                agent_type=agent_type,
-            )
-            self.sessions._runs[run_id] = run_handle
-            created_run_handle = True
-        run_handle._start_task(asyncio.current_task())
-
-        # Use RunHandle's run_ctx as the authoritative context
-        run_ctx = run_handle.run_ctx
-        # Wire run_handle for RunExecutor lifecycle management.
-        # RunExecutor.execute() uses run_handle to set/clear active_agent_run.
-        run_ctx._run_handle = run_handle
-        run_ctx.steer_callback = self.steer
-        run_ctx.deps = kwargs.get("deps")
-        run_ctx.depth = kwargs.get("depth", 0)
-        run_ctx.run_id = run_id
-        run_ctx.cancelled = False
-        run_ctx.current_task = asyncio.current_task()
-        run_ctx.event_bus = self.event_bus
-        run_ctx.session_id = session_id
-        _current_run_ctx_var.set(run_ctx)
-
-        if hasattr(agent, "interrupt"):
-
-            def _schedule_interrupt() -> None:
-                task = asyncio.ensure_future(agent.interrupt(run_ctx=run_ctx))
-                self._cancel_tasks.add(task)
-                task.add_done_callback(self._cancel_tasks.discard)
-
-            run_handle._cancel_fn = _schedule_interrupt
-
-        if _session is not None and _session.current_run_id is None:
-            _session.current_run_id = run_id
-        self._runs[run_ctx.run_id] = run_ctx
-
-        turn_start = time.monotonic()
-        # Use run_stream (public API) when the agent is a real instance
-        # so that patches applied to run_stream are triggered.  For bare
-        # MagicMock agents (common in unit tests) where run_stream is a
-        # generic mock that does not delegate to _run_stream_once,
-        # fall back to _run_stream_once directly.
-        from unittest.mock import MagicMock as _MagicMock
-
-        _use_run_stream: bool = True
-        if isinstance(agent, _MagicMock):
-            # Bare MagicMock in unit tests — use _run_stream_once directly
-            _use_run_stream = False
-        elif isinstance(agent, BaseAgent):
-            # Real agent — use run_stream (public API)
-            _use_run_stream = True
-        else:
-            # Unknown object — try _run_stream_once as fallback
-            _use_run_stream = False
-
-        _stream_callable = agent.run_stream if _use_run_stream else agent._run_stream_once
-        assert _stream_callable is not None, (
-            "Expected run_stream or _run_stream_once to be available"
-        )
-        sig = inspect.signature(_stream_callable)
-        stream_params = set(sig.parameters)
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
-        # input_provider was popped for get_or_create_session_agent;
-        # include it back if _run_stream_once also accepts it.
-        stream_kwargs = dict(kwargs)
-        if input_provider is not None and (has_var_keyword or "input_provider" in stream_params):
-            stream_kwargs["input_provider"] = input_provider
-        if _session is not None:
-            _session._turn_owner_task = asyncio.current_task()
-        _in_turn_context.set(True)
-        # Clear the replay buffer at the start of each turn so that
-        # new subscribers (e.g. run_stream's consumer) only receive
-        # events from THIS turn. Without this, stale events from
-        # previous turns (including StreamCompleteEvent) would be
-        # replayed, causing the consumer to prematurely break and
-        # cancel the native runner.
-        self.event_bus.clear_replay_buffer(session_id)
-        # Track whether the agent already produced a StreamCompleteEvent.
-        # If it did, subsequent exceptions (e.g. CancelledError from
-        # generator cleanup) are NOT run failures — the agent completed
-        # successfully and the exception is a spurious side effect.
-        stream_completed = False
-
-        try:
-            try:
-                # Process prompts and handle injections/queued prompts
-                # like BaseAgent.run_stream() does.  Use _run_ctx to
-                # avoid creating a duplicate AgentRunContext and
-                # _skip_pool to prevent recursive SessionPool delegation.
-                # For mock agents, fall back to _run_stream_once directly.
-                if _use_run_stream:
-                    async for event in agent.run_stream(
-                        *prompts,
-                        session_id=session_id,
-                        _run_ctx=run_ctx,
-                        _skip_pool=True,
-                        **stream_kwargs,
-                    ):
-                        if isinstance(event, StreamCompleteEvent):
-                            stream_completed = True
-                else:
-                    async for event in agent._run_stream_once(
-                        run_ctx, *prompts, session_id=session_id, **stream_kwargs
-                    ):
-                        if isinstance(event, StreamCompleteEvent):
-                            stream_completed = True
-                        await self._publish_event(session_id, event)
-
-                # After _run_stream_once completes, handle unconsumed injections.
-                # Native agents use PydanticAI's PendingMessageDrainCapability
-                # instead of the manual flush/queue loop.
-                if isinstance(agent, BaseAgent) and agent.AGENT_TYPE != "native":
-                    run_ctx.injection_manager.flush_pending_to_queue()
-                    while run_ctx.injection_manager.has_queued() and not run_ctx.cancelled:
-                        current_prompts = run_ctx.injection_manager.pop_queued()
-                        if current_prompts is None:
-                            break
-                        if _use_run_stream:
-                            async for event in agent.run_stream(
-                                *current_prompts,
-                                session_id=session_id,
-                                _run_ctx=run_ctx,
-                                _skip_pool=True,
-                                **stream_kwargs,
-                            ):
-                                if isinstance(event, StreamCompleteEvent):
-                                    stream_completed = True
-                        else:
-                            async for event in agent._run_stream_once(
-                                run_ctx, *current_prompts, session_id=session_id, **stream_kwargs
-                            ):
-                                if isinstance(event, StreamCompleteEvent):
-                                    stream_completed = True
-                                await self._publish_event(session_id, event)
-                        run_ctx.injection_manager.flush_pending_to_queue()
-                elif run_ctx.injection_manager.has_pending():
-                    logger.warning(
-                        "Native agent has unconsumed injections — these will not be flushed to the manual queue. PendingMessageDrainCapability should handle them.",
-                        pending_count=len(run_ctx.injection_manager._pending_injections),
-                    )
-            except RunAbortedError:
-                logger.debug("Run aborted by user", session_id=session_id)
-                # Don't mark run as failed — this is user-initiated cancellation
-                raise
-            except (Exception, asyncio.CancelledError) as exc:
-                # Only mark as failed if the agent did NOT already complete.
-                # A CancelledError after StreamCompleteEvent is a spurious
-                # side effect of generator cleanup, not a real failure.
-                if not stream_completed:
-                    if run_handle is not None and run_handle.status not in (
-                        RunStatus.completed,
-                        RunStatus.failed,
-                        RunStatus.checkpointed,
-                    ):
-                        run_handle.fail(exception=exc, event_bus=self.event_bus)
-                else:
-                    logger.debug(
-                        "Suppressed RunFailedEvent after StreamCompleteEvent",
-                        session_id=session_id,
-                        exc_type=type(exc).__name__,
-                        exc_repr=repr(exc),
-                    )
-                raise
-            except (Exception, asyncio.CancelledError) as exc:
-                if run_handle is not None and run_handle.status not in (
-                    RunStatus.completed,
-                    RunStatus.failed,
-                    RunStatus.checkpointed,
-                ):
-                    run_handle.fail(exception=exc, event_bus=self.event_bus)
-                raise
-        finally:
-            # CRITICAL: Mark run as completed BEFORE any await so that
-            # inject_prompt() sees completed=True and falls back to
-            # post-turn queuing instead of returning True (active turn)
-            # and dropping the message in a dead pending queue.
-            run_ctx.completed = True
-
-            # Safety net: if this is a child session and the tool didn't call
-            # complete_background_task(), set the parent's done_event anyway.
-            if _session is not None and _session.parent_session_id is not None:
-                parent_session = self.sessions.get_session(_session.parent_session_id)
-                if parent_session is not None and parent_session.current_run_id is not None:
-                    parent_run_handle = self.sessions._runs.get(parent_session.current_run_id)
-                    if parent_run_handle is not None and parent_run_handle.run_ctx is not None:
-                        event = parent_run_handle.run_ctx.child_done_events.pop(_session.session_id, None)
-                        if event is not None:
-                            event.set()
-
-            # CRITICAL: Clear session.current_run_id BEFORE any await to prevent
-            # race condition where inject_prompt returns True but message
-            # gets stuck in pending (flush_pending_to_queue() already passed).
-            if _session is not None:
-                _session.current_run_id = None
-
-            self._runs.pop(run_ctx.run_id, None)
-            _current_run_ctx_var.set(None)
-            # Reset elicitation InputProvider ContextVar
-            if _elicitation_token is not None:
-                from agentpool.mcp_server.manager import _current_input_provider
-
-                _current_input_provider.reset(_elicitation_token)
-            if _session is not None:
-                _session._turn_owner_task = None
-            _in_turn_context.set(False)
-
-            turn_end = time.monotonic()
-            self._turn_timings.append((turn_start, turn_end))
-            if len(self._turn_timings) > self._max_turn_timing_history:
-                self._turn_timings.pop(0)
-
-            # Clean up RunHandle if we created it
-            if created_run_handle and run_handle is not None:
-                if run_handle.status not in (
-                    RunStatus.completed,
-                    RunStatus.failed,
-                    RunStatus.checkpointed,
-                ):
-                    if run_ctx.checkpointed:
-                        run_handle.checkpoint()
-                    else:
-                        run_handle.complete()
-                # Note: complete_event is NOT set here — it is deferred to
-                # run_loop() so that it covers the full run loop including
-                # auto-resume turns.  Per-request waiters (e.g. sync HTTP
-                # endpoint) should wait for the entire session run cycle.
-                self.sessions._runs.pop(run_id, None)
-
-    async def run_turn(
-        self,
-        session_id: str,
-        *prompts: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Run a single turn for a session.
-
-        Acquires session.turn_lock to enforce "1 turn per session".
-        Events are delivered exclusively via EventBus.
-
-        Args:
-            session_id: The session to run the turn for.
-            *prompts: Prompts to pass to the agent.
-            **kwargs: Additional arguments passed to the agent.
-        """
-        session, _was_created = await self.sessions.get_or_create_session(session_id)
-
-        async with session.turn_lock:
-            if session.is_closing:
-                logger.debug("Session is closing, skipping turn", session_id=session_id)
-                return
-            await self._run_turn_unlocked(session_id, *prompts, **kwargs)
-
-    async def run_loop(
-        self,
-        session_id: str,
-        *initial_prompts: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Run a turn loop until no more post-turn work.
-
-        !!! warning "Deprecated"
-            Delegates to :meth:`RunHandle.start` when
-            ``AGENTPOOL_USE_RUN_TURN`` is set. Otherwise calls
-            :meth:`_legacy_run_loop` for backward compatibility.
-
-        Args:
-            session_id: The session to run the loop for.
-            *initial_prompts: Initial prompts to start the loop.
-            **kwargs: Additional arguments passed to the agent.
-        """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            warnings.warn(
-                "TurnRunner.run_loop() is deprecated. Use RunHandle.start() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            session = self.sessions.get_session(session_id)
-            if session is None or session.current_run_id is None:
-                return
-            run_handle = self.sessions._runs.get(session.current_run_id)
-            if run_handle is None:
-                return
-            content = " ".join(str(p) for p in initial_prompts) if initial_prompts else ""
-            async for _event in run_handle.start(content):
-                pass
-            return
-        await self._legacy_run_loop(session_id, *initial_prompts, **kwargs)
-
-    async def _legacy_run_loop(
-        self,
-        session_id: str,
-        *initial_prompts: Any,
-        **kwargs: Any,
-    ) -> None:
-        """Run a turn loop until no more post-turn work (legacy).
-
-        Only one run_loop per session at a time (enforced by SessionState.turn_lock).
-        Events are delivered exclusively via EventBus.
-
-        Args:
-            session_id: The session to run the loop for.
-            *initial_prompts: Initial prompts to start the loop.
-            **kwargs: Additional arguments passed to the agent.
-        """
-        session, _was_created = await self.sessions.get_or_create_session(session_id)
-
-        async with session.turn_lock:
-            if session.is_closing:
-                logger.debug("Session is closing, skipping turn", session_id=session_id)
-                return
-
-            try:
-                await self._run_turn_unlocked(session_id, *initial_prompts, **kwargs)
-                await self._process_queued_work(session_id, session, **kwargs)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.exception("Turn loop failed", session_id=session_id)
-                # Publish RunFailedEvent so protocol handlers can notify clients
-                run_id = session.current_run_id
-                if run_id is not None:
-                    run_handle = self.sessions._runs.get(run_id)
-                    if run_handle is not None:
-                        run_handle.fail(exception=exc, event_bus=self.event_bus)
-                self._last_error = exc
-                await self._drain_post_turn_injections(session_id)
-                await self._drain_post_turn_prompts(session_id)
-            finally:
-                # Signal completion after the full run loop (including auto-resume)
-                # so that per-request waiters observe the full session run cycle.
-                run_id = session.current_run_id
-                if run_id is not None:
-                    run_handle = self.sessions._runs.get(run_id)
-                    if run_handle is not None:
-                        run_handle.complete_event.set()
-
-    async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> bool:
-        """Inject a message into a session.
-
-        If the session has an active turn, injects immediately.
-        Otherwise, queues for the next turn and triggers auto-resume.
-
-        Does NOT acquire session.turn_lock.
-
-        Args:
-            session_id: The session to inject into.
-            message: The message to inject.
-            **kwargs: Additional arguments passed to the agent run.
-
-        Returns:
-            True if injected into active turn, False if queued.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None or session.agent is None or session.is_closing:
-            logger.debug(
-                "Cannot inject: session=%s agent=%s is_closing=%s",
-                session is not None,
-                session.agent is not None if session else False,
-                session.is_closing if session else False,
-            )
-            return False
-
-        agent = session.agent
-        run_ctx = agent.get_active_run_context()
-        if run_ctx is not None and not run_ctx.completed:
-            run_ctx.injection_manager.inject(message)
-            return True
-
-        lock = await self._get_injection_lock(session_id)
-        async with lock:
-            run_ctx = agent.get_active_run_context()
-            if run_ctx is not None and not run_ctx.completed:
-                run_ctx.injection_manager.inject(message)
-                return True
-            session = self.sessions.get_session(session_id)
-            if session is None or session.is_closing:
-                logger.debug("Session closed while waiting for lock")
-                return False
-            self._post_turn_injections.setdefault(session_id, []).append(message)
-
-        logger.debug("Queued injection for next turn, triggering auto-resume")
-
-        # Spawn auto-resume task in session's TaskGroup
-        async with await self._get_session_task_group(session_id) as tg:
-            tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
-
-        return False
-
-    async def queue_prompt(self, session_id: str, *prompts: Any, **kwargs: Any) -> bool:
-        """Queue prompts for a session.
-
-        Similar to inject_prompt but for full prompts.
-        Does NOT acquire session.turn_lock.
-
-        Args:
-            session_id: The session to queue prompts for.
-            *prompts: Prompts to queue.
-            **kwargs: Additional arguments passed to the agent run.
-
-        Returns:
-            True if queued into active turn, False if stored for later.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None or session.agent is None or session.is_closing:
-            return False
-
-        agent = session.agent
-        run_ctx = agent.get_active_run_context()
-        if run_ctx is not None:
-            run_ctx.injection_manager.queue(*prompts)
-            return True
-
-        lock = await self._get_injection_lock(session_id)
-        async with lock:
-            run_ctx = agent.get_active_run_context()
-            if run_ctx is not None:
-                run_ctx.injection_manager.queue(*prompts)
-                return True
-            session = self.sessions.get_session(session_id)
-            if session is None or session.is_closing:
-                return False
-            self._post_turn_prompts.setdefault(session_id, []).append(prompts)
-
-        logger.debug("Queued prompt for next turn, triggering auto-resume")
-
-        # Spawn auto-resume task in session's TaskGroup
-        async with await self._get_session_task_group(session_id) as tg:
-            tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
-
-        return False
-
-    async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:
-        """Inject a steer message with agent-type-aware routing.
-
-        !!! warning "Deprecated"
-            Delegates to :meth:`RunHandle.steer` when
-            ``AGENTPOOL_USE_RUN_TURN`` is set. Otherwise calls
-            :meth:`_legacy_steer` for backward compatibility.
-
-        Args:
-            session_id: Target session.
-            message: The steer message to deliver.
-            **kwargs: Additional arguments (ignored in delegate mode).
-
-        Returns:
-            True if delivered into active turn, False if queued for idle.
-        """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            warnings.warn(
-                "TurnRunner.steer() is deprecated. Use RunHandle.steer() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            session = self.sessions.get_session(session_id)
-            if session is None or session.current_run_id is None:
-                return False
-            run_handle = self.sessions._runs.get(session.current_run_id)
-            if run_handle is None:
-                return False
-            return run_handle.steer(message)
-        return await self._legacy_steer(session_id, message, **kwargs)
-
-    async def _legacy_steer(self, session_id: str, message: str, **kwargs: Any) -> bool:  # noqa: PLR0911
-        """Inject a steer message with agent-type-aware routing (legacy).
-
-        Routes based on agent type (native vs non-native) and session state
-        (active run vs idle):
-
-        - Native + active: enqueues via ``agent_run.enqueue(priority='asap')``.
-        - Native + idle: delegates to
-          :meth:`SessionController.receive_request` with ``priority='steer'``.
-        - Non-native + active: injects via
-          ``run_handle.run_ctx.injection_manager.inject()``.
-        - Non-native + idle: stores in ``_post_turn_injections`` and triggers
-          auto-resume.
-
-        Uses TOCTOU-safe pattern: reads ``active_agent_run`` into a local
-        variable to prevent double-read races.
-
-        Args:
-            session_id: Target session.
-            message: The steer message to deliver.
-            **kwargs: Additional arguments passed to
-                :meth:`SessionController.receive_request` or
-                :meth:`_trigger_auto_resume`.
-
-        Returns:
-            True if delivered into active turn, False if queued for idle.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None or session.agent is None or session.is_closing:
-            return False
-
-        agent = session.agent
-        agent_type: str = getattr(agent, "AGENT_TYPE", "native")
-
-        if agent_type == "native":
-            run_id = session.current_run_id
-            if run_id is not None:
-                run_handle = self.sessions._runs.get(run_id)
-                if run_handle is not None:
-                    agent_run = run_handle.active_agent_run  # TOCTOU: read once
-                    if agent_run is not None:
-                        agent_run.enqueue(message, priority="asap")
-                        return True
-                    # RunExecutor may be in wait loop — queue for re-iteration
-                    if run_handle.run_ctx is not None:
-                        run_ctx = run_handle.run_ctx
-                        if not run_ctx.completed:
-                            run_ctx.queued_steer_messages.append(message)
-                            return False
-                    # Run exists but agent_run not yet ready (PydanticAI
-                    # iteration hasn't started).  Queue the message instead
-                    # of calling receive_request(priority="steer") — that
-                    # would re-enter steer() and recurse infinitely because
-                    # the run_id is still set.
-                    self._post_turn_injections.setdefault(session_id, []).append(message)
-                    logger.debug(
-                        "Queued steer for run without agent_run, triggering auto-resume",
-                        session_id=session_id,
-                        run_id=run_id,
-                    )
-                    async with await self._get_session_task_group(session_id) as tg:
-                        tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
-                    return False
-            # Native idle (no run at all): delegate to receive_request
-            await self.sessions.receive_request(session_id, message, priority="steer", **kwargs)
-            return False
-
-        # Non-native routing
-        run_id = session.current_run_id
-        if run_id is not None:
-            run_handle = self.sessions._runs.get(run_id)
-            if run_handle is not None and run_handle.status == RunStatus.running:
-                run_ctx = run_handle.run_ctx
-                run_ctx.injection_manager.inject(message)
-                return True
-
-        # Non-native idle: store for next turn
-        self._post_turn_injections.setdefault(session_id, []).append(message)
-        logger.debug("Queued injection for next turn, triggering auto-resume")
-        async with await self._get_session_task_group(session_id) as tg:
-            tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
-        return False
-
-    async def followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
-        """Queue a follow-up message with agent-type-aware routing.
-
-        !!! warning "Deprecated"
-            Delegates to :meth:`RunHandle.followup` when
-            ``AGENTPOOL_USE_RUN_TURN`` is set. Otherwise calls
-            :meth:`_legacy_followup` for backward compatibility.
-
-        Args:
-            session_id: Target session.
-            message: The follow-up message to deliver.
-            **kwargs: Additional arguments (ignored in delegate mode).
-
-        Returns:
-            True if delivered into active turn, False if queued for idle.
-        """
-        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            warnings.warn(
-                "TurnRunner.followup() is deprecated. Use RunHandle.followup() instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            session = self.sessions.get_session(session_id)
-            if session is None or session.current_run_id is None:
-                return False
-            run_handle = self.sessions._runs.get(session.current_run_id)
-            if run_handle is None:
-                return False
-            return run_handle.followup(message)
-        return await self._legacy_followup(session_id, message, **kwargs)
-
-    async def _legacy_followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
-        """Queue a follow-up message with agent-type-aware routing (legacy).
-
-        Routes based on agent type (native vs non-native) and session state
-        (active run vs idle):
-
-        - Native + active: enqueues via ``agent_run.enqueue(priority='when_idle')``.
-        - Native + idle: delegates to
-          :meth:`SessionController.receive_request` with ``priority='followup'``.
-        - Non-native + active: queues via
-          ``run_handle.run_ctx.injection_manager.queue()``.
-        - Non-native + idle: stores in ``_post_turn_prompts`` and triggers
-          auto-resume.
-
-        Uses TOCTOU-safe pattern: reads ``active_agent_run`` into a local
-        variable to prevent double-read races.
-
-        Args:
-            session_id: Target session.
-            message: The follow-up message to deliver.
-            **kwargs: Additional arguments passed to
-                :meth:`SessionController.receive_request` or
-                :meth:`_trigger_auto_resume`.
-
-        Returns:
-            True if delivered into active turn, False if queued for idle.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None or session.agent is None or session.is_closing:
-            return False
-
-        agent = session.agent
-        agent_type: str = getattr(agent, "AGENT_TYPE", "native")
-
-        if agent_type == "native":
-            run_id = session.current_run_id
-            if run_id is not None:
-                run_handle = self.sessions._runs.get(run_id)
-                if run_handle is not None:
-                    agent_run = run_handle.active_agent_run  # TOCTOU: read once
-                    if agent_run is not None:
-                        agent_run.enqueue(message, priority="when_idle")
-                        return True
-                    # Run exists but agent_run not yet ready — queue to
-                    # avoid the same recursion as steer().
-                    self._post_turn_prompts.setdefault(session_id, []).append((message,))
-                    logger.debug(
-                        "Queued followup for run without agent_run, triggering auto-resume",
-                        session_id=session_id,
-                        run_id=run_id,
-                    )
-                    async with await self._get_session_task_group(session_id) as tg:
-                        tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
-                    return False
-            # Native idle (no run at all): delegate to receive_request
-            await self.sessions.receive_request(session_id, message, priority="followup", **kwargs)
-            return False
-
-        # Non-native routing
-        run_id = session.current_run_id
-        if run_id is not None:
-            run_handle = self.sessions._runs.get(run_id)
-            if run_handle is not None and run_handle.status == RunStatus.running:
-                run_ctx = run_handle.run_ctx
-                run_ctx.injection_manager.inject(message)
-                return True
-
-        # Non-native idle: store for next turn
-        self._post_turn_prompts.setdefault(session_id, []).append((message,))
-
-        logger.debug("Queued followup for next turn, triggering auto-resume")
-
-        # Spawn auto-resume task in session's TaskGroup
-        async with await self._get_session_task_group(session_id) as tg:
-            tg.start_soon(self._safe_auto_resume, session_id, **kwargs)
-
-        return False
-
-    async def _drain_post_turn_injections(self, session_id: str) -> list[str]:
-        """Drain and return post-turn injections for a session.
-
-        Args:
-            session_id: Session to drain.
-
-        Returns:
-            List of injection messages.
-        """
-        lock = await self._get_injection_lock(session_id)
-        async with lock:
-            injections = self._post_turn_injections.pop(session_id, [])
-            return injections
-
-    async def _drain_post_turn_prompts(self, session_id: str) -> list[tuple[Any, ...]]:
-        """Drain and return post-turn prompts for a session.
-
-        Args:
-            session_id: Session to drain.
-
-        Returns:
-            List of prompt tuples.
-        """
-        lock = await self._get_injection_lock(session_id)
-        async with lock:
-            prompts = self._post_turn_prompts.pop(session_id, [])
-            return prompts
-
-    async def _process_queued_work(
-        self,
-        session_id: str,
-        session: SessionState,
-        **kwargs: Any,
-    ) -> None:
-        """Process queued post-turn work under turn_lock.
-
-        Shared logic used by both run_loop() and _trigger_auto_resume().
-        Caller MUST hold session.turn_lock.
-
-        Args:
-            session_id: The session to process queued work for.
-            session: The session state.
-            **kwargs: Additional arguments passed to the agent run.
-        """
-        if session.is_closing:
-            logger.debug("Session is closing, skipping queued work")
-            return
-
-        # Use session-stored input_provider if not provided in kwargs
-        if "input_provider" not in kwargs and session.input_provider is not None:
-            kwargs["input_provider"] = session.input_provider
-
-        injections = await self._drain_post_turn_injections(session_id)
-        prompts = await self._drain_post_turn_prompts(session_id)
-
-        logger.debug(
-            "Drained injections=%s prompts=%s",
-            len(injections),
-            len(prompts),
-        )
-
-        if injections:
-            logger.debug("Running turn with injections")
-            await self._run_turn_unlocked(session_id, *injections, **kwargs)
-            logger.debug("Turn with injections completed")
-
-        for prompt_group in prompts:
-            await self._run_turn_unlocked(session_id, *prompt_group, **kwargs)
-
-        for iteration in range(self._max_auto_resume):
-            if session.is_closing:
-                logger.debug("Session closing during auto-resume")
-                break
-
-            injections = await self._drain_post_turn_injections(session_id)
-            prompts = await self._drain_post_turn_prompts(session_id)
-
-            if not injections and not prompts:
-                logger.debug("No more queued work, stopping auto-resume")
-                break
-
-            logger.info(
-                "Auto-resuming turn",
-                session_id=session_id,
-                iteration=iteration + 1,
-                injections=len(injections),
-                prompts=len(prompts),
-            )
-
-            if injections:
-                await self._run_turn_unlocked(session_id, *injections, **kwargs)
-            for prompt_group in prompts:
-                await self._run_turn_unlocked(session_id, *prompt_group, **kwargs)
-
-        logger.info(
-            "Auto-resume complete",
-            session_id=session_id,
-            max_iterations=self._max_auto_resume,
-        )
-
-    async def _trigger_auto_resume(self, session_id: str, **kwargs: Any) -> None:
-        """Trigger auto-resume for a session if no turn is active.
-
-        Fire-and-forget task that ensures post-turn work queued after
-        run_loop() exits gets processed promptly.
-
-        Args:
-            session_id: The session to trigger auto-resume for.
-            **kwargs: Additional arguments passed to the agent run.
-        """
-        logger.debug("_trigger_auto_resume called for %s", session_id)
-        try:
-            session = self.sessions.get_session(session_id)
-            if session is None or session.is_closing:
-                logger.debug("Session not found or closing")
-                return
-
-            async with session.turn_lock:
-                if session.is_closing:
-                    logger.debug("Session closing after acquiring lock")
-                    return
-
-                current_session = self.sessions.get_session(session_id)
-                if current_session is not session:
-                    logger.debug("Session changed")
-                    return
-
-                # Use session-stored input_provider if not provided in kwargs
-                if "input_provider" not in kwargs and session.input_provider is not None:
-                    kwargs["input_provider"] = session.input_provider
-
-                if self._enable_auto_resume:
-                    logger.debug("Processing queued work")
-                    await self._process_queued_work(session_id, session, **kwargs)
-                    logger.debug("Finished processing queued work")
-                else:
-                    injections = await self._drain_post_turn_injections(session_id)
-                    prompts = await self._drain_post_turn_prompts(session_id)
-
-                    if injections:
-                        await self._run_turn_unlocked(session_id, *injections, **kwargs)
-                    for prompt_group in prompts:
-                        await self._run_turn_unlocked(session_id, *prompt_group, **kwargs)
-        except asyncio.CancelledError:
-            return
-
-
 class SessionPool:
     """High-level session pool combining session and turn management.
 
     This is the main interface used by protocol handlers.
-
-    Feature flags:
-    - enable_auto_resume: Enable auto-resume loop
-    - enable_event_bus: Enable cross-turn event routing
     """
 
     def __init__(
@@ -3004,13 +1809,11 @@ class SessionPool:
             cleanup_callback=self.close_session,
             max_concurrent_runs=max_concurrent_runs,
         )
-        self.turns = TurnRunner(
-            self.sessions,
-            enable_auto_resume=enable_auto_resume,
-            max_auto_resume=max_auto_resume,
+        self._event_bus = EventBus(
+            session_controller=self.sessions,
             replay_buffer_size=replay_buffer_size,
         )
-        self.sessions._turn_runner = self.turns
+        self.sessions._event_bus = self._event_bus
         self._enable_auto_resume = enable_auto_resume
         self._enable_event_bus = enable_event_bus
         self._runs_lock: asyncio.Lock = asyncio.Lock()
@@ -3050,7 +1853,7 @@ class SessionPool:
     @property
     def event_bus(self) -> EventBus:
         """Get the event bus for cross-turn event routing."""
-        return self.turns.event_bus
+        return self._event_bus
 
     async def create_session(
         self,
@@ -3546,17 +2349,6 @@ class SessionPool:
 
         await self.sessions.close_session(session_id)
         await self.event_bus.close_session(session_id)
-        has_turn_state = (
-            session_id in self.turns._post_turn_injections
-            or session_id in self.turns._post_turn_prompts
-            or session_id in self.turns._injection_locks
-        )
-        if has_turn_state:
-            lock = await self.turns._get_injection_lock(session_id)
-            async with lock:
-                self.turns._post_turn_injections.pop(session_id, None)
-                self.turns._post_turn_prompts.pop(session_id, None)
-                self.turns._injection_locks.pop(session_id, None)
 
         self._message_cache.pop(session_id, None)
 
@@ -3577,25 +2369,8 @@ class SessionPool:
         logger.debug("No in-flight checkpoint operations to await")
 
     # ------------------------------------------------------------------
-    # RunHandle delegation helpers (feature-flag gated)
+    # RunHandle delegation helpers
     # ------------------------------------------------------------------
-
-    def _use_run_turn_for_session(self, session_id: str) -> bool:
-        """Check if the RunTurn path should be used for a session.
-
-        Delegates to :meth:`SessionController._use_run_turn` using the
-        agent registered for the session.
-
-        Returns:
-            True if the RunTurn path should be used.
-        """
-        session = self.sessions.get_session(session_id)
-        if session is None:
-            return False
-        agent = self.sessions._session_agents.get(session_id)
-        if agent is None:
-            agent = session.agent
-        return self.sessions._use_run_turn(agent)
 
     def _get_active_run_handle(self, session_id: str) -> RunHandle | None:
         """Get the active RunHandle for a session, if any.
@@ -3683,32 +2458,17 @@ class SessionPool:
         *prompts: Any,
         **kwargs: Any,
     ) -> None:
-        """Process a prompt through the turn loop.
+        """Process a prompt through the RunHandle lifecycle.
 
         Main entry point for protocol handlers.
         Events are delivered exclusively via EventBus.
-
-        When ``AGENTPOOL_USE_RUN_TURN`` is set, delegates to
-        :meth:`_process_prompt_run_turn` which uses RunHandle.start().
-        Otherwise, uses the legacy TurnRunner path.
 
         Args:
             session_id: The session to process the prompt for.
             *prompts: Prompts to process.
             **kwargs: Additional arguments passed to the agent.
         """
-        if self._use_run_turn_for_session(session_id):
-            await self._process_prompt_run_turn(session_id, *prompts, **kwargs)
-            return
-        # Keep blocking behavior for backward compatibility during migration.
-        # Protocol handlers that need fire-and-forget should use receive_request().
-        self.turns._last_error = None
-        if self._enable_auto_resume:
-            await self.turns.run_loop(session_id, *prompts, **kwargs)
-        else:
-            await self.turns.run_turn(session_id, *prompts, **kwargs)
-        if self.turns._last_error is not None:
-            raise self.turns._last_error
+        await self._process_prompt_run_turn(session_id, *prompts, **kwargs)
 
     async def receive_request(
         self,
@@ -3720,14 +2480,11 @@ class SessionPool:
         """Route an incoming request for a session (fire-and-forget).
 
         Creates a background task that processes the prompt through
-        the turn runner. Protocol handlers should subscribe to the
+        the RunHandle lifecycle. Protocol handlers should subscribe to the
         EventBus *before* calling this method so no events are dropped.
 
-        When ``AGENTPOOL_USE_RUN_TURN`` is set,
-        :meth:`SessionController.receive_request` handles the flag
-        internally: idle sessions create a RunHandle, busy sessions
-        call ``RunHandle.steer()`` or ``RunHandle.followup()``.
-        When the flag is off, the legacy TurnRunner path is used.
+        Idle sessions create a RunHandle, busy sessions call
+        ``RunHandle.steer()`` or ``RunHandle.followup()``.
 
         Args:
             session_id: Target session.
@@ -3777,15 +2534,12 @@ class SessionPool:
         scope: str = "session",
         **kwargs: Any,
     ) -> AsyncIterator[Any]:
-        """Process prompts and yield events from the EventBus.
+        """Process prompts and yield events.
 
         Convenience method for tests and standalone clients that want
-        an async iterator over session events.
-
-        When ``AGENTPOOL_USE_RUN_TURN`` is set and no active run exists,
-        yields events directly from ``RunHandle.start()``. If a run is
-        already active, steers the message and falls back to EventBus.
-        When the flag is off, uses the legacy EventBus-based path.
+        an async iterator over session events. Yields events directly
+        from ``RunHandle.start()`` when no active run exists. If a run
+        is already active, steers the message and falls back to EventBus.
 
         Args:
             session_id: The session to process the prompt for.
@@ -3798,56 +2552,10 @@ class SessionPool:
         Yields:
             Events published to the EventBus for this session.
         """
-        if self._use_run_turn_for_session(session_id):
-            async for event in self._run_stream_run_turn(
-                session_id, *prompts, scope=scope, **kwargs
-            ):
-                yield event
-            return
-        stream = await self.event_bus.subscribe(session_id, scope=scope)
-        process_task = asyncio.create_task(self.process_prompt(session_id, *prompts, **kwargs))
-        receive_task: asyncio.Task[Any] | None = None
-        try:
-            while not process_task.done():
-                if receive_task is None:
-                    receive_task = asyncio.create_task(stream.receive())
-                done, _pending = await asyncio.wait(
-                    {process_task, receive_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if receive_task in done:
-                    try:
-                        event = receive_task.result()
-                    except anyio.EndOfStream:
-                        receive_task = None
-                        break
-                    receive_task = None
-                    yield event.event
-            if receive_task is not None and not receive_task.done():
-                receive_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await receive_task
-                receive_task = None
-            while True:
-                try:
-                    event = stream.receive_nowait()
-                except anyio.WouldBlock:
-                    break
-                except anyio.EndOfStream:
-                    break
-                yield event.event
-            if (exc := process_task.exception()) is not None:
-                raise exc
-        finally:
-            if receive_task is not None and not receive_task.done():
-                receive_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await receive_task
-            if not process_task.done():
-                process_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await process_task
-            await self.event_bus.unsubscribe(session_id, stream)
+        async for event in self._run_stream_run_turn(
+            session_id, *prompts, scope=scope, **kwargs
+        ):
+            yield event
 
     async def _run_stream_run_turn(
         self,
@@ -3900,12 +2608,8 @@ class SessionPool:
     async def inject_prompt(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Inject a message into a session.
 
-        If the session has an active turn, injects immediately.
-        Otherwise, queues for the next turn and triggers auto-resume.
-
-        For native agents, delegates to :meth:`steer` for agent-type-aware
-        routing. For non-native agents, falls through to
-        :meth:`TurnRunner.inject_prompt` for backward compatibility.
+        If the session has an active run, injects immediately via
+        ``RunHandle.steer()``. Otherwise, returns False.
 
         Does NOT acquire session.turn_lock.
 
@@ -3917,27 +2621,16 @@ class SessionPool:
         Returns:
             True if injected into active turn, False if queued.
         """
-        if self._use_run_turn_for_session(session_id):
-            run_handle = self._get_active_run_handle(session_id)
-            if run_handle is not None:
-                return run_handle.steer(message)
-            return False
-        session = self.sessions.get_session(session_id)
-        if session is not None and session.agent is not None:
-            agent_type: str = getattr(session.agent, "AGENT_TYPE", "native")
-            if agent_type == "native":
-                return await self.turns.steer(session_id, message, **kwargs)
-        return await self.turns.inject_prompt(session_id, message, **kwargs)
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is not None:
+            return run_handle.steer(message)
+        return False
 
     async def queue_prompt(self, session_id: str, *prompts: Any, **kwargs: Any) -> bool:
         """Queue prompts for a session.
 
         Similar to inject_prompt but for full prompts.
         Does NOT acquire session.turn_lock.
-
-        For native agents, delegates to :meth:`followup` for agent-type-aware
-        routing. For non-native agents, falls through to
-        :meth:`TurnRunner.queue_prompt` for backward compatibility.
 
         Args:
             session_id: The session to queue prompts for.
@@ -3947,70 +2640,47 @@ class SessionPool:
         Returns:
             True if queued into active turn, False if stored for later.
         """
-        if self._use_run_turn_for_session(session_id):
-            run_handle = self._get_active_run_handle(session_id)
-            if run_handle is not None:
-                message = prompts[0] if prompts else ""
-                return run_handle.followup(str(message))
-            return False
-        session = self.sessions.get_session(session_id)
-        if session is not None and session.agent is not None:
-            agent_type: str = getattr(session.agent, "AGENT_TYPE", "native")
-            if agent_type == "native":
-                # followup accepts a single message; use first prompt if multiple
-                message = prompts[0] if prompts else ""
-                return await self.turns.followup(session_id, str(message), **kwargs)
-        return await self.turns.queue_prompt(session_id, *prompts, **kwargs)
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is not None:
+            message = prompts[0] if prompts else ""
+            return run_handle.followup(str(message))
+        return False
 
     async def steer(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Inject a steer message with agent-type-aware routing.
 
-        Delegates to :meth:`TurnRunner.steer` which routes based on agent
-        type (native vs non-native) and session state (active run vs idle).
-
-        This is the preferred method for delivering urgent messages into
-        native agent sessions. For backward compatibility, :meth:`inject_prompt`
-        also delegates here for native agents.
+        Delegates to ``RunHandle.steer()`` when an active run exists.
 
         Args:
             session_id: Target session.
             message: The steer message to deliver.
-            **kwargs: Additional arguments forwarded to :meth:`TurnRunner.steer`.
+            **kwargs: Additional arguments (ignored).
 
         Returns:
             True if delivered into active turn, False if queued for idle.
         """
-        if self._use_run_turn_for_session(session_id):
-            run_handle = self._get_active_run_handle(session_id)
-            if run_handle is not None:
-                return run_handle.steer(message)
-            return False
-        return await self.turns.steer(session_id, message, **kwargs)
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is not None:
+            return run_handle.steer(message)
+        return False
 
     async def followup(self, session_id: str, message: str, **kwargs: Any) -> bool:
         """Queue a follow-up message with agent-type-aware routing.
 
-        Delegates to :meth:`TurnRunner.followup` which routes based on agent
-        type (native vs non-native) and session state (active run vs idle).
-
-        This is the preferred method for queuing follow-up messages into
-        native agent sessions. For backward compatibility, :meth:`queue_prompt`
-        also delegates here for native agents.
+        Delegates to ``RunHandle.followup()`` when an active run exists.
 
         Args:
             session_id: Target session.
             message: The follow-up message to deliver.
-            **kwargs: Additional arguments forwarded to :meth:`TurnRunner.followup`.
+            **kwargs: Additional arguments (ignored).
 
         Returns:
             True if delivered into active turn, False if queued for idle.
         """
-        if self._use_run_turn_for_session(session_id):
-            run_handle = self._get_active_run_handle(session_id)
-            if run_handle is not None:
-                return run_handle.followup(message)
-            return False
-        return await self.turns.followup(session_id, message, **kwargs)
+        run_handle = self._get_active_run_handle(session_id)
+        if run_handle is not None:
+            return run_handle.followup(message)
+        return False
 
     async def get_messages(
         self,

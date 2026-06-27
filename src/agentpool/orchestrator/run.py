@@ -76,7 +76,7 @@ class RunHandle:
         run_id: Unique identifier for this run.
         session_id: Session this run belongs to.
         agent_type: Type of agent running (e.g. ``"native"``, ``"claude"``).
-        status: Legacy lifecycle state (used by TurnRunner code path).
+        status: Legacy lifecycle state (used by old code paths).
         agent: The agent instance driving turns.
         event_bus: Event bus for publishing stream events.
         session: Per-session state containing the turn lock.
@@ -84,7 +84,7 @@ class RunHandle:
         complete_event: Set after cleanup finishes.
         _cleanup_callback: Optional callback invoked with run_id during cleanup.
         active_agent_run: Reference to PydanticAI AgentRun, set by
-            RunExecutor during execution and cleared in ``finally``.
+            NativeTurn during execution and cleared in ``finally``.
         _status: New primary lifecycle state (idle/running/done).
         _closing: Flag indicating :meth:`close` has been called.
         _idle_event: asyncio.Event that is set when idle (for wake-up).
@@ -291,7 +291,7 @@ class RunHandle:
         self.close()
 
     # ------------------------------------------------------------------
-    # Legacy lifecycle (TurnRunner code path)
+    # Legacy lifecycle (old code paths)
     # ------------------------------------------------------------------
 
     def _start_task(self, task: asyncio.Task[Any] | None = None) -> None:

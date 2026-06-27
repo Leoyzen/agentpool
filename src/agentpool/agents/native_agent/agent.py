@@ -38,7 +38,6 @@ from agentpool.agents.exceptions import UnknownCategoryError, UnknownModeError
 from agentpool.agents.native_agent.turn import NativeTurn
 from agentpool.log import get_logger
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.run_executor import RunExecutor
 from agentpool.storage import StorageManager
 from agentpool.tools import Tool, ToolManager
 from agentpool.tools.exceptions import ToolError
@@ -785,7 +784,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         #    to avoid double-firing. Old base_agent.py hook mechanism handles
         #    pre_run/post_run/pre_tool_use/post_tool_use directly.
         #    EventBus events (RunStartedEvent, ToolCallStartEvent,
-        #    ToolCallCompleteEvent) are produced by RunExecutor, so the
+        #    ToolCallCompleteEvent) are produced by NativeTurn, so the
         #    removed EventBusHooksAdapter wrapping was redundant.
         if not self.hooks:
             hooks_capability = self._hook_manager.as_capability()
@@ -918,8 +917,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Detects graph context via *_state* in kwargs (injected by
         :class:`~agentpool.messaging.graph_adapter.MessageNodeStep`) and
-        delegates execution to :class:`~agentpool.orchestrator.run_executor.RunExecutor`,
-        forwarding all events to the state's event queue for the parent graph
+        delegates execution to :class:`~agentpool.agents.native_agent.turn.NativeTurn`,
+        forwarding all events to the EventBus for the parent graph
         to drain.
 
         Args:
@@ -932,8 +931,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         Raises:
             RuntimeError: If ``_state`` or required sub-keys are missing.
-            RuntimeError: If ``RunExecutor`` completes without a
-                ``StreamCompleteEvent``.
         """
         from agentpool.messaging.graph_adapter import AgentPoolState
 
@@ -958,18 +955,19 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             event_bus = EventBus()
             run_ctx.event_bus = event_bus
 
-        executor = RunExecutor(self)
-        result = await executor.execute(
+        turn = NativeTurn(
+            agent=self,
             prompts=list(prompts),
             run_ctx=run_ctx,
-            user_msg=kw["user_msg"],
             message_history=kw["message_history"],
-            message_id=kw.get("message_id") or str(uuid4()),
-            session_id=kw["session_id"],
-            _parent_id=kw.get("parent_session_id"),
-            input_provider=kw.get("input_provider"),
-            deps=kw.get("deps"),
-            event_bus=event_bus,
+        )
+        session_id = kw["session_id"]
+        async for event in turn.execute():
+            await event_bus.publish(session_id, event)
+        result = turn.final_message
+        await event_bus.publish(
+            session_id,
+            StreamCompleteEvent(message=result),
         )
 
         state.result = result
@@ -992,34 +990,20 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wait_for_connections: bool | None = None,
         deps: TDeps | None = None,
     ) -> AsyncIterator[RichAgentStreamEvent[OutputDataT]]:
-        """Stream agent events in real-time using RunExecutor.
+        """Stream agent events in real-time using NativeTurn.
 
-        Delegates to :class:`~agentpool.orchestrator.run_executor.RunExecutor`
+        Delegates to :class:`~agentpool.agents.native_agent.turn.NativeTurn`
         which drives the PydanticAI agent run loop with ``agent_run.next(node)``,
         yielding fine-grained streaming events including ``RunStartedEvent``,
         ``PartStartEvent``, ``ToolCallStartEvent``, and ``StreamCompleteEvent``.
 
-        !!! note "Dual-path architecture"
-            There are two execution paths for native agents:
-
-            | Path | Entry Point | Mechanism | Streaming Granularity |
-            |---|---|---|---|
-            | **Standalone** | `BaseAgent.run_stream()` | `_stream_events()` → `RunExecutor.execute()` | Fine-grained (real-time) |
-            | **Graph** | `MessageNode.run()` / `run_stream()` | `MessageNodeStep._execute()` → `_execute_node()` | Coarse-grained (per-step) |
-
-            Both paths use :class:`RunExecutor` for event production.
-            The graph path buffers events into the state event queue; the
-            standalone path streams them directly to the caller.
+        Events are published to the EventBus via ``NativeTurn.execute()``;
+        this method yields nothing — the caller picks up the result via
+        ``run_ctx.terminal_tool_result`` side channel.
         """
-        message_id = message_id or str(uuid4())
         assert session_id is not None  # Initialized by BaseAgent.run_stream()
 
-        executor = RunExecutor(self)
-
-        # Get or create EventBus — events go directly to EventBus via
-        # executor.execute(), which publishes them fire-and-forget.
-        # _stream_events() yields nothing; the caller (_run_stream_once)
-        # picks up the result via run_ctx.terminal_tool_result side channel.
+        # Get or create EventBus — events go directly to EventBus.
         event_bus = run_ctx.event_bus
         if event_bus is None:
             from agentpool.orchestrator.core import EventBus
@@ -1027,17 +1011,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             event_bus = EventBus()
             run_ctx.event_bus = event_bus
 
-        result = await executor.execute(
+        turn = NativeTurn(
+            agent=self,
             prompts=list(prompts),
             run_ctx=run_ctx,
-            user_msg=user_msg,
             message_history=message_history,
-            message_id=message_id,
-            session_id=session_id,
-            _parent_id=parent_session_id,
-            input_provider=input_provider,
-            deps=deps,
-            event_bus=event_bus,
+        )
+        async for event in turn.execute():
+            await event_bus.publish(session_id, event)
+        result = turn.final_message
+        await event_bus.publish(
+            session_id,
+            StreamCompleteEvent(message=result),
         )
 
         # Store result for _run_stream_once() to pick up — avoids race

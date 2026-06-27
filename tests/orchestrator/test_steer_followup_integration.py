@@ -23,7 +23,7 @@ from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
 from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.core import SessionController, TurnRunner
+from agentpool.orchestrator.core import SessionController
 from agentpool.orchestrator.run import RunHandle, RunStatus
 from agentpool.orchestrator.run_executor import RunExecutor
 
@@ -51,12 +51,6 @@ def mock_pool() -> MagicMock:
 def controller(mock_pool: MagicMock) -> SessionController:
     """Return a real SessionController backed by the mock pool."""
     return SessionController(pool=mock_pool)
-
-
-@pytest.fixture
-def turn_runner(controller: SessionController) -> TurnRunner:
-    """Return a TurnRunner with auto-resume enabled."""
-    return TurnRunner(session_controller=controller, enable_auto_resume=True)
 
 
 @pytest.fixture
@@ -118,173 +112,14 @@ def _make_run_handle(
 # 10.7: steer message injected before next LLM call via
 #       PendingMessageDrainCapability.before_model_request()
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_steer_integration_enqueues_asap_through_turn_runner(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """steer() routes through TurnRunner → native agent → agent_run.enqueue(asap).
-
-    Integration test verifying the full pipeline: session lookup, agent_type
-    detection, active_agent_run retrieval, and enqueue with priority='asap'.
-    When PendingMessageDrainCapability is active, this asap message is drained
-    at the next before_model_request hook.
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-int-steer", agent, mock_pool)
-
-    # Set up an active run with a mocked PydanticAI AgentRun
-    mock_agent_run = MagicMock()
-    mock_agent_run.enqueue = MagicMock()
-    run_handle = _make_run_handle("sess-int-steer", "native")
-    run_handle.active_agent_run = mock_agent_run
-    run_handle.status = RunStatus.running
-    controller._runs[run_handle.run_id] = run_handle
-
-    session = controller.get_session("sess-int-steer")
-    assert session is not None, "Session should exist"
-    session.current_run_id = run_handle.run_id
-
-    result = await turn_runner.steer("sess-int-steer", "steer: urgent context update")
-
-    # steer() into active run returns True (delivered to active turn)
-    assert result is True, "Steer into active native run should return True"
-
-    # Verify enqueue was called with asap priority (handled by
-    # PendingMessageDrainCapability.before_model_request)
-    mock_agent_run.enqueue.assert_called_once_with(
-        "steer: urgent context update", priority="asap"
-    )
-
-
 # =============================================================================
 # 10.8: followup message processed after agent would otherwise end
 #       (via after_node_run redirect)
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_followup_integration_enqueues_when_idle_through_turn_runner(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """followup() routes through TurnRunner → native agent → agent_run.enqueue(when_idle).
-
-    Integration test verifying the full pipeline: session lookup, agent_type
-    detection, active_agent_run retrieval, and enqueue with priority='when_idle'.
-    PendingMessageDrainCapability drains these messages at after_node_run,
-    creating a follow-up chain.
-    """
-    agent = _make_native_agent()
-    await _setup_session_with_agent(controller, "sess-int-followup", agent, mock_pool)
-
-    mock_agent_run = MagicMock()
-    mock_agent_run.enqueue = MagicMock()
-    run_handle = _make_run_handle("sess-int-followup", "native")
-    run_handle.active_agent_run = mock_agent_run
-    run_handle.status = RunStatus.running
-    controller._runs[run_handle.run_id] = run_handle
-
-    session = controller.get_session("sess-int-followup")
-    assert session is not None, "Session should exist"
-    session.current_run_id = run_handle.run_id
-
-    result = await turn_runner.followup("sess-int-followup", "followup: continue after done")
-
-    assert result is True, "Followup into active native run should return True"
-
-    # Verify enqueue was called with when_idle priority (handled by
-    # PendingMessageDrainCapability.after_node_run)
-    mock_agent_run.enqueue.assert_called_once_with(
-        "followup: continue after done", priority="when_idle"
-    )
-
-
 # =============================================================================
 # 10.9: manual follow-up loop NOT executed for native agents
 #       (no redundant processing)
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_native_agent_skips_manual_followup_loop_gating(
-    controller: SessionController,
-    turn_runner: TurnRunner,
-    mock_pool: MagicMock,
-) -> None:
-    """Native agents skip the manual while has_queued() loop in _run_turn_unlocked.
-
-    The gating condition ``getattr(agent, "AGENT_TYPE", "native") != "native"``
-    prevents native agents from entering the manual flush_pending_to_queue +
-    while has_queued() loop. Native agents rely on PydanticAI's
-    PendingMessageDrainCapability instead.
-
-    This test verifies:
-    1. The gating condition correctly identifies native vs non-native agents.
-    2. The injection_manager correctly reflects whether items are queued.
-    3. The manual loop would NOT drain queued items for native agents.
-    """
-    native_agent = _make_native_agent()
-    acp_agent = _make_acp_agent()
-
-    # Set up sessions for both agent types
-    await _setup_session_with_agent(controller, "sess-native-gate", native_agent, mock_pool)
-    await _setup_session_with_agent(controller, "sess-acp-gate", acp_agent, mock_pool)
-
-    # Create run contexts with queued prompts
-    native_run_ctx = AgentRunContext()
-    native_run_ctx.injection_manager.queue("queued-for-native")
-    assert native_run_ctx.injection_manager.has_queued(), "Should have queued prompts"
-
-    acp_run_ctx = AgentRunContext()
-    acp_run_ctx.injection_manager.queue("queued-for-acp")
-    assert acp_run_ctx.injection_manager.has_queued(), "Should have queued prompts"
-
-    # --- Verify gating condition ---
-    # Native: condition is False → while loop is SKIPPED
-    native_type = getattr(native_agent, "AGENT_TYPE", "native")
-    assert native_type == "native", f"Expected 'native', got '{native_type}'"
-    native_should_enter_loop = (native_type != "native")
-    assert not native_should_enter_loop, (
-        f"Native agent (AGENT_TYPE='{native_type}') should NOT enter "
-        f"the manual while has_queued() loop"
-    )
-
-    # Non-native: condition is True → while loop IS entered
-    acp_type = getattr(acp_agent, "AGENT_TYPE", "native")
-    assert acp_type != "native", f"Expected non-native, got '{acp_type}'"
-    acp_should_enter_loop = (acp_type != "native")
-    assert acp_should_enter_loop, (
-        f"Non-native agent (AGENT_TYPE='{acp_type}') SHOULD enter "
-        f"the manual while has_queued() loop"
-    )
-
-    # --- Verify queued state is preserved for native (no manual drain) ---
-    assert native_run_ctx.injection_manager.has_queued(), (
-        "Native agent: queued prompts should remain — manual loop is skipped"
-    )
-
-    # --- Verify non-native manual loop would drain ---
-    # Simulate what _run_turn_unlocked does for non-native:
-    acp_run_ctx.injection_manager.flush_pending_to_queue()
-    while acp_run_ctx.injection_manager.has_queued():
-        drained = acp_run_ctx.injection_manager.pop_queued()
-        assert drained is not None
-        assert drained[0] == "queued-for-acp"
-        break  # Only one item in queue
-
-    assert not acp_run_ctx.injection_manager.has_queued(), (
-        "Non-native agent: queued prompts should be drained by manual loop"
-    )
-
-
 # =============================================================================
 # 10.10: RunExecutor next() loop fires after_node_run hooks
 # =============================================================================
@@ -433,75 +268,6 @@ async def test_run_executor_next_loop_clears_agent_run_on_error(
 # 10.11: agent type detected via agent.AGENT_TYPE (not metadata)
 #        — native agents correctly skip manual loop
 # =============================================================================
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_create_run_uses_agent_ag_type_not_metadata(
-    controller: SessionController,
-    mock_pool: MagicMock,
-) -> None:
-    """_create_run() uses ``getattr(agent, "AGENT_TYPE")`` when agent is provided.
-
-    The SessionController._create_run() method checks the agent's AGENT_TYPE
-    attribute directly rather than relying on session metadata. This ensures
-    that the agent_type in RunHandle always reflects the actual agent instance,
-    which is critical for the gating logic in _run_turn_unlocked and the
-    steer/followup routing in TurnRunner.
-    """
-    # Set up a session with metadata that differs from agent AGENT_TYPE
-    session, _ = await controller.get_or_create_session("sess-create-run")
-    session.metadata["agent_type"] = "unknown-fallback"
-
-    # The agent has AGENT_TYPE = "native"
-    agent = _make_native_agent()
-    agent.AGENT_TYPE = "native"
-
-    # _create_run with agent → uses agent.AGENT_TYPE
-    run_handle = controller._create_run("sess-create-run", "test prompt", agent=agent)
-    assert run_handle.agent_type == "native", (
-        f"_create_run with agent should use agent.AGENT_TYPE, "
-        f"got '{run_handle.agent_type}'"
-    )
-
-    # _create_run without agent → falls back to session metadata
-    run_handle_no_agent = controller._create_run("sess-create-run", "test prompt")
-    assert run_handle_no_agent.agent_type == "unknown-fallback", (
-        f"_create_run without agent should fall back to session metadata, "
-        f"got '{run_handle_no_agent.agent_type}'"
-    )
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_create_run_handles_missing_ag_type_gracefully(
-    controller: SessionController,
-    mock_pool: MagicMock,
-) -> None:
-    """_create_run() defaults to 'native' when agent has no AGENT_TYPE.
-
-    The getattr(agent, "AGENT_TYPE", "native") fallback ensures that agents
-    without an explicitly set AGENT_TYPE are treated as native, which means
-    they benefit from PendingMessageDrainCapability and skip the manual
-    follow-up loop.
-    """
-    # Agent without AGENT_TYPE attribute at all
-    agent = MagicMock()
-    # Remove AGENT_TYPE attribute so getattr falls back
-    del agent.AGENT_TYPE
-
-    session, _ = await controller.get_or_create_session("sess-no-agtype")
-    # Need to set up the session agent so _create_run works
-    session.agent = agent
-    controller._session_agents["sess-no-agtype"] = agent
-
-    run_handle = controller._create_run("sess-no-agtype", "test", agent=agent)
-    assert run_handle.agent_type == "native", (
-        f"Agent without AGENT_TYPE should default to 'native', "
-        f"got '{run_handle.agent_type}'"
-    )
-
-
 # =============================================================================
 # 10.12: tool result augmentation via injection_manager.consume()
 #        still works on native agents

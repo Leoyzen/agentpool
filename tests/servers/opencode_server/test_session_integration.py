@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from agentpool.orchestrator.core import EventBus, RunHandle, SessionPool, TurnRunner
+from agentpool.orchestrator.core import EventBus, RunHandle, SessionPool
 from agentpool.orchestrator.run import RunStatus
 from agentpool.sessions.models import SessionData
 from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider

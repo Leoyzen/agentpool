@@ -122,7 +122,7 @@ class AgentRunContext:
     """Whether the run has been checkpointed (deferred tools pending)."""
 
     _run_handle: RunHandle | None = None
-    """Run handle for this execution, set by TurnRunner._run_turn_unlocked()."""
+    """Run handle for this execution, set by RunHandle lifecycle."""
 
     child_done_events: dict[str, anyio.Event] = field(default_factory=dict)
     """Per-child-session done events for tracking subagent completion."""
@@ -131,13 +131,13 @@ class AgentRunContext:
     """Steer messages queued during post-iteration wait window."""
 
     steer_callback: Callable[[str, str], Awaitable[bool]] | None = None
-    """Set by TurnRunner, allows tools to call steer() via run_ctx."""
+    """Set by RunHandle.start(), allows tools to call steer() via run_ctx."""
 
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 
         Calls steer_callback first (if set), then pops and sets the done_event.
-        Ordering is critical: steer BEFORE signal to prevent RunExecutor
+        Ordering is critical: steer BEFORE signal to prevent NativeTurn
         from waking before the steer message is queued.
         """
         if self.steer_callback is not None:

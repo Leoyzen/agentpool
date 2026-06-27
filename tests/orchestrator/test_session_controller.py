@@ -54,22 +54,6 @@ def mock_native_agent() -> MagicMock:
     return agent
 
 
-@pytest.fixture
-def mock_turn_runner() -> MagicMock:
-    """Return a mocked TurnRunner whose run_loop blocks until cancelled."""
-    tr = MagicMock()
-    run_loop_event = asyncio.Event()
-
-    async def _run_loop(*args: Any, **kwargs: Any) -> None:
-        await run_loop_event.wait()
-
-    tr.run_loop = AsyncMock(side_effect=_run_loop)
-    tr.steer = AsyncMock(return_value=None)
-    tr.followup = AsyncMock(return_value=None)
-    tr._run_loop_event = run_loop_event
-    return tr
-
-
 # ---------------------------------------------------------------------------
 # get_or_create_session
 # ---------------------------------------------------------------------------
@@ -156,31 +140,6 @@ async def test_list_sessions_returns_session_info(
     assert {info.agent_name for info in infos} == {"agent-a", "agent-b"}
     assert all(info.status == "idle" for info in infos)
     assert all(not info.is_per_session_agent for info in infos)
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_list_sessions_reflects_busy_status(
-    controller: SessionController,
-) -> None:
-    """list_sessions marks sessions as busy when they have an active run."""
-    state, _ = await controller.get_or_create_session("sess-1", agent_name="agent-a")
-    handle = controller._create_run("sess-1", "hello")
-    controller._runs[handle.run_id] = handle
-    state.current_run_id = handle.run_id
-
-    infos = controller.list_sessions()
-
-    assert len(infos) == 1
-    assert infos[0].status == "busy"
-
-    # Simulate run cleanup which clears current_run_id in production
-    controller._cleanup_run(handle.run_id)
-    state.current_run_id = None
-    infos_after = controller.list_sessions()
-    assert infos_after[0].status == "idle"
-
-
 # ---------------------------------------------------------------------------
 # get_or_create_session_agent – shared agent fallback
 # ---------------------------------------------------------------------------
@@ -522,176 +481,6 @@ def test_default_ttl_is_one_hour() -> None:
 # ---------------------------------------------------------------------------
 # receive_request
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_creates_run_for_idle_session(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request creates a RunHandle and starts execution for an idle session."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    await controller.receive_request("sess-1", "hello")
-    # Give the background task a chance to start
-    await asyncio.sleep(0.01)
-
-    assert len(controller._runs) == 1
-    run_id = next(iter(controller._runs.keys()))
-    session = controller.get_session("sess-1")
-    assert session is not None
-    assert session.current_run_id == run_id
-    mock_turn_runner.run_loop.assert_awaited_once_with("sess-1", "hello")
-
-    # Let the background task finish so it doesn't leak into other tests
-    mock_turn_runner._run_loop_event.set()
-    await asyncio.sleep(0.01)
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_enqueues_for_active_session(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request delegates to followup when a run is already active."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    # Simulate an active run
-    session = controller.get_session("sess-1")
-    assert session is not None
-    session.current_run_id = "existing-run-id"
-
-    await controller.receive_request("sess-1", "second message")
-    await asyncio.sleep(0.01)
-
-    mock_turn_runner.followup.assert_awaited_once_with("sess-1", "second message")
-    mock_turn_runner.run_loop.assert_not_awaited()
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_injects_for_active_session_with_asap(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request delegates to steer when priority is asap."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    session = controller.get_session("sess-1")
-    assert session is not None
-    session.current_run_id = "existing-run-id"
-
-    await controller.receive_request("sess-1", "urgent", priority="asap")
-    await asyncio.sleep(0.01)
-
-    mock_turn_runner.steer.assert_awaited_once_with("sess-1", "urgent")
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_rejects_unknown_session(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request silently returns when the session does not exist."""
-    controller._turn_runner = mock_turn_runner
-    await controller.receive_request("missing", "hello")
-    assert len(controller._runs) == 0
-    mock_turn_runner.run_loop.assert_not_awaited()
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_rejects_when_closing(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request rejects new requests when the session is closing."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    session = controller.get_session("sess-1")
-    assert session is not None
-    session.closing = True
-
-    await controller.receive_request("sess-1", "hello")
-    assert len(controller._runs) == 0
-    mock_turn_runner.run_loop.assert_not_awaited()
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_rejects_when_is_closing(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request rejects new requests when is_closing is set."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    session = controller.get_session("sess-1")
-    assert session is not None
-    session.is_closing = True
-
-    await controller.receive_request("sess-1", "hello")
-    assert len(controller._runs) == 0
-    mock_turn_runner.run_loop.assert_not_awaited()
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_enforces_max_concurrent_runs(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """receive_request drops requests when max_concurrent_runs is reached."""
-    controller._turn_runner = mock_turn_runner
-    controller._max_concurrent_runs = 1
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-    await controller.get_or_create_session("sess-2", agent_name="agent-a")
-
-    # First request should create a run
-    await controller.receive_request("sess-1", "hello")
-    await asyncio.sleep(0.01)
-    assert len(controller._runs) == 1
-
-    # Second request should be dropped
-    await controller.receive_request("sess-2", "hello")
-    assert len(controller._runs) == 1
-    sess2 = controller.get_session("sess-2")
-    assert sess2 is not None
-    assert sess2.current_run_id is None
-
-    # Clean up the blocked background task
-    mock_turn_runner._run_loop_event.set()
-    await asyncio.sleep(0.01)
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_receive_request_concurrent_race(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """Concurrent requests for the same idle session only create one run."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    async def _fire() -> None:
-        await controller.receive_request("sess-1", "hello")
-
-    await asyncio.gather(_fire(), _fire(), _fire())
-    await asyncio.sleep(0.01)
-
-    # Only one run should have been created
-    assert len(controller._runs) <= 1
-    session = controller.get_session("sess-1")
-    assert session is not None
     # Either idle (run completed quickly) or exactly one active run
     # Because run_loop is mocked, it returns immediately, so the run
     # may already be cleaned up.
@@ -700,36 +489,6 @@ async def test_receive_request_concurrent_race(
 # ---------------------------------------------------------------------------
 # cancel_run_for_session
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_cancel_run_for_session_cancels_active_run(
-    controller: SessionController,
-    mock_turn_runner: MagicMock,
-) -> None:
-    """cancel_run_for_session cancels the task backing an active run."""
-    controller._turn_runner = mock_turn_runner
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-
-    await controller.receive_request("sess-1", "hello")
-    await asyncio.sleep(0.01)
-
-    sess1 = controller.get_session("sess-1")
-    assert sess1 is not None
-    run_id = sess1.current_run_id
-    assert run_id is not None
-    handle = controller._runs[run_id]
-
-    controller.cancel_run_for_session("sess-1")
-
-    assert handle.run_ctx.cancelled is True
-
-    # Let the cancelled task finish
-    mock_turn_runner._run_loop_event.set()
-    await asyncio.sleep(0.01)
-
-
 def test_cancel_run_for_session_noop_for_idle_session(
     controller: SessionController,
 ) -> None:
@@ -751,47 +510,6 @@ def test_cancel_run_for_session_noop_for_missing_run(
 # ---------------------------------------------------------------------------
 # _create_run / _cleanup_run
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_create_run_returns_handle(
-    controller: SessionController,
-) -> None:
-    """_create_run builds a RunHandle with the correct fields."""
-    await controller.get_or_create_session(
-        "sess-1", agent_name="agent-a", agent_type="native"
-    )
-    handle = controller._create_run("sess-1", "hello")
-    assert isinstance(handle, RunHandle)
-    assert handle.session_id == "sess-1"
-    assert handle.agent_type == "native"
-    assert handle.status == RunStatus.pending
-
-
-@pytest.mark.deprecated
-def test_create_run_raises_for_missing_session(controller: SessionController) -> None:
-    """_create_run raises ValueError when the session does not exist."""
-    with pytest.raises(ValueError, match="Session not found"):
-        controller._create_run("missing", "hello")
-
-
-@pytest.mark.deprecated
-@pytest.mark.anyio
-async def test_cleanup_run_removes_and_signals(
-    controller: SessionController,
-) -> None:
-    """_cleanup_run removes the handle from _runs and sets complete_event."""
-    await controller.get_or_create_session("sess-1", agent_name="agent-a")
-    handle = controller._create_run("sess-1", "hello")
-    controller._runs[handle.run_id] = handle
-
-    controller._cleanup_run(handle.run_id)
-
-    assert handle.run_id not in controller._runs
-    assert handle.complete_event.is_set() is True
-
-
 def test_cleanup_run_noop_for_missing_run(controller: SessionController) -> None:
     """_cleanup_run is a no-op when the run_id is unknown."""
     controller._cleanup_run("ghost")  # should not raise

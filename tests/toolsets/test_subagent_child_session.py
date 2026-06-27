@@ -2,7 +2,7 @@
 
 Verifies RFC-0028 Task T9 requirements:
 - Exactly one SpawnSessionStart emitted per delegation from task()
-- SpawnSessionStart is emitted from task(), NOT from TurnRunner stream wrapping
+- SpawnSessionStart is emitted from task(), NOT from session stream wrapping
 - ctx.run_ctx.depth is used instead of getattr(ctx, "current_depth", 0)
 - MAX_DELEGATION_DEPTH guard is enforced before child session creation
 - session_id, parent_session_id, and depth are passed into child run_stream()
@@ -84,7 +84,7 @@ agents:
 
     assert spawn_count == 1, (
         f"Expected exactly 1 SpawnSessionStart, got {spawn_count}. "
-        "The event should be emitted once from task(), not duplicated by TurnRunner."
+        "The event should be emitted once from task(), not duplicated by session stream."
     )
 
 

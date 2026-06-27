@@ -212,51 +212,6 @@ async def test_run_handle_steer_for_acp_path(monkeypatch: pytest.MonkeyPatch) ->
 # ---------------------------------------------------------------------------
 # Test 3: Tool-result augmentation via PromptInjectionManager.inject()/consume()
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-async def test_prompt_injection_flushed_after_acp_turn_execute() -> None:
-    """Given an ACPTurn with injected context, execute() flushes it.
-
-    Verifies that unconsumed pending injections are flushed to queued
-    prompts via flush_pending_to_queue() at the end of execute().
-    """
-    updates = [_text_update("Response")]
-    messages = [_text_update("Response")]
-    client = MockACPClient(updates=updates, messages=messages)
-    run_ctx = _make_run_ctx()
-
-    # Inject context before execute
-    run_ctx.injection_manager.inject("extra tool context")
-
-    # Verify injection is pending before execute
-    assert run_ctx.injection_manager.has_pending()
-
-    turn = ACPTurn(
-        acp_client=client,
-        prompts=["Hello"],
-        run_ctx=run_ctx,
-        message_history=[],
-        session_id="test-session",
-    )
-
-    # Execute the turn — flush_pending_to_queue() is called at end of execute()
-    events = [event async for event in turn.execute()]
-
-    # Verify turn completed successfully
-    assert len(events) >= 2
-    assert isinstance(events[-1], StreamCompleteEvent)
-
-    # After execute, pending injections should be flushed to queued prompts
-    assert not run_ctx.injection_manager.has_pending()
-    assert run_ctx.injection_manager.has_queued()
-
-    # Verify the injected context is in the queued prompts
-    queued = run_ctx.injection_manager._queued_prompts
-    assert len(queued) == 1
-    assert "extra tool context" in queued[0][0]
-
-
 # ---------------------------------------------------------------------------
 # Test 4: ACPAgent.create_turn() returns ACPTurn with correct fields
 # ---------------------------------------------------------------------------

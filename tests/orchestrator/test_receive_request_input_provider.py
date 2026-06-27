@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.orchestrator.core import SessionController
+from agentpool.orchestrator.core import EventBus, SessionController
 from agentpool.orchestrator.run import RunHandle
 
 
@@ -46,15 +46,9 @@ def controller(mock_pool: MagicMock) -> SessionController:
 
 
 @pytest.fixture
-def mock_turn_runner() -> MagicMock:
-    """Return a mocked TurnRunner with event_bus."""
-    tr = MagicMock()
-    tr.event_bus = MagicMock()
-    tr.event_bus.publish = AsyncMock()
-    tr.steer = AsyncMock(return_value=None)
-    tr.followup = AsyncMock(return_value=None)
-    tr.run_loop = AsyncMock(return_value=None)
-    return tr
+def event_bus() -> EventBus:
+    """Return a real EventBus for testing."""
+    return EventBus()
 
 
 @pytest.fixture
@@ -100,14 +94,14 @@ def _setup_session(
 @pytest.mark.anyio
 async def test_input_provider_propagated_to_session(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     mock_input_provider: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """input_provider passed to receive_request is stored on session.input_provider."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-ip-1", mock_agent)
 
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
@@ -125,13 +119,13 @@ async def test_input_provider_propagated_to_session(
 @pytest.mark.anyio
 async def test_input_provider_none_when_not_passed(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When input_provider is not passed, session.input_provider remains None."""
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-ip-3", mock_agent)
 
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
@@ -148,7 +142,7 @@ async def test_input_provider_none_when_not_passed(
 @pytest.mark.anyio
 async def test_input_provider_stored_on_session_for_cached_agent(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     mock_input_provider: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -161,7 +155,7 @@ async def test_input_provider_stored_on_session_for_cached_agent(
     session.input_provider for get_input_provider() lookup chain.
     """
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-ip-4", mock_agent)
 
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
@@ -193,7 +187,7 @@ async def test_input_provider_stored_on_session_for_cached_agent(
 @pytest.mark.anyio
 async def test_input_provider_not_in_kwargs_after_processing(
     controller: SessionController,
-    mock_turn_runner: MagicMock,
+    event_bus: EventBus,
     mock_agent: MagicMock,
     mock_input_provider: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -201,10 +195,10 @@ async def test_input_provider_not_in_kwargs_after_processing(
     """input_provider is popped from kwargs and not forwarded to legacy path.
 
     When the RunTurn path is used, input_provider should be consumed by
-    _start_run_handle and not leaked into any downstream kwargs.
+    _start_run_handle and not leak into any downstream kwargs.
     """
     monkeypatch.setenv("AGENTPOOL_USE_RUN_TURN", "true")
-    controller._turn_runner = mock_turn_runner
+    controller._event_bus = event_bus
     _setup_session(controller, "sess-ip-5", mock_agent)
 
     controller._use_run_turn = lambda _agent: True  # type: ignore[method-assign]
@@ -226,4 +220,3 @@ async def test_input_provider_not_in_kwargs_after_processing(
     session = controller.get_session("sess-ip-5")
     assert session is not None
     assert session.input_provider is mock_input_provider
-

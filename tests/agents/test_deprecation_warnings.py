@@ -2,7 +2,7 @@
 
 Pooled native agents (those with ``agent_pool is not None``) should emit
 a ``DeprecationWarning`` when calling ``inject_prompt()`` or ``queue_prompt()``,
-guiding users toward ``TurnRunner.steer()`` and ``TurnRunner.followup()``.
+guiding users toward ``SessionPool.steer()`` and ``SessionPool.followup()``.
 
 Standalone native agents and non-native agents should NOT emit any warning.
 """

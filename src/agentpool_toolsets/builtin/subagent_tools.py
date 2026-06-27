@@ -1,7 +1,7 @@
 """Provider for subagent/task tools with streaming support.
 
 Business-layer event routing is intentionally minimal. All agent stream events
-flow through the SessionPool's TurnRunner, which publishes them to the EventBus.
+flow through the SessionPool, which publishes them to the EventBus.
 The protocol layer (OpenCode, ACP, etc.) subscribes to the parent session with
 ``scope="descendants"`` and receives child session events automatically — no
 manual forwarding from the business layer is required.
@@ -202,7 +202,7 @@ class SubagentTools(StaticResourceProvider):
                 raw_model = agent_cfg.model
                 node_model_id = str(raw_model) if raw_model else None
 
-        # Create child session with metadata for TurnRunner event wrapping.
+        # Create child session with metadata for event wrapping.
         # SpawnSessionStart is auto-emitted by create_child_session().
         child_session_id = await ctx.create_child_session(
             agent_name=agent_or_team,

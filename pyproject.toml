@@ -279,7 +279,7 @@ reportPrivateImportUsage = false
 reportUnusedExpression = false
 
 [tool.pytest]
-addopts = ["-m", "not slow and not acp_snapshot and not deprecated"]
+addopts = ["-m", "not slow and not acp_snapshot"]
 filterwarnings = [
   "ignore::DeprecationWarning:psygnal.*",
   "ignore::DeprecationWarning:pydantic.*:",
@@ -292,7 +292,6 @@ log_level = "ERROR"
 markers = [
   "acp_snapshot: marks tests as ACP snapshot tests (excluded by default)",
   "asyncio: mark test as async",
-  "deprecated: marks tests for deprecated TurnRunner-specific behavior",
   "integration: marks tests as integration tests",
   "slow: marks tests as slow",
   "unit: marks tests as unit tests",

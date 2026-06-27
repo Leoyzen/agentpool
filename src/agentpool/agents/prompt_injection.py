@@ -1,15 +1,13 @@
-"""Prompt injection and queuing manager for agents.
+"""Prompt injection manager for agents.
 
-Provides unified handling for:
-- Immediate injection (consumed by agent hooks mid-run)
-- Queued prompts (processed after current run completes)
-- Fallback behavior (unconsumed injections become queued prompts)
+Provides unified handling for immediate injection (consumed by agent
+hooks mid-run) and queued prompts (inserted at front of queue for
+processing).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-import warnings
 
 from agentpool.log import get_logger
 
@@ -21,16 +19,11 @@ logger = get_logger(__name__)
 
 
 class PromptInjectionManager:
-    """Manages prompt injection and queuing for agents.
+    """Manages prompt injection for agents.
 
-    This class handles two types of prompt scheduling:
-
-    1. **Injections** (`inject`): Messages to be injected mid-run via agent hooks.
-       If a tool executes, the hook consumes the injection and adds it as
-       additional context. If no tool runs, injections fall back to queued prompts.
-
-    2. **Queued prompts** (`queue`): Prompts to be processed after the current
-       run completes. The run_stream loop continues with these.
+    This class handles immediate injections consumed by agent hooks
+    during a run. When a tool executes, the hook consumes the injection
+    and adds it as additional context.
     """
 
     def __init__(self) -> None:
@@ -50,23 +43,6 @@ class PromptInjectionManager:
         """
         self._pending_injections.append(message)
         logger.debug("Queued injection", message_len=len(message))
-
-    def queue(self, *prompts: PromptCompatible) -> None:
-        """Queue prompts to be processed after current run completes.
-
-        .. deprecated::
-            Use RunHandle.followup() instead.
-
-        Args:
-            *prompts: Prompts to queue (same format as run/run_stream)
-        """
-        warnings.warn(
-            "PromptInjectionManager.queue() is deprecated. Use RunHandle.followup() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._queued_prompts.append(prompts)
-        logger.debug("Queued prompt", num_parts=len(prompts))
 
     async def consume(self) -> str | None:
         """Consume the next pending injection.
@@ -95,45 +71,6 @@ class PromptInjectionManager:
         if result:
             logger.debug("Consumed all injections", count=len(result))
         return result
-
-    def flush_pending_to_queue(self) -> None:
-        """Move unconsumed injections to the queued prompts.
-
-        .. deprecated::
-            Use RunHandle.followup() instead.
-
-        Called at the end of each run iteration. Any injections that weren't
-        consumed by tool hooks become regular queued prompts, ensuring they
-        still get processed.
-        """
-        warnings.warn(
-            "PromptInjectionManager.flush_pending_to_queue() is deprecated."
-            " Use RunHandle.followup() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if not self._pending_injections:
-            return
-        logger.debug("Flushing unconsumed injections to queue", count=len(self._pending_injections))
-        for msg in self._pending_injections:
-            self._queued_prompts.append((msg,))
-        self._pending_injections.clear()
-
-    def pop_queued(self) -> tuple[PromptCompatible, ...] | None:
-        """Get the next queued prompt group.
-
-        .. deprecated::
-            Use RunHandle.followup() instead.
-
-        Returns:
-            Tuple of prompts, or None if queue is empty
-        """
-        warnings.warn(
-            "PromptInjectionManager.pop_queued() is deprecated. Use RunHandle.followup() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self._queued_prompts.pop(0) if self._queued_prompts else None
 
     def insert_queued(self, prompts: tuple[PromptCompatible, ...]) -> None:
         """Insert prompts at the front of the queue.

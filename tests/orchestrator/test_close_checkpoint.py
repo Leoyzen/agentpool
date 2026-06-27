@@ -276,34 +276,6 @@ class TestCloseSessionWithoutStore:
 
 class TestSessionPoolCloseCheckpoint:
     """SessionPool.close_session delegates to SessionController which handles checkpoint."""
-
-    @pytest.mark.deprecated
-    @pytest.mark.anyio
-    async def test_pool_close_session_with_pending_calls(
-        self, mock_pool: MagicMock, mock_store: MagicMock
-    ) -> None:
-        """SessionPool.close_session correctly handles checkpointed close."""
-        data = make_session_data(pending=[make_pending_call()])
-        mock_store.load = AsyncMock(return_value=data)
-        mock_store.save = AsyncMock(return_value=None)
-
-        pool = SessionPool(pool=mock_pool)
-        # Inject the mock store into the underlying SessionController
-        pool.sessions.store = mock_store
-
-        await pool.create_session("sess-1", agent_name="test-agent")
-        await pool.close_session("sess-1")
-
-        # Verify checkpointed save happened
-        saved_calls = [
-            call
-            for call in mock_store.save.await_args_list
-            if call[0][0].session_id == "sess-1" and call[0][0].status == "checkpointed"
-        ]
-        assert len(saved_calls) >= 1, "Expected save() with checkpointed status"
-        mock_store.delete.assert_not_awaited()
-
-
 # ===================================================================
 # _save_close_checkpoint helper
 # ===================================================================

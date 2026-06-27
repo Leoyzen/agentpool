@@ -735,7 +735,7 @@ class ACPEventConverter:
             case RunFailedEvent(run_id=run_id, exception=exc):
                 # Display run failure as agent text and signal turn completion.
                 # Unlike RunErrorEvent (agent-level), RunFailedEvent indicates
-                # the TurnRunner itself crashed — the session cannot continue.
+                # the run itself crashed — the session cannot continue.
                 
                 # Check if this is a cancellation (session/cancel notification)
                 import asyncio

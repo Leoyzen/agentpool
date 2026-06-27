@@ -101,7 +101,7 @@ class MetricsCollector:
     def record_auto_resume(self) -> None:
         """Record an auto-resume occurrence.
 
-        Called by TurnRunner when an auto-resume iteration is triggered.
+        Called when an auto-resume iteration is triggered.
         """
         self._auto_resume_counter += 1
 
@@ -124,7 +124,8 @@ class MetricsCollector:
         else:
             avg_session_lifetime = 0.0
 
-        turn_timings = self.session_pool.turns._turn_timings
+        # Turn timing data is no longer available (old turn lifecycle removed).
+        turn_timings: list[tuple[float, float]] = []
         if turn_timings:
             latencies_ms = [(end - start) * 1000 for start, end in turn_timings]
             avg_turn_latency_ms = sum(latencies_ms) / len(latencies_ms)

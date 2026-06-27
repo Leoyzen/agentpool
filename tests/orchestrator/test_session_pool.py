@@ -425,27 +425,6 @@ async def test_receive_request_flag_on_delegates_to_session_controller(
     assert result.agent is agent
 
 
-@pytest.mark.anyio
-async def test_receive_request_flag_off_delegates_to_turn_runner(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, receive_request delegates to SessionController which uses TurnRunner."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-rr-2", agent)
-    session_pool.sessions._turn_runner = MagicMock()
-    session_pool.sessions._turn_runner.steer = AsyncMock()
-    session_pool.sessions._turn_runner.followup = AsyncMock()
-    session_pool.sessions._turn_runner.event_bus = session_pool.event_bus
-    session_pool.sessions._turn_runner.run_loop = AsyncMock()
-
-    await session_pool.receive_request("sess-rr-2", "hello", priority="asap")
-
-    # When flag is off and session is idle, TurnRunner.run_loop is called
-    # (via _receive_request_turn_runner path)
-
-
 # === process_prompt ===
 
 
@@ -476,28 +455,6 @@ async def test_process_prompt_flag_on_delegates_to_run_handle(
     await session_pool.process_prompt("sess-pp-1", "test prompt")
 
     mock_run.start.assert_called_once_with("test prompt")
-
-
-@pytest.mark.anyio
-async def test_process_prompt_flag_off_delegates_to_turn_runner(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, process_prompt delegates to TurnRunner."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-pp-2", agent)
-    session_pool._use_run_turn_for_session = lambda _sid: False  # type: ignore[method-assign]
-    session_pool.turns = AsyncMock()
-    session_pool.turns._last_error = None
-    session_pool.turns.run_loop = AsyncMock()
-    session_pool.turns.run_turn = AsyncMock()
-
-    await session_pool.process_prompt("sess-pp-2", "test prompt")
-
-    session_pool.turns.run_loop.assert_awaited_once_with("sess-pp-2", "test prompt")
-
-
 # === run_stream ===
 
 
@@ -528,32 +485,6 @@ async def test_run_stream_flag_on_delegates_to_run_handle(
 
     assert events == ["event1", "event2"]
     mock_run.start.assert_called_once_with("prompt")
-
-
-@pytest.mark.anyio
-async def test_run_stream_flag_off_uses_event_bus(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, run_stream uses EventBus-based path."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-rs-2", agent)
-    session_pool._use_run_turn_for_session = lambda _sid: False  # type: ignore[method-assign]
-    session_pool.turns = AsyncMock()
-    session_pool.turns._last_error = None
-    session_pool.turns.run_loop = AsyncMock()
-    session_pool.turns.run_turn = AsyncMock()
-
-    events = []
-    async for event in session_pool.run_stream("sess-rs-2", "prompt"):
-        events.append(event)
-        break  # Stop after first event to avoid hanging
-
-    # TurnRunner.run_loop was called (via process_prompt)
-    session_pool.turns.run_loop.assert_awaited_once()
-
-
 # === inject_prompt ===
 
 
@@ -589,28 +520,6 @@ async def test_inject_prompt_flag_on_no_run_returns_false(
     result = await session_pool.inject_prompt("sess-ip-2", "message")
 
     assert result is False
-
-
-@pytest.mark.anyio
-async def test_inject_prompt_flag_off_delegates_to_turn_runner(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, inject_prompt delegates to TurnRunner."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-ip-3", agent)
-    session_pool._use_run_turn_for_session = lambda _sid: False  # type: ignore[method-assign]
-    session_pool.turns = AsyncMock()
-    session_pool.turns.steer = AsyncMock(return_value=True)
-    session_pool.turns.inject_prompt = AsyncMock(return_value=False)
-
-    await session_pool.inject_prompt("sess-ip-3", "message")
-
-    # For native agents, inject_prompt delegates to turns.steer
-    session_pool.turns.steer.assert_awaited_once_with("sess-ip-3", "message")
-
-
 # === queue_prompt ===
 
 
@@ -646,28 +555,6 @@ async def test_queue_prompt_flag_on_no_run_returns_false(
     result = await session_pool.queue_prompt("sess-qp-2", "message")
 
     assert result is False
-
-
-@pytest.mark.anyio
-async def test_queue_prompt_flag_off_delegates_to_turn_runner(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, queue_prompt delegates to TurnRunner."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-qp-3", agent)
-    session_pool._use_run_turn_for_session = lambda _sid: False  # type: ignore[method-assign]
-    session_pool.turns = AsyncMock()
-    session_pool.turns.followup = AsyncMock(return_value=True)
-    session_pool.turns.queue_prompt = AsyncMock(return_value=False)
-
-    await session_pool.queue_prompt("sess-qp-3", "message")
-
-    # For native agents, queue_prompt delegates to turns.followup
-    session_pool.turns.followup.assert_awaited_once_with("sess-qp-3", "message")
-
-
 # === steer ===
 
 
@@ -703,27 +590,6 @@ async def test_steer_flag_on_no_run_returns_false(
     result = await session_pool.steer("sess-st-2", "message")
 
     assert result is False
-
-
-@pytest.mark.anyio
-async def test_steer_flag_off_delegates_to_turn_runner(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, steer delegates to TurnRunner.steer()."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-st-3", agent)
-    session_pool._use_run_turn_for_session = lambda _sid: False  # type: ignore[method-assign]
-    session_pool.turns = AsyncMock()
-    session_pool.turns.steer = AsyncMock(return_value=True)
-
-    result = await session_pool.steer("sess-st-3", "steer message")
-
-    assert result is True
-    session_pool.turns.steer.assert_awaited_once_with("sess-st-3", "steer message")
-
-
 # === followup ===
 
 
@@ -759,27 +625,6 @@ async def test_followup_flag_on_no_run_returns_false(
     result = await session_pool.followup("sess-fu-2", "message")
 
     assert result is False
-
-
-@pytest.mark.anyio
-async def test_followup_flag_off_delegates_to_turn_runner(
-    session_pool: SessionPool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When flag is OFF, followup delegates to TurnRunner.followup()."""
-    monkeypatch.delenv("AGENTPOOL_USE_RUN_TURN", raising=False)
-    agent = _make_mock_agent()
-    _setup_session_with_agent(session_pool, "sess-fu-3", agent)
-    session_pool._use_run_turn_for_session = lambda _sid: False  # type: ignore[method-assign]
-    session_pool.turns = AsyncMock()
-    session_pool.turns.followup = AsyncMock(return_value=True)
-
-    result = await session_pool.followup("sess-fu-3", "followup message")
-
-    assert result is True
-    session_pool.turns.followup.assert_awaited_once_with("sess-fu-3", "followup message")
-
-
 # === Helpers ===
 
 

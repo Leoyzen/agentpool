@@ -264,7 +264,7 @@ class AgentPool[TPoolDeps = None]:
                 # Configure additional SessionPool settings
                 self._session_pool.sessions._session_ttl_seconds = cfg.session_ttl_seconds
                 self._session_pool.sessions._mcp_max_processes = cfg.mcp_max_processes
-                self._session_pool.turns.event_bus._max_queue_size = cfg.max_queue_size
+                self._session_pool.event_bus._max_queue_size = cfg.max_queue_size
                 await self._session_pool.start()
 
             except Exception as e:

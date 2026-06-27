@@ -192,8 +192,8 @@ async def test_session_controller_skips_fail_on_checkpointed() -> None:
     assert not should_skip, "checkpointed status should be excluded from fail path"
 
 
-async def test_turn_runner_finally_skips_complete_on_checkpointed() -> None:
-    """TurnRunner must NOT call complete() when RunHandle is checkpointed.
+async def test_run_loop_finally_skips_complete_on_checkpointed() -> None:
+    """Run loop must NOT call complete() when RunHandle is checkpointed.
 
     This tests the guard in ``_run_turn_unlocked``'s finally block that checks
     ``run_handle.status not in (RunStatus.completed, RunStatus.failed)``
