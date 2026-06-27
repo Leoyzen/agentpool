@@ -1298,8 +1298,105 @@ class SessionController:
         await self.store.save(data)
         logger.debug("Session marked as closed in store", session_id=session_id)
 
-    async def close_session(self, session_id: str) -> None:
+    async def _close_session_run_turn(self, session_id: str) -> None:  # noqa: PLR0915
+        """Close a session using the RunHandle lifecycle.
+
+        Flow:
+        1. Signal ``RunHandle.close()`` (sets ``_closing``, wakes idle loop).
+        2. Mark ``session.closing = True``.
+        3. Cancel the session ``CancelScope``.
+        4. Acquire ``turn_lock`` (30 s timeout) — graceful turn completion.
+        5. Await ``complete_event`` (30 s timeout) — graceful run completion.
+        6. On timeout: call ``RunHandle.cancel()``.
+        7. Clean up tracking dicts and agent context.
+
+        Args:
+            session_id: The session to close.
+        """
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return
+
+            run_handle: RunHandle | None = None
+            if session.current_run_id:
+                run_handle = self._runs.get(session.current_run_id)
+            if run_handle is not None:
+                run_handle.close()
+
+            session.closing = True
+            session.closed_at = time.monotonic()
+
+            scope = self._session_scopes.pop(session_id, None)
+            if scope is not None:
+                scope.cancel()
+
+        acquired = False
+        try:
+            async with asyncio.timeout(30):
+                await session.turn_lock.acquire()
+            acquired = True
+        except TimeoutError:
+            logger.warning(
+                "Timeout waiting for turn_lock during close_session (run-turn path)",
+                session_id=session_id,
+            )
+
+        if run_handle is not None and acquired:
+            try:
+                async with asyncio.timeout(30):
+                    await run_handle.complete_event.wait()
+            except TimeoutError:
+                logger.warning(
+                    "Timeout waiting for run completion, cancelling",
+                    session_id=session_id,
+                )
+                run_handle.cancel()
+        elif run_handle is not None:
+            run_handle.cancel()
+
+        if acquired:
+            session.turn_lock.release()
+
+        async with self._lock:
+            children = self._children.pop(session_id, [])
+            if children:
+                for child_id in children:
+                    child_session = self._sessions.get(child_id)
+                    if (
+                        child_session is not None
+                        and child_session.lifecycle_policy == "independent"
+                    ):
+                        continue
+                    await self._close_session_unlocked(child_id)
+
+            agent = self._session_agents.pop(session_id, None)
+            self._sessions.pop(session_id, None)
+            if self.store is not None:
+                await self._mark_session_closed(session_id)
+            if session.parent_session_id and session.parent_session_id in self._children:
+                self._children[session.parent_session_id] = [
+                    cid for cid in self._children[session.parent_session_id] if cid != session_id
+                ]
+
+        if agent is not None and session.is_per_session_agent:
+            try:
+                await agent.__aexit__(None, None, None)
+            except Exception:
+                logger.exception("Failed to exit agent context", session_id=session_id)
+            finally:
+                self._decrement_mcp_count(agent)
+
+        logger.info("Closed session (run-turn path)", session_id=session_id)
+
+    async def close_session(self, session_id: str) -> None:  # noqa: PLR0915
         """Close a session and clean up resources.
+
+        When ``AGENTPOOL_USE_RUN_TURN`` is set, delegates to
+        :meth:`_close_session_run_turn` which uses the RunHandle
+        lifecycle (close → turn_lock → complete_event → cancel).
+
+        Otherwise, the legacy path is used:
 
         Order matters:
         1. Mark session as closing (prevents new turns from starting)
@@ -1314,6 +1411,10 @@ class SessionController:
         Args:
             session_id: The session to close.
         """
+        if os.environ.get("AGENTPOOL_USE_RUN_TURN", "").lower() in ("1", "true", "yes"):
+            await self._close_session_run_turn(session_id)
+            return
+
         async with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
